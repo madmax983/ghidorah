@@ -59,6 +59,8 @@ fn analysis_run_completes_and_reports() {
             "TailCallsAndParts",
             "MainDiscovery",
             "EndbrSeeds",
+            "DataPtrSeeds",
+            "AddrTakenSeeds",
             "References",
             "Strings",
             "StackFrames",

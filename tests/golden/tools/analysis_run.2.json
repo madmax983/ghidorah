@@ -11,7 +11,7 @@
   "partial": true,
   "data": {
     "state": "budget_stopped",
-    "steps_used": 841,
+    "steps_used": 961,
     "resume": true,
     "analyzers": [
       {
@@ -89,6 +89,18 @@
       {
         "name": "EndbrSeeds",
         "priority": 440,
+        "pending": 0,
+        "runs": 1
+      },
+      {
+        "name": "DataPtrSeeds",
+        "priority": 450,
+        "pending": 0,
+        "runs": 1
+      },
+      {
+        "name": "AddrTakenSeeds",
+        "priority": 460,
         "pending": 0,
         "runs": 1
       },

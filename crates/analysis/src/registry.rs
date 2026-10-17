@@ -89,6 +89,8 @@ pub static ANALYZERS: &[&AnalyzerSpec] = &[
     &TAIL_CALLS,
     &MAIN_DISCOVERY,
     &endbr::SPEC,
+    &dataptr::SPEC,
+    &addrtaken::SPEC,
     &refs::SPEC,
     &strings::SPEC,
     &STACK_FRAMES,

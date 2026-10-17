@@ -329,8 +329,10 @@ fn ram(addrs: &[Address]) -> impl Iterator<Item = u64> + '_ {
     addrs.iter().filter(|a| a.is_ram()).map(|a| a.off)
 }
 
-/// Gives the case targets of the resolved jump tables: the method A tables of the work state,
-/// the agent tables and the agent cases of indirect jumps.
+/// Gives the case targets of the resolved jump tables.
+///
+/// The tables are the method A tables of the work state, the agent tables and the agent cases
+/// of indirect jumps.
 pub(crate) fn case_targets(ctx: &AnalysisCtx<'_>) -> BTreeSet<u64> {
     let program = ctx.program();
     let base = program.base();

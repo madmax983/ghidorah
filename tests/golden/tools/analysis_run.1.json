@@ -11,7 +11,7 @@
   "partial": false,
   "data": {
     "state": "complete",
-    "steps_used": 976,
+    "steps_used": 1096,
     "resume": false,
     "analyzers": [
       {
@@ -89,6 +89,18 @@
       {
         "name": "EndbrSeeds",
         "priority": 440,
+        "pending": 0,
+        "runs": 1
+      },
+      {
+        "name": "DataPtrSeeds",
+        "priority": 450,
+        "pending": 0,
+        "runs": 1
+      },
+      {
+        "name": "AddrTakenSeeds",
+        "priority": 460,
         "pending": 0,
         "runs": 1
       },
