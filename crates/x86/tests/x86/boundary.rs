@@ -3,7 +3,8 @@
 
 use ghidorah_testkit::pbt;
 use ghidorah_x86::{
-    DecodeError, Insn, InvalidReason, Map, Mnem, Operand, Opts, Reg, decode, length, length_with,
+    DecodeError, Flow, Insn, InvalidReason, Map, Mnem, Operand, Opts, Reg, decode, length,
+    length_with,
 };
 
 use crate::common::{SPEC_ADDR, dec, hex, listings, root, spec_lines};
@@ -357,4 +358,39 @@ fn regress_movlpd_register_form_is_movhlps() {
     assert_eq!((insn.mnem(), insn.len()), (Mnem::Movlhps, 4));
     let insn = dec(&hex("66 0f 16 00"), 0).expect("movhpd");
     assert_eq!(insn.mnem(), Mnem::Movhpd);
+}
+
+#[test]
+fn regress_padlock_lkgs_and_fred_forms() {
+    // GNU objdump and llvm-objdump decode these forms. The decoder rejected them.
+    for (text, m, n) in [
+        ("0f a7 c0", Mnem::XstoreRng, 3),
+        ("0f a7 c8", Mnem::XcryptEcb, 3),
+        ("f3 0f a7 d0", Mnem::XcryptCbc, 4),
+        ("0f a7 d8", Mnem::XcryptCtr, 3),
+        ("0f a7 e0", Mnem::XcryptCfb, 3),
+        ("0f a7 e8", Mnem::XcryptOfb, 3),
+        ("f3 0f a6 c0", Mnem::Montmul, 4),
+        ("0f a6 c8", Mnem::Xsha1, 3),
+        ("0f a6 d0", Mnem::Xsha256, 3),
+        ("f2 0f 00 32", Mnem::Lkgs, 4),
+        ("f2 0f 00 f0", Mnem::Lkgs, 4),
+        ("f2 0f 00 00", Mnem::Sldt, 4),
+        ("f2 0f 01 ca", Mnem::Erets, 4),
+        ("f3 0f 01 ca", Mnem::Eretu, 4),
+    ] {
+        let insn = dec(&hex(text), 0).unwrap_or_else(|e| panic!("{text}: {e}"));
+        assert_eq!((insn.mnem(), insn.len()), (m, n), "{text}");
+    }
+    assert_eq!(dec(&hex("f2 0f 01 ca"), 0).map(|i| i.flow()), Ok(Flow::Ret));
+    for text in [
+        "0f a7 c1",
+        "0f a7 f0",
+        "0f a6 d8",
+        "0f a7 00",
+        "f3 0f 00 30",
+    ] {
+        assert!(dec(&hex(text), 0).is_err(), "{text}");
+    }
+    assert_eq!(length(&hex("0f a7 80 00 00 00 00")), Ok(7));
 }

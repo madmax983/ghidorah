@@ -73,6 +73,8 @@ pub(crate) const fn of(m: Mnem, direct: bool) -> Flow {
         | Mnem::Iret
         | Mnem::Iretw
         | Mnem::Iretq
+        | Mnem::Erets
+        | Mnem::Eretu
         | Mnem::Sysret
         | Mnem::Sysexit
         | Mnem::Rsm => Flow::Ret,

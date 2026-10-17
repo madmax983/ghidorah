@@ -5,12 +5,13 @@
 
 use crate::error::{DecodeError, Feature};
 use crate::len::Layout;
+use crate::tables::groups::GROUPS;
 use crate::tables::mnem::Mnem::{self, *};
 use crate::tables::ops::{
-    ADDR, AX, D64, EV, Entry, IB, JB, JZ, K, LOCK, M0, MB, MD, MQ, MW, MX, RAX, RQ, RV, RW, RW1,
-    RW2, S, ST0, STI, Spec, U, UNDEF, V, W1, ZV, op,
+    ADDR, AX, D64, EV, EWV, Entry, IB, JB, JZ, K, LOCK, M0, MB, MD, MQ, MW, MX, RAX, RQ, RV, RW,
+    RW1, RW2, S, ST0, STI, Spec, U, UNDEF, V, W1, ZV, op,
 };
-use crate::tables::{s, x87};
+use crate::tables::{g, s, x87};
 
 /// A resolved special form: the row, and whether it uses the mandatory prefix.
 pub(crate) struct Resolved {
@@ -71,6 +72,15 @@ pub(crate) fn resolve(id: u8, lay: &Layout) -> Result<Resolved, DecodeError> {
         s::XABORT if lay.modrm == Some(0xf8) => plain(op!(Xabort, IB; 0)),
         s::XBEGIN if lay.modrm == Some(0xf8) => plain(op!(Xbegin, JZ; 0)),
         s::G7 => group7(lay)?,
+        s::PADLOCK => plain(padlock(lay)),
+        s::LKGS if reg == 6 => with_col(op!(Lkgs, EWV; 0)),
+        s::LKGS => plain(
+            GROUPS
+                .get(usize::from(g::G6))
+                .and_then(|r| r.get(usize::from(reg)))
+                .copied()
+                .unwrap_or(UNDEF),
+        ),
         s::HINT18 if mem && reg < 4 => {
             let m = [Prefetchnta, Prefetcht0, Prefetcht1, Prefetcht2];
             plain(op!(m.get(usize::from(reg)).copied().unwrap_or(Nop), MB; ADDR))
@@ -168,6 +178,12 @@ fn group7(lay: &Layout) -> Result<Resolved, DecodeError> {
     if f3 && matches!(m, 0xe8 | 0xea) {
         return Err(unsupported(lay));
     }
+    // The FRED returns.
+    match (lay.pfx.rep, m) {
+        (0xf2, 0xca) => return Ok(with_col(op!(Erets; 0))),
+        (0xf3, 0xca) => return Ok(with_col(op!(Eretu; 0))),
+        _ => {}
+    }
     Ok(plain(match m {
         0xc8 => op!(Monitor; 0),
         0xc9 => op!(Mwait; 0),
@@ -186,6 +202,23 @@ fn group7(lay: &Layout) -> Result<Resolved, DecodeError> {
         0xf0..=0xf7 => op!(Lmsw, RW; 0),
         _ => return Err(unsupported(lay)),
     }))
+}
+
+/// `0F A6` and `0F A7`: the VIA PadLock forms. Each form has one exact `ModRM` byte.
+const fn padlock(lay: &Layout) -> Entry {
+    let m = match (lay.opcode, lay.modrm) {
+        (0xa6, Some(0xc0)) => Montmul,
+        (0xa6, Some(0xc8)) => Xsha1,
+        (0xa6, Some(0xd0)) => Xsha256,
+        (0xa7, Some(0xc0)) => XstoreRng,
+        (0xa7, Some(0xc8)) => XcryptEcb,
+        (0xa7, Some(0xd0)) => XcryptCbc,
+        (0xa7, Some(0xd8)) => XcryptCtr,
+        (0xa7, Some(0xe0)) => XcryptCfb,
+        (0xa7, Some(0xe8)) => XcryptOfb,
+        _ => return UNDEF,
+    };
+    op!(m; 0)
 }
 
 /// `F3 0F 1E`: `endbr64`, `endbr32` and `rdssp`. Other forms are hint `nop` forms.

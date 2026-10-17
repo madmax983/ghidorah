@@ -136,6 +136,8 @@ const ROWS: &[(Mnem, FlagInfo)] = &[
     (Mnem::Iret, f!(0, ARITH | DF, 0)),
     (Mnem::Iretw, f!(0, ARITH | DF, 0)),
     (Mnem::Iretq, f!(0, ARITH | DF, 0)),
+    (Mnem::Erets, f!(0, ARITH | DF, 0)),
+    (Mnem::Eretu, f!(0, ARITH | DF, 0)),
     (Mnem::Cmc, f!(CF, CF, 0)),
     (Mnem::Clc, f!(0, CF, 0)),
     (Mnem::Stc, f!(0, CF, 0)),

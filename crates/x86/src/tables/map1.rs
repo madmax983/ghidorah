@@ -18,6 +18,7 @@ type Row = (u8, u8, Entry);
 
 const ROWS: &[Row] = &[
     (0x00, 0, grp!(g::G6)),
+    (0x00, 3, special!(s::LKGS)),
     (0x01, 0, special!(s::G7)),
     (0x02, 0, op!(Lar, GV, EWV; W1)),
     (0x03, 0, op!(Lsl, GV, EWV; W1)),
@@ -160,6 +161,8 @@ const ROWS: &[Row] = &[
     (0xa3, 0, op!(Bt, EV, GV; 0)),
     (0xa4, 0, op!(Shld, EV, GV, IB; RW1)),
     (0xa5, 0, op!(Shld, EV, GV, CL; RW1)),
+    (0xa6, 0, special!(s::PADLOCK)),
+    (0xa7, 0, special!(s::PADLOCK)),
     (0xa8, 0, op!(Push, GS; D64)),
     (0xa9, 0, op!(Pop, GS; D64 | W1)),
     (0xaa, 0, op!(Rsm; 0)),

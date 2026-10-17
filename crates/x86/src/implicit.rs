@@ -53,7 +53,16 @@ fn implicit(insn: &Insn) -> (RegSet, RegSet) {
         | M::Popfw
         | M::Iret
         | M::Iretw
-        | M::Iretq => (set(&[RSP]), set(&[RSP])),
+        | M::Iretq
+        | M::Erets
+        | M::Eretu => (set(&[RSP]), set(&[RSP])),
+        // The VIA PadLock register use, from the VIA PadLock programming guide.
+        M::XstoreRng => counted(&[RDX, RDI], &[RAX, RDI]),
+        M::XcryptEcb | M::XcryptCbc | M::XcryptCtr | M::XcryptCfb | M::XcryptOfb => {
+            counted(&[RAX, RBX, RDX, RSI, RDI], &[RAX, RSI, RDI])
+        }
+        M::Xsha1 | M::Xsha256 => counted(&[RAX, RSI, RDI], &[RAX, RSI]),
+        M::Montmul => counted(&[RAX, RSI], &[RAX, RDX]),
         M::Enter | M::Leave => (set(&[RSP, RBP]), set(&[RSP, RBP])),
         M::Mul | M::Imul | M::Div | M::Idiv if insn.n_ops() == 1 => {
             let divide = matches!(insn.mnem(), M::Div | M::Idiv);

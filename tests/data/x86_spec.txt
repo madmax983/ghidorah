@@ -762,6 +762,19 @@ f3 0f 2a c0|cvtsi2ss|xmm0,eax|4|seq
 66 0f 78 c0 01 02|extrq|xmm0,0x1,0x2|6|seq
 f2 0f 78 c1 01 02|insertq|xmm0,xmm1,0x1,0x2|6|seq
 66 0f 79 c1|extrq|xmm0,xmm1|4|seq
+0f a7 c0|xstore-rng||3|seq
+0f a7 c8|xcrypt-ecb||3|seq
+f3 0f a7 d0|xcrypt-cbc||4|seq
+0f a7 d8|xcrypt-ctr||3|seq
+0f a7 e0|xcrypt-cfb||3|seq
+0f a7 e8|xcrypt-ofb||3|seq
+f3 0f a6 c0|montmul||4|seq
+0f a6 c8|xsha1||3|seq
+0f a6 d0|xsha256||3|seq
+f2 0f 00 32|lkgs|word ptr [rdx]|4|seq
+f2 0f 00 f0|lkgs|eax|4|seq
+f2 0f 01 ca|erets||4|ret
+f3 0f 01 ca|eretu||4|ret
 f2 0f 79 ca|insertq|xmm1,xmm2|4|seq
 f2 0f 7c c1|haddps|xmm0,xmm1|4|seq
 66 0f 7c c1|haddpd|xmm0,xmm1|4|seq
@@ -974,8 +987,9 @@ c4 e2 79 f7|!truncated||5|
 0f 36|!invalid||2|
 0f 39|!invalid||2|
 0f 3b|!invalid||2|
-0f a6 c0|!invalid||2|
-0f a7 c0|!invalid||2|
+0f a6 d8|!invalid||3|
+0f a7 c1|!invalid||3|
+0f a7 00|!invalid||3|
 0f b8 c0|!invalid||3|
 0f 0d c0|!invalid||3|
 dd 28|!invalid||2|
