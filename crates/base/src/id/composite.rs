@@ -2,7 +2,7 @@
 
 use std::fmt;
 
-use super::{FuncId, IdError, IdKind, from_str_via_id, parse_dec};
+use super::{FuncId, IdError, IdKind, from_str_via_id, parse_dec_as};
 use crate::address::Address;
 use crate::hex;
 
@@ -76,8 +76,7 @@ impl Storage {
             return Ok(Self::Ret);
         }
         if let Some(n) = text.strip_prefix("param:") {
-            return parse_dec(n)
-                .and_then(|n| u16::try_from(n).ok())
+            return parse_dec_as::<u16>(n)
                 .map(Self::Param)
                 .ok_or_else(|| bad("param"));
         }

@@ -32,7 +32,7 @@ use std::fmt;
 use crate::catalog::ErrorCode;
 use crate::default_name::DefaultName;
 use crate::hex;
-use crate::id::{Id, IdError, IdKind, MAX_ID_TEXT};
+use crate::id::{Id, IdError, IdKind, MAX_ID_TEXT, parse_dec};
 
 /// The smallest JSON integer that is not a valid address input: 2^53.
 pub const JSON_INT_LIMIT: u64 = 1 << 53;
@@ -227,11 +227,8 @@ fn digits(text: &str) -> Option<Readings> {
     if text.is_empty() || !text.bytes().all(|b| b.is_ascii_digit()) {
         return None;
     }
-    let decimal = text.bytes().try_fold(0u64, |acc, b| {
-        acc.checked_mul(10)?.checked_add(u64::from(b - b'0'))
-    });
     Some(Readings {
-        decimal,
+        decimal: parse_dec(text),
         hex: hex::parse_digits(text),
     })
 }

@@ -122,10 +122,13 @@ impl Sha256 {
             .wrapping_add(u64::try_from(data.len()).unwrap_or(u64::MAX));
         let mut rest = data;
         while !rest.is_empty() {
-            let room = BLOCK_LEN - self.block_len;
-            let (now, later) = rest.split_at(room.min(rest.len()));
-            self.block[self.block_len..self.block_len + now.len()].copy_from_slice(now);
-            self.block_len += now.len();
+            let free = self.block.get_mut(self.block_len..).unwrap_or_default();
+            let n = free.len().min(rest.len());
+            let (now, later) = rest.split_at(n);
+            for (dst, src) in free.iter_mut().zip(now) {
+                *dst = *src;
+            }
+            self.block_len += n;
             rest = later;
             if self.block_len == BLOCK_LEN {
                 compress(&mut self.state, &self.block);

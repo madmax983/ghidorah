@@ -3,7 +3,7 @@
 use std::fmt;
 use std::str::FromStr;
 
-use super::{IdError, IdKind, from_str_via_id, parse_dec};
+use super::{IdError, IdKind, from_str_via_id, parse_dec, parse_dec_as};
 use crate::address::Address;
 use crate::hex;
 
@@ -62,9 +62,7 @@ impl OpId {
             .rsplit_once(':')
             .ok_or(IdError::bad(IdKind::Op, "sequence"))?;
         let addr = hex::parse_u64(addr).ok_or(IdError::bad(IdKind::Op, "address"))?;
-        let seq = parse_dec(seq)
-            .and_then(|n| u16::try_from(n).ok())
-            .ok_or(IdError::bad(IdKind::Op, "sequence"))?;
+        let seq = parse_dec_as::<u16>(seq).ok_or(IdError::bad(IdKind::Op, "sequence"))?;
         Ok(Self { addr, seq })
     }
 }

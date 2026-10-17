@@ -35,8 +35,11 @@ mod simple;
 use std::fmt;
 use std::str::FromStr;
 
-pub use composite::{RefId, RegVar, Storage, VarId};
-pub use names::{ExportId, ImportId, SectionId, SetName, SymId, SyscallId, TypeRef};
+pub use composite::{MAX_REF_KIND, MAX_REG_NAME, RefId, RegVar, Storage, VarId};
+pub use names::{
+    ExportId, ImportId, MAX_SET_NAME, MAX_SYSCALL_NAME, SectionId, SetName, SymId, SyscallId,
+    TypeRef,
+};
 pub use simple::{
     BinaryId, BlockId, FileOffset, FuncId, JumpTableId, NoteId, OpId, Rev, SegmentId, StringId,
     TxId,
@@ -334,7 +337,7 @@ impl Id {
             IdKind::Syscall => Self::Syscall(SyscallId::parse_body(body)?),
             IdKind::Section => Self::Section(SectionId::parse_body(body)?),
             IdKind::Segment => Self::Segment(SegmentId(
-                u16::try_from(number("index")?).map_err(|_| IdError::bad(kind, "index"))?,
+                parse_dec_as(body).ok_or_else(|| IdError::bad(kind, "index"))?,
             )),
             IdKind::Str => Self::Str(StringId(address()?)),
             IdKind::JumpTable => Self::JumpTable(JumpTableId(address()?)),
@@ -390,15 +393,20 @@ impl fmt::Display for Id {
     }
 }
 
-/// Parses 1 to 20 decimal digits into a `u64`. An overflow gives `None`.
+/// Parses decimal digits into a `u64`. Empty text and an overflow give `None`.
 pub(crate) fn parse_dec(text: &str) -> Option<u64> {
-    if text.is_empty() || text.len() > 20 {
+    if text.is_empty() {
         return None;
     }
     text.bytes().try_fold(0u64, |acc, b| {
         let d = b.is_ascii_digit().then(|| u64::from(b - b'0'))?;
         acc.checked_mul(10)?.checked_add(d)
     })
+}
+
+/// Parses decimal digits into a narrower integer type. A value out of range gives `None`.
+pub(crate) fn parse_dec_as<T: TryFrom<u64>>(text: &str) -> Option<T> {
+    T::try_from(parse_dec(text)?).ok()
 }
 
 /// Tells if `text` holds only ASCII digits. Empty text gives `true`.

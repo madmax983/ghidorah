@@ -5,7 +5,7 @@
 
 use std::fmt;
 
-use super::{IdError, IdKind, MAX_NAME_LEN, all_digits, from_str_via_id, parse_dec};
+use super::{IdError, IdKind, MAX_NAME_LEN, all_digits, from_str_via_id, parse_dec_as};
 use crate::hex;
 
 /// The largest syscall name in bytes.
@@ -141,8 +141,7 @@ impl ImportId {
             Some(("", name)) => Self::elf(name),
             Some((dll, item)) => match item.strip_prefix('#') {
                 Some(digits) if all_digits(digits) => {
-                    let ordinal = parse_dec(digits)
-                        .and_then(|n| u16::try_from(n).ok())
+                    let ordinal = parse_dec_as::<u16>(digits)
                         .ok_or(IdError::bad(IdKind::Import, "ordinal"))?;
                     Self::pe_by_ordinal(dll, ordinal)
                 }
@@ -214,8 +213,7 @@ impl ExportId {
 
     pub(crate) fn parse_body(body: &str) -> Result<Self, IdError> {
         match body.strip_prefix('#') {
-            Some(digits) if all_digits(digits) => parse_dec(digits)
-                .and_then(|n| u32::try_from(n).ok())
+            Some(digits) if all_digits(digits) => parse_dec_as::<u32>(digits)
                 .map(Self::by_ordinal)
                 .ok_or(IdError::bad(IdKind::Export, "ordinal")),
             _ => Self::by_name(body),
@@ -289,8 +287,7 @@ impl SyscallId {
 
     pub(crate) fn parse_body(body: &str) -> Result<Self, IdError> {
         if !body.is_empty() && all_digits(body) {
-            parse_dec(body)
-                .and_then(|n| u16::try_from(n).ok())
+            parse_dec_as::<u16>(body)
                 .map(Self::by_number)
                 .ok_or(IdError::bad(IdKind::Syscall, "number"))
         } else {
@@ -349,9 +346,7 @@ impl SectionId {
         let (index, name) = body
             .split_once(':')
             .ok_or(IdError::bad(IdKind::Section, "name"))?;
-        let index = parse_dec(index)
-            .and_then(|n| u16::try_from(n).ok())
-            .ok_or(IdError::bad(IdKind::Section, "index"))?;
+        let index = parse_dec_as::<u16>(index).ok_or(IdError::bad(IdKind::Section, "index"))?;
         Self::new(index, name)
     }
 }
