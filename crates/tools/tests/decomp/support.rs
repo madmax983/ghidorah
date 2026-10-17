@@ -12,13 +12,13 @@ use ghidorah_tools::{
     ToolSpec, dispatch_with,
 };
 
-/// The tools of the tests in the `tools/list` order: `func_get` has the `decomp` section.
+/// The tools of the tests in the `tools/list` order.
 pub static TOOLS: &[&ToolSpec<Session>] = &[
     &handlers::load::SPEC,
     &handlers::survey::SPEC,
     &handlers::analysis_run::SPEC,
     &handlers::func_list::SPEC,
-    &handlers::func_get::SPEC_DECOMP,
+    &handlers::func_get::SPEC,
     &handlers::xref_list::SPEC,
     &handlers::search::SPEC,
     &handlers::mem_read::SPEC,

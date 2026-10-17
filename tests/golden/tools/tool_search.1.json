@@ -8,7 +8,7 @@
     "items": [
       {
         "name": "func_get",
-        "summary": "Get one or more functions with selected sections: summary, disassembly, IR, xrefs, callers, callees, strings, variables, notes, why, CFG and jump tables.",
+        "summary": "Get one or more functions with selected sections: summary, disassembly, IR, decompiled C, xrefs, callers, callees, strings, variables, notes, why, CFG and jump tables.",
         "annotations": {
           "readOnlyHint": true,
           "destructiveHint": false,

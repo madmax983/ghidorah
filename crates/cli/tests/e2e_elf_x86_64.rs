@@ -4,8 +4,9 @@
 //! Version 1 holds the legacy handshake and `tools/list`. The next versions spawn the server
 //! with a new projects root. It loads the demo binary, which runs the analysis. Then it calls
 //! the read tools `binary_survey`, `func_list`, `func_get` and `xref_list` (version 2), and
-//! `analysis_run`, `history_list` and a dry run of `history_undo` (version 3). Later WPs add
-//! client lines and bless the server lines again with `GHIDORAH_BLESS=1`.
+//! `analysis_run`, `history_list` and a dry run of `history_undo` (version 3), and
+//! `func_get include decomp` (version 6). Later WPs add client lines and bless the server
+//! lines again with `GHIDORAH_BLESS=1`.
 
 #![allow(
     clippy::expect_used,
@@ -42,7 +43,7 @@ fn text<'a>(reply: &'a Value, pointer: &str) -> Option<&'a str> {
 fn e2e_elf_x86_64() {
     let clients = clients("e2e");
     assert!(
-        clients.len() >= 11,
+        clients.len() >= 12,
         "the transcript has the handshake, tools/list and the tool calls"
     );
     let projects = tmp("e2e_projects");
@@ -106,5 +107,10 @@ fn e2e_elf_x86_64() {
         text(&undo, "/error/code"),
         Some("NOTHING_TO_UNDO"),
         "the analysis commits are not undo steps: {undo}"
+    );
+    let decomp = reply(&steps, 11);
+    assert!(
+        text(&decomp, "/data/decomp/text").is_some_and(|t| t.contains("main(")),
+        "func_get include decomp gives the C text of main: {decomp}"
     );
 }

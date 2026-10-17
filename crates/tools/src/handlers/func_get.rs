@@ -35,23 +35,7 @@ use crate::session::Session;
 use crate::spec::{ArgKind, ArgSpec, Example, Group, GroupRule, Profile, Role, ToolSpec};
 
 /// The sections of `func_get` in schema order.
-pub const SECTIONS: [&str; 12] = [
-    "summary",
-    "disasm",
-    "ir",
-    "xrefs",
-    "callers",
-    "callees",
-    "strings",
-    "vars",
-    "notes",
-    "why",
-    "cfg",
-    "jumptables",
-];
-
-/// The sections of [`SPEC_DECOMP`] in schema order: [`SECTIONS`] with `decomp`.
-pub const DECOMP_SECTIONS: [&str; 13] = [
+pub const SECTIONS: [&str; 13] = [
     "summary",
     "disasm",
     "ir",
@@ -99,18 +83,6 @@ const CURSORS: &[ArgSpec] = &[
         ArgKind::Str(1_024),
         "The ir.next_cursor of the previous call.",
     ),
-];
-
-const DECOMP_SECTION_ITEM: ArgSpec = ArgSpec::new(
-    "section",
-    Role::Param,
-    ArgKind::Enum(&DECOMP_SECTIONS),
-    "One section of the function.",
-);
-
-const DECOMP_CURSORS: &[ArgSpec] = &[
-    CURSORS[0],
-    CURSORS[1],
     ArgSpec::new(
         "decomp",
         Role::Param,
@@ -199,37 +171,6 @@ const DECOMP_OPTS: &[ArgSpec] = &[
     ),
 ];
 
-const DECOMP_ARGS: &[ArgSpec] = &[
-    ARGS[0],
-    ARGS[1],
-    ArgSpec::new(
-        "include",
-        Role::Param,
-        ArgKind::List(&DECOMP_SECTION_ITEM, 13),
-        "The sections to return in this order.",
-    )
-    .default_json("[\"summary\"]"),
-    ArgSpec::new(
-        "ir_opts",
-        Role::Param,
-        ArgKind::Obj(IR_OPTS),
-        "The options of the ir section.",
-    ),
-    ArgSpec::new(
-        "decomp_opts",
-        Role::Param,
-        ArgKind::Obj(DECOMP_OPTS),
-        "The options of the decomp section: the window of lines and the passes.",
-    ),
-    ARGS[3],
-    ArgSpec::new(
-        "cursors",
-        Role::Param,
-        ArgKind::Obj(DECOMP_CURSORS),
-        "The section cursors of the previous call, to get the next rows of a section.",
-    ),
-];
-
 const ARGS: &[ArgSpec] = &[
     ArgSpec::new(
         "target",
@@ -247,10 +188,22 @@ const ARGS: &[ArgSpec] = &[
     ArgSpec::new(
         "include",
         Role::Param,
-        ArgKind::List(&SECTION_ITEM, 12),
+        ArgKind::List(&SECTION_ITEM, 13),
         "The sections to return in this order.",
     )
     .default_json("[\"summary\"]"),
+    ArgSpec::new(
+        "ir_opts",
+        Role::Param,
+        ArgKind::Obj(IR_OPTS),
+        "The options of the ir section.",
+    ),
+    ArgSpec::new(
+        "decomp_opts",
+        Role::Param,
+        ArgKind::Obj(DECOMP_OPTS),
+        "The options of the decomp section: the window of lines and the passes.",
+    ),
     ArgSpec::new(
         "disasm_limit",
         Role::Param,
@@ -303,13 +256,14 @@ const FIELDS: &[Field] = &[
 /// `func_get`.
 pub const SPEC: ToolSpec<Session> = ToolSpec {
     title: "Get functions",
-    summary: "Get one or more functions with selected sections: summary, disassembly, IR, xrefs, callers, callees, strings, variables, notes, why, CFG and jump tables.",
-    description: "Get one or more functions with selected sections: summary, disassembly, IR, xrefs, callers, callees, strings, variables, notes, why, CFG and jump tables. \
+    summary: "Get one or more functions with selected sections: summary, disassembly, IR, decompiled C, xrefs, callers, callees, strings, variables, notes, why, CFG and jump tables.",
+    description: "Get one or more functions with selected sections: summary, disassembly, IR, decompiled C, xrefs, callers, callees, strings, variables, notes, why, CFG and jump tables. \
                   Send target, or targets for up to 50 functions. \
                   The sections share max_chars by weight, so a large section can come back cut. \
-                  A cut disassembly gives next_cursor: send it in cursors to read on. \
+                  A cut disassembly or decompile gives next_cursor: send it in cursors to read on. \
+                  decomp_opts.lines selects a window of lines of the decompiled C, and ir_opts.level l1 gives the SSA form. \
                   The member omitted names each section that did not fit, with its size. \
-                  A call with disasm or ir marks the function as visited, and this mark changes no fact.",
+                  A call with disasm, ir or decomp marks the function as visited, and this mark changes no fact.",
     args: ARGS,
     groups: &[Group {
         members: &["target", "targets"],
@@ -330,41 +284,13 @@ pub const SPEC: ToolSpec<Session> = ToolSpec {
             args: r#"{"targets":["main","0x11e0"],"include":["summary","strings"]}"#,
             golden: "tests/golden/tools/func_get.3.json",
         },
-    ],
-    max_chars: crate::budget::LARGE_MAX_CHARS,
-    ..ToolSpec::base("func_get", run)
-};
-
-/// `func_get` with the `decomp` section, `ir_opts` and `decomp_opts` (WP-23).
-pub const SPEC_DECOMP: ToolSpec<Session> = ToolSpec {
-    summary: "Get one or more functions with selected sections: summary, disassembly, IR, decompiled C, xrefs, callers, callees, strings, variables, notes, why, CFG and jump tables.",
-    description: "Get one or more functions with selected sections: summary, disassembly, IR, decompiled C, xrefs, callers, callees, strings, variables, notes, why, CFG and jump tables. \
-                  Send target, or targets for up to 50 functions. \
-                  The sections share max_chars by weight, so a large section can come back cut. \
-                  A cut disassembly or decompile gives next_cursor: send it in cursors to read on. \
-                  decomp_opts.lines selects a window of lines of the decompiled C, and ir_opts.level l1 gives the SSA form. \
-                  The member omitted names each section that did not fit, with its size. \
-                  A call with disasm, ir or decomp marks the function as visited, and this mark changes no fact.",
-    args: DECOMP_ARGS,
-    examples: &[
-        Example {
-            args: r#"{"target":"main"}"#,
-            golden: "tests/golden/tools/func_get.1.json",
-        },
-        Example {
-            args: r#"{"target":"fn:0x1080","include":["disasm","callees"],"disasm_limit":8}"#,
-            golden: "tests/golden/tools/func_get.2.json",
-        },
-        Example {
-            args: r#"{"targets":["main","0x11e0"],"include":["summary","strings"]}"#,
-            golden: "tests/golden/tools/func_get.3.json",
-        },
         Example {
             args: r#"{"target":"main","include":["decomp"],"decomp_opts":{"lines":{"start":1,"count":40}}}"#,
             golden: "tests/golden/tools/func_get.4.json",
         },
     ],
-    ..SPEC
+    max_chars: crate::budget::LARGE_MAX_CHARS,
+    ..ToolSpec::base("func_get", run)
 };
 
 /// The smallest share of a section that the handler renders. A section with a smaller
@@ -384,7 +310,7 @@ fn included(args: &Args) -> Vec<&'static str> {
         .collect();
     let mut out: Vec<&'static str> = Vec::new();
     for name in names {
-        if let Some(s) = DECOMP_SECTIONS.iter().find(|s| **s == name)
+        if let Some(s) = SECTIONS.iter().find(|s| **s == name)
             && !out.contains(s)
         {
             out.push(s);

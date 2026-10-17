@@ -1,8 +1,9 @@
 //! The tier-1 tests of `func_get include decomp` and of the IR level `l1` (WP-23).
 //!
-//! The registry of the tests holds `func_get` with the `decomp` section
-//! ([`ghidorah_tools::handlers::func_get::SPEC_DECOMP`]). The edits of the tests go through
-//! [`ghidorah_tools::Session::transact`], the write path of the edit tools.
+//! The registry of the tests holds the shipped `func_get`
+//! ([`ghidorah_tools::handlers::func_get::SPEC`]), which has the `decomp` section. The edits
+//! of the tests go through [`ghidorah_tools::Session::transact`], the write path of the edit
+//! tools.
 
 #![allow(
     clippy::expect_used,

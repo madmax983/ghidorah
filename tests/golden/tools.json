@@ -462,7 +462,7 @@
   {
     "name": "func_get",
     "title": "Get functions",
-    "description": "Get one or more functions with selected sections: summary, disassembly, IR, xrefs, callers, callees, strings, variables, notes, why, CFG and jump tables. Send target, or targets for up to 50 functions. The sections share max_chars by weight, so a large section can come back cut. A cut disassembly gives next_cursor: send it in cursors to read on. The member omitted names each section that did not fit, with its size. A call with disasm or ir marks the function as visited, and this mark changes no fact.",
+    "description": "Get one or more functions with selected sections: summary, disassembly, IR, decompiled C, xrefs, callers, callees, strings, variables, notes, why, CFG and jump tables. Send target, or targets for up to 50 functions. The sections share max_chars by weight, so a large section can come back cut. A cut disassembly or decompile gives next_cursor: send it in cursors to read on. decomp_opts.lines selects a window of lines of the decompiled C, and ir_opts.level l1 gives the SSA form. The member omitted names each section that did not fit, with its size. A call with disasm, ir or decomp marks the function as visited, and this mark changes no fact.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -492,6 +492,7 @@
               "summary",
               "disasm",
               "ir",
+              "decomp",
               "xrefs",
               "callers",
               "callees",
@@ -504,11 +505,82 @@
             ],
             "description": "One section of the function."
           },
-          "maxItems": 12,
+          "maxItems": 13,
           "description": "The sections to return in this order.",
           "default": [
             "summary"
           ]
+        },
+        "ir_opts": {
+          "type": "object",
+          "properties": {
+            "level": {
+              "type": "string",
+              "enum": [
+                "l0",
+                "l1"
+              ],
+              "description": "The IR level: l0 for the lifted ops, l1 for the SSA form after the passes.",
+              "default": "l0"
+            }
+          },
+          "additionalProperties": false,
+          "description": "The options of the ir section."
+        },
+        "decomp_opts": {
+          "type": "object",
+          "properties": {
+            "lines": {
+              "type": "object",
+              "properties": {
+                "start": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 1000000,
+                  "description": "The number of the first line, from 1.",
+                  "default": 1
+                },
+                "count": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 1000,
+                  "description": "The largest number of lines.",
+                  "default": 150
+                }
+              },
+              "additionalProperties": false,
+              "description": "The window of lines to return."
+            },
+            "passes": {
+              "type": "object",
+              "properties": {
+                "fold": {
+                  "type": "boolean",
+                  "description": "Put each value with one use into its use.",
+                  "default": true
+                },
+                "sailr": {
+                  "type": "boolean",
+                  "description": "Run the SAILR-lite passes: canary removal, noreturn calls and tail calls.",
+                  "default": true
+                },
+                "canary": {
+                  "type": "boolean",
+                  "description": "Remove the stack canary check. It needs sailr.",
+                  "default": true
+                },
+                "tailcall": {
+                  "type": "boolean",
+                  "description": "Show a tail jump as return f(..). It needs sailr.",
+                  "default": true
+                }
+              },
+              "additionalProperties": false,
+              "description": "The decompiler passes to turn on or off."
+            }
+          },
+          "additionalProperties": false,
+          "description": "The options of the decomp section: the window of lines and the passes."
         },
         "disasm_limit": {
           "type": "integer",
@@ -529,6 +601,11 @@
               "type": "string",
               "maxLength": 1024,
               "description": "The ir.next_cursor of the previous call."
+            },
+            "decomp": {
+              "type": "string",
+              "maxLength": 1024,
+              "description": "The decomp.next_cursor of the previous call."
             }
           },
           "additionalProperties": false,

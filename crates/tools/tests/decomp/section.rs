@@ -29,7 +29,7 @@ fn docs(spec: &ArgSpec, out: &mut Vec<String>) {
 
 #[test]
 fn decomp_texts_are_ste() {
-    let tool = &handlers::func_get::SPEC_DECOMP;
+    let tool = &handlers::func_get::SPEC;
     let mut texts = vec![tool.summary.to_owned(), tool.description.to_owned()];
     for spec in tool.args {
         docs(spec, &mut texts);
