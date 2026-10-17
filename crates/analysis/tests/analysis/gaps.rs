@@ -47,7 +47,7 @@ fn gaps_match_truth() {
         let expect = truth_gaps(&json_at(&truth));
         let got: Vec<(u64, u64, String)> = gaps::items(p).iter().map(shape).collect();
         let name = name_of(&path);
-        if name.ends_with(".noeh") {
+        if name.split('.').any(|part| part == "noeh") {
             for g in &expect {
                 assert!(got.contains(g), "{path}: {g:?} is a gap");
             }
