@@ -1,0 +1,28 @@
+[package]
+name = "ghidorah-db"
+description = "Program database: managers, provenance facts, default names, function ownership and set storage."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# Unit tests live in `src/**/tests.rs`, because the manager mutators are `pub(crate)`.
+# The test binary `tests/db/main.rs` checks the public read API.
+[lib]
+name = "ghidorah_db"
+path = "src/lib.rs"
+
+[dependencies]
+ghidorah-base = { path = "../base" }
+ghidorah-kernel = { path = "../kernel" }
+# The JSON codec of WP-11b uses this crate.
+ghidorah-json = { path = "../json" }
+ghidorah-loader = { path = "../loader" }
+ghidorah-types = { path = "../types" }
+
+[dev-dependencies]
+ghidorah-testkit = { path = "../testkit" }
+
+[lints]
+workspace = true
