@@ -86,7 +86,7 @@ impl Scanner {
                     self.pos += 1;
                 }
             } else if c == '*' && self.peek(1) == Some('/') {
-                depth -= 1;
+                depth = depth.saturating_sub(1);
                 self.pos += 2;
                 text.push(' ');
                 if depth == 0 {

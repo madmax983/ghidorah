@@ -10,7 +10,7 @@
 //! - [`fuzz`]: havoc mutation, a case runner with pending files, stage counters and a panic counter.
 //! - [`golden`]: golden files with a header line and `GHIDORAH_BLESS`.
 //! - [`model`]: model-based tests over random operation sequences.
-//! - [`bench`]: the benchmark harness of ADR-0026.
+//! - [`mod@bench`]: the benchmark harness of ADR-0026.
 //! - [`fixture`]: one built fixture per key in each test binary.
 //! - [`ste`]: the ASD-STE100 checker with rules STE-1 to STE-8 of ADR-0019.
 //! - [`elf`]: `ElfBuilder`, a writer for small ELF test files.

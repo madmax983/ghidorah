@@ -153,6 +153,28 @@ fn ste_rust_comment_blocks_are_paragraphs() {
     assert_eq!(got, vec![(1, Rule::Ste3)], "{findings:?}");
 }
 
+#[test]
+fn ste_markdown_edge_blocks() {
+    let text = "~~~\nThe file is read.\n~~~\n\
+                <!-- start\n\
+                The file is read.\n\
+                end -->\n\
+                [ref]: https://example.com/a.md\n\
+                ---\n\
+                > > Nested quote is read by nobody.\n\
+                \n\
+                | Name | Note |\n\
+                |:--|--:|\n\
+                | `a|b` | Use a pipe \\| here. |\n\
+                \n\
+                1) First item.\n\
+                + Second item is checked by the tool.\n\
+                text <b>bold</b> and < not a tag.\n";
+    let findings = Checker::new(Lexicon::builtin()).check(text, TextKind::Markdown);
+    let got: Vec<(usize, Rule)> = findings.iter().map(|f| (f.line, f.rule)).collect();
+    assert_eq!(got, vec![(9, Rule::Ste4), (16, Rule::Ste4)], "{findings:?}");
+}
+
 fn repo_with_glossary() -> PathBuf {
     let root = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("ste_glossary_tree");
     let _ = std::fs::remove_dir_all(&root);

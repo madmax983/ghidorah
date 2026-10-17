@@ -21,6 +21,19 @@
 //! a label and a colon counts as one word. Markdown table cells count as text.
 //! The checker skips headings, fenced blocks and Mermaid blocks.
 //!
+//! How the checker decides:
+//!
+//! - A sentence ends at `.`, `!` or `?` and a space, unless a lower case letter follows.
+//! - STE-4 looks for a form of "be", up to two adverbs and a participle.
+//!   A participle is an irregular form or a word that ends in "ed".
+//!   A hyphenated word and a state word such as "unused" are not participles.
+//!   A state word counts as a participle when "by" follows.
+//! - STE-5 looks for "have" or "has" in the same way.
+//!   A regular participle before a noun is an adjective.
+//! - STE-7 counts the nouns in a row. A function word, a verb, an adjective, a number,
+//!   a code word or a mark ends a run. The verb list is short, so the check can miss a run.
+//! - STE-8 needs a procedural sentence. It looks for "and" with an imperative after it.
+//!
 //! Modes: [`Mode::Deny`] is for agent-facing text and ignores the allowlist.
 //! [`Mode::Warn`] is for docs and comments and applies the allowlist.
 //!
