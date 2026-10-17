@@ -19,12 +19,15 @@
 
 pub mod arena;
 pub mod check;
+mod copyprop;
+mod dce;
 pub mod fuse;
 pub mod graph;
 pub mod interp;
 pub mod loc;
 pub mod op;
 pub mod passes;
+mod sccp;
 pub mod sem;
 pub mod ssa;
 

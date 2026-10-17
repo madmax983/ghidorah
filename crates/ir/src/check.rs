@@ -13,10 +13,12 @@
 //! The entry does not reach an unreachable block, so no run reads its values. The checker
 //! does not apply [`Rule::DefDominatesUse`] to a use in such a block.
 
+use std::collections::BTreeMap;
 use std::fmt;
 
-use crate::op::{OpId, Val};
-use crate::ssa::Ssa;
+use crate::graph::{DomTree, Node, dominators};
+use crate::op::{Arg, Op, OpId, Opc, Val};
+use crate::ssa::{Anchor, Ssa};
 
 /// A rule of the SSA checker.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -74,9 +76,146 @@ impl fmt::Display for Violation {
     }
 }
 
+/// The place of an op or a use: the function start, or a block and a rank in its run order.
+///
+/// The phis of a block have rank 0, and the end of a block has rank `u32::MAX`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Pos {
+    Start,
+    In(Node, u32),
+}
+
+/// The state of one check.
+struct Checker<'a> {
+    ssa: &'a Ssa,
+    dom: DomTree,
+    pos: BTreeMap<u32, Pos>,
+    found: Vec<Violation>,
+}
+
+impl Checker<'_> {
+    /// Tells if a def at `def` comes before a use at `use_at` on every path.
+    fn dominates(&self, def: Pos, use_at: Pos) -> bool {
+        match (def, use_at) {
+            (Pos::Start, _) => true,
+            (Pos::In(..), Pos::Start) => false,
+            (Pos::In(db, dk), Pos::In(ub, uk)) => {
+                !self.dom.is_reachable(ub)
+                    || if db == ub {
+                        dk < uk
+                    } else {
+                        self.dom.dominates(db, ub)
+                    }
+            }
+        }
+    }
+
+    fn report(&mut self, rule: Rule, at: OpId, val: Option<Val>) {
+        self.found.push(Violation { rule, at, val });
+    }
+
+    /// Checks one use of `arg` by the op `at` at the place `use_at`.
+    fn use_of(&mut self, at: OpId, arg: Arg, use_at: Pos) {
+        let Arg::V(v) = arg else {
+            return;
+        };
+        let def = self.ssa.arena().def_of(v);
+        let Some(def) = def.filter(|_| self.ssa.live_def(v).is_some()) else {
+            self.report(Rule::RemovedValue, at, Some(v));
+            return;
+        };
+        let Some(&def_at) = self.pos.get(&def) else {
+            self.report(Rule::RemovedValue, at, Some(v));
+            return;
+        };
+        if !self.dominates(def_at, use_at) {
+            self.report(Rule::DefDominatesUse, at, Some(v));
+        }
+    }
+
+    /// Tells if an op has a bad L1 shape at its place.
+    fn bad_shape(&self, index: u32, op: &Op) -> bool {
+        match self.ssa.place(index) {
+            None => matches!(op.opc, Opc::Get | Opc::Put | Opc::Phi),
+            Some(Anchor::Head(_)) => op.opc != Opc::Phi,
+            Some(Anchor::Start | Anchor::After(_)) => matches!(op.opc, Opc::Put | Opc::Phi),
+            Some(Anchor::Before(_) | Anchor::Tail(_)) => {
+                matches!(op.opc, Opc::Get | Opc::Put | Opc::Phi)
+            }
+        }
+    }
+
+    /// Checks one L1 op.
+    fn op(&mut self, index: u32) {
+        let Some(&op) = self.ssa.arena().op(index) else {
+            return;
+        };
+        let here = self.pos.get(&index).copied().unwrap_or(Pos::Start);
+        if self.bad_shape(index, &op) {
+            self.report(Rule::Shape, op.id, None);
+        }
+        if let Some(v) = op.out
+            && self.ssa.arena().def_of(v) != Some(index)
+        {
+            self.report(Rule::SingleDef, op.id, Some(v));
+        }
+        if op.opc == Opc::Phi {
+            self.phi(&op, here);
+        } else {
+            for arg in op.a {
+                self.use_of(op.id, arg, here);
+            }
+        }
+        for &(_, arg) in self.ssa.uses_at(index) {
+            self.use_of(op.id, arg, here);
+        }
+    }
+
+    /// Checks the arity and the arguments of a phi.
+    fn phi(&mut self, op: &Op, here: Pos) {
+        let Pos::In(block, _) = here else {
+            return;
+        };
+        let args = self.ssa.arena().phi_args(op).unwrap_or_default().to_vec();
+        if args.len() != self.ssa.phi_arity(block) {
+            self.report(Rule::PhiArity, op.id, op.out);
+        }
+        let preds = self.ssa.preds(block).to_vec();
+        for (j, arg) in args.into_iter().enumerate() {
+            let end = preds.get(j).map_or(Pos::Start, |&p| Pos::In(p, u32::MAX));
+            self.use_of(op.id, arg, end);
+        }
+    }
+}
+
 /// Gives each break of the SSA rules, in the run order of [`Ssa::order`].
 #[must_use]
 pub fn check(ssa: &Ssa) -> Vec<Violation> {
-    let _ = ssa;
-    Vec::new()
+    let mut pos = BTreeMap::new();
+    for &i in ssa.anchored(Anchor::Start) {
+        pos.insert(i, Pos::Start);
+    }
+    for block in ssa.block_order() {
+        let mut list = Vec::new();
+        ssa.block_ops(block, &mut list);
+        let mut rank = 1u32;
+        for i in list {
+            if ssa.place(i) == Some(Anchor::Head(block)) {
+                pos.insert(i, Pos::In(block, 0));
+            } else {
+                pos.insert(i, Pos::In(block, rank));
+                rank = rank.saturating_add(1);
+            }
+        }
+    }
+    let mut checker = Checker {
+        ssa,
+        dom: dominators(ssa.cfg()),
+        pos,
+        found: Vec::new(),
+    };
+    for index in ssa.order() {
+        checker.op(index);
+    }
+    checker.found
 }

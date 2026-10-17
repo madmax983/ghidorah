@@ -17,11 +17,18 @@
 //! The flags word of `materialize_flags` comes from the semantic module, so an undefined
 //! flag has the value that [`x86_flags`](crate::sem::x86_flags) gives.
 
+use std::collections::BTreeMap;
 use std::fmt;
 
 use ghidorah_base::Fuel;
 
-use crate::ssa::{Ssa, SsaError};
+use crate::fuse::fuse;
+use crate::interp::eval;
+use crate::op::{Arg, Opc, Val};
+use crate::ssa::{Ssa, SsaError, out_width};
+use crate::{copyprop, dce, sccp};
+
+mod flags;
 
 /// One L1 pass.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -174,6 +181,108 @@ pub fn run(ssa: &mut Ssa, switches: &Switches, fuel: &mut Fuel) -> Result<Report
 /// [`SsaError::SeqFull`] or [`SsaError::Full`] when the pass cannot add an op. Then the
 /// pass makes no change.
 pub fn run_pass(ssa: &mut Ssa, pass: Pass, fuel: &mut Fuel) -> Result<u64, SsaError> {
-    let _ = (ssa, pass, fuel);
-    Ok(0)
+    match pass {
+        Pass::Fold => fold(ssa, fuel),
+        Pass::Fuse => fuse_conds(ssa, fuel),
+        Pass::Copyprop => copyprop::run(ssa, fuel),
+        Pass::Sccp => sccp::run(ssa, fuel),
+        Pass::CondThroughPhi => flags::cond_through_phi(ssa, fuel),
+        Pass::MaterializeFlags => flags::materialize(ssa, fuel),
+        Pass::Dce => dce::run(ssa, fuel),
+    }
+}
+
+/// Gives the constant of an argument: `Nil` is 0, and a value needs a known constant.
+fn known_value(arg: Arg, known: &BTreeMap<Val, u128>) -> Option<u128> {
+    match arg {
+        Arg::Nil => Some(0),
+        Arg::K(imm) => Some(u128::from(imm.get())),
+        Arg::V(v) => known.get(&v).copied(),
+        Arg::L(_) => None,
+    }
+}
+
+/// The pass `fold`: each op with constant inputs becomes `Copy` of its result.
+///
+/// The walk follows the run order, so a def comes before its uses outside phis. A phi with
+/// one constant on each argument gives that constant to its users. A result above 64 bits
+/// stays an op, but its users can still fold. An input that `eval` rejects stays an op.
+fn fold(ssa: &mut Ssa, fuel: &mut Fuel) -> Result<u64, SsaError> {
+    let mut known: BTreeMap<Val, u128> = BTreeMap::new();
+    let mut plan = Vec::new();
+    for index in ssa.order() {
+        fuel.tick()?;
+        let Some(&op) = ssa.arena().op(index) else {
+            continue;
+        };
+        let Some(out) = op.out else {
+            continue;
+        };
+        if op.opc == Opc::Phi {
+            let args = ssa.arena().phi_args(&op).unwrap_or_default();
+            let values: Option<Vec<u128>> = args.iter().map(|&a| known_value(a, &known)).collect();
+            if let Some(&first) = values.as_deref().and_then(<[u128]>::first)
+                && values.iter().flatten().all(|&v| v == first)
+            {
+                known.insert(out, first);
+            }
+            continue;
+        }
+        let [Some(x), Some(y), Some(z)] = op.a.map(|a| known_value(a, &known)) else {
+            continue;
+        };
+        let Ok(result) = eval(op.opc, op.w, op.sub, x, y, z) else {
+            continue;
+        };
+        known.insert(out, result);
+        let Ok(value) = u64::try_from(result) else {
+            continue;
+        };
+        let w = out_width(&op);
+        let folded = [Arg::k(value), Arg::Nil, Arg::Nil];
+        if !(op.opc == Opc::Copy && op.w == w && op.a == folded) {
+            plan.push((index, w, folded));
+        }
+    }
+    for &(index, w, a) in &plan {
+        ssa.set_op(index, Opc::Copy, w, 0, a);
+    }
+    Ok(u64::try_from(plan.len()).unwrap_or(u64::MAX))
+}
+
+/// The pass `fuse`: `Cond(cc, Flags(op, a, b, c))` becomes the compare of [`fuse`].
+///
+/// The compare takes the width of the `Flags` op, which must be 8, 16, 32 or 64 bits.
+/// The walk looks through `Copy` ops that keep the value.
+fn fuse_conds(ssa: &mut Ssa, fuel: &mut Fuel) -> Result<u64, SsaError> {
+    let mut plan = Vec::new();
+    for index in ssa.order() {
+        fuel.tick()?;
+        let Some(&op) = ssa.arena().op(index) else {
+            continue;
+        };
+        let (Opc::Cond, Some(cc)) = (op.opc, op.cc()) else {
+            continue;
+        };
+        let Arg::V(f) = ssa.root(op.a[0]) else {
+            continue;
+        };
+        let Some(&thunk) = ssa.live_def(f) else {
+            continue;
+        };
+        let Some(flag_op) = thunk
+            .flag_op()
+            .filter(|_| matches!(thunk.w, 8 | 16 | 32 | 64))
+        else {
+            continue;
+        };
+        let (a, b) = (ssa.root(thunk.a[0]), ssa.root(thunk.a[1]));
+        if let Some((opc, x, y)) = fuse(flag_op, cc, a, b) {
+            plan.push((index, opc, thunk.w, [x, y, Arg::Nil]));
+        }
+    }
+    for &(index, opc, w, a) in &plan {
+        ssa.set_op(index, opc, w, 0, a);
+    }
+    Ok(u64::try_from(plan.len()).unwrap_or(u64::MAX))
 }

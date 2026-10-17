@@ -31,11 +31,16 @@ use std::fmt;
 
 use ghidorah_base::{Fuel, OutOfFuel};
 
-use crate::arena::{Arena, BuildError};
+use crate::arena::{Arena, BuildError, InsnSpan};
 use crate::graph::{Cfg, Node, rpo};
 use crate::interp::Interp;
 use crate::loc::{Loc, LocSet, REG_COUNT};
 use crate::op::{Arg, Op, OpId, Opc, Val};
+
+mod braun;
+mod build;
+pub(crate) mod cleanup;
+mod edit;
 
 /// The first sequence number of an op that a pass adds.
 pub const PASS_SEQ: u16 = 0x8000;
@@ -393,19 +398,21 @@ impl Ssa {
         out.extend_from_slice(self.anchored(Anchor::Tail(block)));
     }
 
+    /// Gives the last instruction of a block.
+    #[must_use]
+    pub fn last_insn(&self, block: Node) -> Option<InsnSpan> {
+        let b = self.blocks.get(block.index())?;
+        let last = b.first.checked_add(b.count.checked_sub(1)?)?;
+        self.arena.insns().get(usize::try_from(last).ok()?).copied()
+    }
+
     /// Gives the indices of the instruction ops of a block.
     pub(crate) fn insn_op_range(&self, block: Node) -> std::ops::Range<u32> {
-        let Some(b) = self.blocks.get(block.index()) else {
-            return 0..0;
-        };
-        let insns = self.arena.insns();
-        let first = usize::try_from(b.first).ok();
-        let last =
-            first.and_then(|f| f.checked_add(usize::try_from(b.count).ok()?.checked_sub(1)?));
-        match (
-            first.and_then(|i| insns.get(i)),
-            last.and_then(|i| insns.get(i)),
-        ) {
+        let first = self
+            .blocks
+            .get(block.index())
+            .and_then(|b| self.arena.insns().get(usize::try_from(b.first).ok()?));
+        match (first, self.last_insn(block)) {
             (Some(lo), Some(hi)) => lo.first..hi.first.saturating_add(hi.count),
             _ => 0..0,
         }
@@ -508,6 +515,5 @@ pub(crate) const fn low_mask(w: u8) -> u64 {
 /// bad body, [`SsaError::BadOp`] for an op that is not valid L0, [`SsaError::SeqFull`] and
 /// [`SsaError::Full`] when the arena cannot take an op, and [`SsaError::OutOfFuel`].
 pub fn build(arena: Arena, body: Body, opts: &Opts, fuel: &mut Fuel) -> Result<Ssa, SsaError> {
-    let _ = (arena, body, opts, fuel);
-    Err(SsaError::Full)
+    build::build(arena, body, opts, fuel)
 }
