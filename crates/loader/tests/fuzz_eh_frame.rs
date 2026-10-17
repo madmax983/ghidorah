@@ -131,10 +131,8 @@ fn target(input: &[u8]) -> Outcome {
         3
     } else if !first.fdes.is_empty() {
         2
-    } else if fits {
-        1
     } else {
-        0
+        usize::from(fits)
     };
     Outcome::reached(stage)
 }

@@ -37,7 +37,7 @@ fn fde(out: &mut Vec<u8>, program: &[u8]) {
         .to_vec();
     body.extend_from_slice(&[0x10, 0x7f, 0]);
     body.extend_from_slice(program);
-    while body.len() % 4 != 0 {
+    while !body.len().is_multiple_of(4) {
         body.push(0);
     }
     out.extend_from_slice(&u32::try_from(body.len()).expect("len").to_le_bytes());

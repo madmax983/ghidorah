@@ -13,10 +13,11 @@
 
 use std::collections::BTreeMap;
 
-use ghidorah_base::Limits;
+use ghidorah_base::{BinText, Limits};
 
-use crate::binary::{Binary, Import, RelocType};
+use crate::binary::{Binary, Import, RelocType, Sym, SymKind, SymTable};
 use crate::diag::Diags;
+use crate::elf::consts::SHN_UNDEF;
 use crate::limits::Budget;
 
 /// `R_X86_64_GLOB_DAT`: a GOT slot that holds the address of a symbol.
@@ -45,15 +46,93 @@ pub fn collect(binary: &Binary, limits: &Limits) -> Vec<Import> {
     load(binary, &mut budget, &mut diags)
 }
 
+/// Tells if a `.dynsym` symbol is an import: undefined, with a name, not a section.
+fn is_import(s: &Sym) -> bool {
+    s.table == SymTable::Dynsym
+        && s.index != 0
+        && s.shndx == SHN_UNDEF
+        && !s.name.is_empty()
+        && !matches!(s.kind, SymKind::Section | SymKind::File)
+}
+
+/// Gives the import index of each import symbol by its `.dynsym` index.
+fn by_symbol(binary: &Binary) -> BTreeMap<u32, usize> {
+    let mut names: BTreeMap<&[u8], usize> = BTreeMap::new();
+    let mut out = BTreeMap::new();
+    for s in binary.symbols.iter().filter(|s| is_import(s)) {
+        let next = names.len();
+        let import = *names.entry(s.name.as_bytes()).or_insert(next);
+        out.insert(s.index, import);
+    }
+    out
+}
+
+/// Gives the slot map from the relocations, with the import indexes of `by_symbol`.
+fn slot_map(binary: &Binary, by_symbol: &BTreeMap<u32, usize>) -> BTreeMap<u64, Slot> {
+    let mut out = BTreeMap::new();
+    if !binary.arch.is_x86_64() {
+        return out;
+    }
+    for (reloc, r) in binary.relocs.iter().enumerate() {
+        if !(r.kind == R_X86_64_JUMP_SLOT || r.kind == R_X86_64_GLOB_DAT)
+            || r.sym_table != SymTable::Dynsym
+        {
+            continue;
+        }
+        let Some(&import) = r.sym.and_then(|i| by_symbol.get(&i)) else {
+            continue;
+        };
+        out.entry(r.offset).or_insert(Slot {
+            import,
+            kind: r.kind,
+            reloc,
+        });
+    }
+    out
+}
+
 /// Gives the imports and adds the diagnostics of the text cap to `diags`.
 pub(crate) fn load(binary: &Binary, budget: &mut Budget, diags: &mut Diags) -> Vec<Import> {
-    let _ = (binary, budget, diags);
-    Vec::new()
+    let by_symbol = by_symbol(binary);
+    let mut out: Vec<Import> = Vec::new();
+    for s in binary.symbols.iter().filter(|s| is_import(s)) {
+        if by_symbol.get(&s.index) != Some(&out.len()) {
+            continue;
+        }
+        let bytes = s.name.as_bytes();
+        let size = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
+        let name = if budget.take_text(size, "elf.imports", diags) {
+            BinText::new(bytes)
+        } else {
+            BinText::default()
+        };
+        out.push(Import {
+            lib: None,
+            name: Some(name),
+            ordinal: None,
+            hint: None,
+            slot: None,
+            stub: None,
+            reloc_kind: None,
+            delay: false,
+        });
+    }
+    let slots = slot_map(binary, &by_symbol);
+    for kind in [R_X86_64_JUMP_SLOT, R_X86_64_GLOB_DAT] {
+        for (addr, slot) in slots.iter().filter(|(_, s)| s.kind == kind) {
+            if let Some(i) = out.get_mut(slot.import)
+                && i.slot.is_none()
+            {
+                i.slot = Some(*addr);
+                i.reloc_kind = Some(kind);
+            }
+        }
+    }
+    out
 }
 
 /// Gives the import slot map: the slot address to its import.
 #[must_use]
 pub fn slots(binary: &Binary) -> BTreeMap<u64, Slot> {
-    let _ = binary;
-    BTreeMap::new()
+    slot_map(binary, &by_symbol(binary))
 }

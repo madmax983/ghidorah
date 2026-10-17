@@ -43,7 +43,11 @@ fn listing(text: &str) -> Listing {
             let fields: Vec<&str> = line.split('\t').collect();
             let bytes = fields
                 .get(1)
-                .map(|f| f.split_whitespace().map(|b| hex(b) as u8).collect())
+                .map(|f| {
+                    f.split_whitespace()
+                        .map(|b| u8::from_str_radix(b, 16).expect("byte"))
+                        .collect()
+                })
                 .unwrap_or_default();
             let note = fields
                 .get(2)

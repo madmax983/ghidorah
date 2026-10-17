@@ -46,7 +46,7 @@ pub enum PointerError {
     Encoding(u8),
     /// The address goes past the 64-bit range.
     Overflow,
-    /// The target of an indirect pointer is not mapped.
+    /// No region holds the target of an indirect pointer.
     Unmapped(u64),
 }
 
@@ -76,6 +76,82 @@ impl fmt::Display for PointerError {
 
 impl std::error::Error for PointerError {}
 
+/// `DW_EH_PE_omit`: no pointer.
+const OMIT: u8 = 0xff;
+/// The bit of an indirect pointer.
+const INDIRECT: u8 = 0x80;
+
+/// A raw value: unsigned or signed.
+#[derive(Debug, Clone, Copy)]
+enum Raw {
+    Unsigned(u64),
+    Signed(i64),
+}
+
+impl Raw {
+    /// Gives the value as a 64-bit pattern.
+    const fn bits(self) -> u64 {
+        match self {
+            Self::Unsigned(v) => v,
+            Self::Signed(v) => v.cast_unsigned(),
+        }
+    }
+}
+
+/// Tells if the low 4 bits of `enc` name a known value format.
+const fn known_format(enc: u8) -> bool {
+    matches!(enc & 0x0f, 0x00..=0x04 | 0x08..=0x0c)
+}
+
+const fn map_read(e: ghidorah_kernel::ReadError) -> PointerError {
+    match e {
+        ghidorah_kernel::ReadError::BadLeb => PointerError::BadLeb,
+        ghidorah_kernel::ReadError::Eof | ghidorah_kernel::ReadError::NoNul => PointerError::Eof,
+    }
+}
+
+/// Reads the value of the format in the low 4 bits of `enc`.
+fn read_raw(reader: &mut Reader<'_>, enc: u8) -> Result<Raw, PointerError> {
+    let raw = match enc & 0x0f {
+        0x00 | 0x04 => Raw::Unsigned(reader.u64().map_err(map_read)?),
+        0x01 => Raw::Unsigned(reader.uleb128().map_err(map_read)?),
+        0x02 => Raw::Unsigned(u64::from(reader.u16().map_err(map_read)?)),
+        0x03 => Raw::Unsigned(u64::from(reader.u32().map_err(map_read)?)),
+        0x08 | 0x0c => Raw::Signed(reader.u64().map_err(map_read)?.cast_signed()),
+        0x09 => Raw::Signed(reader.sleb128().map_err(map_read)?),
+        0x0a => Raw::Signed(i64::from(reader.u16().map_err(map_read)?.cast_signed())),
+        0x0b => Raw::Signed(i64::from(reader.u32().map_err(map_read)?.cast_signed())),
+        _ => return Err(PointerError::Encoding(enc)),
+    };
+    Ok(raw)
+}
+
+/// Reads a value of the format in the low 4 bits of `enc`, with no base and no indirection.
+///
+/// An FDE PC range uses this form.
+pub(crate) fn read_value(reader: &mut Reader<'_>, enc: u8) -> Result<u64, PointerError> {
+    if !known_format(enc) {
+        return Err(PointerError::Encoding(enc));
+    }
+    read_raw(reader, enc).map(Raw::bits)
+}
+
+/// Tells if `enc` is a pointer encoding of the module table.
+pub(crate) const fn supported(enc: u8) -> bool {
+    enc == OMIT || (known_format(enc) && matches!(enc & 0x70, 0x00 | 0x10 | 0x30))
+}
+
+/// Adds a raw value to a base. An 8-byte unsigned value is a two's complement offset.
+fn offset(base: u64, raw: Raw, enc: u8) -> Option<u64> {
+    match raw {
+        Raw::Signed(v) => base.checked_add_signed(v),
+        Raw::Unsigned(v) if matches!(enc & 0x0f, 0x00 | 0x04) => {
+            base.checked_add_signed(v.cast_signed())
+        }
+        Raw::Unsigned(v) => base.checked_add(v),
+    }
+}
+
 /// Reads one pointer with the encoding `enc` at the reader position.
 ///
 /// Gives `Ok(None)` for `DW_EH_PE_omit` and reads no byte. An indirect pointer reads its
@@ -83,17 +159,39 @@ impl std::error::Error for PointerError {}
 ///
 /// # Errors
 ///
-/// Returns [`PointerError::Eof`] or [`PointerError::BadLeb`] for a bad value,
-/// [`PointerError::Encoding`] for an encoding outside the table of the module,
-/// [`PointerError::Overflow`] when the address passes `u64::MAX`, and
-/// [`PointerError::Unmapped`] for an indirect target outside `mem`. A failed read keeps
-/// the reader position when the value itself is bad.
+/// Returns [`PointerError::Eof`] or [`PointerError::BadLeb`] for a bad value.
+/// Returns [`PointerError::Encoding`] for an encoding outside the table of the module.
+/// Returns [`PointerError::Overflow`] when the address passes `u64::MAX`.
+/// Returns [`PointerError::Unmapped`] for an indirect target outside `mem`.
+/// A bad encoding or a bad value keeps the reader position.
 pub fn read_pointer(
     reader: &mut Reader<'_>,
     enc: u8,
     bases: Bases,
     mem: Option<&MemoryMap>,
 ) -> Result<Option<u64>, PointerError> {
-    let _ = (reader, bases, mem);
-    Err(PointerError::Encoding(enc))
+    if enc == OMIT {
+        return Ok(None);
+    }
+    if !supported(enc) {
+        return Err(PointerError::Encoding(enc));
+    }
+    let field = u64::try_from(reader.pos())
+        .ok()
+        .and_then(|pos| bases.start.checked_add(pos));
+    let raw = read_raw(reader, enc)?;
+    let addr = match enc & 0x70 {
+        0x10 => field.and_then(|f| offset(f, raw, enc)),
+        0x30 => offset(bases.data, raw, enc),
+        _ => Some(raw.bits()),
+    }
+    .ok_or(PointerError::Overflow)?;
+    if enc & INDIRECT == 0 {
+        return Ok(Some(addr));
+    }
+    let target = mem
+        .and_then(|m| m.read(addr, 8, &ghidorah_base::Limits::DEFAULT).ok())
+        .and_then(|b| <[u8; 8]>::try_from(b.as_ref()).ok())
+        .ok_or(PointerError::Unmapped(addr))?;
+    Ok(Some(u64::from_le_bytes(target)))
 }

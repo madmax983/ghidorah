@@ -24,13 +24,15 @@ pub struct GoldenFde {
     pub pc_end: u64,
     /// The rows of the model.
     pub rows: Vec<Row>,
+    /// A `def_cfa_expression` inside the range stops the rows.
+    pub stopped: bool,
 }
 
 /// The CFA state of the model: register and offset.
 type State = Option<(u16, i64)>;
 
-/// Adds a row, or replaces the row at the same address. A row that repeats the rule
-/// before it is not kept.
+/// Adds a row, or replaces the row at the same address. The list keeps no row that
+/// repeats the rule before it.
 fn emit(rows: &mut Vec<Row>, pc: u64, state: State, end: u64) {
     let Some((reg, off)) = state else {
         return;
@@ -70,7 +72,8 @@ struct Walk {
 impl Walk {
     fn line(&mut self, line: &str) {
         let line = line.trim();
-        if self.dead {
+        // An instruction at or after the end of the range has no effect.
+        if self.dead || self.loc >= self.end {
             return;
         }
         if let Some(rest) = line.strip_prefix("DW_CFA_def_cfa: ") {
@@ -155,6 +158,7 @@ pub fn parse(text: &str) -> Vec<GoldenFde> {
                 pc_begin,
                 pc_end,
                 rows: walk.rows,
+                stopped: walk.dead,
             });
         }
     }

@@ -24,13 +24,13 @@ struct Eh {
 }
 
 impl Eh {
-    /// Adds a record with a 4-byte length and the CIE ID or pointer `id`. The body is
-    /// padded with `DW_CFA_nop` to a multiple of 4.
+    /// Adds a record with a 4-byte length and the CIE ID or pointer `id`. `DW_CFA_nop`
+    /// bytes fill the body to a multiple of 4.
     fn record(&mut self, id: u32, body: &[u8]) -> u64 {
         let at = self.buf.len() as u64;
         let mut content = id.to_le_bytes().to_vec();
         content.extend_from_slice(body);
-        while content.len() % 4 != 0 {
+        while !content.len().is_multiple_of(4) {
             content.push(0);
         }
         self.buf
@@ -151,7 +151,7 @@ fn ac_053_eh_frame_golden() {
         let want = frames::parse(&body);
         let (b, _) = load_ok(&fixture(&name));
         problems.extend(compare(&name, &b, &want));
-        let stopped = body.matches("DW_CFA_def_cfa_expression").count();
+        let stopped = want.iter().filter(|f| f.stopped).count();
         let cfa = codes(&b)
             .into_iter()
             .filter(|c| *c == DiagCode::CfaOpcode)
@@ -452,9 +452,12 @@ fn cie_forms() {
     );
 }
 
+/// One bad record case: name, writer, expected code and expected FDE count.
+type BadCase = (&'static str, Box<dyn Fn(&mut Eh)>, DiagCode, usize);
+
 #[test]
 fn bad_records_give_diagnostics() {
-    let cases: Vec<(&str, Box<dyn Fn(&mut Eh)>, DiagCode, usize)> = vec![
+    let cases: Vec<BadCase> = vec![
         (
             "CIE version 2",
             Box::new(|eh: &mut Eh| {

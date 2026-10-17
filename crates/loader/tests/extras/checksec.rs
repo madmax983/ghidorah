@@ -7,7 +7,7 @@ use ghidorah_testkit::elf::consts::{DT_FLAGS, DT_FLAGS_1};
 use ghidorah_testkit::elf::{ElfBuilder, ImportKind, Loc, Section, Symbol};
 
 use crate::json;
-use crate::support::{fixture, has_fixture, load_ok, root};
+use crate::support::{fixture, golden_body, has_fixture, load_ok, root};
 
 fn relro_name(r: Relro) -> &'static str {
     match r {
@@ -34,7 +34,10 @@ fn render(p: &ElfProtections, build_id: Option<&str>) -> String {
     )
 }
 
-fn render_truth(t: &json::Json) -> String {
+/// Renders the truth fields. `relro_seen` is `false` when the readelf golden of the file
+/// has no `PT_GNU_RELRO`. `objcopy` drops that header in the `noeh` variants, so the golden
+/// decides RELRO for such a file.
+fn render_truth(t: &json::Json, relro_seen: bool) -> String {
     let id = match t.get("build_id") {
         json::Json::Str(s) => s.clone(),
         _ => "null".to_string(),
@@ -46,7 +49,11 @@ fn render_truth(t: &json::Json) -> String {
         t.get("ibt").bool(),
         t.get("nx").bool(),
         t.get("pie").bool(),
-        t.get("relro").text(),
+        if relro_seen {
+            t.get("relro").text()
+        } else {
+            "none"
+        },
         t.get("rpath").bool(),
         t.get("runpath").bool(),
         t.get("shstk").bool()
@@ -65,13 +72,14 @@ fn ac_058_protections() {
     paths.sort();
     for path in paths {
         let truth = json::parse(&std::fs::read_to_string(&path).expect("truth"));
-        let want = render_truth(truth.get("protections"));
         for bin in truth.get("binaries").items() {
             let name = bin.get("name").text();
             if !has_fixture(name) {
                 continue;
             }
             checked += 1;
+            let readelf = golden_body("loader", &format!("{name}.readelf.txt")).expect("golden");
+            let want = render_truth(truth.get("protections"), readelf.contains("GNU_RELRO"));
             let (b, _) = load_ok(&fixture(name));
             let Some(Protections::Elf(p)) = b.protections.clone() else {
                 problems.push(format!("{name}: protections {:?}", b.protections));
@@ -81,7 +89,10 @@ fn ac_058_protections() {
             if got != want {
                 problems.push(format!("{name}:\n  got  {got}\n  want {want}"));
             }
-            let stripped = name.ends_with(".stripped") || name.ends_with(".noshdr");
+            // The noeh and noshdr variants come from the stripped file.
+            let stripped = [".stripped", ".noshdr", ".noeh"]
+                .iter()
+                .any(|v| name.ends_with(v));
             if p.stripped != stripped {
                 problems.push(format!("{name}: stripped {}", p.stripped));
             }
@@ -96,6 +107,7 @@ fn ac_058_protections() {
 
 fn base() -> ElfBuilder {
     ElfBuilder::dyn_object()
+        .force_dynamic()
         .section(Section::code(".text", &[0xc3; 16]))
         .symbol(Symbol::func("_start", Loc::section(".text", 0), 1))
         .entry(Loc::symbol("_start"))
