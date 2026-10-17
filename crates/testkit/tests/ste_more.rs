@@ -199,6 +199,41 @@ fn ste_repo_lexicon_reads_the_glossary() {
 }
 
 #[test]
+fn ste_lexicon_reads_the_verb_section_of_the_glossary() {
+    let text = "# Glossary\n\n## Technical verbs\n\n| Word | Meaning |\n|---|---|\n\
+                | demangle | Change a name. |\n| `lift` | Change an instruction. |\n\
+                | make sure | Check a result. |\n\n## Technical nouns\n\n\
+                | Word | Meaning |\n|---|---|\n| thunk | A short jump. |\n";
+    let mut lexicon = Lexicon::builtin();
+    lexicon.add_glossary(text);
+    assert!(lexicon.is_imperative("demangle"));
+    assert!(lexicon.is_imperative("Lift"));
+    assert!(!lexicon.is_imperative("word"));
+    assert!(!lexicon.is_imperative("make sure"));
+    assert!(!lexicon.is_imperative("thunk"));
+    let findings =
+        Checker::new(lexicon).check("Demangle the name and lift the code.", TextKind::Plain);
+    assert_eq!(rules_of(&findings), BTreeSet::from([Rule::Ste8]));
+}
+
+#[test]
+fn ste_repo_glossary_verbs_are_imperatives() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let lexicon = ste::repo_lexicon(&root);
+    for verb in [
+        "demangle",
+        "disassemble",
+        "fuzz",
+        "lift",
+        "rebase",
+        "verify",
+    ] {
+        assert!(lexicon.is_imperative(verb), "{verb}");
+    }
+    assert!(!lexicon.is_imperative("thunk"));
+}
+
+#[test]
 fn ste_scan_of_a_missing_root_is_an_error() {
     let root = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("ste_no_such_root");
     let _ = std::fs::remove_dir_all(&root);
