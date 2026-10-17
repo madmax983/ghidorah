@@ -1,0 +1,203 @@
+{
+  "binaries": [
+    {
+      "name": "canary.gcc-O2",
+      "sha256": "5f173cb556e267988206ca1ca3eefd363f1e5236679586ba130cbacf2b074d7b",
+      "variant": "none"
+    },
+    {
+      "name": "canary.gcc-O2.stripped",
+      "sha256": "6411b2f15ac8b1570729b2daca54a4c25be17e17841b38dcd7d8ef318b7d29f4",
+      "variant": "stripped"
+    }
+  ],
+  "build": {
+    "cflags": ["-O2"],
+    "compiler": "gcc 13.3.0",
+    "id": "gcc-O2",
+    "ldflags": []
+  },
+  "call_edges": [
+    ["__do_global_dtors_aux","__cxa_finalize"],
+    ["__do_global_dtors_aux","deregister_tm_clones"],
+    ["_start","__libc_start_main"],
+    ["checksum_line","__snprintf_chk"],
+    ["checksum_line","__stack_chk_fail"],
+    ["copy_name","__stack_chk_fail"],
+    ["copy_name","puts"],
+    ["copy_name","strlen"],
+    ["frame_dummy","register_tm_clones"],
+    ["main","__printf_chk"],
+    ["main","checksum_line"],
+    ["main","copy_name"]
+  ],
+  "cold_parts": [],
+  "duplicate_names": {},
+  "elf": {
+    "entry": "0x1120",
+    "image_base": "0x0",
+    "interp": true,
+    "type": "DYN"
+  },
+  "facts": {
+    "claims": [
+      {
+        "args": ["main","copy_name"],
+        "rel": "calls"
+      },
+      {
+        "args": ["main","checksum_line"],
+        "rel": "calls"
+      }
+    ]
+  },
+  "fixture": "canary.gcc-O2",
+  "function_count": 10,
+  "functions": [
+    {
+      "addr": "0x1000",
+      "insns": 8,
+      "name": "_init",
+      "size": 0
+    },
+    {
+      "addr": "0x10e0",
+      "insns": 18,
+      "name": "main",
+      "size": 62
+    },
+    {
+      "addr": "0x1120",
+      "insns": 13,
+      "name": "_start",
+      "size": 38
+    },
+    {
+      "addr": "0x1150",
+      "insns": 11,
+      "name": "deregister_tm_clones",
+      "size": 0
+    },
+    {
+      "addr": "0x1180",
+      "insns": 16,
+      "name": "register_tm_clones",
+      "size": 0
+    },
+    {
+      "addr": "0x11c0",
+      "insns": 16,
+      "name": "__do_global_dtors_aux",
+      "size": 0
+    },
+    {
+      "addr": "0x1200",
+      "insns": 3,
+      "name": "frame_dummy",
+      "size": 0
+    },
+    {
+      "addr": "0x1210",
+      "insns": 63,
+      "name": "copy_name",
+      "size": 220
+    },
+    {
+      "addr": "0x12f0",
+      "insns": 33,
+      "name": "checksum_line",
+      "size": 129
+    },
+    {
+      "addr": "0x1374",
+      "insns": 4,
+      "name": "_fini",
+      "size": 0
+    }
+  ],
+  "gaps": [],
+  "generator": {
+    "name": "xtask-fixtures",
+    "version": "1"
+  },
+  "imports": [
+    "__cxa_finalize",
+    "__libc_start_main",
+    "__printf_chk",
+    "__snprintf_chk",
+    "__stack_chk_fail",
+    "puts",
+    "strlen"
+  ],
+  "jump_tables": [],
+  "leaf_functions": [],
+  "libraries": ["libc.so.6"],
+  "network_imports": [],
+  "program": "canary",
+  "protections": {
+    "build_id": "6147cac3be5bb53495f26d8a5bb72ad58f190a35",
+    "canary": true,
+    "fortify": true,
+    "ibt": true,
+    "nx": true,
+    "pie": true,
+    "relro": "full",
+    "rpath": false,
+    "runpath": false,
+    "shstk": true
+  },
+  "self_calls": [],
+  "strings": [
+    {
+      "addr": "0x2004",
+      "encoding": "bytes",
+      "hex": "6c696e653a2573",
+      "len": 7,
+      "text": "line:%s"
+    }
+  ],
+  "survey_facts": [
+    {
+      "kind": "import",
+      "value": "__stack_chk_fail"
+    },
+    {
+      "kind": "import",
+      "value": "puts"
+    },
+    {
+      "kind": "library",
+      "value": "libc.so.6"
+    },
+    {
+      "kind": "protection",
+      "value": "canary"
+    },
+    {
+      "kind": "protection",
+      "value": "fortify"
+    },
+    {
+      "kind": "protection",
+      "value": "ibt"
+    },
+    {
+      "kind": "protection",
+      "value": "nx"
+    },
+    {
+      "kind": "protection",
+      "value": "pie"
+    },
+    {
+      "kind": "protection",
+      "value": "shstk"
+    }
+  ],
+  "syscall_names": [],
+  "syscalls": [],
+  "tail_calls": [
+    ["frame_dummy","register_tm_clones"]
+  ],
+  "tier": "T1"
+}

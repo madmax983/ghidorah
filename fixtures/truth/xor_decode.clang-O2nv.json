@@ -1,0 +1,200 @@
+{
+  "binaries": [
+    {
+      "name": "xor_decode.clang-O2nv",
+      "sha256": "8af090dbed39d704474e038dd1231ff718c4de76daa0f9f586af8b04725934fe",
+      "variant": "none"
+    }
+  ],
+  "build": {
+    "cflags": ["-O2","-fno-vectorize","-fno-slp-vectorize"],
+    "compiler": "clang 18.1.3",
+    "id": "clang-O2nv",
+    "ldflags": []
+  },
+  "call_edges": [
+    ["__do_global_dtors_aux","__cxa_finalize"],
+    ["__do_global_dtors_aux","deregister_tm_clones"],
+    ["_start","__libc_start_main"],
+    ["decode","key_at"],
+    ["frame_dummy","register_tm_clones"],
+    ["main","decode"],
+    ["main","mix32"],
+    ["main","printf"],
+    ["main","puts"],
+    ["main","strcmp"],
+    ["main","strlen"]
+  ],
+  "cold_parts": [],
+  "duplicate_names": {},
+  "elf": {
+    "entry": "0x1080",
+    "image_base": "0x0",
+    "interp": true,
+    "type": "DYN"
+  },
+  "facts": {
+    "claims": [
+      {
+        "args": ["main","decode"],
+        "rel": "calls"
+      },
+      {
+        "args": ["decode","key_at"],
+        "rel": "calls"
+      }
+    ],
+    "constants": {
+      "key_base": "0x5a",
+      "key_step": "3"
+    },
+    "secrets": {
+      "plaintext": "attack at dawn"
+    }
+  },
+  "fixture": "xor_decode.clang-O2nv",
+  "function_count": 12,
+  "functions": [
+    {
+      "addr": "0x1000",
+      "insns": 8,
+      "name": "_init",
+      "size": 0
+    },
+    {
+      "addr": "0x1080",
+      "insns": 13,
+      "name": "_start",
+      "size": 38
+    },
+    {
+      "addr": "0x10b0",
+      "insns": 11,
+      "name": "deregister_tm_clones",
+      "size": 0
+    },
+    {
+      "addr": "0x10e0",
+      "insns": 16,
+      "name": "register_tm_clones",
+      "size": 0
+    },
+    {
+      "addr": "0x1120",
+      "insns": 16,
+      "name": "__do_global_dtors_aux",
+      "size": 0
+    },
+    {
+      "addr": "0x1160",
+      "insns": 3,
+      "name": "frame_dummy",
+      "size": 0
+    },
+    {
+      "addr": "0x1170",
+      "insns": 3,
+      "name": "key_at",
+      "size": 6
+    },
+    {
+      "addr": "0x1180",
+      "insns": 4,
+      "name": "rotl32",
+      "size": 7
+    },
+    {
+      "addr": "0x1190",
+      "insns": 8,
+      "name": "mix32",
+      "size": 24
+    },
+    {
+      "addr": "0x11b0",
+      "insns": 27,
+      "name": "decode",
+      "size": 74
+    },
+    {
+      "addr": "0x1200",
+      "insns": 32,
+      "name": "main",
+      "size": 114
+    },
+    {
+      "addr": "0x1274",
+      "insns": 4,
+      "name": "_fini",
+      "size": 0
+    }
+  ],
+  "gaps": [],
+  "generator": {
+    "name": "xtask-fixtures",
+    "version": "1"
+  },
+  "imports": ["__cxa_finalize","__libc_start_main","printf","puts","strcmp","strlen"],
+  "jump_tables": [],
+  "leaf_functions": [
+    {
+      "name": "key_at",
+      "sig": "u8(u32)",
+      "vectors": "tests/golden/semantics/leaf/xor_decode.clang-O2nv.jsonl"
+    },
+    {
+      "name": "rotl32",
+      "sig": "u32(u32,u32)",
+      "vectors": "tests/golden/semantics/leaf/xor_decode.clang-O2nv.jsonl"
+    },
+    {
+      "name": "mix32",
+      "sig": "u32(u32,u32)",
+      "vectors": "tests/golden/semantics/leaf/xor_decode.clang-O2nv.jsonl"
+    }
+  ],
+  "libraries": ["libc.so.6"],
+  "network_imports": [],
+  "program": "xor_decode",
+  "protections": {
+    "build_id": "17ff74861aa7d7a2768e1a7255ce59bde939e61a",
+    "canary": false,
+    "fortify": false,
+    "ibt": false,
+    "nx": true,
+    "pie": true,
+    "relro": "partial",
+    "rpath": false,
+    "runpath": false,
+    "shstk": false
+  },
+  "self_calls": [],
+  "strings": [],
+  "survey_facts": [
+    {
+      "kind": "function",
+      "value": "decode"
+    },
+    {
+      "kind": "import",
+      "value": "strcmp"
+    },
+    {
+      "kind": "library",
+      "value": "libc.so.6"
+    },
+    {
+      "kind": "protection",
+      "value": "nx"
+    },
+    {
+      "kind": "protection",
+      "value": "pie"
+    }
+  ],
+  "syscall_names": [],
+  "syscalls": [],
+  "tail_calls": [
+    ["frame_dummy","register_tm_clones"]
+  ],
+  "tier": "T1"
+}

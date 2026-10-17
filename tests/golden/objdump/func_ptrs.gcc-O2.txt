@@ -1,0 +1,296 @@
+# golden: generator=xtask-fixtures version=1 binutils=2.42 fixture=func_ptrs.gcc-O2 fixture_sha256=b32bdf353c42c2cdb74fee4cb0de0109a167534d6d03ffc9e855bcdc760b3e6b
+
+func_ptrs.gcc-O2:     file format elf64-x86-64
+
+
+Disassembly of section .init:
+
+0000000000001000 <_init>:
+    1000:	f3 0f 1e fa          	endbr64
+    1004:	48 83 ec 08          	sub    rsp,0x8
+    1008:	48 8b 05 c9 2f 00 00 	mov    rax,QWORD PTR [rip+0x2fc9]        # 3fd8 <__gmon_start__@Base>
+    100f:	48 85 c0             	test   rax,rax
+    1012:	74 02                	je     1016 <_init+0x16>
+    1014:	ff d0                	call   rax
+    1016:	48 83 c4 08          	add    rsp,0x8
+    101a:	c3                   	ret
+
+Disassembly of section .plt:
+
+0000000000001020 <.plt>:
+    1020:	ff 35 72 2f 00 00    	push   QWORD PTR [rip+0x2f72]        # 3f98 <_GLOBAL_OFFSET_TABLE_+0x8>
+    1026:	ff 25 74 2f 00 00    	jmp    QWORD PTR [rip+0x2f74]        # 3fa0 <_GLOBAL_OFFSET_TABLE_+0x10>
+    102c:	0f 1f 40 00          	nop    DWORD PTR [rax+0x0]
+    1030:	f3 0f 1e fa          	endbr64
+    1034:	68 00 00 00 00       	push   0x0
+    1039:	e9 e2 ff ff ff       	jmp    1020 <_init+0x20>
+    103e:	66 90                	xchg   ax,ax
+    1040:	f3 0f 1e fa          	endbr64
+    1044:	68 01 00 00 00       	push   0x1
+    1049:	e9 d2 ff ff ff       	jmp    1020 <_init+0x20>
+    104e:	66 90                	xchg   ax,ax
+    1050:	f3 0f 1e fa          	endbr64
+    1054:	68 02 00 00 00       	push   0x2
+    1059:	e9 c2 ff ff ff       	jmp    1020 <_init+0x20>
+    105e:	66 90                	xchg   ax,ax
+    1060:	f3 0f 1e fa          	endbr64
+    1064:	68 03 00 00 00       	push   0x3
+    1069:	e9 b2 ff ff ff       	jmp    1020 <_init+0x20>
+    106e:	66 90                	xchg   ax,ax
+
+Disassembly of section .plt.got:
+
+0000000000001070 <__cxa_finalize@plt>:
+    1070:	f3 0f 1e fa          	endbr64
+    1074:	ff 25 6e 2f 00 00    	jmp    QWORD PTR [rip+0x2f6e]        # 3fe8 <__cxa_finalize@GLIBC_2.2.5>
+    107a:	66 0f 1f 44 00 00    	nop    WORD PTR [rax+rax*1+0x0]
+
+Disassembly of section .plt.sec:
+
+0000000000001080 <qsort@plt>:
+    1080:	f3 0f 1e fa          	endbr64
+    1084:	ff 25 1e 2f 00 00    	jmp    QWORD PTR [rip+0x2f1e]        # 3fa8 <qsort@GLIBC_2.2.5>
+    108a:	66 0f 1f 44 00 00    	nop    WORD PTR [rax+rax*1+0x0]
+
+0000000000001090 <__stack_chk_fail@plt>:
+    1090:	f3 0f 1e fa          	endbr64
+    1094:	ff 25 16 2f 00 00    	jmp    QWORD PTR [rip+0x2f16]        # 3fb0 <__stack_chk_fail@GLIBC_2.4>
+    109a:	66 0f 1f 44 00 00    	nop    WORD PTR [rax+rax*1+0x0]
+
+00000000000010a0 <strtol@plt>:
+    10a0:	f3 0f 1e fa          	endbr64
+    10a4:	ff 25 0e 2f 00 00    	jmp    QWORD PTR [rip+0x2f0e]        # 3fb8 <strtol@GLIBC_2.2.5>
+    10aa:	66 0f 1f 44 00 00    	nop    WORD PTR [rax+rax*1+0x0]
+
+00000000000010b0 <__printf_chk@plt>:
+    10b0:	f3 0f 1e fa          	endbr64
+    10b4:	ff 25 06 2f 00 00    	jmp    QWORD PTR [rip+0x2f06]        # 3fc0 <__printf_chk@GLIBC_2.3.4>
+    10ba:	66 0f 1f 44 00 00    	nop    WORD PTR [rax+rax*1+0x0]
+
+Disassembly of section .text:
+
+00000000000010c0 <main>:
+    10c0:	f3 0f 1e fa          	endbr64
+    10c4:	55                   	push   rbp
+    10c5:	48 8d 0d 24 02 00 00 	lea    rcx,[rip+0x224]        # 12f0 <cmp_long>
+    10cc:	ba 08 00 00 00       	mov    edx,0x8
+    10d1:	48 89 f5             	mov    rbp,rsi
+    10d4:	53                   	push   rbx
+    10d5:	be 04 00 00 00       	mov    esi,0x4
+    10da:	89 fb                	mov    ebx,edi
+    10dc:	48 83 ec 48          	sub    rsp,0x48
+    10e0:	66 0f 6f 05 38 0f 00 00 	movdqa xmm0,XMMWORD PTR [rip+0xf38]        # 2020 <_IO_stdin_used+0x20>
+    10e8:	64 48 8b 04 25 28 00 00 00 	mov    rax,QWORD PTR fs:0x28
+    10f1:	48 89 44 24 38       	mov    QWORD PTR [rsp+0x38],rax
+    10f6:	31 c0                	xor    eax,eax
+    10f8:	48 8d 7c 24 10       	lea    rdi,[rsp+0x10]
+    10fd:	0f 29 44 24 10       	movaps XMMWORD PTR [rsp+0x10],xmm0
+    1102:	66 0f 6f 05 26 0f 00 00 	movdqa xmm0,XMMWORD PTR [rip+0xf26]        # 2030 <_IO_stdin_used+0x30>
+    110a:	0f 29 44 24 20       	movaps XMMWORD PTR [rsp+0x20],xmm0
+    110f:	e8 6c ff ff ff       	call   1080 <qsort@plt>
+    1114:	48 8d 05 f5 01 00 00 	lea    rax,[rip+0x1f5]        # 1310 <log_event>
+    111b:	48 89 44 24 08       	mov    QWORD PTR [rsp+0x8],rax
+    1120:	48 8b 7c 24 08       	mov    rdi,QWORD PTR [rsp+0x8]
+    1125:	e8 46 02 00 00       	call   1370 <set_callback>
+    112a:	89 df                	mov    edi,ebx
+    112c:	e8 4f 02 00 00       	call   1380 <fire>
+    1131:	31 ff                	xor    edi,edi
+    1133:	83 fb 01             	cmp    ebx,0x1
+    1136:	7e 12                	jle    114a <main+0x8a>
+    1138:	48 8b 7d 08          	mov    rdi,QWORD PTR [rbp+0x8]
+    113c:	ba 0a 00 00 00       	mov    edx,0xa
+    1141:	31 f6                	xor    esi,esi
+    1143:	e8 58 ff ff ff       	call   10a0 <strtol@plt>
+    1148:	89 c7                	mov    edi,eax
+    114a:	ba 06 00 00 00       	mov    edx,0x6
+    114f:	be 14 00 00 00       	mov    esi,0x14
+    1154:	e8 f7 01 00 00       	call   1350 <run_op>
+    1159:	be 06 00 00 00       	mov    esi,0x6
+    115e:	bf 14 00 00 00       	mov    edi,0x14
+    1163:	48 89 c3             	mov    rbx,rax
+    1166:	e8 c5 01 00 00       	call   1330 <op_mod>
+    116b:	48 8b 4c 24 10       	mov    rcx,QWORD PTR [rsp+0x10]
+    1170:	bf 02 00 00 00       	mov    edi,0x2
+    1175:	48 8d 35 92 0e 00 00 	lea    rsi,[rip+0xe92]        # 200e <_IO_stdin_used+0xe>
+    117c:	48 8d 14 03          	lea    rdx,[rbx+rax*1]
+    1180:	31 c0                	xor    eax,eax
+    1182:	e8 29 ff ff ff       	call   10b0 <__printf_chk@plt>
+    1187:	48 8b 44 24 38       	mov    rax,QWORD PTR [rsp+0x38]
+    118c:	64 48 2b 04 25 28 00 00 00 	sub    rax,QWORD PTR fs:0x28
+    1195:	75 09                	jne    11a0 <main+0xe0>
+    1197:	48 83 c4 48          	add    rsp,0x48
+    119b:	31 c0                	xor    eax,eax
+    119d:	5b                   	pop    rbx
+    119e:	5d                   	pop    rbp
+    119f:	c3                   	ret
+    11a0:	e8 eb fe ff ff       	call   1090 <__stack_chk_fail@plt>
+    11a5:	66 2e 0f 1f 84 00 00 00 00 00 	cs nop WORD PTR [rax+rax*1+0x0]
+    11af:	90                   	nop
+
+00000000000011b0 <_start>:
+    11b0:	f3 0f 1e fa          	endbr64
+    11b4:	31 ed                	xor    ebp,ebp
+    11b6:	49 89 d1             	mov    r9,rdx
+    11b9:	5e                   	pop    rsi
+    11ba:	48 89 e2             	mov    rdx,rsp
+    11bd:	48 83 e4 f0          	and    rsp,0xfffffffffffffff0
+    11c1:	50                   	push   rax
+    11c2:	54                   	push   rsp
+    11c3:	45 31 c0             	xor    r8d,r8d
+    11c6:	31 c9                	xor    ecx,ecx
+    11c8:	48 8d 3d f1 fe ff ff 	lea    rdi,[rip+0xfffffffffffffef1]        # 10c0 <main>
+    11cf:	ff 15 f3 2d 00 00    	call   QWORD PTR [rip+0x2df3]        # 3fc8 <__libc_start_main@GLIBC_2.34>
+    11d5:	f4                   	hlt
+    11d6:	66 2e 0f 1f 84 00 00 00 00 00 	cs nop WORD PTR [rax+rax*1+0x0]
+
+00000000000011e0 <deregister_tm_clones>:
+    11e0:	48 8d 3d 29 2e 00 00 	lea    rdi,[rip+0x2e29]        # 4010 <__TMC_END__>
+    11e7:	48 8d 05 22 2e 00 00 	lea    rax,[rip+0x2e22]        # 4010 <__TMC_END__>
+    11ee:	48 39 f8             	cmp    rax,rdi
+    11f1:	74 15                	je     1208 <deregister_tm_clones+0x28>
+    11f3:	48 8b 05 d6 2d 00 00 	mov    rax,QWORD PTR [rip+0x2dd6]        # 3fd0 <_ITM_deregisterTMCloneTable@Base>
+    11fa:	48 85 c0             	test   rax,rax
+    11fd:	74 09                	je     1208 <deregister_tm_clones+0x28>
+    11ff:	ff e0                	jmp    rax
+    1201:	0f 1f 80 00 00 00 00 	nop    DWORD PTR [rax+0x0]
+    1208:	c3                   	ret
+    1209:	0f 1f 80 00 00 00 00 	nop    DWORD PTR [rax+0x0]
+
+0000000000001210 <register_tm_clones>:
+    1210:	48 8d 3d f9 2d 00 00 	lea    rdi,[rip+0x2df9]        # 4010 <__TMC_END__>
+    1217:	48 8d 35 f2 2d 00 00 	lea    rsi,[rip+0x2df2]        # 4010 <__TMC_END__>
+    121e:	48 29 fe             	sub    rsi,rdi
+    1221:	48 89 f0             	mov    rax,rsi
+    1224:	48 c1 ee 3f          	shr    rsi,0x3f
+    1228:	48 c1 f8 03          	sar    rax,0x3
+    122c:	48 01 c6             	add    rsi,rax
+    122f:	48 d1 fe             	sar    rsi,1
+    1232:	74 14                	je     1248 <register_tm_clones+0x38>
+    1234:	48 8b 05 a5 2d 00 00 	mov    rax,QWORD PTR [rip+0x2da5]        # 3fe0 <_ITM_registerTMCloneTable@Base>
+    123b:	48 85 c0             	test   rax,rax
+    123e:	74 08                	je     1248 <register_tm_clones+0x38>
+    1240:	ff e0                	jmp    rax
+    1242:	66 0f 1f 44 00 00    	nop    WORD PTR [rax+rax*1+0x0]
+    1248:	c3                   	ret
+    1249:	0f 1f 80 00 00 00 00 	nop    DWORD PTR [rax+0x0]
+
+0000000000001250 <__do_global_dtors_aux>:
+    1250:	f3 0f 1e fa          	endbr64
+    1254:	80 3d b5 2d 00 00 00 	cmp    BYTE PTR [rip+0x2db5],0x0        # 4010 <__TMC_END__>
+    125b:	75 2b                	jne    1288 <__do_global_dtors_aux+0x38>
+    125d:	55                   	push   rbp
+    125e:	48 83 3d 82 2d 00 00 00 	cmp    QWORD PTR [rip+0x2d82],0x0        # 3fe8 <__cxa_finalize@GLIBC_2.2.5>
+    1266:	48 89 e5             	mov    rbp,rsp
+    1269:	74 0c                	je     1277 <__do_global_dtors_aux+0x27>
+    126b:	48 8b 3d 96 2d 00 00 	mov    rdi,QWORD PTR [rip+0x2d96]        # 4008 <__dso_handle>
+    1272:	e8 f9 fd ff ff       	call   1070 <__cxa_finalize@plt>
+    1277:	e8 64 ff ff ff       	call   11e0 <deregister_tm_clones>
+    127c:	c6 05 8d 2d 00 00 01 	mov    BYTE PTR [rip+0x2d8d],0x1        # 4010 <__TMC_END__>
+    1283:	5d                   	pop    rbp
+    1284:	c3                   	ret
+    1285:	0f 1f 00             	nop    DWORD PTR [rax]
+    1288:	c3                   	ret
+    1289:	0f 1f 80 00 00 00 00 	nop    DWORD PTR [rax+0x0]
+
+0000000000001290 <frame_dummy>:
+    1290:	f3 0f 1e fa          	endbr64
+    1294:	e9 77 ff ff ff       	jmp    1210 <register_tm_clones>
+    1299:	0f 1f 80 00 00 00 00 	nop    DWORD PTR [rax+0x0]
+
+00000000000012a0 <op_add>:
+    12a0:	f3 0f 1e fa          	endbr64
+    12a4:	48 8d 04 37          	lea    rax,[rdi+rsi*1]
+    12a8:	c3                   	ret
+    12a9:	0f 1f 80 00 00 00 00 	nop    DWORD PTR [rax+0x0]
+
+00000000000012b0 <op_sub>:
+    12b0:	f3 0f 1e fa          	endbr64
+    12b4:	48 89 f8             	mov    rax,rdi
+    12b7:	48 29 f0             	sub    rax,rsi
+    12ba:	c3                   	ret
+    12bb:	0f 1f 44 00 00       	nop    DWORD PTR [rax+rax*1+0x0]
+
+00000000000012c0 <op_mul>:
+    12c0:	f3 0f 1e fa          	endbr64
+    12c4:	48 89 f8             	mov    rax,rdi
+    12c7:	48 0f af c6          	imul   rax,rsi
+    12cb:	c3                   	ret
+    12cc:	0f 1f 40 00          	nop    DWORD PTR [rax+0x0]
+
+00000000000012d0 <op_div>:
+    12d0:	f3 0f 1e fa          	endbr64
+    12d4:	48 85 f6             	test   rsi,rsi
+    12d7:	74 0b                	je     12e4 <op_div+0x14>
+    12d9:	48 89 f8             	mov    rax,rdi
+    12dc:	48 99                	cqo
+    12de:	48 f7 fe             	idiv   rsi
+    12e1:	48 89 c6             	mov    rsi,rax
+    12e4:	48 89 f0             	mov    rax,rsi
+    12e7:	c3                   	ret
+    12e8:	0f 1f 84 00 00 00 00 00 	nop    DWORD PTR [rax+rax*1+0x0]
+
+00000000000012f0 <cmp_long>:
+    12f0:	f3 0f 1e fa          	endbr64
+    12f4:	48 8b 06             	mov    rax,QWORD PTR [rsi]
+    12f7:	48 39 07             	cmp    QWORD PTR [rdi],rax
+    12fa:	0f 9f c0             	setg   al
+    12fd:	0f 9c c2             	setl   dl
+    1300:	0f b6 d2             	movzx  edx,dl
+    1303:	0f b6 c0             	movzx  eax,al
+    1306:	29 d0                	sub    eax,edx
+    1308:	c3                   	ret
+    1309:	0f 1f 80 00 00 00 00 	nop    DWORD PTR [rax+0x0]
+
+0000000000001310 <log_event>:
+    1310:	f3 0f 1e fa          	endbr64
+    1314:	89 fa                	mov    edx,edi
+    1316:	48 8d 35 e7 0c 00 00 	lea    rsi,[rip+0xce7]        # 2004 <_IO_stdin_used+0x4>
+    131d:	bf 02 00 00 00       	mov    edi,0x2
+    1322:	31 c0                	xor    eax,eax
+    1324:	e9 87 fd ff ff       	jmp    10b0 <__printf_chk@plt>
+    1329:	0f 1f 80 00 00 00 00 	nop    DWORD PTR [rax+0x0]
+
+0000000000001330 <op_mod>:
+    1330:	f3 0f 1e fa          	endbr64
+    1334:	48 89 f8             	mov    rax,rdi
+    1337:	48 85 f6             	test   rsi,rsi
+    133a:	74 08                	je     1344 <op_mod+0x14>
+    133c:	48 99                	cqo
+    133e:	48 f7 fe             	idiv   rsi
+    1341:	48 89 d6             	mov    rsi,rdx
+    1344:	48 89 f0             	mov    rax,rsi
+    1347:	c3                   	ret
+    1348:	0f 1f 84 00 00 00 00 00 	nop    DWORD PTR [rax+rax*1+0x0]
+
+0000000000001350 <run_op>:
+    1350:	f3 0f 1e fa          	endbr64
+    1354:	89 f8                	mov    eax,edi
+    1356:	48 89 f7             	mov    rdi,rsi
+    1359:	48 89 d6             	mov    rsi,rdx
+    135c:	83 e0 03             	and    eax,0x3
+    135f:	48 8d 15 1a 2a 00 00 	lea    rdx,[rip+0x2a1a]        # 3d80 <ops>
+    1366:	ff 24 c2             	jmp    QWORD PTR [rdx+rax*8]
+    1369:	0f 1f 80 00 00 00 00 	nop    DWORD PTR [rax+0x0]
+
+0000000000001370 <set_callback>:
+    1370:	f3 0f 1e fa          	endbr64
+    1374:	48 89 3d 9d 2c 00 00 	mov    QWORD PTR [rip+0x2c9d],rdi        # 4018 <on_event>
+    137b:	c3                   	ret
+    137c:	0f 1f 40 00          	nop    DWORD PTR [rax+0x0]
+
+0000000000001380 <fire>:
+    1380:	f3 0f 1e fa          	endbr64
+    1384:	48 8b 05 8d 2c 00 00 	mov    rax,QWORD PTR [rip+0x2c8d]        # 4018 <on_event>
+    138b:	48 85 c0             	test   rax,rax
+    138e:	74 08                	je     1398 <fire+0x18>
+    1390:	ff e0                	jmp    rax
+    1392:	66 0f 1f 44 00 00    	nop    WORD PTR [rax+rax*1+0x0]
+    1398:	c3                   	ret
+
+Disassembly of section .fini:
+
+000000000000139c <_fini>:
+    139c:	f3 0f 1e fa          	endbr64
+    13a0:	48 83 ec 08          	sub    rsp,0x8
+    13a4:	48 83 c4 08          	add    rsp,0x8
+    13a8:	c3                   	ret

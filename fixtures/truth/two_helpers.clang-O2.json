@@ -1,0 +1,182 @@
+{
+  "binaries": [
+    {
+      "name": "two_helpers.clang-O2",
+      "sha256": "4393ecaca8b9ef4214cb16dcb4a8c979ba2471633930c2dcf12853102ca00fa4",
+      "variant": "none"
+    },
+    {
+      "name": "two_helpers.clang-O2.stripped",
+      "sha256": "66576215588c21c655b71bd80cf193187676470dd293aadcf5a0213c8984bf6c",
+      "variant": "stripped"
+    }
+  ],
+  "build": {
+    "cflags": ["-O2"],
+    "compiler": "clang 18.1.3",
+    "id": "clang-O2",
+    "ldflags": []
+  },
+  "call_edges": [
+    ["__do_global_dtors_aux","__cxa_finalize"],
+    ["__do_global_dtors_aux","deregister_tm_clones"],
+    ["_start","__libc_start_main"],
+    ["frame_dummy","register_tm_clones"],
+    ["left_value","helper"],
+    ["main","left_value"],
+    ["main","printf"],
+    ["main","right_value"],
+    ["right_value","helper"]
+  ],
+  "cold_parts": [],
+  "duplicate_names": {
+    "helper": ["0x1150","0x11a0"]
+  },
+  "elf": {
+    "entry": "0x1050",
+    "image_base": "0x0",
+    "interp": true,
+    "type": "DYN"
+  },
+  "facts": {
+    "claims": [
+      {
+        "args": ["main","left_value"],
+        "rel": "calls"
+      },
+      {
+        "args": ["main","right_value"],
+        "rel": "calls"
+      }
+    ]
+  },
+  "fixture": "two_helpers.clang-O2",
+  "function_count": 12,
+  "functions": [
+    {
+      "addr": "0x1000",
+      "insns": 8,
+      "name": "_init",
+      "size": 0
+    },
+    {
+      "addr": "0x1050",
+      "insns": 13,
+      "name": "_start",
+      "size": 38
+    },
+    {
+      "addr": "0x1080",
+      "insns": 11,
+      "name": "deregister_tm_clones",
+      "size": 0
+    },
+    {
+      "addr": "0x10b0",
+      "insns": 16,
+      "name": "register_tm_clones",
+      "size": 0
+    },
+    {
+      "addr": "0x10f0",
+      "insns": 16,
+      "name": "__do_global_dtors_aux",
+      "size": 0
+    },
+    {
+      "addr": "0x1130",
+      "insns": 3,
+      "name": "frame_dummy",
+      "size": 0
+    },
+    {
+      "addr": "0x1140",
+      "insns": 5,
+      "name": "left_value",
+      "size": 10
+    },
+    {
+      "addr": "0x1150",
+      "insns": 3,
+      "name": "helper",
+      "size": 6
+    },
+    {
+      "addr": "0x1160",
+      "insns": 18,
+      "name": "main",
+      "size": 46
+    },
+    {
+      "addr": "0x1190",
+      "insns": 5,
+      "name": "right_value",
+      "size": 10
+    },
+    {
+      "addr": "0x11a0",
+      "insns": 4,
+      "name": "helper",
+      "size": 13
+    },
+    {
+      "addr": "0x11b0",
+      "insns": 4,
+      "name": "_fini",
+      "size": 0
+    }
+  ],
+  "gaps": [],
+  "generator": {
+    "name": "xtask-fixtures",
+    "version": "1"
+  },
+  "imports": ["__cxa_finalize","__libc_start_main","printf"],
+  "jump_tables": [],
+  "leaf_functions": [],
+  "libraries": ["libc.so.6"],
+  "network_imports": [],
+  "program": "two_helpers",
+  "protections": {
+    "build_id": "1503170b9ea55824be563e4c2a5935b91a0f3c54",
+    "canary": false,
+    "fortify": false,
+    "ibt": false,
+    "nx": true,
+    "pie": true,
+    "relro": "partial",
+    "rpath": false,
+    "runpath": false,
+    "shstk": false
+  },
+  "self_calls": [],
+  "strings": [],
+  "survey_facts": [
+    {
+      "kind": "function",
+      "value": "helper"
+    },
+    {
+      "kind": "function",
+      "value": "left_value"
+    },
+    {
+      "kind": "library",
+      "value": "libc.so.6"
+    },
+    {
+      "kind": "protection",
+      "value": "nx"
+    },
+    {
+      "kind": "protection",
+      "value": "pie"
+    }
+  ],
+  "syscall_names": [],
+  "syscalls": [],
+  "tail_calls": [
+    ["frame_dummy","register_tm_clones"]
+  ],
+  "tier": "T1"
+}

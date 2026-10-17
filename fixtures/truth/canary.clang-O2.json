@@ -1,0 +1,174 @@
+{
+  "binaries": [
+    {
+      "name": "canary.clang-O2",
+      "sha256": "bf935b8c96d58aeb2a3ed07cdb47a9ad6688ef11dd2a75866d47215f016f9899",
+      "variant": "none"
+    },
+    {
+      "name": "canary.clang-O2.stripped",
+      "sha256": "626cb500f1ea21cb6926fc3057af056377b40284e2af165afc7b01d432448962",
+      "variant": "stripped"
+    }
+  ],
+  "build": {
+    "cflags": ["-O2"],
+    "compiler": "clang 18.1.3",
+    "id": "clang-O2",
+    "ldflags": []
+  },
+  "call_edges": [
+    ["__do_global_dtors_aux","__cxa_finalize"],
+    ["__do_global_dtors_aux","deregister_tm_clones"],
+    ["_start","__libc_start_main"],
+    ["checksum_line","snprintf"],
+    ["copy_name","memcpy"],
+    ["copy_name","puts"],
+    ["copy_name","strlen"],
+    ["frame_dummy","register_tm_clones"],
+    ["main","checksum_line"],
+    ["main","copy_name"],
+    ["main","printf"]
+  ],
+  "cold_parts": [],
+  "duplicate_names": {},
+  "elf": {
+    "entry": "0x1090",
+    "image_base": "0x0",
+    "interp": true,
+    "type": "DYN"
+  },
+  "facts": {
+    "claims": [
+      {
+        "args": ["main","copy_name"],
+        "rel": "calls"
+      },
+      {
+        "args": ["main","checksum_line"],
+        "rel": "calls"
+      }
+    ]
+  },
+  "fixture": "canary.clang-O2",
+  "function_count": 10,
+  "functions": [
+    {
+      "addr": "0x1000",
+      "insns": 8,
+      "name": "_init",
+      "size": 0
+    },
+    {
+      "addr": "0x1090",
+      "insns": 13,
+      "name": "_start",
+      "size": 38
+    },
+    {
+      "addr": "0x10c0",
+      "insns": 11,
+      "name": "deregister_tm_clones",
+      "size": 0
+    },
+    {
+      "addr": "0x10f0",
+      "insns": 16,
+      "name": "register_tm_clones",
+      "size": 0
+    },
+    {
+      "addr": "0x1130",
+      "insns": 16,
+      "name": "__do_global_dtors_aux",
+      "size": 0
+    },
+    {
+      "addr": "0x1170",
+      "insns": 3,
+      "name": "frame_dummy",
+      "size": 0
+    },
+    {
+      "addr": "0x1180",
+      "insns": 22,
+      "name": "copy_name",
+      "size": 71
+    },
+    {
+      "addr": "0x11d0",
+      "insns": 25,
+      "name": "checksum_line",
+      "size": 71
+    },
+    {
+      "addr": "0x1220",
+      "insns": 17,
+      "name": "main",
+      "size": 55
+    },
+    {
+      "addr": "0x1258",
+      "insns": 4,
+      "name": "_fini",
+      "size": 0
+    }
+  ],
+  "gaps": [],
+  "generator": {
+    "name": "xtask-fixtures",
+    "version": "1"
+  },
+  "imports": ["__cxa_finalize","__libc_start_main","memcpy","printf","puts","snprintf","strlen"],
+  "jump_tables": [],
+  "leaf_functions": [],
+  "libraries": ["libc.so.6"],
+  "network_imports": [],
+  "program": "canary",
+  "protections": {
+    "build_id": "aeca35e4811ca28f5496b6767d155c7f425c9bc3",
+    "canary": false,
+    "fortify": false,
+    "ibt": false,
+    "nx": true,
+    "pie": true,
+    "relro": "partial",
+    "rpath": false,
+    "runpath": false,
+    "shstk": false
+  },
+  "self_calls": [],
+  "strings": [
+    {
+      "addr": "0x2004",
+      "encoding": "bytes",
+      "hex": "6c696e653a2573",
+      "len": 7,
+      "text": "line:%s"
+    }
+  ],
+  "survey_facts": [
+    {
+      "kind": "import",
+      "value": "puts"
+    },
+    {
+      "kind": "library",
+      "value": "libc.so.6"
+    },
+    {
+      "kind": "protection",
+      "value": "nx"
+    },
+    {
+      "kind": "protection",
+      "value": "pie"
+    }
+  ],
+  "syscall_names": [],
+  "syscalls": [],
+  "tail_calls": [
+    ["frame_dummy","register_tm_clones"]
+  ],
+  "tier": "T1"
+}

@@ -1,0 +1,225 @@
+{
+  "binaries": [
+    {
+      "name": "hello.gcc-O2-noplt",
+      "sha256": "1eb0643e3348b32b9f89bc7e0d27ca6031d2bd6ec37ae4d01a3c80deec3a82b0",
+      "variant": "none"
+    }
+  ],
+  "build": {
+    "cflags": ["-O2","-fno-plt"],
+    "compiler": "gcc 13.3.0",
+    "id": "gcc-O2-noplt",
+    "ldflags": []
+  },
+  "call_edges": [
+    ["__do_global_dtors_aux","__cxa_finalize"],
+    ["__do_global_dtors_aux","deregister_tm_clones"],
+    ["_start","__libc_start_main"],
+    ["finish","puts"],
+    ["frame_dummy","register_tm_clones"],
+    ["greet","__printf_chk"],
+    ["main","run"],
+    ["run","finish"],
+    ["run","greet"]
+  ],
+  "cold_parts": [],
+  "duplicate_names": {},
+  "elf": {
+    "entry": "0x1050",
+    "image_base": "0x0",
+    "interp": true,
+    "type": "DYN"
+  },
+  "facts": {
+    "claims": [
+      {
+        "args": ["main","run"],
+        "rel": "calls"
+      },
+      {
+        "args": ["run","greet"],
+        "rel": "calls"
+      },
+      {
+        "args": ["run","finish"],
+        "rel": "calls"
+      },
+      {
+        "args": ["finish","puts"],
+        "rel": "calls"
+      }
+    ]
+  },
+  "fixture": "hello.gcc-O2-noplt",
+  "function_count": 11,
+  "functions": [
+    {
+      "addr": "0x1000",
+      "insns": 8,
+      "name": "_init",
+      "size": 0
+    },
+    {
+      "addr": "0x1040",
+      "insns": 2,
+      "name": "main",
+      "size": 9
+    },
+    {
+      "addr": "0x1050",
+      "insns": 13,
+      "name": "_start",
+      "size": 38
+    },
+    {
+      "addr": "0x1080",
+      "insns": 11,
+      "name": "deregister_tm_clones",
+      "size": 0
+    },
+    {
+      "addr": "0x10b0",
+      "insns": 16,
+      "name": "register_tm_clones",
+      "size": 0
+    },
+    {
+      "addr": "0x10f0",
+      "insns": 16,
+      "name": "__do_global_dtors_aux",
+      "size": 0
+    },
+    {
+      "addr": "0x1130",
+      "insns": 3,
+      "name": "frame_dummy",
+      "size": 0
+    },
+    {
+      "addr": "0x1140",
+      "insns": 6,
+      "name": "greet",
+      "size": 27
+    },
+    {
+      "addr": "0x1160",
+      "insns": 8,
+      "name": "finish",
+      "size": 24
+    },
+    {
+      "addr": "0x1180",
+      "insns": 11,
+      "name": "run",
+      "size": 39
+    },
+    {
+      "addr": "0x11a8",
+      "insns": 4,
+      "name": "_fini",
+      "size": 0
+    }
+  ],
+  "gaps": [],
+  "generator": {
+    "name": "xtask-fixtures",
+    "version": "1"
+  },
+  "imports": ["__cxa_finalize","__libc_start_main","__printf_chk","puts"],
+  "jump_tables": [],
+  "leaf_functions": [],
+  "libraries": ["libc.so.6"],
+  "network_imports": [],
+  "program": "hello",
+  "protections": {
+    "build_id": "05652c611ab408631c5cd6c26b16f75634317a14",
+    "canary": false,
+    "fortify": true,
+    "ibt": true,
+    "nx": true,
+    "pie": true,
+    "relro": "full",
+    "rpath": false,
+    "runpath": false,
+    "shstk": true
+  },
+  "self_calls": [],
+  "strings": [
+    {
+      "addr": "0x2004",
+      "encoding": "bytes",
+      "hex": "48656c6c6f2c202573210a",
+      "len": 11,
+      "text": "Hello, %s!\n"
+    },
+    {
+      "addr": "0x2010",
+      "encoding": "bytes",
+      "hex": "476f6f646279652e",
+      "len": 8,
+      "text": "Goodbye."
+    },
+    {
+      "addr": "0x2019",
+      "encoding": "bytes",
+      "hex": "667269656e64",
+      "len": 6,
+      "text": "friend"
+    },
+    {
+      "addr": "0x2020",
+      "encoding": "bytes",
+      "hex": "776f726c64",
+      "len": 5,
+      "text": "world"
+    }
+  ],
+  "survey_facts": [
+    {
+      "kind": "function",
+      "value": "main"
+    },
+    {
+      "kind": "import",
+      "value": "puts"
+    },
+    {
+      "kind": "library",
+      "value": "libc.so.6"
+    },
+    {
+      "kind": "protection",
+      "value": "fortify"
+    },
+    {
+      "kind": "protection",
+      "value": "ibt"
+    },
+    {
+      "kind": "protection",
+      "value": "nx"
+    },
+    {
+      "kind": "protection",
+      "value": "pie"
+    },
+    {
+      "kind": "protection",
+      "value": "shstk"
+    },
+    {
+      "kind": "string",
+      "value": "Goodbye."
+    }
+  ],
+  "syscall_names": [],
+  "syscalls": [],
+  "tail_calls": [
+    ["frame_dummy","register_tm_clones"],
+    ["greet","__printf_chk"],
+    ["main","run"],
+    ["run","finish"]
+  ],
+  "tier": "T1"
+}
