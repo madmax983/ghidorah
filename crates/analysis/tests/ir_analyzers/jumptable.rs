@@ -4,8 +4,9 @@ use std::collections::BTreeMap;
 
 use ghidorah_analysis::fir::Image;
 use ghidorah_analysis::jumptable::{self, Failure};
-use ghidorah_base::Fuel;
-use ghidorah_db::Program;
+use ghidorah_analysis::{EdgeKind, cfg};
+use ghidorah_base::{Address, Fuel, JumpTableId, TxId};
+use ghidorah_db::{Edit, JtMethod, JumpTable, Origin, Program, SessionLabel, Source};
 use ghidorah_loader::Perms;
 
 use crate::blob::{BASE, Rom, load, pad};
@@ -153,4 +154,37 @@ fn method_a_failures() {
     ] {
         assert!(f.to_string().ends_with('.'));
     }
+}
+
+#[test]
+fn regress_unresolved_table_edge() {
+    // mov rax, [rdi]; jmp rax with an unresolved record: the CFG keeps the unresolved edge.
+    let mut p = load(&[0x48, 0x8b, 0x07, 0xff, 0xe0], 0);
+    let _ = crate::support::analyze(&mut p);
+    let site = Address::ram(BASE + 3);
+    let label = SessionLabel::new("test").expect("a label");
+    let next = p.last_tx().0.checked_add(1).expect("a free ID");
+    let o = Origin::new(Source::Agent, TxId(next), label.clone(), false);
+    let mut tx = p.begin("test", Source::Agent, label).expect("a Tx");
+    let edit = Edit::SetJumpTable {
+        id: JumpTableId(site),
+        table: Some(o.fact(JumpTable {
+            base: None,
+            entry_size: 0,
+            count: 0,
+            targets: Vec::new(),
+            method: JtMethod::Agent,
+            resolved: false,
+        })),
+    };
+    assert!(tx.apply(edit).is_ok(), "the record applies");
+    assert!(tx.commit().is_ok(), "the record commits");
+    let g = cfg::build(&p, crate::support::fid(BASE)).expect("a CFG");
+    assert!(
+        g.edges
+            .iter()
+            .any(|e| e.from == BASE && e.to.is_none() && e.kind == EdgeKind::IndirectUnresolved),
+        "{:?}",
+        g.edges
+    );
 }

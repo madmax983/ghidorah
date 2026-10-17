@@ -12,7 +12,7 @@
 //! | `jmp` | `branch` in the body, else `tailcall` |
 //! | `jcc` | `cond_true` to the target, `cond_false` to the next instruction |
 //! | `call` | `call_return`, except after a noreturn callee (AC-080a) |
-//! | indirect `jmp` | `switch_case(i)` for a jump table, `tailcall` through an import slot, else `indirect_unresolved` |
+//! | indirect `jmp` | `switch_case(i)` for a resolved jump table, `tailcall` through an import slot, else `indirect_unresolved` |
 //! | `ret`, trap | none |
 //!
 //! A `fallthrough` or `cond_false` edge out of the body is a `tailcall` edge.
@@ -204,7 +204,10 @@ impl Edges<'_> {
     /// Adds the edges of an indirect jump at `at` in the block `from`.
     fn indirect(&mut self, from: u64, at: u64) {
         let program = self.program;
-        if let Some(table) = program.jump_table(JumpTableId(Address::ram(at))) {
+        let table = program
+            .jump_table(JumpTableId(Address::ram(at)))
+            .filter(|t| t.value.resolved);
+        if let Some(table) = table {
             for (i, t) in table.value.targets.iter().enumerate() {
                 let case = EdgeKind::SwitchCase(u16::try_from(i).unwrap_or(u16::MAX));
                 if t.is_ram() {
@@ -285,7 +288,9 @@ fn leaders(program: &Program, entry: u64, units: &BTreeMap<u64, Unit>) -> BTreeS
             out.insert(t);
         }
         if *flow == FlowKind::IJmp
-            && let Some(table) = program.jump_table(JumpTableId(Address::ram(*at)))
+            && let Some(table) = program
+                .jump_table(JumpTableId(Address::ram(*at)))
+                .filter(|t| t.value.resolved)
         {
             out.extend(
                 table
