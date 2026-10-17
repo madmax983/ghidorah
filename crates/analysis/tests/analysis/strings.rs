@@ -8,9 +8,7 @@ use ghidorah_db::{Encoding, FactKey, Program, StrInfo};
 use ghidorah_json::Value;
 use ghidorah_testkit::elf::{ElfBuilder, FixupKind, Layout, Loc, Section};
 
-use crate::support::{
-    all_t1_full, analyze_full, built, full_list, json_at, program, t1_full, truth_paths,
-};
+use crate::support::{all_t1, analyze, built, json_at, program, t1, truth_paths};
 
 /// Gives the bytes of a hex text.
 fn unhex(text: &str) -> Vec<u8> {
@@ -38,7 +36,7 @@ fn escaped(encoding: &str, bytes: &[u8]) -> String {
 
 /// Gives the program of the fixture path `path` from the full analysis.
 fn analyzed(path: &str) -> &'static Program {
-    all_t1_full()
+    all_t1()
         .iter()
         .find(|(p, _)| p == path)
         .map(|(_, p)| p)
@@ -102,7 +100,7 @@ fn ac_087_strings() {
 #[test]
 fn referenced_flags_and_rules() {
     for name in ["strings.gcc-O0", "strings.gcc-O2", "strings.clang-O2"] {
-        let p = t1_full(name);
+        let p = t1(name);
         let unused = p
             .analysis()
             .strings()
@@ -154,7 +152,7 @@ fn hostile_strings_have_no_fragments() {
         "hostile_strings.gcc-O2",
         "hostile_strings.clang-O2",
     ] {
-        let p = t1_full(name);
+        let p = t1(name);
         let all: Vec<(u64, StrInfo)> = p
             .analysis()
             .strings()
@@ -203,7 +201,7 @@ fn data_file(ro: &[u8], refs: &[u64]) -> (Program, Layout) {
         .section(text)
         .section(Section::rodata(".rodata", ro));
     let (mut p, layout) = built(&b);
-    let _ = analyze_full(&mut p);
+    let _ = analyze(&mut p);
     (p, layout)
 }
 
@@ -359,7 +357,7 @@ fn strings_slicing_and_idempotence() {
         "fixtures/bin/strings.clang-O2",
     ] {
         let mut whole = program(path);
-        let (mut sched, _) = analyze_full(&mut whole);
+        let (mut sched, _) = analyze(&mut whole);
         assert!(!whole.analysis().strings().is_empty(), "{path}: strings");
         let expect = hash(&whole);
         let again = sched
@@ -371,7 +369,7 @@ fn strings_slicing_and_idempotence() {
         );
         for k in [1, 7] {
             let mut p = program(path);
-            let mut s = Scheduler::with_analyzers(full_list());
+            let mut s = Scheduler::new();
             for _ in 0..1_000_000 {
                 let out = s
                     .run(&mut p, Until::Full, &mut Fuel::new(k))

@@ -15,7 +15,7 @@ use ghidorah_db::{
 use ghidorah_types::Category;
 
 use crate::blobs::{BASE, Blob};
-use crate::support::{analyze_full, fid, full_list, named, program, t1_full};
+use crate::support::{analyze, fid, named, program, t1};
 
 /// The blob of the exact metrics test: `f` calls `g` and branches to one of two returns.
 fn two_funcs() -> Program {
@@ -27,7 +27,7 @@ fn two_funcs() -> Program {
         .at(0x20)
         .ret(); // 0x20: g
     let mut p = blob.load(Some(0));
-    let _ = analyze_full(&mut p);
+    let _ = analyze(&mut p);
     p
 }
 
@@ -63,7 +63,7 @@ fn exact_metrics_of_a_blob() {
 
 #[test]
 fn import_calls_and_string_refs() {
-    let p = t1_full("socket_client.gcc-O0");
+    let p = t1("socket_client.gcc-O0");
     let graph = CallGraph::build(p);
     let connect =
         metrics::func_metrics(p, &graph, fid(named(p, "connect_to"))).expect("a function");
@@ -99,15 +99,15 @@ fn metrics_deterministic() {
     ] {
         let path = format!("fixtures/bin/{name}");
         let mut a = program(&path);
-        let _ = analyze_full(&mut a);
+        let _ = analyze(&mut a);
         let mut b = program(&path);
-        let mut s = Scheduler::with_analyzers(full_list());
+        let mut s = Scheduler::new();
         while s
             .run(&mut b, Until::Full, &mut Fuel::new(7))
             .expect("a slice")
             .resume
         {}
-        let shared = t1_full(name);
+        let shared = t1(name);
         for p in [&a, &b] {
             assert_eq!(metrics::all(p), metrics::all(shared), "{name}: metrics");
             assert_eq!(
@@ -168,7 +168,7 @@ fn touch_names(p: &mut Program, at: u64) {
 #[test]
 fn priority_frozen_per_run() {
     let mut p = program("fixtures/bin/socket_client.gcc-O2.stripped");
-    let (mut sched, _) = analyze_full(&mut p);
+    let (mut sched, _) = analyze(&mut p);
     let first = metrics::priority(&p);
     assert!(first.len() > 5, "the functions have a priority");
     for pair in first.windows(2) {
@@ -210,7 +210,7 @@ fn priority_frozen_per_run() {
 
 #[test]
 fn coverage_counts() {
-    let p = t1_full("hello.gcc-O2");
+    let p = t1("hello.gcc-O2");
     let funcs = u64::try_from(p.funcs().len()).expect("small");
     let c = metrics::coverage(p);
     assert_eq!(
@@ -225,7 +225,7 @@ fn coverage_counts() {
         },
         "an unstripped file names each function"
     );
-    let s = metrics::coverage(t1_full("hello.gcc-O2.stripped"));
+    let s = metrics::coverage(t1("hello.gcc-O2.stripped"));
     assert!(
         s.named < s.functions,
         "a stripped file has default names: {s:?}"
@@ -234,7 +234,7 @@ fn coverage_counts() {
 
 #[test]
 fn worklist_items() {
-    let p = t1_full("crackme.gcc-O2.stripped");
+    let p = t1("crackme.gcc-O2.stripped");
     let list = metrics::worklist(p);
     let gaps: Vec<&WorkItem> = list.iter().filter(|i| i.kind == ItemKind::Gap).collect();
     assert_eq!(gaps.len(), 1);
@@ -245,7 +245,7 @@ fn worklist_items() {
         .jmp_rax() // 0x02: jmp rax
         .at(0x10);
     let mut p = blob.load(Some(0));
-    let _ = analyze_full(&mut p);
+    let _ = analyze(&mut p);
     let items: Vec<(ItemKind, u64, Option<FuncId>, Option<Remedy>)> = metrics::worklist(&p)
         .iter()
         .map(|i| (i.kind, i.at.off - BASE, i.func, i.remedy))

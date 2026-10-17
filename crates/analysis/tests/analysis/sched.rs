@@ -349,7 +349,10 @@ fn restart_keeps_the_lower_bands() {
 #[test]
 fn registry_follows_section_7_1() {
     let priorities: Vec<u16> = ANALYZERS.iter().map(|s| s.priority).collect();
-    assert_eq!(priorities, [100, 110, 120, 150, 300, 301, 302, 400, 440]);
+    assert_eq!(
+        priorities,
+        [100, 110, 120, 150, 300, 301, 302, 400, 440, 600, 650]
+    );
     for (i, s) in ANALYZERS.iter().enumerate() {
         assert_eq!(index(s.id), Some(i));
         assert_eq!(by_name(s.name).map(|x| x.id), Some(s.id));

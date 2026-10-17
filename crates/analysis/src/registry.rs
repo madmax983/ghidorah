@@ -48,6 +48,8 @@ pub static ANALYZERS: &[&AnalyzerSpec] = &[
     &noreturn::DISCOVERED,
     &calls::SPEC,
     &endbr::SPEC,
+    &refs::SPEC,
+    &strings::SPEC,
 ];
 
 /// Runs one step of the analyzer `id` over `ranges`.

@@ -12,7 +12,7 @@ use ghidorah_testkit::elf::{
     ElfBuilder, FixupKind, ImportKind, Layout, Loc, Reloc, RelocTable, Section, Symbol,
 };
 
-use crate::support::{all_t1_full, analyze_full, built, program, t1_full};
+use crate::support::{all_t1, analyze, built, program, t1};
 
 /// `R_X86_64_RELATIVE`.
 const RELATIVE: u32 = 8;
@@ -66,7 +66,7 @@ fn operand_file(builder: ElfBuilder) -> (Program, Layout) {
         .section(Section::rodata(".rodata", b"abcdefgh\0"))
         .section(Section::data(".data", &[0; 24]));
     let (mut p, layout) = built(&b);
-    let _ = analyze_full(&mut p);
+    let _ = analyze(&mut p);
     (p, layout)
 }
 
@@ -89,7 +89,7 @@ fn specs_and_rows() {
     }
     assert!(refs::SPEC.listens(Trigger::Instructions));
     assert_eq!(refs::SPEC.option("min_imm"), Some(MIN_IMM));
-    let list = crate::support::full_list();
+    let list = ghidorah_analysis::ANALYZERS.to_vec();
     let names: Vec<&str> = list.iter().map(|s| s.name).collect();
     assert_eq!(names.iter().filter(|n| **n == "References").count(), 1);
     assert_eq!(names.iter().filter(|n| **n == "Strings").count(), 1);
@@ -122,7 +122,7 @@ fn specs_and_rows() {
 #[test]
 fn ac_085a_xref_shape() {
     let mut kinds = BTreeMap::new();
-    for (path, p) in all_t1_full() {
+    for (path, p) in all_t1() {
         let found = p.check_invariants();
         assert!(found.is_empty(), "{path}: {found:?}");
         for layer in [p.base(), p.analysis()] {
@@ -186,7 +186,7 @@ fn operand_ref_kinds() {
 
 #[test]
 fn reloc_slots_of_a_pie() {
-    let p = t1_full("hello.gcc-O2");
+    let p = t1("hello.gcc-O2");
     let slots: BTreeMap<u64, Address> = refs::slots(p)
         .into_iter()
         .map(|(at, s)| (at, s.to))
@@ -236,7 +236,7 @@ fn table_file(builder: ElfBuilder) -> (Program, Layout) {
         .section(data)
         .init_array(Loc::section(".text", 1));
     let (mut p, layout) = built(&b);
-    let _ = analyze_full(&mut p);
+    let _ = analyze(&mut p);
     (p, layout)
 }
 
@@ -308,7 +308,7 @@ fn reloc_slots_never_overlap() {
         text,
         "the addend does not move the layout"
     );
-    let _ = analyze_full(&mut p);
+    let _ = analyze(&mut p);
     let data = sec(&layout, ".data");
     let got = *layout.got.get("puts").expect("the GOT slot of puts");
     let slots: BTreeMap<u64, Address> = refs::slots(&p)
@@ -341,7 +341,7 @@ fn relr_refs_exact() {
         .relr(Loc::section(".data.rel.ro", 0))
         .relr(Loc::section(".data.rel.ro", 8));
     let (mut p, layout) = built(&b);
-    let _ = analyze_full(&mut p);
+    let _ = analyze(&mut p);
     let slot = sec(&layout, ".data.rel.ro");
     let text = sec(&layout, ".text");
     let ro = sec(&layout, ".rodata");
@@ -378,7 +378,7 @@ fn relr_refs_exact() {
 
 #[test]
 fn reloc_targets_match_the_slots() {
-    let p = t1_full("hello.gcc-O2");
+    let p = t1("hello.gcc-O2");
     let slots = refs::slots(p);
     let mut seen = 0;
     for r in &p.binary().relocs {
@@ -404,7 +404,7 @@ fn other_machines_have_no_code_refs() {
         .section(Section::rodata(".rodata", b"survey text\0"))
         .section(data);
     let (mut p, layout) = built(&b);
-    let _ = analyze_full(&mut p);
+    let _ = analyze(&mut p);
     assert!(
         data_refs(&p).is_empty(),
         "no x86-64 code and no x86-64 relocations"
@@ -430,7 +430,7 @@ fn other_machines_have_no_code_refs() {
 #[test]
 fn restart_keeps_the_references() {
     let mut p = program("fixtures/bin/socket_client.gcc-O2");
-    let (mut sched, _) = analyze_full(&mut p);
+    let (mut sched, _) = analyze(&mut p);
     let before = p.state_hash().expect("a hash");
     let rev = p.rev();
     sched.restart(refs::SPEC.priority);

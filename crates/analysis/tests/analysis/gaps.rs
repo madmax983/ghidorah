@@ -6,7 +6,7 @@ use ghidorah_base::Range;
 use ghidorah_json::Value;
 
 use crate::blobs::{BASE, Blob};
-use crate::support::{all_t1_full, analyze_full, json_at, name_of, truth_paths};
+use crate::support::{all_t1, analyze, json_at, name_of, truth_paths};
 
 /// Gives the gap items of a truth file as `(addr, size, first_insn)`.
 fn truth_gaps(truth: &Value) -> Vec<(u64, u64, String)> {
@@ -39,7 +39,7 @@ fn shape(g: &Gap) -> (u64, u64, String) {
 fn gaps_match_truth() {
     let mut seen = 0;
     for (path, truth) in truth_paths() {
-        let p = &all_t1_full()
+        let p = &all_t1()
             .iter()
             .find(|(f, _)| *f == path)
             .expect("the fixture")
@@ -64,7 +64,7 @@ fn gaps_match_truth() {
 
 #[test]
 fn gap_item_shape() {
-    let p = &all_t1_full()
+    let p = &all_t1()
         .iter()
         .find(|(f, _)| name_of(f) == "crackme.gcc-O2.stripped")
         .expect("the fixture")
@@ -91,7 +91,7 @@ fn padding_splits_gaps() {
         .raw(&[0xcc, 0x06]) // 0x12: a byte that does not decode
         .ret(); // 0x13
     let mut p = blob.load(Some(0));
-    let _ = analyze_full(&mut p);
+    let _ = analyze(&mut p);
     let items = gaps::items(&p);
     let got: Vec<(u64, u64, Option<&str>)> = items
         .iter()
@@ -106,6 +106,6 @@ fn padding_splits_gaps() {
     assert_eq!(got, [(0x0b, 6, Some("mov eax, 0x1")), (0x12, 2, None)]);
     let all_padding = Blob::new().ret().raw(&[0xcc; 7]).raw(&[0; 8]);
     let mut p = all_padding.load(Some(0));
-    let _ = analyze_full(&mut p);
+    let _ = analyze(&mut p);
     assert_eq!(gaps::items(&p), [], "padding alone is not a gap");
 }

@@ -31,7 +31,10 @@ fn analysis_run_completes_and_reports() {
     assert!(int(got, "/steps_used") > 0);
     assert!(int(got, "/changed/functions") > 10);
     assert!(int(got, "/changed/refs") > 10);
-    assert_eq!(int(got, "/changed/strings"), 0);
+    assert!(
+        int(got, "/changed/strings") > 0,
+        "Strings (650) finds strings"
+    );
     let rows = got
         .get("analyzers")
         .and_then(Value::as_array)
@@ -51,7 +54,9 @@ fn analysis_run_completes_and_reports() {
             "NoReturnKnown",
             "NoReturnDiscovered",
             "CallTargets",
-            "EndbrSeeds"
+            "EndbrSeeds",
+            "References",
+            "Strings"
         ]
     );
     assert!(rows.iter().all(|r| int(r, "/pending") == 0));

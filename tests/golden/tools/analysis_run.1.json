@@ -11,7 +11,7 @@
   "partial": false,
   "data": {
     "state": "complete",
-    "steps_used": 369,
+    "steps_used": 499,
     "resume": false,
     "analyzers": [
       {
@@ -67,12 +67,24 @@
         "priority": 440,
         "pending": 0,
         "runs": 1
+      },
+      {
+        "name": "References",
+        "priority": 600,
+        "pending": 0,
+        "runs": 1
+      },
+      {
+        "name": "Strings",
+        "priority": 650,
+        "pending": 0,
+        "runs": 1
       }
     ],
     "changed": {
       "functions": 11,
-      "refs": 26,
-      "strings": 0,
+      "refs": 54,
+      "strings": 4,
       "jumptables": 0
     }
   },
