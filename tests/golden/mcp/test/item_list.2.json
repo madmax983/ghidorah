@@ -1,0 +1,33 @@
+{"golden":"generator=cli_examples version=1"}
+{
+  "ok": true,
+  "binary_id": "b1",
+  "rev": 1,
+  "session": "s",
+  "analysis": {
+    "state": "complete",
+    "rev": 1
+  },
+  "partial": false,
+  "data": {
+    "items": [
+      {
+        "id": "fn:0x401000",
+        "addr": "0x401000",
+        "name": "item_0"
+      },
+      {
+        "id": "fn:0x401010",
+        "addr": "0x401010",
+        "name": "item_1"
+      }
+    ]
+  },
+  "page": {
+    "returned": 2,
+    "total": 3,
+    "truncated": true,
+    "next_cursor": "c0:401010",
+    "hint": "Send page.next_cursor as cursor to get the next page."
+  }
+}
