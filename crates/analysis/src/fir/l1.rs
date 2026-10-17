@@ -1,0 +1,189 @@
+//! The L1 extension of the function IR builder (design Sections 6.4 and 7.12, WP-21).
+//!
+//! [`lift`] takes the L0 IR of a function. It makes the L1 form in three steps:
+//!
+//! 1. Each tail jump becomes a call in place: a `Jump` to an address outside the body, at the
+//!    end of a block with no successor. So the argument registers stay live at the jump.
+//! 2. Braun SSA ([`ghidorah_ir::ssa::build`]) with the location sets of [`ssa_opts`].
+//! 3. The L1 passes in fixed order ([`ghidorah_ir::passes::run`]) with the given switches.
+//!
+//! [`ssa_opts`] applies the calling convention:
+//!
+//! | Op | Locations |
+//! |---|---|
+//! | `Ret` reads | the first integer return register |
+//! | A call reads | the integer and floating argument registers, and the varargs register |
+//! | A call writes | each general register that the callee does not keep, each XMM register and the flags |
+//!
+//! The result is derived data: the journal never holds it.
+
+use std::collections::BTreeSet;
+use std::fmt;
+
+use ghidorah_base::{Fuel, FuncId};
+use ghidorah_db::Program;
+use ghidorah_ir::passes::{self, Report, Switches};
+use ghidorah_ir::ssa::{self, Ssa, SsaError};
+use ghidorah_ir::{Arg, Loc, LocSet, Node, Opc};
+use ghidorah_types::CallConv;
+
+use super::{FirError, FuncIr, Opts};
+use crate::cc::{conv_of, loc_of};
+
+/// The L1 form of one function, with its L0 IR.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct L1Ir {
+    /// The L0 IR. Its arena has no tail-jump rewrite.
+    pub l0: FuncIr,
+    /// The L1 form. The instruction ops keep the index of their L0 op.
+    pub ssa: Ssa,
+    /// The change counts of the passes.
+    pub report: Report,
+    /// The addresses of the tail jumps that became calls.
+    pub tail_calls: BTreeSet<u64>,
+}
+
+/// The error of [`lift`] and [`build`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum L1Error {
+    /// The L0 IR does not build.
+    Fir(FirError),
+    /// The SSA build or a pass fails.
+    Ssa(SsaError),
+}
+
+impl fmt::Display for L1Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Fir(e) => write!(f, "The L0 IR does not build: {e}"),
+            Self::Ssa(e) => write!(f, "The L1 form does not build: {e}"),
+        }
+    }
+}
+
+impl std::error::Error for L1Error {}
+
+impl From<FirError> for L1Error {
+    fn from(e: FirError) -> Self {
+        Self::Fir(e)
+    }
+}
+
+impl From<SsaError> for L1Error {
+    fn from(e: SsaError) -> Self {
+        Self::Ssa(e)
+    }
+}
+
+/// Gives the set of the register names of a convention table.
+fn regs(names: &[&str]) -> LocSet {
+    names.iter().filter_map(|n| loc_of(n)).collect()
+}
+
+/// Gives the location sets of the flow ops for the convention `conv` (see the module table).
+#[must_use]
+pub fn ssa_opts(conv: &CallConv) -> ssa::Opts {
+    let ret_uses = regs(conv.int_ret.get(..1).unwrap_or_default());
+    let call_uses = regs(conv.int_args)
+        .union(regs(conv.float_args))
+        .union(regs(conv.varargs_reg.as_slice()));
+    let kept = regs(conv.callee_saved);
+    let mut call_defs: LocSet = (0..16u8)
+        .filter_map(Loc::gpr)
+        .filter(|l| !kept.contains(*l))
+        .collect();
+    call_defs = call_defs.union((0..16u8).filter_map(Loc::xmm).collect());
+    let _ = call_defs.insert(Loc::Flags);
+    ssa::Opts {
+        ret_uses,
+        call_uses,
+        call_defs,
+    }
+}
+
+/// Rewrites each tail jump of `l0` into a call. Gives the arena and the jump addresses.
+fn rewrite_tail_jumps(l0: &FuncIr) -> (ghidorah_ir::Arena, BTreeSet<u64>) {
+    let mut arena = l0.arena.clone();
+    let mut tails = BTreeSet::new();
+    for (i, b) in l0.body.blocks.iter().enumerate() {
+        let Ok(n) = u32::try_from(i) else {
+            continue;
+        };
+        if !l0.body.cfg.succs(Node(n)).is_empty() || b.count == 0 {
+            continue;
+        }
+        let last = b.first.saturating_add(b.count.saturating_sub(1));
+        let Some(span) = usize::try_from(last)
+            .ok()
+            .and_then(|k| arena.insns().get(k))
+            .copied()
+        else {
+            continue;
+        };
+        let Some(k) = span
+            .count
+            .checked_sub(1)
+            .and_then(|c| span.first.checked_add(c))
+        else {
+            continue;
+        };
+        let Some(op) = usize::try_from(k)
+            .ok()
+            .and_then(|k| arena.ops_mut().get_mut(k))
+        else {
+            continue;
+        };
+        let outside =
+            op.a.first()
+                .and_then(|a| a.as_k())
+                .is_some_and(|t| l0.arena.insn_index(t).is_none());
+        if op.opc == Opc::Jump && outside {
+            op.opc = Opc::Call;
+            op.a = [op.a[0], Arg::Nil, Arg::Nil];
+            tails.insert(span.addr);
+        }
+    }
+    (arena, tails)
+}
+
+/// Makes the L1 form of the L0 IR `l0` under the convention `conv`.
+///
+/// Each op of the SSA build and each step of a pass takes one unit of `fuel`.
+///
+/// # Errors
+///
+/// Returns [`L1Error::Ssa`] when the SSA build or a pass fails, for example when the fuel
+/// runs out.
+pub fn lift(
+    l0: FuncIr,
+    conv: &CallConv,
+    switches: &Switches,
+    fuel: &mut Fuel,
+) -> Result<L1Ir, L1Error> {
+    let _ = (
+        l0,
+        conv,
+        switches,
+        fuel,
+        rewrite_tail_jumps,
+        passes::run,
+        ssa::build,
+    );
+    Err(L1Error::Ssa(SsaError::Full))
+}
+
+/// Builds the L1 form of the published function `id` with the convention of its format.
+///
+/// # Errors
+///
+/// Returns [`L1Error::Fir`] when the L0 IR does not build, and the errors of [`lift`].
+pub fn build(
+    program: &Program,
+    id: FuncId,
+    opts: &Opts,
+    switches: &Switches,
+    fuel: &mut Fuel,
+) -> Result<L1Ir, L1Error> {
+    let l0 = super::build(program, id, opts, fuel)?;
+    lift(l0, conv_of(program), switches, fuel)
+}

@@ -22,6 +22,8 @@
 //! `Neg`, `Inc` or `Dec` in the same block, or up a chain of blocks with one predecessor,
 //! becomes one compare op in place (design Section 6.2). A call or an effect op that writes
 //! the flags ends the chain. [`Fusion`] counts the flag reads and the fused reads (AC-070).
+//!
+//! The submodule [`l1`] makes the L1 form: SSA, the L1 passes and the calling convention.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -34,6 +36,7 @@ use ghidorah_ir::{Arena, Builder, Cfg, GraphError, InsnSpan, Memory, Node, OpId,
 use ghidorah_loader::Perms;
 
 mod fusion;
+pub mod l1;
 
 use self::fusion::{count_reads, fuse_flags};
 use crate::code::decode_at;

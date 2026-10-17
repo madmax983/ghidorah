@@ -48,6 +48,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "ghidorah-decomp"
+version = "0.1.0"
+dependencies = [
+ "ghidorah-analysis",
+ "ghidorah-base",
+ "ghidorah-db",
+ "ghidorah-ir",
+ "ghidorah-json",
+ "ghidorah-loader",
+ "ghidorah-testkit",
+ "ghidorah-types",
+]
+
+[[package]]
 name = "ghidorah-ir"
 version = "0.1.0"
 dependencies = [
