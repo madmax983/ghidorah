@@ -16,7 +16,7 @@
 //! | [`ssa`] | [`Ssa`], [`Body`] and [`ssa::build`]: L1 Braun SSA | Section 6.4 |
 //! | [`passes`] | [`Pass`], [`Switches`] and [`passes::run`]: the L1 passes | Section 6.4 |
 //! | [`check`](mod@check) | [`check()`]: the SSA checker | Section 6.4 |
-//! | [`print`] | The IR text and JSON printers | Sections 6.1, 10.4 |
+//! | [`print`](mod@print) | The IR text and JSON printers | Sections 6.1, 10.4 |
 
 pub mod arena;
 pub mod check;
