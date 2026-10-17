@@ -7,6 +7,8 @@
 //!
 //! The interpreter does not run callees: a call stops the run. A location that the run did
 //! not write reads as 0. Memory is little-endian.
+//!
+//! [`Interp::run`] runs L0. [`Interp::run_l1`] runs L1 (the `l1` module).
 
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -19,6 +21,7 @@ use crate::loc::Loc;
 use crate::op::{Arg, Op, OpId, Opc, Val};
 
 mod eval;
+mod l1;
 
 use eval::{low64, mask};
 
