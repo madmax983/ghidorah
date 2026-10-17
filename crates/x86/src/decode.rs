@@ -124,10 +124,10 @@ fn lookup(lay: &Layout) -> Result<(Entry, bool), DecodeError> {
     Ok((row, col_used))
 }
 
-/// Gives the access of operand `i` of a row.
-fn access(row: &Entry, i: usize, kind: K) -> Access {
+/// Gives the access of operand `i` of a row. `rm_mem` tells if `ModRM` selects memory.
+fn access(row: &Entry, i: usize, kind: K, rm_mem: bool) -> Access {
     let mem_kind = matches!(kind, K::E | K::M | K::W | K::Q);
-    if row.flags & ADDR != 0 && mem_kind {
+    if row.flags & ADDR != 0 && mem_kind && rm_mem {
         return Access::Address;
     }
     match (row.flags & ACCESS, i) {
@@ -183,7 +183,7 @@ fn fill(ctx: &Ctx<'_>, row: &Entry, insn: &mut Insn) -> Result<Usage, DecodeErro
         if spec.k == K::None {
             break;
         }
-        let slot = ctx.operand(*spec, access(row, i, spec.k), insn)?;
+        let slot = ctx.operand(*spec, access(row, i, spec.k, rm_mem), insn)?;
         u.osz |= match spec.k {
             K::J => ctx.first_imm == 2,
             _ if row.flags & F64 != 0 => false,

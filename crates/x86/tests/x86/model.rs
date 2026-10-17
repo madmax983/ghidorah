@@ -379,3 +379,17 @@ fn encoding_and_map_names() {
     }
     assert_eq!(insn("90").encoding(), Encoding::Legacy);
 }
+
+#[test]
+fn regress_nop_register_access() {
+    // A hint `nop` with a register operand reads the register. Only a memory operand
+    // has an address-only access.
+    match insn("0f 1f c0").op(0) {
+        Some(Operand::Reg { access, .. }) => assert_eq!(access, Access::Read),
+        other => panic!("{other:?}"),
+    }
+    match insn("0f 1f 00").op(0) {
+        Some(Operand::Mem(m)) => assert_eq!(m.access, Access::Address),
+        other => panic!("{other:?}"),
+    }
+}
