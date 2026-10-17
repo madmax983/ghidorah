@@ -176,14 +176,26 @@ impl Ssa {
     }
 
     /// Removes an op: it becomes a `Nop` with no value, and an added op leaves its anchor.
+    ///
+    /// A removed `Get` after a flow op also leaves the location defs of that flow op.
     pub(crate) fn remove_op(&mut self, index: u32) {
+        let out = self.arena.op(index).and_then(|op| op.out);
         self.set_op(index, Opc::Nop, 0, 0, [Arg::Nil; 3]);
-        if let Some(anchor) = self.places.remove(&index)
-            && let Some(list) = self.anchors.get_mut(&anchor)
-        {
+        let Some(anchor) = self.places.remove(&index) else {
+            return;
+        };
+        if let Some(list) = self.anchors.get_mut(&anchor) {
             list.retain(|&i| i != index);
             if list.is_empty() {
                 self.anchors.remove(&anchor);
+            }
+        }
+        if let (Anchor::After(owner), Some(v)) = (anchor, out)
+            && let Some(defs) = self.defs.get_mut(&owner)
+        {
+            defs.retain(|&(_, d)| d != v);
+            if defs.is_empty() {
+                self.defs.remove(&owner);
             }
         }
     }

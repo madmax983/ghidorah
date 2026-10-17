@@ -192,6 +192,32 @@ fn dce_keeps_calls() {
 }
 
 #[test]
+fn regress_dce_drops_dead_flow_defs() {
+    // The call writes rax and rcx. Only rax has a reader, so the def of rcx goes.
+    let arena = program(|b| {
+        b.begin(0x3800, 5)?;
+        b.flow(Opc::Call, Arg::k(0x9000), NIL)?;
+        b.begin(0x3805, 1)?;
+        let r = b.get(Loc::RAX)?;
+        b.put(Loc::RBX, r.into())?;
+        b.flow(Opc::Ret, NIL, NIL)
+    });
+    let opts = Opts {
+        ret_uses: std::iter::once(Loc::RBX).collect(),
+        call_defs: [Loc::RAX, Loc::RCX].into_iter().collect(),
+        ..Opts::default()
+    };
+    let mut ssa = build(&arena, body(&arena, &[0x3800]), &opts);
+    assert_eq!(ssa.defs_at(0).len(), 2);
+    run_all(&mut ssa, Switches::all());
+    assert_clean(&ssa, "dead flow def");
+    let defs = ssa.defs_at(0).to_vec();
+    assert_eq!(defs.iter().map(|d| d.0).collect::<Vec<_>>(), [Loc::RAX]);
+    assert!(defs.iter().all(|&(_, v)| ssa.live_def(v).is_some()));
+    assert_eq!(ssa.anchored(Anchor::After(0)).len(), 1);
+}
+
+#[test]
 fn pass_switch_off_equals_skip() {
     let mut rng = Xoshiro256ss::seed_from_u64(0x5717);
     let opts = pool_opts();

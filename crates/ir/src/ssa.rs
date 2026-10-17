@@ -342,6 +342,8 @@ impl Ssa {
     }
 
     /// Gives the location defs of a flow op: each location and its new value.
+    ///
+    /// `dce` removes a def that no op reads, so each value of the list has its def op.
     #[must_use]
     pub fn defs_at(&self, index: u32) -> &[(Loc, Val)] {
         self.defs.get(&index).map(Vec::as_slice).unwrap_or_default()
