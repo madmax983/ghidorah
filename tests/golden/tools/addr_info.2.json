@@ -1,0 +1,159 @@
+{"golden":"generator=tools_examples version=1 fixture=crackme.gcc-O2 fixture_sha256=467a43b75d95c826daba8cb216d01d7fd386aa96c5ef5a95c2effffe1780de8f"}
+{
+  "ok": true,
+  "binary_id": "467a43b75d95c826",
+  "rev": 1,
+  "session": "cli",
+  "analysis": {
+    "state": "complete",
+    "rev": 1
+  },
+  "partial": false,
+  "data": {
+    "items": [
+      {
+        "input": "0x1091",
+        "ok": true,
+        "data": {
+          "input": "0x1091",
+          "addr": "0x1091",
+          "resolved_from": {
+            "rule": "hex",
+            "matched": "0x1091"
+          },
+          "region": {
+            "name": "seg:3",
+            "perms": "r-x"
+          },
+          "section": {
+            "id": "sec:16:.text",
+            "name": ".text"
+          },
+          "func": {
+            "id": "fn:0x1080",
+            "name": "main",
+            "offset": "0x11"
+          },
+          "code_unit": {
+            "kind": "insn",
+            "len": 5,
+            "mnem": "call",
+            "text": "call check_password"
+          },
+          "xrefs_in": 0,
+          "xrefs_out": 1,
+          "notes": 0,
+          "comments": [],
+          "refs": {
+            "in": [],
+            "out": [
+              {
+                "to": "0x11e0",
+                "kind": "unconditional_call"
+              }
+            ]
+          },
+          "file_offset": "0x1091"
+        }
+      },
+      {
+        "input": "imp:puts",
+        "ok": true,
+        "data": {
+          "input": "imp:puts",
+          "addr": "0x1060",
+          "resolved_from": {
+            "rule": "id",
+            "matched": "imp:puts"
+          },
+          "region": {
+            "name": "seg:3",
+            "perms": "r-x"
+          },
+          "section": {
+            "id": "sec:15:.plt.sec",
+            "name": ".plt.sec"
+          },
+          "func": {
+            "id": "fn:0x1060",
+            "name": "puts@plt",
+            "offset": "0x0"
+          },
+          "symbol": {
+            "name": "puts@plt",
+            "source": "imported",
+            "kind": "function"
+          },
+          "code_unit": {
+            "kind": "insn",
+            "len": 4,
+            "mnem": "endbr64",
+            "text": "endbr64"
+          },
+          "xrefs_in": 3,
+          "xrefs_out": 0,
+          "notes": 0,
+          "comments": [],
+          "refs": {
+            "in": [
+              {
+                "from": "0x10a1",
+                "kind": "unconditional_call"
+              },
+              {
+                "from": "0x10b7",
+                "kind": "unconditional_call"
+              },
+              {
+                "from": "0x10c7",
+                "kind": "unconditional_call"
+              }
+            ],
+            "out": []
+          },
+          "file_offset": "0x1060"
+        }
+      },
+      {
+        "input": "0x2004",
+        "ok": true,
+        "data": {
+          "input": "0x2004",
+          "addr": "0x2004",
+          "resolved_from": {
+            "rule": "hex",
+            "matched": "0x2004"
+          },
+          "region": {
+            "name": "seg:4",
+            "perms": "r--"
+          },
+          "section": {
+            "id": "sec:18:.rodata",
+            "name": ".rodata"
+          },
+          "code_unit": {
+            "kind": "undefined",
+            "len": 1
+          },
+          "xrefs_in": 1,
+          "xrefs_out": 0,
+          "notes": 0,
+          "comments": [],
+          "refs": {
+            "in": [
+              {
+                "from": "0x10c0",
+                "kind": "data"
+              }
+            ],
+            "out": []
+          },
+          "file_offset": "0x2004"
+        }
+      }
+    ],
+    "ok_count": 3,
+    "error_count": 0
+  }
+}

@@ -1,0 +1,75 @@
+{"golden":"generator=tools_examples version=1 fixture=crackme.gcc-O2 fixture_sha256=467a43b75d95c826daba8cb216d01d7fd386aa96c5ef5a95c2effffe1780de8f"}
+{
+  "ok": true,
+  "binary_id": "467a43b75d95c826",
+  "rev": 1,
+  "session": "cli",
+  "analysis": {
+    "state": "complete",
+    "rev": 1
+  },
+  "partial": false,
+  "data": {
+    "items": [
+      {
+        "kind": "string",
+        "id": "str:0x201e",
+        "addr": "0x201e",
+        "text": {
+          "text": "Access granted",
+          "hex": "416363657373206772616e746564",
+          "len": 14,
+          "src": "binary"
+        },
+        "func": "fn:0x1080",
+        "extra": {
+          "ref_count": 1,
+          "funcs": [
+            "fn:0x1080"
+          ]
+        },
+        "next": {
+          "tool": "xref_list",
+          "args": {
+            "targets": [
+              "str:0x201e"
+            ]
+          },
+          "why": "List the references to the string."
+        }
+      },
+      {
+        "kind": "string",
+        "id": "str:0x202d",
+        "addr": "0x202d",
+        "text": {
+          "text": "Access denied",
+          "hex": "4163636573732064656e696564",
+          "len": 13,
+          "src": "binary"
+        },
+        "func": "fn:0x1080",
+        "extra": {
+          "ref_count": 1,
+          "funcs": [
+            "fn:0x1080"
+          ]
+        },
+        "next": {
+          "tool": "xref_list",
+          "args": {
+            "targets": [
+              "str:0x202d"
+            ]
+          },
+          "why": "List the references to the string."
+        }
+      }
+    ]
+  },
+  "page": {
+    "returned": 2,
+    "total": 2,
+    "truncated": false
+  }
+}

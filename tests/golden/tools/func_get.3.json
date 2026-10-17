@@ -1,0 +1,153 @@
+{"golden":"generator=tools_examples version=1 fixture=crackme.gcc-O2 fixture_sha256=467a43b75d95c826daba8cb216d01d7fd386aa96c5ef5a95c2effffe1780de8f"}
+{
+  "ok": true,
+  "binary_id": "467a43b75d95c826",
+  "rev": 1,
+  "session": "cli",
+  "analysis": {
+    "state": "complete",
+    "rev": 1
+  },
+  "partial": false,
+  "data": {
+    "items": [
+      {
+        "input": "main",
+        "ok": true,
+        "data": {
+          "id": "fn:0x1080",
+          "name": "main",
+          "entry": "0x1080",
+          "size": 83,
+          "parts": [
+            {
+              "start": "0x1080",
+              "size": "0x53",
+              "kind": "main"
+            }
+          ],
+          "signature": null,
+          "start_reason": "symbol",
+          "confidence": 100,
+          "flags": [],
+          "caveats": [],
+          "summary": {
+            "blocks": 10,
+            "insns": 21,
+            "edges": 11,
+            "cyclomatic": 3,
+            "callers": 0,
+            "callees": 2,
+            "string_refs": 3,
+            "import_calls": [
+              {
+                "category": "io",
+                "count": 3
+              }
+            ]
+          },
+          "strings": [
+            {
+              "id": "str:0x2004",
+              "addr": "0x2004",
+              "text": {
+                "text": "usage: crackme <password>",
+                "hex": "75736167653a20637261636b6d65203c70617373776f72643e",
+                "len": 25,
+                "src": "binary"
+              },
+              "at": [
+                "0x10c0"
+              ]
+            },
+            {
+              "id": "str:0x201e",
+              "addr": "0x201e",
+              "text": {
+                "text": "Access granted",
+                "hex": "416363657373206772616e746564",
+                "len": 14,
+                "src": "binary"
+              },
+              "at": [
+                "0x10b0"
+              ]
+            },
+            {
+              "id": "str:0x202d",
+              "addr": "0x202d",
+              "text": {
+                "text": "Access denied",
+                "hex": "4163636573732064656e696564",
+                "len": 13,
+                "src": "binary"
+              },
+              "at": [
+                "0x109a"
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "input": "0x11e0",
+        "ok": true,
+        "data": {
+          "id": "fn:0x11e0",
+          "name": "check_password",
+          "entry": "0x11e0",
+          "size": 73,
+          "parts": [
+            {
+              "start": "0x11e0",
+              "size": "0x45",
+              "kind": "main"
+            },
+            {
+              "start": "0x1228",
+              "size": "0x4",
+              "kind": "main"
+            }
+          ],
+          "signature": null,
+          "start_reason": "symbol",
+          "confidence": 100,
+          "flags": [],
+          "caveats": [],
+          "summary": {
+            "blocks": 8,
+            "insns": 24,
+            "edges": 9,
+            "cyclomatic": 4,
+            "callers": 1,
+            "callees": 1,
+            "string_refs": 1,
+            "import_calls": [
+              {
+                "category": "string",
+                "count": 1
+              }
+            ]
+          },
+          "strings": [
+            {
+              "id": "str:0x2040",
+              "addr": "0x2040",
+              "text": {
+                "text": ")i9(i.w1i#",
+                "hex": "29693928692e77316923",
+                "len": 10,
+                "src": "binary"
+              },
+              "at": [
+                "0x11fa"
+              ]
+            }
+          ]
+        }
+      }
+    ],
+    "ok_count": 2,
+    "error_count": 0
+  }
+}

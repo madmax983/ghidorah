@@ -1,0 +1,53 @@
+{"golden":"generator=tools_examples version=1 fixture=crackme.gcc-O2 fixture_sha256=467a43b75d95c826daba8cb216d01d7fd386aa96c5ef5a95c2effffe1780de8f"}
+{
+  "ok": true,
+  "binary_id": "467a43b75d95c826",
+  "rev": 1,
+  "session": "cli",
+  "analysis": {
+    "state": "complete",
+    "rev": 1
+  },
+  "partial": false,
+  "data": {
+    "items": [
+      {
+        "kind": "jumptable",
+        "id": "jt:0x112f",
+        "addr": "0x112f",
+        "func": "fn:0x1110",
+        "extra": {
+          "id": "jt:0x112f",
+          "at": "0x112f",
+          "entry_size": 0,
+          "count": 0,
+          "targets": [],
+          "method": "a",
+          "resolved": false,
+          "source": "analysis"
+        }
+      },
+      {
+        "kind": "jumptable",
+        "id": "jt:0x1170",
+        "addr": "0x1170",
+        "func": "fn:0x1140",
+        "extra": {
+          "id": "jt:0x1170",
+          "at": "0x1170",
+          "entry_size": 0,
+          "count": 0,
+          "targets": [],
+          "method": "a",
+          "resolved": false,
+          "source": "analysis"
+        }
+      }
+    ]
+  },
+  "page": {
+    "returned": 2,
+    "total": 2,
+    "truncated": false
+  }
+}

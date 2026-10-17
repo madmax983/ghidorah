@@ -1,0 +1,33 @@
+{"golden":"generator=tools_examples version=1 fixture=crackme.gcc-O2 fixture_sha256=467a43b75d95c826daba8cb216d01d7fd386aa96c5ef5a95c2effffe1780de8f"}
+{
+  "ok": true,
+  "binary_id": "467a43b75d95c826",
+  "rev": 1,
+  "session": "cli",
+  "analysis": {
+    "state": "complete",
+    "rev": 1
+  },
+  "partial": false,
+  "data": {
+    "addr": "0x2004",
+    "len": 8,
+    "hex": "75736167653a2063",
+    "text": {
+      "text": "usage: c",
+      "hex": "75736167653a2063",
+      "len": 8,
+      "src": "binary"
+    },
+    "values": [
+      "0x7375",
+      "0x6761",
+      "0x3a65",
+      "0x6320"
+    ],
+    "region": {
+      "name": "seg:4",
+      "perms": "r--"
+    }
+  }
+}

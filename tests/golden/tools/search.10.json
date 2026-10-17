@@ -1,0 +1,150 @@
+{"golden":"generator=tools_examples version=1 fixture=crackme.gcc-O2 fixture_sha256=467a43b75d95c826daba8cb216d01d7fd386aa96c5ef5a95c2effffe1780de8f"}
+{
+  "ok": true,
+  "binary_id": "467a43b75d95c826",
+  "rev": 1,
+  "session": "cli",
+  "analysis": {
+    "state": "complete",
+    "rev": 1
+  },
+  "partial": false,
+  "data": {
+    "items": [
+      {
+        "kind": "segment",
+        "id": "seg:11",
+        "extra": {
+          "size": "0x0",
+          "perms": "rw-",
+          "file_off": "0x0"
+        }
+      },
+      {
+        "kind": "segment",
+        "id": "seg:2",
+        "addr": "0x0",
+        "extra": {
+          "size": "0x660",
+          "perms": "r--",
+          "file_off": "0x0"
+        }
+      },
+      {
+        "kind": "segment",
+        "id": "seg:0",
+        "addr": "0x40",
+        "extra": {
+          "size": "0x2d8",
+          "perms": "r--",
+          "file_off": "0x40"
+        }
+      },
+      {
+        "kind": "segment",
+        "id": "seg:1",
+        "addr": "0x318",
+        "extra": {
+          "size": "0x1c",
+          "perms": "r--",
+          "file_off": "0x318"
+        }
+      },
+      {
+        "kind": "segment",
+        "id": "seg:7",
+        "addr": "0x338",
+        "extra": {
+          "size": "0x30",
+          "perms": "r--",
+          "file_off": "0x338"
+        }
+      },
+      {
+        "kind": "segment",
+        "id": "seg:9",
+        "addr": "0x338",
+        "extra": {
+          "size": "0x30",
+          "perms": "r--",
+          "file_off": "0x338"
+        }
+      },
+      {
+        "kind": "segment",
+        "id": "seg:8",
+        "addr": "0x368",
+        "extra": {
+          "size": "0x44",
+          "perms": "r--",
+          "file_off": "0x368"
+        }
+      },
+      {
+        "kind": "segment",
+        "id": "seg:3",
+        "addr": "0x1000",
+        "extra": {
+          "size": "0x239",
+          "perms": "r-x",
+          "file_off": "0x1000"
+        }
+      },
+      {
+        "kind": "segment",
+        "id": "seg:4",
+        "addr": "0x2000",
+        "extra": {
+          "size": "0x150",
+          "perms": "r--",
+          "file_off": "0x2000"
+        }
+      },
+      {
+        "kind": "segment",
+        "id": "seg:10",
+        "addr": "0x204c",
+        "extra": {
+          "size": "0x3c",
+          "perms": "r--",
+          "file_off": "0x204c"
+        }
+      },
+      {
+        "kind": "segment",
+        "id": "seg:12",
+        "addr": "0x3db0",
+        "extra": {
+          "size": "0x250",
+          "perms": "r--",
+          "file_off": "0x2db0"
+        }
+      },
+      {
+        "kind": "segment",
+        "id": "seg:5",
+        "addr": "0x3db0",
+        "extra": {
+          "size": "0x268",
+          "perms": "rw-",
+          "file_off": "0x2db0"
+        }
+      },
+      {
+        "kind": "segment",
+        "id": "seg:6",
+        "addr": "0x3dc0",
+        "extra": {
+          "size": "0x1f0",
+          "perms": "rw-",
+          "file_off": "0x2dc0"
+        }
+      }
+    ]
+  },
+  "page": {
+    "returned": 13,
+    "total": 13,
+    "truncated": false
+  }
+}
