@@ -15,6 +15,7 @@
 //! only through this type.
 
 use std::borrow::Cow;
+use std::collections::BTreeSet;
 use std::fmt;
 use std::sync::Arc;
 
@@ -59,7 +60,18 @@ impl Perms {
     /// Makes a value from the ELF `p_flags` bits `PF_R`, `PF_W` and `PF_X`.
     #[must_use]
     pub const fn from_elf(p_flags: u32) -> Self {
-        Self(0)
+        // `PF_X`, `PF_W` and `PF_R` have the values of the Ghidra bits.
+        let mut bits = 0;
+        if p_flags & 0x1 != 0 {
+            bits |= Self::EXECUTE.0;
+        }
+        if p_flags & 0x2 != 0 {
+            bits |= Self::WRITE.0;
+        }
+        if p_flags & 0x4 != 0 {
+            bits |= Self::READ.0;
+        }
+        Self(bits)
     }
 
     /// Tells if `self` has every bit of `other`.
@@ -236,13 +248,25 @@ impl MemoryMap {
     /// Gives the region that holds `va`.
     #[must_use]
     pub fn region_at(&self, va: u64) -> Option<&Region> {
-        None
+        self.regions.get(va)
     }
 
     /// Gives the mapped address nearest to `va`. A mapped `va` gives itself.
     #[must_use]
     pub fn nearest(&self, va: u64) -> Option<u64> {
-        None
+        self.regions.nearest(va)
+    }
+
+    /// Gives `region` with its file part cut to the region size and to the file bytes.
+    fn normalize(&self, mut region: Region) -> Region {
+        let file_len = u64::try_from(self.file.len()).unwrap_or(u64::MAX);
+        if region.file_off > file_len {
+            region.file_off = file_len;
+        }
+        let in_file = file_len.saturating_sub(region.file_off);
+        let vsize = u64::try_from(region.va.len()).unwrap_or(u64::MAX);
+        region.file_size = region.file_size.min(in_file).min(vsize);
+        region
     }
 
     /// Adds a region. A part of an old region under the new region goes away.
@@ -250,7 +274,24 @@ impl MemoryMap {
     /// The map cuts `file_size` to the region size and to the file bytes after `file_off`.
     /// The result lists the old ranges that the new region replaced, in address order.
     pub fn map(&mut self, region: Region) -> Vec<Range> {
-        Vec::new()
+        let region = self.normalize(region);
+        let new = region.va;
+        let old: Vec<(Range, Region)> = self.regions.overlapping(new).to_vec();
+        let mut replaced = Vec::with_capacity(old.len());
+        for (range, value) in old {
+            self.regions.remove_at(range.first);
+            replaced.push(Range {
+                first: range.first.max(new.first),
+                last: range.last.min(new.last),
+            });
+            for keep in outside(range, new) {
+                // The part is outside `new` and outside the other old ranges.
+                let _ = self.regions.insert(keep, piece(&value, keep));
+            }
+        }
+        // No old range overlaps `new` now.
+        let _ = self.regions.insert(new, region);
+        replaced
     }
 
     /// Adds many regions in one sweep. A later region wins where two regions overlap.
@@ -259,18 +300,87 @@ impl MemoryMap {
     /// The result gives the list index of each new region that covers a part of an
     /// earlier region, in index order.
     pub fn map_all(&mut self, regions: Vec<Region>) -> Vec<usize> {
-        Vec::new()
+        let old_count = self.regions.len();
+        let mut all: Vec<Region> = std::mem::take(&mut self.regions)
+            .iter()
+            .map(|(_, r)| r.clone())
+            .collect();
+        all.extend(regions.into_iter().map(|r| self.normalize(r)));
+        let (parts, covering) = sweep(&all);
+        let entries: Vec<(Range, Region)> = parts
+            .into_iter()
+            .filter_map(|(part, owner)| all.get(owner).map(|r| (part, piece(r, part))))
+            .collect();
+        // The sweep gives disjoint parts, so the bulk insert cannot fail.
+        let _ = self.regions.extend_sorted(entries);
+        covering
+            .into_iter()
+            .filter_map(|i| i.checked_sub(old_count))
+            .collect()
     }
 
     /// Reads `len` bytes at `va`. Bytes in a zero tail read as zero.
     ///
     /// # Errors
     ///
-    /// Returns [`MemError::Unmapped`] when an address of the read is in no region,
-    /// [`MemError::Overflow`] when the read goes past `u64::MAX` and
-    /// [`MemError::TooLong`] when `len` is above `limits.file_size`.
+    /// Returns [`MemError::Unmapped`] when an address of the read is in no region.
+    /// Returns [`MemError::Overflow`] when the read goes past `u64::MAX`.
+    /// Returns [`MemError::TooLong`] when `len` is above `limits.file_size`.
     pub fn read(&self, va: u64, len: u64, limits: &Limits) -> Result<Bytes<'_>, MemError> {
-        Err(MemError::Unmapped { va, nearest: None })
+        if len == 0 {
+            return Ok(Cow::Borrowed(&[]));
+        }
+        if len > limits.file_size {
+            return Err(MemError::TooLong {
+                len,
+                max: limits.file_size,
+            });
+        }
+        let last = ghidorah_kernel::range_last(va, len).ok_or(MemError::Overflow { va, len })?;
+        let mut out: Option<Vec<u8>> = None;
+        let mut cur = va;
+        loop {
+            let Some((range, region)) = self.regions.find(cur) else {
+                return Err(MemError::Unmapped {
+                    va: cur,
+                    nearest: self.regions.nearest(cur),
+                });
+            };
+            let end = range.last.min(last);
+            let part = self.part(region, cur, end);
+            if out.is_none()
+                && end == last
+                && let Some(bytes) = part.as_borrowed()
+            {
+                return Ok(Cow::Borrowed(bytes));
+            }
+            let buf = out.get_or_insert_with(|| {
+                Vec::with_capacity(usize::try_from(len).unwrap_or_default())
+            });
+            part.append_to(buf);
+            if end == last {
+                return Ok(Cow::Owned(out.unwrap_or_default()));
+            }
+            // Here `end < last`, so the next address exists.
+            cur = end.saturating_add(1);
+        }
+    }
+
+    /// Gives the bytes of `region` from `first` to `last`. Both are in the region.
+    fn part<'a>(&'a self, region: &Region, first: u64, last: u64) -> Part<'a> {
+        let delta = first.saturating_sub(region.va.first);
+        let count = last.saturating_sub(first).saturating_add(1);
+        let from_file = region.file_size.saturating_sub(delta).min(count);
+        let start = usize::try_from(region.file_off.saturating_add(delta)).unwrap_or(usize::MAX);
+        let take = usize::try_from(from_file).unwrap_or_default();
+        let bytes = start
+            .checked_add(take)
+            .and_then(|end| self.file.get(start..end))
+            .unwrap_or_default();
+        Part {
+            bytes,
+            zeros: count.saturating_sub(from_file),
+        }
     }
 
     /// Gives the file offset of the byte at `va`.
@@ -278,6 +388,128 @@ impl MemoryMap {
     /// The result is `None` for a byte in a zero tail or outside every region.
     #[must_use]
     pub fn va_to_file(&self, va: u64) -> Option<u64> {
-        None
+        let region = self.regions.get(va)?;
+        ghidorah_kernel::va_to_file(&region.mapping(), va)
     }
+}
+
+/// The bytes of one region part: file bytes, then a run of zeros.
+struct Part<'a> {
+    bytes: &'a [u8],
+    zeros: u64,
+}
+
+impl<'a> Part<'a> {
+    /// Gives the file bytes when the part has no zeros.
+    const fn as_borrowed(&self) -> Option<&'a [u8]> {
+        if self.zeros == 0 {
+            Some(self.bytes)
+        } else {
+            None
+        }
+    }
+
+    /// Adds the bytes of the part to `out`.
+    fn append_to(&self, out: &mut Vec<u8>) {
+        out.extend_from_slice(self.bytes);
+        let zeros = usize::try_from(self.zeros).unwrap_or_default();
+        out.resize(out.len().saturating_add(zeros), 0);
+    }
+}
+
+/// Gives the parts of `range` outside `cut`: at most one on each side.
+fn outside(range: Range, cut: Range) -> Vec<Range> {
+    let mut out = Vec::with_capacity(2);
+    if range.first < cut.first
+        && let Some(last) = cut.first.checked_sub(1)
+    {
+        out.push(Range {
+            first: range.first,
+            last: last.min(range.last),
+        });
+    }
+    if range.last > cut.last
+        && let Some(first) = cut.last.checked_add(1)
+    {
+        out.push(Range {
+            first: first.max(range.first),
+            last: range.last,
+        });
+    }
+    out
+}
+
+/// Gives the part `va` of `region` with the matching file part. `va` is in `region.va`.
+fn piece(region: &Region, va: Range) -> Region {
+    let delta = va.first.saturating_sub(region.va.first);
+    let skip = delta.min(region.file_size);
+    let len = u64::try_from(va.len()).unwrap_or(u64::MAX);
+    Region {
+        name: region.name.clone(),
+        va,
+        file_off: region.file_off.saturating_add(skip),
+        file_size: region.file_size.saturating_sub(skip).min(len),
+        perms: region.perms,
+        source: region.source,
+    }
+}
+
+/// Splits the addresses under `regions` into parts with one owner each.
+///
+/// The owner of a part is the last region of the list that holds it. Adjacent parts with
+/// the same owner join. The second result lists each region that covers a part of an
+/// earlier region, in index order.
+fn sweep(regions: &[Region]) -> (Vec<(Range, usize)>, Vec<usize>) {
+    // The events use `u128` points, so the end after `u64::MAX` has a value.
+    // At one point, the ends (`false`) come before the starts (`true`).
+    let mut events: Vec<(u128, bool, usize)> = Vec::with_capacity(regions.len().saturating_mul(2));
+    for (i, r) in regions.iter().enumerate() {
+        events.push((u128::from(r.va.first), true, i));
+        events.push((u128::from(r.va.last).saturating_add(1), false, i));
+    }
+    events.sort_unstable();
+    let mut live: BTreeSet<usize> = BTreeSet::new();
+    // The live regions that overlap no earlier region so far.
+    let mut unmarked: BTreeSet<usize> = BTreeSet::new();
+    let mut covering = BTreeSet::new();
+    let mut parts: Vec<(Range, usize)> = Vec::new();
+    let mut at = 0;
+    while let Some(&(point, _, _)) = events.get(at) {
+        while let Some(&(p, start, i)) = events.get(at)
+            && p == point
+        {
+            if start {
+                if live.first().is_some_and(|low| *low < i) {
+                    covering.insert(i);
+                } else {
+                    unmarked.insert(i);
+                }
+                // Each live region with a higher index now overlaps region `i`.
+                let higher: Vec<usize> = unmarked.range(i.saturating_add(1)..).copied().collect();
+                for h in higher {
+                    unmarked.remove(&h);
+                    covering.insert(h);
+                }
+                live.insert(i);
+            } else {
+                live.remove(&i);
+                unmarked.remove(&i);
+            }
+            at = at.saturating_add(1);
+        }
+        let (Some(&owner), Some(&(next, _, _))) = (live.last(), events.get(at)) else {
+            continue;
+        };
+        let (Ok(first), Ok(last)) = (u64::try_from(point), u64::try_from(next.saturating_sub(1)))
+        else {
+            continue;
+        };
+        match parts.last_mut() {
+            Some((prev, o)) if *o == owner && prev.last.checked_add(1) == Some(first) => {
+                prev.last = last;
+            }
+            _ => parts.push((Range { first, last }, owner)),
+        }
+    }
+    (parts, covering.into_iter().collect())
 }

@@ -122,7 +122,7 @@ pub const DT_NEEDED: u64 = 1;
 pub const DT_PLTRELSZ: u64 = 2;
 /// Dynamic tag: PLT and GOT address.
 pub const DT_PLTGOT: u64 = 3;
-/// Dynamic tag: SysV hash table.
+/// Dynamic tag: System V hash table.
 pub const DT_HASH: u64 = 4;
 /// Dynamic tag: dynamic string table.
 pub const DT_STRTAB: u64 = 5;
@@ -196,7 +196,7 @@ pub const DT_VERNEEDNUM: u64 = 0x6fff_ffff;
 /// Note type: GNU build ID.
 pub const NT_GNU_BUILD_ID: u32 = 3;
 
-/// `DT_VERSYM` bit: the version is hidden.
+/// `DT_VERSYM` bit: the hidden bit of a version.
 pub const VERSYM_HIDDEN: u16 = 0x8000;
 
 /// Relocation type: base plus addend.

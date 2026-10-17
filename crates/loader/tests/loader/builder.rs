@@ -1,7 +1,7 @@
 //! Behavior on `ElfBuilder` files: the dynamic view, hash counts, RELR, `SHN_XINDEX`,
 //! versions, entry arrays and other machines.
 
-use ghidorah_base::DiagCode;
+use ghidorah_base::{BinText, DiagCode};
 use ghidorah_loader::{
     Arch, Binary, EntryKind, RelocForm, RelocSource, RelocType, SymBind, SymKind, SymTable, SymVis,
 };
@@ -100,15 +100,18 @@ fn dynamic_view_strings() {
         .strip_section_headers()
         .build();
     let b = load_ok(&bytes).0;
-    let libs: Vec<&[u8]> = b.libraries.iter().map(|l| l.as_bytes()).collect();
+    let libs: Vec<&[u8]> = b.libraries.iter().map(BinText::as_bytes).collect();
     assert_eq!(libs, vec![&b"libc.so.6"[..], b"libm.so.6"]);
     assert_eq!(
-        b.identity.soname.as_ref().map(|t| t.as_bytes()),
+        b.identity.soname.as_ref().map(BinText::as_bytes),
         Some(&b"libz.so.1"[..])
     );
-    assert_eq!(b.rpath.as_ref().map(|t| t.as_bytes()), Some(&b"/opt/r"[..]));
     assert_eq!(
-        b.runpath.as_ref().map(|t| t.as_bytes()),
+        b.rpath.as_ref().map(BinText::as_bytes),
+        Some(&b"/opt/r"[..])
+    );
+    assert_eq!(
+        b.runpath.as_ref().map(BinText::as_bytes),
         Some(&b"/opt/rp"[..])
     );
     assert_eq!(
@@ -276,7 +279,8 @@ fn version_definitions_name_defined_symbols() {
     let (bytes0, _) = build(&probe_versym, &probe_verdef).build_with_layout();
     let first = load_ok(&bytes0).0;
     let dynstr = section(&first, ".dynstr").clone();
-    let strs = &bytes0[usize::try_from(dynstr.file_off).expect("off")..][..dynstr.size as usize];
+    let strs = &bytes0[usize::try_from(dynstr.file_off).expect("off")..]
+        [..usize::try_from(dynstr.size).expect("size")];
     let find = |s: &[u8]| -> u32 {
         let mut needle = s.to_vec();
         needle.push(0);

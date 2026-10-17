@@ -74,7 +74,7 @@ fn probe_table() {
         }
     );
     let cases: Vec<(Vec<u8>, &str)> = vec![
-        (hello.clone(), "elf64-le"),
+        (hello, "elf64-le"),
         (
             header_only(Class::Elf64, Endian::Little, 1, 62),
             "elf64-le-rel",

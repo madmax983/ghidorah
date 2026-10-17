@@ -57,7 +57,7 @@ fn seeds() -> Vec<Vec<u8>> {
         .needed("libc.so.6")
         .relr(Loc::section(".data", 8))
         .hash(HashStyle::Both);
-    out.push(built.clone().build());
+    out.push(built.build());
     out.push(built.strip_section_headers().build());
     out.extend(malformed_variants().into_iter().map(|v| v.bytes));
     out
@@ -139,11 +139,10 @@ fn fuzz_elf_load() {
             .collect::<Vec<_>>()
     );
     assert_eq!(fuzz::panic_count(), 0, "no case panics");
-    for stage in 1..STAGES.len() {
+    for (stage, name) in STAGES.iter().enumerate().skip(1) {
         assert!(
             report.reached_percent(stage) >= 10,
-            "stage {}: {:?}",
-            STAGES[stage],
+            "stage {name}: {:?}",
             report.reached
         );
     }

@@ -110,7 +110,17 @@ impl SymKind {
     /// Gives the kind of a raw `STT_*` value.
     #[must_use]
     pub const fn from_raw(raw: u8) -> Self {
-        Self::Other(raw)
+        match raw {
+            0 => Self::NoType,
+            1 => Self::Object,
+            2 => Self::Func,
+            3 => Self::Section,
+            4 => Self::File,
+            5 => Self::Common,
+            6 => Self::Tls,
+            10 => Self::Ifunc,
+            other => Self::Other(other),
+        }
     }
 }
 
@@ -133,7 +143,13 @@ impl SymBind {
     /// Gives the binding of a raw `STB_*` value.
     #[must_use]
     pub const fn from_raw(raw: u8) -> Self {
-        Self::Other(raw)
+        match raw {
+            0 => Self::Local,
+            1 => Self::Global,
+            2 => Self::Weak,
+            10 => Self::Unique,
+            other => Self::Other(other),
+        }
     }
 }
 
@@ -154,7 +170,12 @@ impl SymVis {
     /// Gives the visibility of the low 2 bits of `st_other`.
     #[must_use]
     pub const fn from_other(st_other: u8) -> Self {
-        Self::Default
+        match st_other & 3 {
+            0 => Self::Default,
+            1 => Self::Internal,
+            2 => Self::Hidden,
+            _ => Self::Protected,
+        }
     }
 }
 
@@ -178,7 +199,7 @@ pub struct SymVersion {
     pub name: BinText,
     /// The version index of `DT_VERSYM` without the hidden bit.
     pub index: u16,
-    /// The hidden bit of `DT_VERSYM` is set.
+    /// The `DT_VERSYM` value has the hidden bit.
     pub hidden: bool,
     /// The version comes from `DT_VERNEED`, so the symbol comes from another file.
     pub needed: bool,
@@ -217,7 +238,54 @@ impl RelocType {
     /// Gives the `R_X86_64_*` name of the type, or `None` for an unknown type.
     #[must_use]
     pub const fn x86_64_name(self) -> Option<&'static str> {
-        None
+        let name = match self.0 {
+            0 => "R_X86_64_NONE",
+            1 => "R_X86_64_64",
+            2 => "R_X86_64_PC32",
+            3 => "R_X86_64_GOT32",
+            4 => "R_X86_64_PLT32",
+            5 => "R_X86_64_COPY",
+            6 => "R_X86_64_GLOB_DAT",
+            7 => "R_X86_64_JUMP_SLOT",
+            8 => "R_X86_64_RELATIVE",
+            9 => "R_X86_64_GOTPCREL",
+            10 => "R_X86_64_32",
+            11 => "R_X86_64_32S",
+            12 => "R_X86_64_16",
+            13 => "R_X86_64_PC16",
+            14 => "R_X86_64_8",
+            15 => "R_X86_64_PC8",
+            16 => "R_X86_64_DTPMOD64",
+            17 => "R_X86_64_DTPOFF64",
+            18 => "R_X86_64_TPOFF64",
+            19 => "R_X86_64_TLSGD",
+            20 => "R_X86_64_TLSLD",
+            21 => "R_X86_64_DTPOFF32",
+            22 => "R_X86_64_GOTTPOFF",
+            23 => "R_X86_64_TPOFF32",
+            24 => "R_X86_64_PC64",
+            25 => "R_X86_64_GOTOFF64",
+            26 => "R_X86_64_GOTPC32",
+            27 => "R_X86_64_GOT64",
+            28 => "R_X86_64_GOTPCREL64",
+            29 => "R_X86_64_GOTPC64",
+            30 => "R_X86_64_GOTPLT64",
+            31 => "R_X86_64_PLTOFF64",
+            32 => "R_X86_64_SIZE32",
+            33 => "R_X86_64_SIZE64",
+            34 => "R_X86_64_GOTPC32_TLSDESC",
+            35 => "R_X86_64_TLSDESC_CALL",
+            36 => "R_X86_64_TLSDESC",
+            37 => "R_X86_64_IRELATIVE",
+            38 => "R_X86_64_RELATIVE64",
+            41 => "R_X86_64_GOTPCRELX",
+            42 => "R_X86_64_REX_GOTPCRELX",
+            43 => "R_X86_64_CODE_4_GOTPCRELX",
+            44 => "R_X86_64_CODE_4_GOTTPOFF",
+            45 => "R_X86_64_CODE_4_GOTPC32_TLSDESC",
+            _ => return None,
+        };
+        Some(name)
     }
 }
 

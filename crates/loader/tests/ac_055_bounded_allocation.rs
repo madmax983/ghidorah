@@ -216,8 +216,9 @@ fn ac_055_bounded_allocation() {
 
 #[test]
 fn hostile_files_keep_their_tables_bounded() {
-    let (b, _) = load(&relr_bitmaps(), &LoadOpts::AUTO, &Limits::DEFAULT).expect("relr");
-    let cap = MIB / 4 + 65_536;
+    let relr = relr_bitmaps();
+    let (b, _) = load(&relr, &LoadOpts::AUTO, &Limits::DEFAULT).expect("relr");
+    let cap = relr.len() / 4 + 65_536;
     assert!(b.relocs.len() <= cap, "{} relocations", b.relocs.len());
     assert!(b.relocs.len() > 1000, "the cap keeps many relocations");
     assert!(b.diagnostics.iter().any(|d| d.code.name() == "E_LIMIT"));

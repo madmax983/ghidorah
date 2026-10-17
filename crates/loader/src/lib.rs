@@ -25,6 +25,8 @@ pub mod memmap;
 pub mod probe;
 pub mod raw;
 
+use std::sync::Arc;
+
 use ghidorah_base::{DiagCode, Limits};
 
 pub use binary::{
@@ -74,8 +76,49 @@ pub fn load(
     opts: &LoadOpts,
     limits: &Limits,
 ) -> Result<(Binary, MemoryMap), LoadError> {
-    Err(LoadError::Malformed(Diagnostic::new(
-        DiagCode::BadMagic,
-        "probe",
-    )))
+    let size = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
+    if size > limits.file_size {
+        return Err(LoadError::TooLarge {
+            size,
+            limit: limits.file_size,
+        });
+    }
+    let sha256 = ghidorah_base::sha256(bytes);
+    if let Some(raw) = opts.raw {
+        return raw::load(Arc::from(bytes), sha256, raw);
+    }
+    let detected = probe(bytes);
+    match detected {
+        Detected::Elf {
+            class: ElfClass::Elf64,
+            data: ElfData::Le,
+            e_type: None | Some(elf::consts::ET_EXEC | elf::consts::ET_DYN),
+            ..
+        } => elf::load(&Arc::from(bytes), sha256, limits),
+        Detected::Elf { .. } if bytes.len() < 6 => Err(LoadError::Malformed(
+            Diagnostic::new(DiagCode::Oob, "elf.ident")
+                .need(6)
+                .have(size),
+        )),
+        Detected::Elf {
+            class: ElfClass::Other(_),
+            ..
+        }
+        | Detected::Elf {
+            data: ElfData::Other(_),
+            ..
+        } => Err(LoadError::Malformed(
+            Diagnostic::new(DiagCode::BadMagic, "elf.ident").at(4),
+        )),
+        Detected::Unknown if bytes.len() < 4 => Err(LoadError::Malformed(
+            Diagnostic::new(DiagCode::Oob, "probe").need(4).have(size),
+        )),
+        Detected::Unknown => Err(LoadError::Malformed(
+            Diagnostic::new(DiagCode::BadMagic, "probe").at(0),
+        )),
+        other => Err(LoadError::UnsupportedFormat {
+            detected: other.name(),
+            supported: SUPPORTED_FORMATS,
+        }),
+    }
 }

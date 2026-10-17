@@ -41,14 +41,10 @@ fn group_diff(
 
 /// Compares the five tables of AC-049 and the header facts.
 fn compare(name: &str, want: &Blocks, got: &Blocks) -> Vec<String> {
-    let mut problems: Vec<String> = [
-        first_diff("sections", &want.sections, &got.sections),
-        first_diff("segments", &want.segments, &got.segments),
-        first_diff("dynamic", &want.dynamic, &got.dynamic),
-    ]
-    .into_iter()
-    .flatten()
-    .collect();
+    let mut problems: Vec<String> = Vec::new();
+    problems.extend(first_diff("sections", &want.sections, &got.sections));
+    problems.extend(first_diff("segments", &want.segments, &got.segments));
+    problems.extend(first_diff("dynamic", &want.dynamic, &got.dynamic));
     problems.extend(group_diff("relocations", &want.relocs, &got.relocs));
     problems.extend(group_diff("symbols", &want.symtabs, &got.symtabs));
     if want.entry != got.entry {
@@ -104,6 +100,71 @@ fn ac_049_elf_readelf_golden() {
         problems.len(),
         problems.join("\n")
     );
+}
+
+/// The golden parser finds every table of `hello.gcc-O2`, so an empty parse cannot pass.
+#[test]
+fn golden_parser_reads_every_table() {
+    let (_, body) = golden("hello.gcc-O2.readelf.txt");
+    let b = parse_golden(&body);
+    assert_eq!(b.sections.len(), 31);
+    assert_eq!(b.segments.len(), 13);
+    assert_eq!(b.dynamic.len(), 27);
+    let relocs: Vec<(&str, usize)> = b
+        .relocs
+        .iter()
+        .map(|(n, r)| (n.as_str(), r.len()))
+        .collect();
+    assert_eq!(relocs, vec![(".rela.dyn", 8), (".rela.plt", 2)]);
+    let syms: Vec<(&str, usize)> = b
+        .symtabs
+        .iter()
+        .map(|(n, r)| (n.as_str(), r.len()))
+        .collect();
+    assert_eq!(syms, vec![(".dynsym", 8), (".symtab", 40)]);
+    assert_eq!(b.entry.as_deref(), Some("0x1090"));
+    assert_eq!(b.e_type.as_deref(), Some("DYN"));
+    assert_eq!(
+        b.build_id.as_deref(),
+        Some("ef7e65e69e14ec3197defcf6f83dfddb33b0da02")
+    );
+    let (_, dynrel) = golden("hello.gcc-O2.noshdr.dynrel.txt");
+    let groups: Vec<(String, usize)> = parse_dynrel(&dynrel)
+        .into_iter()
+        .map(|(n, r)| (n, r.len()))
+        .collect();
+    assert_eq!(
+        groups,
+        vec![("RELA".to_string(), 8), ("PLT".to_string(), 2)]
+    );
+    // The renderer gives the same row of the first `.dynsym` symbol as the golden.
+    let (binary, _) = load_ok(&fixture("hello.gcc-O2"));
+    let rendered = render(&binary);
+    assert_eq!(rendered.symtabs[0].1[1], b.symtabs[0].1[1]);
+    assert!(rendered.symtabs[0].1[1].ends_with("__libc_start_main@GLIBC_2.34 (2)"));
+}
+
+/// The comparison of AC-049 finds one changed row in each table.
+#[test]
+fn compare_finds_changed_rows() {
+    let (_, body) = golden("hello.gcc-O2.readelf.txt");
+    let want = parse_golden(&body);
+    let (binary, _) = load_ok(&fixture("hello.gcc-O2"));
+    let got = render(&binary);
+    assert!(compare("hello", &want, &got).is_empty());
+    let change = |edit: &dyn Fn(&mut Blocks)| {
+        let mut bad = got.clone();
+        edit(&mut bad);
+        compare("hello", &want, &bad).len()
+    };
+    assert_eq!(change(&|b| b.sections[3].push('x')), 1);
+    assert_eq!(change(&|b| b.segments[2].push('x')), 1);
+    assert_eq!(change(&|b| b.dynamic[0].push('x')), 1);
+    assert_eq!(change(&|b| b.relocs[1].1[0].push('x')), 1);
+    assert_eq!(change(&|b| b.symtabs[1].1[7].push('x')), 1);
+    assert_eq!(change(&|b| b.symtabs[0].0.push('x')), 1);
+    assert_eq!(change(&|b| b.entry = None), 1);
+    assert_eq!(change(&|b| b.build_id = None), 1);
 }
 
 /// The dynamic view of a fixture without section headers gives the `.dynsym` of its twin.

@@ -1,6 +1,6 @@
 //! Load caps on top of [`Limits`] (design Sections 4.7 and 13.6).
 //!
-//! Each count from the file goes through [`clamp_count`] before an allocation.
+//! Each count from the file goes through a clamp before an allocation.
 //! A count above its cap gives `E_LIMIT`. A table that runs past its bytes gives `E_OOB`.
 //! The load continues with the clamped count.
 //!
@@ -8,14 +8,16 @@
 //!
 //! | Cap | Value |
 //! |---|---|
-//! | Text bytes that the load copies (names, notes, versions) | 4 x file size + 1 MiB |
+//! | Heap bytes of copied text and notes (names, versions, note data) | 4 x file size + 1 MiB |
 //! | Relocations of all tables together | file size / 4 + 65,536, and at most `Limits::relocations` |
+//!
+//! Each cap gives one `E_LIMIT` diagnostic when the load reaches it.
 
-use ghidorah_base::Limits;
+use ghidorah_base::{DiagCode, Limits};
 
-use crate::diag::Diags;
+use crate::diag::{Diagnostic, Diags};
 
-/// The extra text bytes of the text cap.
+/// The extra bytes of the text cap.
 pub const TEXT_SLACK: u64 = 1 << 20;
 
 /// The extra relocations of the relocation cap.
@@ -26,12 +28,14 @@ pub const RELOC_SLACK: u64 = 65_536;
 pub(crate) struct Budget {
     /// The caps of the load.
     pub(crate) limits: Limits,
-    /// The text bytes that the load can still copy.
+    /// The heap bytes that the load can still use for copies.
     text_left: u64,
     /// The relocations that the load can still keep.
     relocs_left: u64,
     /// The text cap gave its diagnostic.
     text_told: bool,
+    /// The relocation cap gave its diagnostic.
+    relocs_told: bool,
 }
 
 impl Budget {
@@ -39,10 +43,47 @@ impl Budget {
     pub(crate) fn new(limits: &Limits, file_len: u64) -> Self {
         Self {
             limits: *limits,
-            text_left: 0,
-            relocs_left: 0,
+            text_left: file_len.saturating_mul(4).saturating_add(TEXT_SLACK),
+            relocs_left: (file_len / 4)
+                .saturating_add(RELOC_SLACK)
+                .min(limits.relocations),
             text_told: false,
+            relocs_told: false,
         }
+    }
+
+    /// Takes `bytes` from the text cap. On `false`, the caller keeps no copy.
+    pub(crate) fn take_text(&mut self, bytes: u64, path: &str, diags: &mut Diags) -> bool {
+        if let Some(left) = self.text_left.checked_sub(bytes) {
+            self.text_left = left;
+            return true;
+        }
+        if !self.text_told {
+            self.text_told = true;
+            diags.push(
+                Diagnostic::new(DiagCode::Limit, path)
+                    .need(bytes)
+                    .have(self.text_left)
+                    .hint("the load keeps no more text"),
+            );
+        }
+        false
+    }
+
+    /// Takes room for up to `want` relocations and gives the room that the cap allows.
+    pub(crate) fn take_relocs(&mut self, want: u64, path: &str, diags: &mut Diags) -> u64 {
+        let got = want.min(self.relocs_left);
+        self.relocs_left = self.relocs_left.saturating_sub(got);
+        if got < want && !self.relocs_told {
+            self.relocs_told = true;
+            diags.push(
+                Diagnostic::new(DiagCode::Limit, path)
+                    .need(want)
+                    .have(got)
+                    .hint("the load keeps no more relocations"),
+            );
+        }
+        got
     }
 }
 
@@ -58,5 +99,24 @@ pub(crate) fn clamp_count(
     path: &str,
     diags: &mut Diags,
 ) -> usize {
-    0
+    let mut n = count;
+    if n > limit {
+        diags.push(
+            Diagnostic::new(DiagCode::Limit, path)
+                .need(count)
+                .have(limit),
+        );
+        n = limit;
+    }
+    if let Some(fit) = avail.checked_div(entsize)
+        && n > fit
+    {
+        diags.push(
+            Diagnostic::new(DiagCode::Oob, path)
+                .need(count.saturating_mul(entsize))
+                .have(avail),
+        );
+        n = fit;
+    }
+    usize::try_from(n).unwrap_or(usize::MAX)
 }

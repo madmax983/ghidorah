@@ -119,7 +119,7 @@ pub struct DynEntry {
     pub val: u64,
 }
 
-/// The CodeView RSDS record of a PE debug directory.
+/// The `CodeView` `RSDS` record of a PE debug directory.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CodeView {
     /// The GUID bytes in file order.
@@ -139,7 +139,7 @@ pub struct Identity {
     pub build_id: Option<String>,
     /// The `DT_SONAME` text, or the PE export DLL name.
     pub soname: Option<BinText>,
-    /// The PE CodeView record.
+    /// The PE `CodeView` record.
     pub codeview: Option<CodeView>,
 }
 
@@ -170,6 +170,10 @@ pub enum Relro {
 
 /// The protections of an ELF file (design Section 4.6).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "each flag is one checksec protection of design Section 4.6"
+)]
 pub struct ElfProtections {
     /// The file is a position-independent executable.
     pub pie: bool,
@@ -195,6 +199,10 @@ pub struct ElfProtections {
 
 /// The protections of a PE file from `DllCharacteristics` (design Section 4.13).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "each flag is one DllCharacteristics bit of design Section 4.13"
+)]
 pub struct PeProtections {
     /// `DYNAMIC_BASE` (0x40).
     pub dynamic_base: bool,
@@ -406,7 +414,7 @@ impl Binary {
     /// Gives the value of the first dynamic entry with `tag`.
     #[must_use]
     pub fn dyn_value(&self, tag: u64) -> Option<u64> {
-        None
+        self.dynamic.iter().find(|e| e.tag == tag).map(|e| e.val)
     }
 
     /// Gives the symbols of one table in table order.
@@ -417,6 +425,7 @@ impl Binary {
     /// Gives the section with this header index.
     #[must_use]
     pub fn section(&self, index: u32) -> Option<&Section> {
-        None
+        let at = usize::try_from(index).ok()?;
+        self.sections.get(at).filter(|s| s.index == index)
     }
 }
