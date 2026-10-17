@@ -87,10 +87,10 @@ fn else_if(t: &Tree) -> Option<&Tree> {
 }
 
 impl<'a> Printer<'a> {
-    /// Gives the init and the step of a `for` loop: `block` ends with `v = init`, `lp` is a
-    /// `while` loop whose pure condition reads `v`, and its body ends with `v = step(v)`. A
-    /// `continue` to the loop head keeps the `while` form, because a `for` would run the
-    /// step first.
+    /// Gives the init and the step of a `for` loop. `block` ends with `v = init`. `lp` is a
+    /// `while` loop with a pure condition that reads `v`. Its body ends with `v = step(v)`.
+    /// A `continue` to the loop head keeps the `while` form. The reason: a `for` runs the
+    /// step before the next test.
     fn for_parts(&self, block: &'a Tree, lp: &'a Tree) -> Option<ForParts<'a>> {
         let view = self.view();
         let Tree::Block(a) = block else {
