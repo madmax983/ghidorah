@@ -1,0 +1,25 @@
+[package]
+name = "ghidorah-x86"
+description = "x86-64 length decoder, semantic decoder, operand model, Intel printer and L0 lifter."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# The crate has no unit tests. Its tests are in the test binary `tests/x86/main.rs`
+# and in the fuzz binaries `tests/fuzz_x86_decode.rs` and `tests/fuzz_x86_lift_interp.rs`.
+[lib]
+name = "ghidorah_x86"
+path = "src/lib.rs"
+test = false
+
+[dependencies]
+ghidorah-ir = { path = "../ir" }
+
+[dev-dependencies]
+ghidorah-base = { path = "../base" }
+ghidorah-testkit = { path = "../testkit" }
+
+[lints]
+workspace = true

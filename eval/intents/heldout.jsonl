@@ -1,0 +1,46 @@
+{"id":"held-01","intent":"load this binary so that I can look at it","expect":["binary_load"]}
+{"id":"held-02","intent":"reopen the project of the binary I analyzed yesterday","expect":["binary_load"]}
+{"id":"held-03","intent":"summarize the file I just opened","expect":["binary_survey"]}
+{"id":"held-04","intent":"check whether the executable has PIE, NX and RELRO","expect":["binary_survey"]}
+{"id":"held-05","intent":"resume the unfinished auto analysis","expect":["analysis_run"]}
+{"id":"held-06","intent":"the analysis is not complete, keep going","expect":["analysis_run"]}
+{"id":"held-07","intent":"which functions have no name yet","expect":["func_list"]}
+{"id":"held-08","intent":"enumerate the functions that call network imports","expect":["func_list"]}
+{"id":"held-09","intent":"print the assembly listing of the password check routine","expect":["func_get"]}
+{"id":"held-10","intent":"show me the control flow graph and the callees of this function","expect":["func_get"]}
+{"id":"held-11","intent":"show the cross references to the string Access granted","expect":["xref_list"]}
+{"id":"held-12","intent":"which code passes a constant to connect, and what arguments does it use","expect":["xref_list"]}
+{"id":"held-13","intent":"look through the binary for the text http","expect":["search"]}
+{"id":"held-14","intent":"list every imported library and every section","expect":["search"]}
+{"id":"held-15","intent":"show the raw hex at the start of the data section","expect":["mem_read"]}
+{"id":"held-16","intent":"decode a linear sweep of instructions at an address that no function owns","expect":["mem_read"]}
+{"id":"held-17","intent":"tell me what this address belongs to","expect":["addr_info"]}
+{"id":"held-18","intent":"is 0x2010 code or data, and which symbol is near it","expect":["addr_info"]}
+{"id":"held-19","intent":"add 0x40 to the address of main","expect":["calc"]}
+{"id":"held-20","intent":"what is 0xffffffd8 as a signed 32-bit number","expect":["calc"]}
+{"id":"held-21","intent":"verify the claim that the decoder uses the XOR key 0x5a","expect":["fact_check"]}
+{"id":"held-22","intent":"is it true that this routine makes a write system call","expect":["fact_check"]}
+{"id":"held-23","intent":"print the size and alignment of a C type","expect":["type_get"]}
+{"id":"held-24","intent":"how big is struct stat and where is st_size","expect":["type_get"]}
+{"id":"held-25","intent":"list the recent renames and comments","expect":["history_list"]}
+{"id":"held-26","intent":"which facts changed since my last check","expect":["history_list"]}
+{"id":"held-27","intent":"catch me up after a restart","expect":["session_brief"]}
+{"id":"held-28","intent":"which projects exist on disk and where did I stop","expect":["session_brief"]}
+{"id":"held-29","intent":"what can this server do","expect":["tool_search"]}
+{"id":"held-30","intent":"explain the address syntax that the tools accept","expect":["tool_search"]}
+{"id":"held-31","intent":"call the routine at 0x1180 check_license","expect":["symbol_rename"]}
+{"id":"held-32","intent":"change the name of the local variable to buffer_len","expect":["symbol_rename"]}
+{"id":"held-33","intent":"annotate the call site with an end-of-line comment","expect":["comment_set"]}
+{"id":"held-34","intent":"write a plate comment above the function entry","expect":["comment_set"]}
+{"id":"held-35","intent":"save my hypothesis that this is a custom hash","expect":["note_write"]}
+{"id":"held-36","intent":"keep a named set of the crypto functions","expect":["note_write"]}
+{"id":"held-37","intent":"set the targets of the jump table by hand","expect":["func_edit"]}
+{"id":"held-38","intent":"tell the analysis which functions this indirect call can reach","expect":["func_edit"]}
+{"id":"held-39","intent":"change the signature of the function to take two arguments","expect":["type_edit"]}
+{"id":"held-40","intent":"define the data at this address as an array of 16 ints","expect":["type_edit"]}
+{"id":"held-41","intent":"take back the change I just made","expect":["history_undo"]}
+{"id":"held-42","intent":"redo the edit that I undid","expect":["history_undo"]}
+{"id":"held-43","intent":"chain a search and a rename in one transaction","expect":["batch_run"]}
+{"id":"held-44","intent":"do these five calls at once and give me only the last result","expect":["batch_run"]}
+{"id":"held-45","intent":"which known function is this unnamed routine most like","expect":["func_similar"]}
+{"id":"held-46","intent":"propose names for unnamed functions from a similar binary","expect":["func_similar"]}

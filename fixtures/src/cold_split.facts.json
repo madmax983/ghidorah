@@ -1,0 +1,67 @@
+{
+  "claims": [
+    {
+      "args": [
+        "parse_number",
+        "parse_digit"
+      ],
+      "rel": "calls"
+    },
+    {
+      "args": [
+        "parse_digit",
+        "report_error"
+      ],
+      "rel": "calls"
+    },
+    {
+      "args": [
+        "parse_number",
+        "die"
+      ],
+      "rel": "calls"
+    }
+  ],
+  "noreturn": [
+    "die"
+  ],
+  "program": "cold_split",
+  "runs": [
+    {
+      "args": [],
+      "exit": 0,
+      "stdout": "123\n"
+    },
+    {
+      "args": [
+        "12x"
+      ],
+      "exit": 0,
+      "stdout": "-1\n"
+    }
+  ],
+  "strings": [
+    {
+      "text": "error: %s (%d)\n"
+    },
+    {
+      "text": "not a digit"
+    },
+    {
+      "text": "bad number"
+    },
+    {
+      "text": "no input"
+    }
+  ],
+  "survey_facts": [
+    {
+      "kind": "string",
+      "value": "not a digit"
+    },
+    {
+      "kind": "function",
+      "value": "parse_number"
+    }
+  ]
+}

@@ -1,0 +1,135 @@
+# golden: generator=x86-print version=1 fixture=two_helpers.clang-O2 fixture_sha256=4393ecaca8b9ef4214cb16dcb4a8c979ba2471633930c2dcf12853102ca00fa4
+<_init>:
+1000 endbr64
+1004 sub rsp, 0x8
+1008 mov rax, qword ptr [rip+0x2fc1] ; 0x3fd0
+100f test rax, rax
+1012 je 0x1016
+1014 call rax
+1016 add rsp, 0x8
+101a ret
+<printf@plt-0x10>:
+1020 push qword ptr [rip+0x2fca] ; 0x3ff0
+1026 jmp qword ptr [rip+0x2fcc] ; 0x3ff8
+102c nop dword ptr [rax+0x0]
+<printf@plt>:
+1030 jmp qword ptr [rip+0x2fca] ; 0x4000
+1036 push 0x0
+103b jmp printf@plt-0x10
+<__cxa_finalize@plt>:
+1040 jmp qword ptr [rip+0x2f9a] ; 0x3fe0
+1046 xchg ax, ax
+<_start>:
+1050 endbr64
+1054 xor ebp, ebp
+1056 mov r9, rdx
+1059 pop rsi
+105a mov rdx, rsp
+105d and rsp, 0xfffffffffffffff0
+1061 push rax
+1062 push rsp
+1063 xor r8d, r8d
+1066 xor ecx, ecx
+1068 lea rdi, [rip+0xf1] ; 0x1160 main
+106f call qword ptr [rip+0x2f4b] ; 0x3fc0
+1075 hlt
+1076 cs nop word ptr [rax+rax*1+0x0]
+<deregister_tm_clones>:
+1080 lea rdi, [rip+0x2f91] ; 0x4018
+1087 lea rax, [rip+0x2f8a] ; 0x4018
+108e cmp rax, rdi
+1091 je 0x10a8
+1093 mov rax, qword ptr [rip+0x2f2e] ; 0x3fc8
+109a test rax, rax
+109d je 0x10a8
+109f jmp rax
+10a1 nop dword ptr [rax+0x0]
+10a8 ret
+10a9 nop dword ptr [rax+0x0]
+<register_tm_clones>:
+10b0 lea rdi, [rip+0x2f61] ; 0x4018
+10b7 lea rsi, [rip+0x2f5a] ; 0x4018
+10be sub rsi, rdi
+10c1 mov rax, rsi
+10c4 shr rsi, 0x3f
+10c8 sar rax, 0x3
+10cc add rsi, rax
+10cf sar rsi, 1
+10d2 je 0x10e8
+10d4 mov rax, qword ptr [rip+0x2efd] ; 0x3fd8
+10db test rax, rax
+10de je 0x10e8
+10e0 jmp rax
+10e2 nop word ptr [rax+rax*1+0x0]
+10e8 ret
+10e9 nop dword ptr [rax+0x0]
+<__do_global_dtors_aux>:
+10f0 endbr64
+10f4 cmp byte ptr [rip+0x2f1d], 0x0 ; 0x4018
+10fb jne 0x1128
+10fd push rbp
+10fe cmp qword ptr [rip+0x2eda], 0x0 ; 0x3fe0
+1106 mov rbp, rsp
+1109 je 0x1117
+110b mov rdi, qword ptr [rip+0x2efe] ; 0x4010
+1112 call __cxa_finalize@plt
+1117 call deregister_tm_clones
+111c mov byte ptr [rip+0x2ef5], 0x1 ; 0x4018
+1123 pop rbp
+1124 ret
+1125 nop dword ptr [rax]
+1128 ret
+1129 nop dword ptr [rax+0x0]
+<frame_dummy>:
+1130 endbr64
+1134 jmp register_tm_clones
+1139 nop dword ptr [rax+0x0]
+<left_value>:
+1140 push rax
+1141 call helper
+1146 inc eax
+1148 pop rcx
+1149 ret
+114a nop word ptr [rax+rax*1+0x0]
+<helper>:
+1150 lea eax, [rdi+rdi*4]
+1153 inc eax
+1155 ret
+1156 cs nop word ptr [rax+rax*1+0x0]
+<main>:
+1160 push rbp
+1161 push rbx
+1162 push rax
+1163 mov ebx, edi
+1165 call left_value
+116a mov ebp, eax
+116c mov edi, ebx
+116e call right_value
+1173 lea rdi, [rip+0xe8a] ; 0x2004
+117a mov esi, ebp
+117c mov edx, eax
+117e xor eax, eax
+1180 call printf@plt
+1185 xor eax, eax
+1187 add rsp, 0x8
+118b pop rbx
+118c pop rbp
+118d ret
+118e xchg ax, ax
+<right_value>:
+1190 push rax
+1191 call helper
+1196 add eax, eax
+1198 pop rcx
+1199 ret
+119a nop word ptr [rax+rax*1+0x0]
+<helper>:
+11a0 lea eax, [rdi*8+0x0]
+11a7 sub eax, edi
+11a9 add eax, 0xfffffffe
+11ac ret
+<_fini>:
+11b0 endbr64
+11b4 sub rsp, 0x8
+11b8 add rsp, 0x8
+11bc ret

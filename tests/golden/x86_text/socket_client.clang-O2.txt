@@ -1,0 +1,205 @@
+# golden: generator=x86-print version=1 fixture=socket_client.clang-O2 fixture_sha256=6f50f1377ca04e7d7ae7783473977921273f2c6a85636234457a9d6dac04fb36
+<_init>:
+1000 endbr64
+1004 sub rsp, 0x8
+1008 mov rax, qword ptr [rip+0x2fc1] ; 0x3fd0
+100f test rax, rax
+1012 je 0x1016
+1014 call rax
+1016 add rsp, 0x8
+101a ret
+<recv@plt-0x10>:
+1020 push qword ptr [rip+0x2fca] ; 0x3ff0
+1026 jmp qword ptr [rip+0x2fcc] ; 0x3ff8
+102c nop dword ptr [rax+0x0]
+<recv@plt>:
+1030 jmp qword ptr [rip+0x2fca] ; 0x4000
+1036 push 0x0
+103b jmp recv@plt-0x10
+<puts@plt>:
+1040 jmp qword ptr [rip+0x2fc2] ; 0x4008
+1046 push 0x1
+104b jmp recv@plt-0x10
+<send@plt>:
+1050 jmp qword ptr [rip+0x2fba] ; 0x4010
+1056 push 0x2
+105b jmp recv@plt-0x10
+<close@plt>:
+1060 jmp qword ptr [rip+0x2fb2] ; 0x4018
+1066 push 0x3
+106b jmp recv@plt-0x10
+<inet_pton@plt>:
+1070 jmp qword ptr [rip+0x2faa] ; 0x4020
+1076 push 0x4
+107b jmp recv@plt-0x10
+<connect@plt>:
+1080 jmp qword ptr [rip+0x2fa2] ; 0x4028
+1086 push 0x5
+108b jmp recv@plt-0x10
+<socket@plt>:
+1090 jmp qword ptr [rip+0x2f9a] ; 0x4030
+1096 push 0x6
+109b jmp recv@plt-0x10
+<__cxa_finalize@plt>:
+10a0 jmp qword ptr [rip+0x2f3a] ; 0x3fe0
+10a6 xchg ax, ax
+<_start>:
+10b0 endbr64
+10b4 xor ebp, ebp
+10b6 mov r9, rdx
+10b9 pop rsi
+10ba mov rdx, rsp
+10bd and rsp, 0xfffffffffffffff0
+10c1 push rax
+10c2 push rsp
+10c3 xor r8d, r8d
+10c6 xor ecx, ecx
+10c8 lea rdi, [rip+0x1c1] ; 0x1290 main
+10cf call qword ptr [rip+0x2eeb] ; 0x3fc0
+10d5 hlt
+10d6 cs nop word ptr [rax+rax*1+0x0]
+<deregister_tm_clones>:
+10e0 lea rdi, [rip+0x2f61] ; 0x4048
+10e7 lea rax, [rip+0x2f5a] ; 0x4048
+10ee cmp rax, rdi
+10f1 je 0x1108
+10f3 mov rax, qword ptr [rip+0x2ece] ; 0x3fc8
+10fa test rax, rax
+10fd je 0x1108
+10ff jmp rax
+1101 nop dword ptr [rax+0x0]
+1108 ret
+1109 nop dword ptr [rax+0x0]
+<register_tm_clones>:
+1110 lea rdi, [rip+0x2f31] ; 0x4048
+1117 lea rsi, [rip+0x2f2a] ; 0x4048
+111e sub rsi, rdi
+1121 mov rax, rsi
+1124 shr rsi, 0x3f
+1128 sar rax, 0x3
+112c add rsi, rax
+112f sar rsi, 1
+1132 je 0x1148
+1134 mov rax, qword ptr [rip+0x2e9d] ; 0x3fd8
+113b test rax, rax
+113e je 0x1148
+1140 jmp rax
+1142 nop word ptr [rax+rax*1+0x0]
+1148 ret
+1149 nop dword ptr [rax+0x0]
+<__do_global_dtors_aux>:
+1150 endbr64
+1154 cmp byte ptr [rip+0x2eed], 0x0 ; 0x4048
+115b jne 0x1188
+115d push rbp
+115e cmp qword ptr [rip+0x2e7a], 0x0 ; 0x3fe0
+1166 mov rbp, rsp
+1169 je 0x1177
+116b mov rdi, qword ptr [rip+0x2ece] ; 0x4040
+1172 call __cxa_finalize@plt
+1177 call deregister_tm_clones
+117c mov byte ptr [rip+0x2ec5], 0x1 ; 0x4048
+1183 pop rbp
+1184 ret
+1185 nop dword ptr [rax]
+1188 ret
+1189 nop dword ptr [rax+0x0]
+<frame_dummy>:
+1190 endbr64
+1194 jmp register_tm_clones
+1199 nop dword ptr [rax+0x0]
+<connect_to>:
+11a0 push rbp
+11a1 push r14
+11a3 push rbx
+11a4 sub rsp, 0x10
+11a8 mov ebp, esi
+11aa mov r14, rdi
+11ad mov edi, 0x2
+11b2 mov esi, 0x1
+11b7 xor edx, edx
+11b9 call socket@plt
+11be test eax, eax
+11c0 js 0x1215
+11c2 mov ebx, eax
+11c4 lea rdx, [rsp+0x4]
+11c9 mov dword ptr [rsp+0xc], 0x0
+11d1 mov qword ptr [rsp+0x4], 0x0
+11da mov word ptr [rsp], 0x2
+11e0 rol bp, 0x8
+11e4 mov word ptr [rsp+0x2], bp
+11e9 mov edi, 0x2
+11ee mov rsi, r14
+11f1 call inet_pton@plt
+11f6 cmp eax, 0x1
+11f9 jne 0x120e
+11fb mov rsi, rsp
+11fe mov edi, ebx
+1200 mov edx, 0x10
+1205 call connect@plt
+120a test eax, eax
+120c je 0x121a
+120e mov edi, ebx
+1210 call close@plt
+1215 mov ebx, 0xffffffff
+121a mov eax, ebx
+121c add rsp, 0x10
+1220 pop rbx
+1221 pop r14
+1223 pop rbp
+1224 ret
+1225 data16 cs nop word ptr [rax+rax*1+0x0]
+<send_hello>:
+1230 push rbp
+1231 push rbx
+1232 sub rsp, 0x48
+1236 mov ebp, edi
+1238 lea rsi, [rip+0xdd1] ; 0x2010
+123f mov edx, 0x10
+1244 xor ecx, ecx
+1246 call send@plt
+124b mov ebx, 0xffffffff
+1250 test rax, rax
+1253 js 0x1279
+1255 mov rsi, rsp
+1258 mov edx, 0x3f
+125d mov edi, ebp
+125f xor ecx, ecx
+1261 call recv@plt
+1266 test rax, rax
+1269 jle 0x1279
+126b mov byte ptr [rsp+rax*1], 0x0
+126f mov rdi, rsp
+1272 call puts@plt
+1277 mov ebx, eax
+1279 mov eax, ebx
+127b add rsp, 0x48
+127f pop rbx
+1280 pop rbp
+1281 ret
+1282 data16 data16 data16 data16 cs nop word ptr [rax+rax*1+0x0]
+<main>:
+1290 push rbx
+1291 lea rdi, [rip+0xd89] ; 0x2021
+1298 mov esi, 0x1f90
+129d call connect_to
+12a2 test eax, eax
+12a4 js 0x12ba
+12a6 mov ebx, eax
+12a8 mov edi, eax
+12aa call send_hello
+12af mov edi, ebx
+12b1 call close@plt
+12b6 xor eax, eax
+12b8 pop rbx
+12b9 ret
+12ba lea rdi, [rip+0xd6a] ; 0x202b
+12c1 call puts@plt
+12c6 mov eax, 0x1
+12cb pop rbx
+12cc ret
+<_fini>:
+12d0 endbr64
+12d4 sub rsp, 0x8
+12d8 add rsp, 0x8
+12dc ret

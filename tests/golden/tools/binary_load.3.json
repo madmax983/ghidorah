@@ -1,0 +1,38 @@
+{"golden":"generator=tools_examples version=1 fixture=crackme.gcc-O2 fixture_sha256=467a43b75d95c826daba8cb216d01d7fd386aa96c5ef5a95c2effffe1780de8f"}
+{
+  "ok": true,
+  "binary_id": "98b111e4fc0ef006",
+  "rev": 0,
+  "session": "cli",
+  "partial": false,
+  "data": {
+    "binary_id": "98b111e4fc0ef006",
+    "sha256": "98b111e4fc0ef0060be449c91ee31e249d889734f3603827363c9e07ea42d9a1",
+    "file_name": "hello.gcc-O2",
+    "format": "raw",
+    "arch": "x86_64",
+    "kind": "raw",
+    "entry": "0x401040",
+    "size": 16096,
+    "already_loaded": false,
+    "read_only": false,
+    "analysis": {
+      "state": "none",
+      "steps_used": 0
+    },
+    "diagnostics": {
+      "total": 0,
+      "by_code": []
+    }
+  },
+  "next": [
+    {
+      "tool": "binary_survey",
+      "args": {
+        "binary_id": "98b111e4fc0ef006"
+      },
+      "why": "Survey the binary that the call loaded."
+    }
+  ],
+  "noop": false
+}

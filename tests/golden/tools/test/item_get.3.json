@@ -1,0 +1,29 @@
+{"golden":"generator=tools_examples version=1"}
+{
+  "ok": true,
+  "binary_id": "b1",
+  "rev": 7,
+  "session": "test",
+  "analysis": {
+    "state": "complete",
+    "rev": 7
+  },
+  "partial": false,
+  "data": {
+    "id": "fn:0x401000",
+    "addr": "0x401000",
+    "summary": "func_0000 has 1 bytes."
+  },
+  "warnings": [
+    {
+      "code": "W_COERCED",
+      "num": 1,
+      "field": "/id",
+      "message": "The server changed an argument to the type of the schema. The call ran with the changed value.",
+      "details": {
+        "from_name": "id",
+        "to_name": "target"
+      }
+    }
+  ]
+}

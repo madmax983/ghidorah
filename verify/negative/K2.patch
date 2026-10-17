@@ -1,0 +1,12 @@
+diff --git a/crates/kernel/src/range.rs b/crates/kernel/src/range.rs
+--- a/crates/kernel/src/range.rs
++++ b/crates/kernel/src/range.rs
+@@ -221,7 +221,7 @@
+         return None;
+     }
+     let delta = va - map.va;
+-    if delta >= map.file_size {
++    if delta > map.file_size {
+         return None;
+     }
+     map.file_off.checked_add(delta)

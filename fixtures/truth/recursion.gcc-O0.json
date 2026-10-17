@@ -1,0 +1,237 @@
+{
+  "binaries": [
+    {
+      "name": "recursion.gcc-O0",
+      "sha256": "aabd992d549875e2d6b78f57afc5ff82aca3c9795c3a5d51e7a26e3f64c039cc",
+      "variant": "none"
+    },
+    {
+      "name": "recursion.gcc-O0.stripped",
+      "sha256": "36189cef79f663f078189480ef0db89fa8f61c7cc38f8cc8e3b106a57111744e",
+      "variant": "stripped"
+    }
+  ],
+  "build": {
+    "cflags": ["-O0"],
+    "compiler": "gcc 13.3.0",
+    "id": "gcc-O0",
+    "ldflags": []
+  },
+  "call_edges": [
+    ["__do_global_dtors_aux","__cxa_finalize"],
+    ["__do_global_dtors_aux","deregister_tm_clones"],
+    ["_start","__libc_start_main"],
+    ["fib","fib"],
+    ["frame_dummy","register_tm_clones"],
+    ["is_even","is_odd"],
+    ["is_odd","is_even"],
+    ["main","__stack_chk_fail"],
+    ["main","fib"],
+    ["main","is_even"],
+    ["main","printf"],
+    ["main","walk"],
+    ["print_node","printf"],
+    ["walk","walk"]
+  ],
+  "cold_parts": [],
+  "duplicate_names": {},
+  "elf": {
+    "entry": "0x1080",
+    "image_base": "0x0",
+    "interp": true,
+    "type": "DYN"
+  },
+  "facts": {
+    "abstain": [
+      {
+        "answer": "unknown",
+        "claim": {
+          "args": ["walk","print_node"],
+          "rel": "calls"
+        },
+        "id": "walk_calls_print_node",
+        "reason": "walk calls a visitor that its caller passes as an argument"
+      },
+      {
+        "answer": "unknown",
+        "claim": {
+          "args": ["walk","fib"],
+          "rel": "calls"
+        },
+        "id": "walk_calls_fib",
+        "reason": "walk calls a visitor that its caller passes as an argument"
+      }
+    ],
+    "claims": [
+      {
+        "args": ["fib","fib"],
+        "rel": "calls"
+      },
+      {
+        "args": ["is_even","is_odd"],
+        "rel": "calls"
+      },
+      {
+        "args": ["is_odd","is_even"],
+        "rel": "calls"
+      },
+      {
+        "args": ["main","walk"],
+        "rel": "calls"
+      }
+    ],
+    "indirect_calls": [
+      {
+        "func": "walk",
+        "targets": ["print_node"]
+      }
+    ]
+  },
+  "fixture": "recursion.gcc-O0",
+  "function_count": 13,
+  "functions": [
+    {
+      "addr": "0x1000",
+      "insns": 8,
+      "name": "_init",
+      "size": 0
+    },
+    {
+      "addr": "0x1080",
+      "insns": 13,
+      "name": "_start",
+      "size": 38
+    },
+    {
+      "addr": "0x10b0",
+      "insns": 11,
+      "name": "deregister_tm_clones",
+      "size": 0
+    },
+    {
+      "addr": "0x10e0",
+      "insns": 16,
+      "name": "register_tm_clones",
+      "size": 0
+    },
+    {
+      "addr": "0x1120",
+      "insns": 16,
+      "name": "__do_global_dtors_aux",
+      "size": 0
+    },
+    {
+      "addr": "0x1160",
+      "insns": 2,
+      "name": "frame_dummy",
+      "size": 0
+    },
+    {
+      "addr": "0x1169",
+      "insns": 23,
+      "name": "fib",
+      "size": 65
+    },
+    {
+      "addr": "0x11aa",
+      "insns": 15,
+      "name": "is_even",
+      "size": 43
+    },
+    {
+      "addr": "0x11d5",
+      "insns": 15,
+      "name": "is_odd",
+      "size": 43
+    },
+    {
+      "addr": "0x1200",
+      "insns": 28,
+      "name": "walk",
+      "size": 91
+    },
+    {
+      "addr": "0x125b",
+      "insns": 15,
+      "name": "print_node",
+      "size": 47
+    },
+    {
+      "addr": "0x128a",
+      "insns": 50,
+      "name": "main",
+      "size": 230
+    },
+    {
+      "addr": "0x1370",
+      "insns": 4,
+      "name": "_fini",
+      "size": 0
+    }
+  ],
+  "gaps": [],
+  "generator": {
+    "name": "xtask-fixtures",
+    "version": "1"
+  },
+  "imports": ["__cxa_finalize","__libc_start_main","__stack_chk_fail","printf"],
+  "jump_tables": [],
+  "leaf_functions": [],
+  "libraries": ["libc.so.6"],
+  "network_imports": [],
+  "program": "recursion",
+  "protections": {
+    "build_id": "5b76c9418016d3606ba00b835dc75df9d44fe073",
+    "canary": true,
+    "fortify": false,
+    "ibt": true,
+    "nx": true,
+    "pie": true,
+    "relro": "full",
+    "rpath": false,
+    "runpath": false,
+    "shstk": true
+  },
+  "self_calls": ["fib","walk"],
+  "strings": [],
+  "survey_facts": [
+    {
+      "kind": "function",
+      "value": "fib"
+    },
+    {
+      "kind": "function",
+      "value": "walk"
+    },
+    {
+      "kind": "library",
+      "value": "libc.so.6"
+    },
+    {
+      "kind": "protection",
+      "value": "canary"
+    },
+    {
+      "kind": "protection",
+      "value": "ibt"
+    },
+    {
+      "kind": "protection",
+      "value": "nx"
+    },
+    {
+      "kind": "protection",
+      "value": "pie"
+    },
+    {
+      "kind": "protection",
+      "value": "shstk"
+    }
+  ],
+  "syscall_names": [],
+  "syscalls": [],
+  "tail_calls": [
+    ["frame_dummy","register_tm_clones"]
+  ],
+  "tier": "T1"
+}

@@ -1,0 +1,36 @@
+{"golden":"generator=tools_examples version=1 fixture=crackme.gcc-O2 fixture_sha256=467a43b75d95c826daba8cb216d01d7fd386aa96c5ef5a95c2effffe1780de8f"}
+{
+  "ok": true,
+  "rev": 0,
+  "session": "cli",
+  "partial": false,
+  "data": {
+    "items": [
+      {
+        "name": "func_get",
+        "summary": "Get one or more functions with selected sections: summary, disassembly, IR, xrefs, callers, callees, strings, variables, notes, why, CFG and jump tables.",
+        "annotations": {
+          "readOnlyHint": true,
+          "destructiveHint": false,
+          "idempotentHint": true,
+          "openWorldHint": false
+        }
+      },
+      {
+        "name": "func_list",
+        "summary": "List and filter the functions of a binary, and sort them by address, name, size or priority.",
+        "annotations": {
+          "readOnlyHint": true,
+          "destructiveHint": false,
+          "idempotentHint": true,
+          "openWorldHint": false
+        }
+      }
+    ]
+  },
+  "page": {
+    "returned": 2,
+    "total": 2,
+    "truncated": false
+  }
+}

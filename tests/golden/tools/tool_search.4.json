@@ -1,0 +1,36 @@
+{"golden":"generator=tools_examples version=1 fixture=crackme.gcc-O2 fixture_sha256=467a43b75d95c826daba8cb216d01d7fd386aa96c5ef5a95c2effffe1780de8f"}
+{
+  "ok": true,
+  "rev": 0,
+  "session": "cli",
+  "partial": false,
+  "data": {
+    "items": [
+      {
+        "name": "binary_load",
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": false,
+          "idempotentHint": true,
+          "openWorldHint": false
+        }
+      },
+      {
+        "name": "calc",
+        "annotations": {
+          "readOnlyHint": true,
+          "destructiveHint": false,
+          "idempotentHint": true,
+          "openWorldHint": false
+        }
+      }
+    ]
+  },
+  "page": {
+    "returned": 2,
+    "total": 5,
+    "truncated": true,
+    "next_cursor": "010b00f744652ad9b175db00000000000000000000010001000000000000007f35b022",
+    "hint": "Add words to query, or send level names for shorter items."
+  }
+}

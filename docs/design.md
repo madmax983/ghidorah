@@ -1,6 +1,6 @@
 # ghidorah design and plan
 
-Date: 2026-10-17. Revision: 3 (see the revision log at the end). Status: Accepted for implementation. Inputs: `docs/research.md`, the planning results (three brainstorms, a reverse brainstorm and six thinking hats), the design review of revision 1 and the owner decisions of 2026-10-17 (revision 3).
+Date: 2026-10-17. Revision: 4 (see the revision log at the end). Status: Accepted for implementation. Inputs: `docs/research.md`, the planning results (three brainstorms, a reverse brainstorm and six thinking hats), the design review of revision 1 and the owner decisions of 2026-10-17 (revision 3).
 
 How to read this document:
 
@@ -266,7 +266,11 @@ graph TD
   analysis --> x86
   analysis --> types
   analysis --> loader
+  analysis --> base
+  analysis --> kernel
+  analysis --> json
   decomp --> analysis
+  decomp --> base
   decomp --> ir
   decomp --> db
   decomp --> types
@@ -284,6 +288,8 @@ graph TD
   eval --> tools
   eval --> json
   eval -. dev .-> testkit
+  decomp -. dev .-> loader
+  decomp -. dev .-> json
   xtask --> json
   xtask --> base
   xtask --> testkit
@@ -292,7 +298,10 @@ graph TD
 Rules:
 
 - Every production crate can take `ghidorah-testkit` as a dev-dependency. Only the `loader` tests take `ghidorah-oracle` as a dev-dependency (counting allocator, AC-055).
+- The `decomp` tests take `ghidorah-loader` and `ghidorah-json` as dev-dependencies. They load the fixtures and read the truth files and the leaf vectors (AC-101).
 - `json` and `testkit` are leaves. They have no workspace dependencies.
+- `analysis` names `Address`, `FuncId` and `Fuel` of `base` and the `RangeSet` of `kernel`. It writes its analysis set through the JSON codec of `db`, so it also takes `json` (WP-15).
+- `decomp` names `Fuel`, `FuncId`, `VarId` and `WarningCode` of `base` (WP-21).
 - Pure core crates (`kernel`, `base`, `json`, `loader`, `x86`, `ir`, `types`, `analysis`, `decomp`) do not use `std::fs`, `std::net`, `std::process`, `std::env` or `std::time::SystemTime` (AC-017). `db`, `tools` and `cli` get file access and a clock from the edge.
 - No crate calls `std::env::set_var` or `std::env::remove_var` (AC-223). The `cli` crate reads every `GHIDORAH_*` variable once into `RunConfig` (Section 10.11).
 
@@ -601,10 +610,10 @@ Default projects root: `$XDG_DATA_HOME/ghidorah/projects` (fallback `$HOME/.loca
 ```text
 <projects_root>/<binary_id>/
   .gitignore         contains "*"
-  project.json       {format_version, binary_id, sha256, file_name, analysis_config, ghidorah_version}
+  project.json       {format_version, binary_id, sha256, file_name, load, analysis_config, ghidorah_version}
   bin/<sha256>       immutable input copy, mode 0444, no exec bit
   journal.jsonl      append-only, one sync per commit, meta lines without a rev change
-  snapshot.json      canonical JCS: {format_version, rev, analysis_inputs_hash, facts, progress, marks}
+  snapshot.json      canonical JCS: {format_version, rev, journal_lines, analysis_inputs_hash, facts, progress, marks}
   project.lock       {pid, start_time, boot_id}
   crash/<id>.json    crash repro: tool, args, rev, panic text
 ```
@@ -612,6 +621,8 @@ Default projects root: `$XDG_DATA_HOME/ghidorah/projects` (fallback `$HOME/.loca
 - All file access goes through the `Fs` trait at the `db` edge: `create_new`, `append`, `write_all`, `sync_file`, `rename`, `sync_dir`, `remove`, `read`. Production uses `RealFs`. Tests use `RecordingFs` (an operation log) and `CrashFs` (stops after operation k and drops every write that has no sync).
 - A commit is `append` of one journal line, then `sync_file`.
 - A snapshot is `create_new` of `snapshot.json.tmp` in the same directory, `write_all`, `sync_file`, `rename` and `sync_dir` (AC-120a). The session writes a snapshot after each completed analysis run, every 256 journal lines and at clean shutdown.
+- `project.json` member `load` is `Auto` or `Raw { base, entry }`. A reopen loads the input copy the same way again.
+- `snapshot.json` member `journal_lines` is the count of journal lines that the snapshot covers. A valid snapshot has two properties. `journal_lines` is at most the line count of the journal. The rev of the last covered line equals the snapshot `rev`.
 - `format_version` starts at 1. Each later version ships a migration function and a golden v1 project fixture (AC-120c).
 - `crash_id` is the first 16 hex digits of `sha256(tool, JCS(args), rev)`. Output paths are relative to the project directory.
 - Lock: a write open creates `project.lock` with `create_new`. A lock whose process is alive (same `boot_id`, same start time in `/proc/<pid>/stat`) gives `PROJECT_LOCKED` with a read-only hint. The error names the owner of a stale lock. Only `--break-lock` replaces a stale lock.
@@ -670,7 +681,7 @@ flowchart TD
 | ELF32, ELF64 BE | `UNSUPPORTED_FORMAT` with `supported: ["elf64-le", "pe32+-x86_64", "raw"]` in `details`. |
 | PE32+, `Machine = 0x8664` (AMD64), EXE or DLL | Full load and full analysis (Sections 4.9 to 4.15). |
 | PE32, or PE32+ with another machine | `UNSUPPORTED_FORMAT` with `details.detected` (for example `pe32-i386` or `pe32+-arm64`) and the supported list (Section 4.9). |
-| Raw blob | `binary_load { path, format: "raw", arch: "x86_64", base, entry? }` maps the file as one RWX region at `base`. Discovery seeds only from `entry` and from agent `func_edit create`. |
+| Raw blob | `binary_load { path, file_format: "raw", arch: "x86_64", base, entry? }` maps the file as one RWX region at `base`. Discovery seeds only from `entry` and from agent `func_edit create`. |
 | Mach-O, fat, DOS MZ without a PE signature, Java class | `probe` identifies them. `binary_load` returns `UNSUPPORTED_FORMAT` with the detected format and the supported list. |
 
 ### 4.2 Two layers
@@ -1042,9 +1053,18 @@ Seeds in confidence order. Each start keeps `start_reason`, a `Why` and a confid
 | 8 | `endbr64` heads in `.text` that do not follow a call to a setjmp-like function and are not jump targets inside a body | `Endbr` | 85 | `R_ENDBR_HEAD` |
 | 9 | Tail-call targets (FETCH rule) | `TailCall` | 80 | `R_TAILCALL` |
 | 10 | Agent `func_edit create` | `Agent` | 100 | (agent fact) |
+| 11 | Code pointers in data (revision 4): an aligned 8-byte value in an initialized region without execute permission that points into an executable region. A relocation must give the value (`R_X86_64_RELATIVE` addend, `R_X86_64_64` or a PE `DIR64` base relocation). In a file without such relocations, the value must be in a run of 2 or more such pointers | `DataPtr` | 70 | `R_DATA_CODE_PTR` |
+| 12 | Address-taken code (revision 4): the target of a RIP-relative `lea`, or of a `mov` with a 32-bit absolute immediate in a non-PIE file, that lies in an executable region | `AddrTaken` | 75 | `R_ADDR_TAKEN` |
 
 - Recursive descent follows fall-through, branch and call edges. It stops at noreturn calls (Section 7.7).
 - Jump-table targets are case blocks, not functions.
+- Seeds 11 and 12 run after recursive descent from seeds 1-10 and after jump-table recovery. A candidate becomes a start only when it passes 4 tests:
+  - It is not inside a known function body or part.
+  - It is not a jump-table case target.
+  - It is not a PLT or IAT slot.
+  - A linear decode from it gives at least 4 valid instructions before an invalid encoding or the end of the region.
+- Padding heads (`nop`, `int3`, zero bytes) move the candidate to the first other instruction.
+- Without these seeds, functions that only code pointers in data or `lea` reach stay undiscovered. This is the main cause of misses on files without `.eh_frame` (measured: F1 0.749 before revision 4, all misses of this kind).
 - FETCH tail-call rule (`TailCallsAndParts`, WP-19): a jump is a tail call only when three conditions are true. The stack height from Section 7.9 is 0. The target obeys the calling convention. Only jumps from this function refer to the target. Otherwise an FDE-only target merges into the caller as a `Cold` part.
 - The MVP has no prologue-pattern gap fill. Executable ranges that no function owns become gap items `{range, bytes, first_insn, remedy: func_edit create}` in the worklist (ADR-0024). Padding (`nop` runs, `int3` runs, zero runs) is not a gap.
 - Gates: function-start F1 >= 0.98 with `.eh_frame` and >= 0.90 without, against the unstripped twin (AC-077, AC-078). Truth excludes `.cold` symbols, because they are parts. Output keeps the confidence values. The calibration gate is stretch S24. PE fixtures check `.pdata` starts against the `RUNTIME_FUNCTION` table and the link map (AC-248).
@@ -1401,7 +1421,7 @@ Profiles (registry data, ADR-0005):
 
 Key inputs, then output shape. All outputs sit in the envelope `data` (Section 10.6). Lists are `data.items`. Defaults are in parentheses.
 
-1. `binary_load { path | builtin: "demo" | binary_id, format?: auto|elf|pe|raw, arch?: x86_64, base?, entry?, analysis?: none|triage|full (full), max_steps? (100,000,000) }` -> `{ binary_id, sha256, file_name, format, arch, kind, entry, size, already_loaded, read_only, analysis: { state, steps_used }, diagnostics: { total, by_code: [{code, count}] } }`. Group: exactly one of `path`, `builtin` and `binary_id`. `path` must be under a configured root. `binary_id` reopens a project from `bin/<sha256>` with no root check.
+1. `binary_load { path | builtin: "demo" | binary_id, file_format?: auto|elf|pe|raw, arch?: x86_64, base?, entry?, analysis?: none|triage|full (full), max_steps? (100,000,000) }` -> `{ binary_id, sha256, file_name, format, arch, kind, entry, size, already_loaded, read_only, analysis: { state, steps_used }, diagnostics: { total, by_code: [{code, count}] } }`. Group: exactly one of `path`, `builtin` and `binary_id`. `path` must be under a configured root. `binary_id` reopens a project from `bin/<sha256>` with no root check. The argument is `file_format`, because the global argument `format` (concise or detailed) applies to every tool (revision 4).
 2. `binary_survey { include?: [identity, protections, segments, sections, imports, exports, strings, entries, functions, syscalls, notes, coverage, languages, diagnostics] (all 14), max_chars? (12,000) }` -> one object per included section. Each section has its own sub-budget. A cut section has `omitted: { count, next }`, where `next` is the `search` call that lists the rest. ELF imports group by Tier-0 category. PE imports group by DLL, and inside each DLL by Tier-0 category. Ordinal imports show `#<ordinal>`, and delay imports show `delay: true`. Strings show the top referenced strings with `ref_count` and up to 3 referencing functions. `next` proposes `func_list { sort: "priority" }` and `func_get` on `main`.
 3. `analysis_run { until?: triage|full (full), max_steps? }` -> `{ state: complete|budget_stopped|stale, steps_used, resume, analyzers: [{ name, priority, pending, runs }], changed: { functions, refs, strings, jumptables } }`. MCP progress notifications go out per fuel slice when the request has a `progressToken`.
 4. `func_list { filter?: { name (glob), min_confidence, start_reason[], visited, named, typed, has_caveat, calls (import glob), size_min, size_max }, in?, sort?: addr|name|size|priority|in_degree (addr) }` -> items `{ id, addr, name, size, start_reason, confidence, flags[], callers, callees, caveats, visited, named }`. Each analysis run freezes `priority` (Section 7.11). `visited` is a live filter.
@@ -2239,7 +2259,9 @@ Ownership rules:
 
 ### 14.3 Work packages
 
-Pairs in one row run in parallel. They share no file except the plain lists and goldens of the register commit (Section 14.1). The production plan of each WP is in parentheses as information only (Section 1.6). A row with one WP has no partner, because its dependencies leave no other WP free for that row. Revision 3 moved WP-16 to P8 and WP-20 to P10, so that WP-18 starts in P7, as soon as WP-12 merges.
+Pairs in one row run in parallel. They share no file except the plain lists and goldens of the register commit (Section 14.1). The production plan of each WP is in parentheses as information only (Section 1.6). A row with one WP has no partner, because its dependencies leave no other WP free for that row.
+
+Revision 3 moved WP-16 to P8 and WP-20 to P10, so that WP-18 starts in P7, as soon as WP-12 merges. Revision 4 adds WP-19b in P13. It also moves WP-23 to P13, because WP-17b and WP-21 merge in P12. WP-22a and WP-22b move to P14, WP-24 and WP-25 to P15, and WP-29 joins WP-30 in P16.
 
 | Pair | WP | WP |
 |---|---|---|
@@ -2255,10 +2277,10 @@ Pairs in one row run in parallel. They share no file except the plain lists and 
 | P10 | WP-15 Analysis spine (1,540) | WP-20 Persistence and history (1,210) |
 | P11 | WP-17a References and strings (770) | WP-19 IR-based analyzers (1,580) |
 | P12 | WP-17b Read tools (1,480) | WP-21 Decompiler core (1,750) |
-| P13 | WP-22a Names, comments, notes and briefs (470) | WP-22b Overrides and type tools (440) |
-| P14 | WP-24 `fact_check` (550) | WP-25 `batch_run` (690) |
-| P15 | WP-23 Decompiler output (1,700) | WP-30 PE32+ x86-64 loader (1,900) |
-| P16 | WP-29 Function similarity (800) | - |
+| P13 | WP-19b Code-pointer seeds (300) | WP-23 Decompiler output (1,700) |
+| P14 | WP-22a Names, comments, notes and briefs (470) | WP-22b Overrides and type tools (440) |
+| P15 | WP-24 `fact_check` (550) | WP-25 `batch_run` (690) |
+| P16 | WP-29 Function similarity (800) | WP-30 PE32+ x86-64 loader (1,900) |
 | P17 | WP-26 Evaluation harness (tooling) | - |
 | P18 | WP-27 Hardening (tooling) | WP-28 Docs and AC evidence (no code) |
 
@@ -2553,13 +2575,27 @@ Pairs in one row run in parallel. They share no file except the plain lists and 
 - Provides: the L0 function IR, stack frames and the `Intrinsic` escape rule, FETCH tail calls and cold parts, jump tables (method A), the calling convention, `main` discovery, syscalls, call-site arguments, override seeding (functions, flow, jump tables, indirect targets, agent refs) with `W_AGENT_OVERRIDE_CONFLICT`.
 - Touches after merge: `crates/analysis/src/registry.rs`, `crates/ir/src/lib.rs`.
 - Depends on: WP-10, WP-15, WP-16, WP-20 (the undo API for AC-097). AC-089 needs the string facts of WP-17a in the same pair, so the WP-19 register commit rebases after WP-17a merges.
-- Closes: AC-070, AC-077, AC-078, AC-079, AC-081, AC-082a, AC-084, AC-088, AC-089, AC-090a, AC-090b, AC-091, AC-092, AC-093, AC-094, AC-097, AC-207.
+- Closes: AC-070, AC-077, AC-079, AC-081, AC-082a, AC-084, AC-088, AC-089, AC-090a, AC-090b, AC-091, AC-092, AC-093, AC-094, AC-097, AC-207.
 
 | Row | Named tests |
 |---|---|
 | Happy | `ac_081_jumptable_truth`, `ac_088_main_discovery`, `ac_089_syscalls`, `ac_090a_param_counts` |
 | Boundary | `ac_091_sp_vs_cfa`, `ac_207_intrinsic_escape`, `ac_079_cold_parts`, `ac_084_no_merged_functions`, `ac_082a_unresolved_remedy` |
-| Regression | `ac_077_f1_eh`, `ac_078_f1_noeh`, `ac_097_reanalysis_path_independent`, `ac_070_fusion_rate` |
+| Regression | `ac_077_f1_eh`, `ac_097_reanalysis_path_independent`, `ac_070_fusion_rate` |
+
+#### WP-19b Code-pointer seeds (revision 4)
+
+- Owns: `crates/analysis/src/analyzers/{dataptr,addrtaken}.rs`, `crates/analysis/tests/ir_analyzers/codeptr.rs`.
+- Provides: seeds 11 (`DataPtr`) and 12 (`AddrTaken`) of Section 7.3 with the Why rules `R_DATA_CODE_PTR` and `R_ADDR_TAKEN`, and the new `StartReason` variants.
+- Touches after merge: `crates/analysis/src/registry.rs`, `crates/analysis/src/analyzers/mod.rs`, the `StartReason` and Why rule enums and their JSON codecs, `crates/analysis/tests/ir_analyzers/pipeline.rs` (remove the `#[ignore]` of `ac_078_f1_noeh`). Its partner WP-23 owns none of these files, so WP-19b edits them in its own branch.
+- Depends on: WP-17a, WP-19.
+- Closes: AC-078, AC-257.
+
+| Row | Named tests |
+|---|---|
+| Happy | `ac_078_f1_noeh`, `ac_257_codeptr_precision`, `dataptr_seeds_relocated_table` |
+| Boundary | `pointer_into_known_body_is_no_seed`, `pointer_to_data_is_no_seed`, `unaligned_value_is_no_seed`, `single_unrelocated_pointer_is_no_seed`, `short_decode_is_no_seed` |
+| Regression | `jumptable_case_is_no_function`, `ac_077_f1_eh` stays at or above 0.98 |
 
 #### WP-20 Persistence and history
 
@@ -2877,7 +2913,7 @@ Rules for this section:
 | AC-018a | `xtask ac` finds at least one evidence item for every MVP AC: every row that is not moved to stretch or removed, the rows of Sections 15.20 and 15.22 included. | `xtask:ac#/missing == []` | 28 | 27 |
 | AC-018b | Every T1 and T2 evidence item passes, and every record item matches its input hash. | `xtask:ac#/failed == []` | 28 | 27 |
 | AC-018c | `xtask ac` fails when an AC closes in a WP that comes before a WP of its Needs column. | `test:xtask::ac_018c_needs_order@T1` | 01 | - |
-| AC-019 | `ci.yml` has a tier-1 job and a tier-2 job and uses no action other than `actions/checkout`. | `test:xtask::ac_019_ci_workflow@T1` | 01 | - |
+| AC-019 | `ci.yml` has a tier-1 job and a tier-2 job and uses no action other than `actions/checkout` and `actions/cache`. | `test:xtask::ac_019_ci_workflow@T1` | 01 | - |
 | AC-020 | Test binaries pass with `PATH` reduced to the toolchain directory and an empty `HOME`. | `xtask:ci#/steps/test_hermetic/ok == true` | 27 | - |
 | AC-021 | Tier 1 finishes in at most 120 s on the 4-core build host. | `xtask:ci#/steps/tier1/seconds <= 120` | 27 | - |
 | AC-022 | Each fixture sha256 equals `fixtures/manifest.json`, and each golden header names the current fixture sha256 and generator version. | `test:xtask::ac_022_fixture_manifest@T1` | 06 | - |
@@ -2989,7 +3025,7 @@ AC-073 and AC-075b are in Section 15.20 (SSA and decompiler).
 | AC | Statement | Evidence | Closes | Needs |
 |---|---|---|---|---|
 | AC-077 | Function-start F1 is at least 0.98 on stripped T1 and T2 fixtures with `.eh_frame`, against unstripped-twin truth. | `test:analysis::ac_077_f1_eh@T1` | 19 | - |
-| AC-078 | Function-start F1 is at least 0.90 on the no-`.eh_frame` variants. | `test:analysis::ac_078_f1_noeh@T1` | 19 | - |
+| AC-078 | Function-start F1 is at least 0.90 on the no-`.eh_frame` variants. | `test:analysis::ac_078_f1_noeh@T1` | 19b | - |
 | AC-079 | Every `.cold` part belongs to its parent function (`die.cold` belongs to `die`). | `test:analysis::ac_079_cold_parts@T1` | 19 | - |
 | AC-080a | No CFG has a fall-through edge after a call to a noreturn function. | `test:analysis::ac_080a_no_fallthrough_after_noreturn@T1` | 15 | - |
 | AC-080b | The wrapper functions of the `noreturn_*` fixtures have the noreturn flag. | `test:analysis::ac_080b_noreturn_wrappers@T1` | 15 | - |
@@ -3312,6 +3348,12 @@ These ACs are normal MVP ACs since revision 3 (Section 1.7). AC-018a counts them
 | AC-255 | PE protections (`DYNAMIC_BASE`, `HIGH_ENTROPY_VA`, `NX_COMPAT`, `GUARD_CF`, `FORCE_INTEGRITY`) and the CodeView identity (GUID, age, PDB path) equal the truth of each PE fixture. | `test:loader::ac_255_pe_protections_identity@T1` | 30 | - |
 | AC-256 | On 10,000 random L0 programs, SSA construction and every pass keep the interpreter result, and the SSA checker finds zero violations. | `test:ir::ac_256_ssa_random_programs@T1` | 18 | - |
 
+### 15.23 ACs appended in revision 4
+
+| AC | Statement | Evidence | Closes | Needs |
+|---|---|---|---|---|
+| AC-257 | The `DataPtr` and `AddrTaken` seeds add no false start on the T1 and T2 fixtures with `.eh_frame`. At most 1% of their starts are false on the no-`.eh_frame` variants. | `test:analysis::ac_257_codeptr_precision@T1` | 19b | - |
+
 ## 16 Risks and mitigations
 
 | Risk | Impact | Mitigation | Signal |
@@ -3431,3 +3473,10 @@ Revision 2 (2026-10-17) applies the design review of revision 1. Main changes:
 - Eval: frozen questions, held-out intents, floors and baselines, a bless log, an argument-provenance lint, a hint-follower robot, abstain and restart scenarios, and the ADR-0014 decision rule.
 - ADRs: ADR-0026 (benchmarks) and ADR-0027 (coverage) are new. Every ADR has Alternatives and a Verified-by line. ADR-0006 names the spec commit.
 - STE: long sentences, passive forms and banned words were rewritten.
+
+Revision 4 (2026-10-17) records findings of the build:
+
+- Section 7.3 adds seeds 11 (`DataPtr`) and 12 (`AddrTaken`). Without them, F1 on files without `.eh_frame` was 0.749 against the 0.90 gate of AC-078. New WP-19b builds them. AC-078 moves from WP-19 to WP-19b. New AC-257 limits the false starts of the new seeds.
+- The pairs table moves WP-23 to P13 next to WP-19b, and shifts WP-22a, WP-22b, WP-24, WP-25 and WP-29 by one row. `xtask/src/ac.rs` PAIRS follows the table.
+- `binary_load` takes `file_format`, not `format`, because the global `format` argument applies to every tool.
+- Section 3.10 records the `load` member of `project.json` and the `journal_lines` member of `snapshot.json`.

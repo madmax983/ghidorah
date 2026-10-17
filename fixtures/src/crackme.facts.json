@@ -1,0 +1,77 @@
+{
+  "claims": [
+    {
+      "args": [
+        "main",
+        "check_password"
+      ],
+      "rel": "calls"
+    },
+    {
+      "args": [
+        "main",
+        "puts"
+      ],
+      "rel": "calls"
+    }
+  ],
+  "constants": {
+    "password_length": "10",
+    "xor_key": "0x5a"
+  },
+  "gaps": [
+    {
+      "symbol": "hidden_gate"
+    }
+  ],
+  "program": "crackme",
+  "runs": [
+    {
+      "args": [
+        "s3cr3t-k3y"
+      ],
+      "exit": 0,
+      "stdout": "Access granted\n"
+    },
+    {
+      "args": [
+        "guess"
+      ],
+      "exit": 1,
+      "stdout": "Access denied\n"
+    },
+    {
+      "args": [],
+      "exit": 2,
+      "stdout": "usage: crackme <password>\n"
+    }
+  ],
+  "secrets": {
+    "password": "s3cr3t-k3y"
+  },
+  "strings": [
+    {
+      "text": "Access granted"
+    },
+    {
+      "text": "Access denied"
+    },
+    {
+      "text": "usage: crackme <password>"
+    }
+  ],
+  "survey_facts": [
+    {
+      "kind": "string",
+      "value": "Access granted"
+    },
+    {
+      "kind": "string",
+      "value": "Access denied"
+    },
+    {
+      "kind": "import",
+      "value": "puts"
+    }
+  ]
+}

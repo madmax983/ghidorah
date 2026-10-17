@@ -1,0 +1,17 @@
+{"golden":"generator=tools_examples version=1"}
+{
+  "ok": true,
+  "rev": 0,
+  "session": "test",
+  "partial": false,
+  "data": {
+    "value": {
+      "a": [
+        1,
+        2
+      ]
+    },
+    "flag": true,
+    "tag": "note:3"
+  }
+}

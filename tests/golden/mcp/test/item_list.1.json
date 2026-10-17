@@ -1,0 +1,46 @@
+{"golden":"generator=cli_examples version=1"}
+{
+  "ok": true,
+  "binary_id": "b1",
+  "rev": 1,
+  "session": "s",
+  "analysis": {
+    "state": "complete",
+    "rev": 1
+  },
+  "partial": false,
+  "data": {
+    "items": [
+      {
+        "id": "fn:0x401000",
+        "addr": "0x401000",
+        "name": "item_0"
+      },
+      {
+        "id": "fn:0x401010",
+        "addr": "0x401010",
+        "name": "item_1"
+      },
+      {
+        "id": "fn:0x401020",
+        "addr": "0x401020",
+        "name": "item_2"
+      },
+      {
+        "id": "fn:0x401030",
+        "addr": "0x401030",
+        "name": "item_3"
+      },
+      {
+        "id": "fn:0x401040",
+        "addr": "0x401040",
+        "name": "item_4"
+      }
+    ]
+  },
+  "page": {
+    "returned": 5,
+    "total": 5,
+    "truncated": false
+  }
+}

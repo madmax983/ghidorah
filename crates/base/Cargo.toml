@@ -1,0 +1,24 @@
+[package]
+name = "ghidorah-base"
+description = "Base types: addresses, interval maps, IDs, code catalogs, limits, fuel, hashes, hex, binary text, did-you-mean, glob and clock."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# The crate has no unit tests. Its tests are in the test binary `tests/base/main.rs`
+# and in the fuzz binary `tests/fuzz_addr_expr.rs`.
+[lib]
+name = "ghidorah_base"
+path = "src/lib.rs"
+test = false
+
+[dependencies]
+ghidorah-kernel = { path = "../kernel" }
+
+[dev-dependencies]
+ghidorah-testkit = { path = "../testkit" }
+
+[lints]
+workspace = true

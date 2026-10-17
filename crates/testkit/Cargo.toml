@@ -1,0 +1,15 @@
+[package]
+name = "ghidorah-testkit"
+version.workspace = true
+description = "Std-only test kit: PRNG, property tests, fuzz harness, golden files, model checks, benchmarks, fixture cache, STE checker and ElfBuilder."
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "ghidorah_testkit"
+path = "src/lib.rs"
+
+[lints]
+workspace = true

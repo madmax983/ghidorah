@@ -1,0 +1,273 @@
+{"golden":"generator=tools_examples version=1"}
+{
+  "ok": true,
+  "binary_id": "b1",
+  "rev": 7,
+  "session": "test",
+  "analysis": {
+    "state": "complete",
+    "rev": 7
+  },
+  "partial": false,
+  "data": {
+    "items": [
+      {
+        "id": "fn:0x401000",
+        "addr": "0x401000",
+        "name": "func_0000",
+        "size": 1,
+        "label": {
+          "text": "func_0000",
+          "hex": "66756e635f30303030",
+          "len": 9,
+          "src": "binary"
+        }
+      },
+      {
+        "id": "fn:0x401010",
+        "addr": "0x401010",
+        "name": "func_0001",
+        "size": 38,
+        "label": {
+          "text": "func_0001",
+          "hex": "66756e635f30303031",
+          "len": 9,
+          "src": "binary"
+        }
+      },
+      {
+        "id": "fn:0x401020",
+        "addr": "0x401020",
+        "name": "func_0002",
+        "size": 75,
+        "label": {
+          "text": "func_0002",
+          "hex": "66756e635f30303032",
+          "len": 9,
+          "src": "binary"
+        }
+      },
+      {
+        "id": "fn:0x401030",
+        "addr": "0x401030",
+        "name": "func_0003",
+        "size": 112,
+        "label": {
+          "text": "func_0003",
+          "hex": "66756e635f30303033",
+          "len": 9,
+          "src": "binary"
+        }
+      },
+      {
+        "id": "fn:0x401040",
+        "addr": "0x401040",
+        "name": "func_0004",
+        "size": 149,
+        "label": {
+          "text": "func_0004",
+          "hex": "66756e635f30303034",
+          "len": 9,
+          "src": "binary"
+        }
+      },
+      {
+        "id": "fn:0x401050",
+        "addr": "0x401050",
+        "name": "func_0005",
+        "size": 186,
+        "label": {
+          "text": "func_0005",
+          "hex": "66756e635f30303035",
+          "len": 9,
+          "src": "binary"
+        }
+      },
+      {
+        "id": "fn:0x401060",
+        "addr": "0x401060",
+        "name": "func_0006",
+        "size": 23,
+        "label": {
+          "text": "func_0006",
+          "hex": "66756e635f30303036",
+          "len": 9,
+          "src": "binary"
+        }
+      },
+      {
+        "id": "fn:0x401070",
+        "addr": "0x401070",
+        "name": "func_0007",
+        "size": 60,
+        "label": {
+          "text": "func_0007",
+          "hex": "66756e635f30303037",
+          "len": 9,
+          "src": "binary"
+        }
+      },
+      {
+        "id": "fn:0x401080",
+        "addr": "0x401080",
+        "name": "func_0008",
+        "size": 97,
+        "label": {
+          "text": "func_0008",
+          "hex": "66756e635f30303038",
+          "len": 9,
+          "src": "binary"
+        }
+      },
+      {
+        "id": "fn:0x401090",
+        "addr": "0x401090",
+        "name": "func_0009",
+        "size": 134,
+        "label": {
+          "text": "func_0009",
+          "hex": "66756e635f30303039",
+          "len": 9,
+          "src": "binary"
+        }
+      },
+      {
+        "id": "fn:0x4010a0",
+        "addr": "0x4010a0",
+        "name": "func_0010",
+        "size": 171,
+        "label": {
+          "text": "func_0010",
+          "hex": "66756e635f30303130",
+          "len": 9,
+          "src": "binary"
+        }
+      },
+      {
+        "id": "fn:0x4010b0",
+        "addr": "0x4010b0",
+        "name": "func_0011",
+        "size": 8,
+        "label": {
+          "text": "func_0011",
+          "hex": "66756e635f30303131",
+          "len": 9,
+          "src": "binary"
+        }
+      },
+      {
+        "id": "fn:0x4010c0",
+        "addr": "0x4010c0",
+        "name": "func_0012",
+        "size": 45,
+        "label": {
+          "text": "func_0012",
+          "hex": "66756e635f30303132",
+          "len": 9,
+          "src": "binary"
+        }
+      },
+      {
+        "id": "fn:0x4010d0",
+        "addr": "0x4010d0",
+        "name": "func_0013",
+        "size": 82,
+        "label": {
+          "text": "func_0013",
+          "hex": "66756e635f30303133",
+          "len": 9,
+          "src": "binary"
+        }
+      },
+      {
+        "id": "fn:0x4010e0",
+        "addr": "0x4010e0",
+        "name": "func_0014",
+        "size": 119,
+        "label": {
+          "text": "func_0014",
+          "hex": "66756e635f30303134",
+          "len": 9,
+          "src": "binary"
+        }
+      },
+      {
+        "id": "fn:0x4010f0",
+        "addr": "0x4010f0",
+        "name": "func_0015",
+        "size": 156,
+        "label": {
+          "text": "func_0015",
+          "hex": "66756e635f30303135",
+          "len": 9,
+          "src": "binary"
+        }
+      },
+      {
+        "id": "fn:0x401100",
+        "addr": "0x401100",
+        "name": "func_0016",
+        "size": 193,
+        "label": {
+          "text": "func_0016",
+          "hex": "66756e635f30303136",
+          "len": 9,
+          "src": "binary"
+        }
+      },
+      {
+        "id": "fn:0x401110",
+        "addr": "0x401110",
+        "name": "func_0017",
+        "size": 30,
+        "label": {
+          "text": "func_0017",
+          "hex": "66756e635f30303137",
+          "len": 9,
+          "src": "binary"
+        }
+      },
+      {
+        "id": "fn:0x401120",
+        "addr": "0x401120",
+        "name": "func_0018",
+        "size": 67,
+        "label": {
+          "text": "func_0018",
+          "hex": "66756e635f30303138",
+          "len": 9,
+          "src": "binary"
+        }
+      },
+      {
+        "id": "fn:0x401130",
+        "addr": "0x401130",
+        "name": "func_0019",
+        "size": 104,
+        "label": {
+          "text": "func_0019",
+          "hex": "66756e635f30303139",
+          "len": 9,
+          "src": "binary"
+        }
+      }
+    ],
+    "sorted_by": "addr"
+  },
+  "page": {
+    "returned": 20,
+    "total": 40,
+    "truncated": true,
+    "next_cursor": "c:0:0x401130",
+    "hint": "Add filter.name or filter.size_min to narrow the list."
+  },
+  "next": [
+    {
+      "tool": "item_get",
+      "args": {
+        "target": "fn:0x401000"
+      },
+      "why": "Read the first item."
+    }
+  ]
+}

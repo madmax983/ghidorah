@@ -1,0 +1,35 @@
+# STE corpus, fail lines (AC-225).
+# Format: <expected rule IDs or -> | <text>
+# The checker reads each text as one plain-text paragraph with the built-in lexicon.
+# The expected IDs are the exact set of rules that the text breaks.
+STE-1 | Write the test, run the test, read the output, change the code, run the test again, and then commit the code with a short message.
+STE-1 | Use the reader for every read of a file value so that no read goes outside the buffer and no offset overflows.
+STE-2 | The scheduler takes the next item from the work list, runs the analyzer of the item, records the result in the program and adds new items to the list.
+STE-2 | The crate holds `A` and `B` and `C` and `D` and `E` and `F` and `G` and `H` and `I` and `J` and `K` and `L` today.
+STE-3 | The reader starts. It reads a byte. It checks the byte. It moves on. It reads more. It stops at the end. It returns the count.
+STE-4 | The file is read by the loader.
+STE-4 | Each value is checked before the use.
+STE-4 | The cache is not cleared after a commit.
+STE-4 | These tables were written by hand.
+STE-4 | The result can be used again.
+STE-4 | Errors are always reported.
+STE-5 | The loader has read the whole file.
+STE-5 | The tests have passed.
+STE-5 | The scheduler has not stopped yet.
+STE-4,STE-5 | The value has been checked.
+STE-6 | The loader should stop at the first error.
+STE-6 | This step would fail on a short file.
+STE-6 | The test ensures that the value is in range.
+STE-6 | Use small inputs, e.g. one byte.
+STE-6 | The data goes via the cache.
+STE-6 | Use `fmt`, `clippy`, etc. before each commit.
+STE-6 | We utilize the reader for all reads.
+STE-6 | The checker could miss a case.
+STE-6 | This is the last case, i.e. the end.
+STE-7 | The file header field value is wrong.
+STE-7 | The parser reads the symbol table entry size field.
+STE-7 | The `loader` crate section header table reader stops early.
+STE-8 | Read the file and write the output.
+STE-8 | Open the project and load the binary.
+STE-8 | Build the crate and run the tests.
+STE-4,STE-6,STE-7 | The file is read by the loader and the value should be checked by the parser before the table header entry offset is used.

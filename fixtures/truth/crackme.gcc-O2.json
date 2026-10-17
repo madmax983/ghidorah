@@ -1,0 +1,213 @@
+{
+  "binaries": [
+    {
+      "name": "crackme.gcc-O2",
+      "sha256": "467a43b75d95c826daba8cb216d01d7fd386aa96c5ef5a95c2effffe1780de8f",
+      "variant": "none"
+    },
+    {
+      "name": "crackme.gcc-O2.noeh",
+      "sha256": "3ddb859c6cb9fdf554da228f4d2af4173124689c78142cd377dfc53fbb06a8ba",
+      "variant": "noeh"
+    },
+    {
+      "name": "crackme.gcc-O2.stripped",
+      "sha256": "93e5845c7a9fc11de7266274f25a045f1c9e59dbc52525583e820e8ac1ea1e9b",
+      "variant": "stripped"
+    }
+  ],
+  "build": {
+    "cflags": ["-O2"],
+    "compiler": "gcc 13.3.0",
+    "id": "gcc-O2",
+    "ldflags": []
+  },
+  "call_edges": [
+    ["__do_global_dtors_aux","__cxa_finalize"],
+    ["__do_global_dtors_aux","deregister_tm_clones"],
+    ["_start","__libc_start_main"],
+    ["check_password","strlen"],
+    ["frame_dummy","register_tm_clones"],
+    ["main","check_password"],
+    ["main","puts"]
+  ],
+  "cold_parts": [],
+  "duplicate_names": {},
+  "elf": {
+    "entry": "0x10e0",
+    "image_base": "0x0",
+    "interp": true,
+    "type": "DYN"
+  },
+  "facts": {
+    "claims": [
+      {
+        "args": ["main","check_password"],
+        "rel": "calls"
+      },
+      {
+        "args": ["main","puts"],
+        "rel": "calls"
+      }
+    ],
+    "constants": {
+      "password_length": "10",
+      "xor_key": "0x5a"
+    },
+    "secrets": {
+      "password": "s3cr3t-k3y"
+    }
+  },
+  "fixture": "crackme.gcc-O2",
+  "function_count": 9,
+  "functions": [
+    {
+      "addr": "0x1000",
+      "insns": 8,
+      "name": "_init",
+      "size": 0
+    },
+    {
+      "addr": "0x1080",
+      "insns": 21,
+      "name": "main",
+      "size": 83
+    },
+    {
+      "addr": "0x10e0",
+      "insns": 13,
+      "name": "_start",
+      "size": 38
+    },
+    {
+      "addr": "0x1110",
+      "insns": 11,
+      "name": "deregister_tm_clones",
+      "size": 0
+    },
+    {
+      "addr": "0x1140",
+      "insns": 16,
+      "name": "register_tm_clones",
+      "size": 0
+    },
+    {
+      "addr": "0x1180",
+      "insns": 16,
+      "name": "__do_global_dtors_aux",
+      "size": 0
+    },
+    {
+      "addr": "0x11c0",
+      "insns": 3,
+      "name": "frame_dummy",
+      "size": 0
+    },
+    {
+      "addr": "0x11e0",
+      "insns": 25,
+      "name": "check_password",
+      "size": 76
+    },
+    {
+      "addr": "0x122c",
+      "insns": 4,
+      "name": "_fini",
+      "size": 0
+    }
+  ],
+  "gaps": [
+    {
+      "addr": "0x11d0",
+      "first_insn": "mov eax,0x1337",
+      "name": "hidden_gate",
+      "size": 8
+    }
+  ],
+  "generator": {
+    "name": "xtask-fixtures",
+    "version": "1"
+  },
+  "imports": ["__cxa_finalize","__libc_start_main","puts","strlen"],
+  "jump_tables": [],
+  "leaf_functions": [],
+  "libraries": ["libc.so.6"],
+  "network_imports": [],
+  "program": "crackme",
+  "protections": {
+    "build_id": "eff2012c44affa52f66e0e37d87fa2ec64c41d1b",
+    "canary": false,
+    "fortify": false,
+    "ibt": true,
+    "nx": true,
+    "pie": true,
+    "relro": "full",
+    "rpath": false,
+    "runpath": false,
+    "shstk": true
+  },
+  "self_calls": [],
+  "strings": [
+    {
+      "addr": "0x201e",
+      "encoding": "bytes",
+      "hex": "416363657373206772616e746564",
+      "len": 14,
+      "text": "Access granted"
+    },
+    {
+      "addr": "0x202d",
+      "encoding": "bytes",
+      "hex": "4163636573732064656e696564",
+      "len": 13,
+      "text": "Access denied"
+    },
+    {
+      "addr": "0x2004",
+      "encoding": "bytes",
+      "hex": "75736167653a20637261636b6d65203c70617373776f72643e",
+      "len": 25,
+      "text": "usage: crackme <password>"
+    }
+  ],
+  "survey_facts": [
+    {
+      "kind": "import",
+      "value": "puts"
+    },
+    {
+      "kind": "library",
+      "value": "libc.so.6"
+    },
+    {
+      "kind": "protection",
+      "value": "ibt"
+    },
+    {
+      "kind": "protection",
+      "value": "nx"
+    },
+    {
+      "kind": "protection",
+      "value": "pie"
+    },
+    {
+      "kind": "protection",
+      "value": "shstk"
+    },
+    {
+      "kind": "string",
+      "value": "Access denied"
+    },
+    {
+      "kind": "string",
+      "value": "Access granted"
+    }
+  ],
+  "syscall_names": [],
+  "syscalls": [],
+  "tail_calls": [
+    ["frame_dummy","register_tm_clones"]
+  ],
+  "tier": "T1"
+}

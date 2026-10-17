@@ -1,0 +1,29 @@
+# The ELF list of functions that do not return (design Section 7.7).
+#
+# Source: Ghidra, Ghidra/Features/Base/data/ElfFunctionsThatDoNotReturn
+# (https://github.com/NationalSecurityAgency/ghidra), branch master, 21 names.
+# Copyright the Ghidra authors. Apache License, Version 2.0. NOTICE holds the attribution.
+#
+# Format: one name on each line. A line that starts with # is a comment.
+# A name has no leading underscore. The match removes the leading underscores of a name first.
+exit
+cexit
+c_exit
+abort
+reboot
+longjmp
+longjmp_chk
+siglongjmp
+panic
+stack_chk_fail
+cxa_throw
+cxa_terminate
+cxa_call_unexpected
+cxa_bad_cast
+Unwind_Resume
+assert_fail
+assert_rtn
+fortify_fail
+ZSt9terminatev
+ZN10__cxxabiv111__terminateEPFvvE
+pthread_exit

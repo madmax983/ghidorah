@@ -1,0 +1,313 @@
+{
+  "binaries": [
+    {
+      "name": "varargs.clang-O2",
+      "sha256": "7a9b351a3fececcec5f36af1fe6b372a60c6226bf2c665099e2d2dfd455a41d6",
+      "variant": "none"
+    },
+    {
+      "name": "varargs.clang-O2.stripped",
+      "sha256": "f211c800a3eec9f01c8fb918bbf741d3ba39bd5bfbafe10050f874f86268ca67",
+      "variant": "stripped"
+    }
+  ],
+  "build": {
+    "cflags": ["-O2"],
+    "compiler": "clang 18.1.3",
+    "id": "clang-O2",
+    "ldflags": []
+  },
+  "call_edges": [
+    ["__do_global_dtors_aux","__cxa_finalize"],
+    ["__do_global_dtors_aux","deregister_tm_clones"],
+    ["_start","__libc_start_main"],
+    ["frame_dummy","register_tm_clones"],
+    ["log_msg","vfprintf"],
+    ["main","log_msg"],
+    ["main","narrow"],
+    ["main","p1"],
+    ["main","p2"],
+    ["main","p3"],
+    ["main","p4"],
+    ["main","p5"],
+    ["main","p6"],
+    ["main","p7"],
+    ["main","p8"],
+    ["main","scale"],
+    ["main","sum_va"]
+  ],
+  "cold_parts": [],
+  "duplicate_names": {},
+  "elf": {
+    "entry": "0x1050",
+    "image_base": "0x0",
+    "interp": true,
+    "type": "DYN"
+  },
+  "facts": {
+    "claims": [
+      {
+        "args": ["main","sum_va"],
+        "rel": "calls"
+      },
+      {
+        "args": ["main","p8"],
+        "rel": "calls"
+      },
+      {
+        "args": ["main","log_msg"],
+        "rel": "calls"
+      }
+    ],
+    "prototypes": [
+      {
+        "name": "p0",
+        "params": 0,
+        "varargs": false
+      },
+      {
+        "name": "p1",
+        "params": 1,
+        "varargs": false
+      },
+      {
+        "name": "p2",
+        "params": 2,
+        "varargs": false
+      },
+      {
+        "name": "p3",
+        "params": 3,
+        "varargs": false
+      },
+      {
+        "name": "p4",
+        "params": 4,
+        "varargs": false
+      },
+      {
+        "name": "p5",
+        "params": 5,
+        "varargs": false
+      },
+      {
+        "name": "p6",
+        "params": 6,
+        "varargs": false
+      },
+      {
+        "name": "p7",
+        "params": 7,
+        "varargs": false
+      },
+      {
+        "name": "p8",
+        "params": 8,
+        "varargs": false
+      },
+      {
+        "name": "narrow",
+        "params": 3,
+        "varargs": false
+      },
+      {
+        "name": "scale",
+        "params": 2,
+        "varargs": false
+      },
+      {
+        "name": "sum_va",
+        "params": 1,
+        "varargs": true
+      },
+      {
+        "name": "log_msg",
+        "params": 1,
+        "varargs": true
+      }
+    ]
+  },
+  "fixture": "varargs.clang-O2",
+  "function_count": 21,
+  "functions": [
+    {
+      "addr": "0x1000",
+      "insns": 8,
+      "name": "_init",
+      "size": 0
+    },
+    {
+      "addr": "0x1050",
+      "insns": 13,
+      "name": "_start",
+      "size": 38
+    },
+    {
+      "addr": "0x1080",
+      "insns": 11,
+      "name": "deregister_tm_clones",
+      "size": 0
+    },
+    {
+      "addr": "0x10b0",
+      "insns": 16,
+      "name": "register_tm_clones",
+      "size": 0
+    },
+    {
+      "addr": "0x10f0",
+      "insns": 16,
+      "name": "__do_global_dtors_aux",
+      "size": 0
+    },
+    {
+      "addr": "0x1130",
+      "insns": 3,
+      "name": "frame_dummy",
+      "size": 0
+    },
+    {
+      "addr": "0x1140",
+      "insns": 2,
+      "name": "p0",
+      "size": 6
+    },
+    {
+      "addr": "0x1150",
+      "insns": 2,
+      "name": "p1",
+      "size": 5
+    },
+    {
+      "addr": "0x1160",
+      "insns": 4,
+      "name": "p2",
+      "size": 10
+    },
+    {
+      "addr": "0x1170",
+      "insns": 3,
+      "name": "p3",
+      "size": 9
+    },
+    {
+      "addr": "0x1180",
+      "insns": 4,
+      "name": "p4",
+      "size": 11
+    },
+    {
+      "addr": "0x1190",
+      "insns": 7,
+      "name": "p5",
+      "size": 23
+    },
+    {
+      "addr": "0x11b0",
+      "insns": 6,
+      "name": "p6",
+      "size": 17
+    },
+    {
+      "addr": "0x11d0",
+      "insns": 10,
+      "name": "p7",
+      "size": 36
+    },
+    {
+      "addr": "0x1200",
+      "insns": 8,
+      "name": "p8",
+      "size": 29
+    },
+    {
+      "addr": "0x1220",
+      "insns": 3,
+      "name": "narrow",
+      "size": 6
+    },
+    {
+      "addr": "0x1230",
+      "insns": 3,
+      "name": "scale",
+      "size": 9
+    },
+    {
+      "addr": "0x1240",
+      "insns": 82,
+      "name": "sum_va",
+      "size": 320
+    },
+    {
+      "addr": "0x1380",
+      "insns": 30,
+      "name": "log_msg",
+      "size": 160
+    },
+    {
+      "addr": "0x1420",
+      "insns": 96,
+      "name": "main",
+      "size": 372
+    },
+    {
+      "addr": "0x1594",
+      "insns": 4,
+      "name": "_fini",
+      "size": 0
+    }
+  ],
+  "gaps": [],
+  "generator": {
+    "name": "xtask-fixtures",
+    "version": "1"
+  },
+  "imports": ["__cxa_finalize","__libc_start_main","vfprintf"],
+  "jump_tables": [],
+  "leaf_functions": [],
+  "libraries": ["libc.so.6"],
+  "network_imports": [],
+  "program": "varargs",
+  "protections": {
+    "build_id": "5282bb18bfb86cd3efe0d8e1b17b296c5f7f32e0",
+    "canary": false,
+    "fortify": false,
+    "ibt": false,
+    "nx": true,
+    "pie": true,
+    "relro": "partial",
+    "rpath": false,
+    "runpath": false,
+    "shstk": false
+  },
+  "self_calls": [],
+  "strings": [],
+  "survey_facts": [
+    {
+      "kind": "function",
+      "value": "log_msg"
+    },
+    {
+      "kind": "function",
+      "value": "sum_va"
+    },
+    {
+      "kind": "library",
+      "value": "libc.so.6"
+    },
+    {
+      "kind": "protection",
+      "value": "nx"
+    },
+    {
+      "kind": "protection",
+      "value": "pie"
+    }
+  ],
+  "syscall_names": [],
+  "syscalls": [],
+  "tail_calls": [
+    ["frame_dummy","register_tm_clones"]
+  ],
+  "tier": "T1"
+}

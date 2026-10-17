@@ -1,0 +1,98 @@
+{
+  "abstain": [
+    {
+      "answer": "unknown",
+      "claim": {
+        "args": [
+          "run_op",
+          "op_mod"
+        ],
+        "rel": "calls"
+      },
+      "id": "run_op_reaches_op_mod",
+      "reason": "run_op calls through a table with an index from the input"
+    },
+    {
+      "answer": "unknown",
+      "claim": {
+        "args": [
+          "fire",
+          "log_event"
+        ],
+        "rel": "calls"
+      },
+      "id": "fire_calls_log_event",
+      "reason": "fire calls through a callback slot that changes at run time"
+    }
+  ],
+  "claims": [
+    {
+      "args": [
+        "main",
+        "op_mod"
+      ],
+      "rel": "calls"
+    },
+    {
+      "args": [
+        "main",
+        "set_callback"
+      ],
+      "rel": "calls"
+    },
+    {
+      "args": [
+        "main",
+        "qsort"
+      ],
+      "rel": "calls"
+    }
+  ],
+  "indirect_calls": [
+    {
+      "func": "run_op",
+      "targets": [
+        "op_add",
+        "op_sub",
+        "op_mul",
+        "op_div"
+      ]
+    },
+    {
+      "func": "fire",
+      "targets": [
+        "log_event"
+      ]
+    }
+  ],
+  "program": "func_ptrs",
+  "runs": [
+    {
+      "args": [],
+      "exit": 0,
+      "stdout": "event 1\n28 2\n"
+    },
+    {
+      "args": [
+        "2"
+      ],
+      "exit": 0,
+      "stdout": "event 2\n122 2\n"
+    }
+  ],
+  "strings": [
+    {
+      "text": "event %d\n"
+    }
+  ],
+  "survey_facts": [
+    {
+      "kind": "import",
+      "value": "qsort"
+    },
+    {
+      "kind": "function",
+      "value": "run_op"
+    }
+  ]
+}

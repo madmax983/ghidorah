@@ -1,0 +1,50 @@
+{
+  "claims": [
+    {
+      "args": [
+        "main",
+        "decode"
+      ],
+      "rel": "calls"
+    },
+    {
+      "args": [
+        "decode",
+        "key_at"
+      ],
+      "rel": "calls"
+    }
+  ],
+  "constants": {
+    "key_base": "0x5a",
+    "key_step": "3"
+  },
+  "program": "xor_decode",
+  "runs": [
+    {
+      "args": [
+        "-v"
+      ],
+      "exit": 0,
+      "stdout": "attack at dawn\n250d5588\n"
+    },
+    {
+      "args": [],
+      "exit": 0,
+      "stdout": "250cf4c8\n"
+    }
+  ],
+  "secrets": {
+    "plaintext": "attack at dawn"
+  },
+  "survey_facts": [
+    {
+      "kind": "function",
+      "value": "decode"
+    },
+    {
+      "kind": "import",
+      "value": "strcmp"
+    }
+  ]
+}

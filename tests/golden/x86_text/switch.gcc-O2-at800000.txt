@@ -1,0 +1,230 @@
+# golden: generator=x86-print version=1 fixture=switch.gcc-O2-at800000 fixture_sha256=cac8dd550e8ebe0665cdb1934d3c8685310cab8815e15bc29c1c3ea71ec3112f
+<_init>:
+801000 endbr64
+801004 sub rsp, 0x8
+801008 mov rax, qword ptr [rip+0x2fd1] ; 0x803fe0
+80100f test rax, rax
+801012 je 0x801016
+801014 call rax
+801016 add rsp, 0x8
+80101a ret
+<.plt>:
+801020 push qword ptr [rip+0x2fca] ; 0x803ff0
+801026 jmp qword ptr [rip+0x2fcc] ; 0x803ff8
+80102c nop dword ptr [rax+0x0]
+801030 endbr64
+801034 push 0x0
+801039 jmp .plt
+80103e xchg ax, ax
+801040 endbr64
+801044 push 0x1
+801049 jmp .plt
+80104e xchg ax, ax
+801050 endbr64
+801054 push 0x2
+801059 jmp .plt
+80105e xchg ax, ax
+<puts@plt>:
+801060 endbr64
+801064 jmp qword ptr [rip+0x2f96] ; 0x804000
+80106a nop word ptr [rax+rax*1+0x0]
+<strtol@plt>:
+801070 endbr64
+801074 jmp qword ptr [rip+0x2f8e] ; 0x804008
+80107a nop word ptr [rax+rax*1+0x0]
+<__printf_chk@plt>:
+801080 endbr64
+801084 jmp qword ptr [rip+0x2f86] ; 0x804010
+80108a nop word ptr [rax+rax*1+0x0]
+<main>:
+801090 endbr64
+801094 push rbp
+801095 push rbx
+801096 xor ebx, ebx
+801098 sub rsp, 0x8
+80109c cmp edi, 0x1
+80109f jle 0x8010b3
+8010a1 mov rdi, qword ptr [rsi+0x8]
+8010a5 mov edx, 0xa
+8010aa xor esi, esi
+8010ac call strtol@plt
+8010b1 mov ebx, eax
+8010b3 mov edi, ebx
+8010b5 call run_command
+8010ba mov edi, ebx
+8010bc call sparse_code
+8010c1 movsxd rdi, ebx
+8010c4 mov esi, 0x29
+8010c9 mov ebp, eax
+8010cb call apply_op
+8010d0 mov ecx, ebp
+8010d2 mov esi, 0x8020b5
+8010d7 mov edi, 0x2
+8010dc mov rdx, rax
+8010df xor eax, eax
+8010e1 call __printf_chk@plt
+8010e6 add rsp, 0x8
+8010ea xor eax, eax
+8010ec pop rbx
+8010ed pop rbp
+8010ee ret
+8010ef nop
+<_start>:
+8010f0 endbr64
+8010f4 xor ebp, ebp
+8010f6 mov r9, rdx
+8010f9 pop rsi
+8010fa mov rdx, rsp
+8010fd and rsp, 0xfffffffffffffff0
+801101 push rax
+801102 push rsp
+801103 xor r8d, r8d
+801106 xor ecx, ecx
+801108 mov rdi, 0x801090
+80110f call qword ptr [rip+0x2ec3] ; 0x803fd8
+801115 hlt
+801116 cs nop word ptr [rax+rax*1+0x0]
+<_dl_relocate_static_pie>:
+801120 endbr64
+801124 ret
+801125 cs nop word ptr [rax+rax*1+0x0]
+80112f nop
+<deregister_tm_clones>:
+801130 mov eax, 0x804028
+801135 cmp rax, 0x804028
+80113b je 0x801150
+80113d mov eax, 0x0
+801142 test rax, rax
+801145 je 0x801150
+801147 mov edi, 0x804028
+80114c jmp rax
+80114e xchg ax, ax
+801150 ret
+801151 data16 cs nop word ptr [rax+rax*1+0x0]
+80115c nop dword ptr [rax+0x0]
+<register_tm_clones>:
+801160 mov esi, 0x804028
+801165 sub rsi, 0x804028
+80116c mov rax, rsi
+80116f shr rsi, 0x3f
+801173 sar rax, 0x3
+801177 add rsi, rax
+80117a sar rsi, 1
+80117d je 0x801190
+80117f mov eax, 0x0
+801184 test rax, rax
+801187 je 0x801190
+801189 mov edi, 0x804028
+80118e jmp rax
+801190 ret
+801191 data16 cs nop word ptr [rax+rax*1+0x0]
+80119c nop dword ptr [rax+0x0]
+<__do_global_dtors_aux>:
+8011a0 endbr64
+8011a4 cmp byte ptr [rip+0x2e7d], 0x0 ; 0x804028
+8011ab jne 0x8011c0
+8011ad push rbp
+8011ae mov rbp, rsp
+8011b1 call deregister_tm_clones
+8011b6 mov byte ptr [rip+0x2e6b], 0x1 ; 0x804028
+8011bd pop rbp
+8011be ret
+8011bf nop
+8011c0 ret
+8011c1 data16 cs nop word ptr [rax+rax*1+0x0]
+8011cc nop dword ptr [rax+0x0]
+<frame_dummy>:
+8011d0 endbr64
+8011d4 jmp register_tm_clones
+8011d6 cs nop word ptr [rax+rax*1+0x0]
+<apply_op>:
+8011e0 endbr64
+8011e4 cmp rdi, 0x8
+8011e8 ja 0x801250
+8011ea notrack jmp qword ptr [rdi*8+0x802008]
+8011f2 nop word ptr [rax+rax*1+0x0]
+8011f8 mov rax, rsi
+8011fb imul rax, rsi
+8011ff ret
+801200 lea rax, [rsi+0x7]
+801204 ret
+801205 nop dword ptr [rax]
+801208 lea rax, [rsi+rsi*2]
+80120c ret
+80120d nop dword ptr [rax]
+801210 mov rax, rsi
+801213 xor rax, 0x55aa
+801219 ret
+80121a nop word ptr [rax+rax*1+0x0]
+801220 lea rax, [rsi*8+0x0]
+801228 ret
+801229 nop dword ptr [rax+0x0]
+801230 mov rax, rsi
+801233 shr rax, 0x2
+801237 ret
+801238 nop dword ptr [rax+rax*1+0x0]
+801240 lea rax, [rsi-0x13]
+801244 ret
+801245 nop dword ptr [rax]
+801248 mov rax, rsi
+80124b not rax
+80124e ret
+80124f nop
+801250 xor eax, eax
+801252 ret
+801253 data16 cs nop word ptr [rax+rax*1+0x0]
+80125e xchg ax, ax
+<sparse_code>:
+801260 endbr64
+801264 cmp edi, 0x1000
+80126a je 0x8012a8
+80126c ja 0x801290
+80126e mov eax, 0x1e
+801273 cmp edi, 0x3
+801276 je 0x8012ad
+801278 cmp edi, 0x64
+80127b mov edx, 0x3e8
+801280 mov eax, 0x63
+801285 cmove eax, edx
+801288 ret
+801289 nop dword ptr [rax+0x0]
+801290 cmp edi, 0xffff
+801296 mov edx, 0x1
+80129b mov eax, 0x63
+8012a0 cmove eax, edx
+8012a3 ret
+8012a4 nop dword ptr [rax+0x0]
+8012a8 mov eax, 0x7
+8012ad ret
+8012ae xchg ax, ax
+<run_command>:
+8012b0 endbr64
+8012b4 cmp edi, 0x5
+8012b7 ja 0x801322
+8012b9 mov edi, edi
+8012bb notrack jmp qword ptr [rdi*8+0x802050]
+8012c3 nop dword ptr [rax+rax*1+0x0]
+8012c8 mov edi, 0x802098
+8012cd jmp puts@plt
+8012d2 nop word ptr [rax+rax*1+0x0]
+8012d8 mov edi, 0x80209f
+8012dd jmp puts@plt
+8012e2 nop word ptr [rax+rax*1+0x0]
+8012e8 mov edi, 0x802080
+8012ed jmp puts@plt
+8012f2 nop word ptr [rax+rax*1+0x0]
+8012f8 mov edi, 0x802086
+8012fd jmp puts@plt
+801302 nop word ptr [rax+rax*1+0x0]
+801308 mov edi, 0x80208b
+80130d jmp puts@plt
+801312 nop word ptr [rax+rax*1+0x0]
+801318 mov edi, 0x802091
+80131d jmp puts@plt
+801322 mov edi, 0x8020a5
+801327 jmp puts@plt
+<_fini>:
+80132c endbr64
+801330 sub rsp, 0x8
+801334 add rsp, 0x8
+801338 ret

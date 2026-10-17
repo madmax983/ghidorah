@@ -1,0 +1,332 @@
+{
+  "binaries": [
+    {
+      "name": "varargs.gcc-O2",
+      "sha256": "2cec7baaaf56e4e4f0acef119b956e64c503c330ef78ff07904d1454dc3cba45",
+      "variant": "none"
+    },
+    {
+      "name": "varargs.gcc-O2.stripped",
+      "sha256": "a65cf1981fae893869348c13b4bdb71c50dca85ffed73f0f088050b0358fe80c",
+      "variant": "stripped"
+    }
+  ],
+  "build": {
+    "cflags": ["-O2"],
+    "compiler": "gcc 13.3.0",
+    "id": "gcc-O2",
+    "ldflags": []
+  },
+  "call_edges": [
+    ["__do_global_dtors_aux","__cxa_finalize"],
+    ["__do_global_dtors_aux","deregister_tm_clones"],
+    ["_start","__libc_start_main"],
+    ["frame_dummy","register_tm_clones"],
+    ["log_msg","__stack_chk_fail"],
+    ["log_msg","__vfprintf_chk"],
+    ["main","log_msg"],
+    ["main","narrow"],
+    ["main","p0"],
+    ["main","p1"],
+    ["main","p2"],
+    ["main","p3"],
+    ["main","p4"],
+    ["main","p5"],
+    ["main","p6"],
+    ["main","p7"],
+    ["main","p8"],
+    ["main","scale"],
+    ["main","sum_va"],
+    ["sum_va","__stack_chk_fail"]
+  ],
+  "cold_parts": [],
+  "duplicate_names": {},
+  "elf": {
+    "entry": "0x11e0",
+    "image_base": "0x0",
+    "interp": true,
+    "type": "DYN"
+  },
+  "facts": {
+    "claims": [
+      {
+        "args": ["main","sum_va"],
+        "rel": "calls"
+      },
+      {
+        "args": ["main","p8"],
+        "rel": "calls"
+      },
+      {
+        "args": ["main","log_msg"],
+        "rel": "calls"
+      }
+    ],
+    "prototypes": [
+      {
+        "name": "p0",
+        "params": 0,
+        "varargs": false
+      },
+      {
+        "name": "p1",
+        "params": 1,
+        "varargs": false
+      },
+      {
+        "name": "p2",
+        "params": 2,
+        "varargs": false
+      },
+      {
+        "name": "p3",
+        "params": 3,
+        "varargs": false
+      },
+      {
+        "name": "p4",
+        "params": 4,
+        "varargs": false
+      },
+      {
+        "name": "p5",
+        "params": 5,
+        "varargs": false
+      },
+      {
+        "name": "p6",
+        "params": 6,
+        "varargs": false
+      },
+      {
+        "name": "p7",
+        "params": 7,
+        "varargs": false
+      },
+      {
+        "name": "p8",
+        "params": 8,
+        "varargs": false
+      },
+      {
+        "name": "narrow",
+        "params": 3,
+        "varargs": false
+      },
+      {
+        "name": "scale",
+        "params": 2,
+        "varargs": false
+      },
+      {
+        "name": "sum_va",
+        "params": 1,
+        "varargs": true
+      },
+      {
+        "name": "log_msg",
+        "params": 1,
+        "varargs": true
+      }
+    ]
+  },
+  "fixture": "varargs.gcc-O2",
+  "function_count": 21,
+  "functions": [
+    {
+      "addr": "0x1000",
+      "insns": 8,
+      "name": "_init",
+      "size": 0
+    },
+    {
+      "addr": "0x1080",
+      "insns": 86,
+      "name": "main",
+      "size": 348
+    },
+    {
+      "addr": "0x11e0",
+      "insns": 13,
+      "name": "_start",
+      "size": 38
+    },
+    {
+      "addr": "0x1210",
+      "insns": 11,
+      "name": "deregister_tm_clones",
+      "size": 0
+    },
+    {
+      "addr": "0x1240",
+      "insns": 16,
+      "name": "register_tm_clones",
+      "size": 0
+    },
+    {
+      "addr": "0x1280",
+      "insns": 16,
+      "name": "__do_global_dtors_aux",
+      "size": 0
+    },
+    {
+      "addr": "0x12c0",
+      "insns": 3,
+      "name": "frame_dummy",
+      "size": 0
+    },
+    {
+      "addr": "0x12d0",
+      "insns": 3,
+      "name": "p0",
+      "size": 10
+    },
+    {
+      "addr": "0x12e0",
+      "insns": 3,
+      "name": "p1",
+      "size": 9
+    },
+    {
+      "addr": "0x12f0",
+      "insns": 5,
+      "name": "p2",
+      "size": 14
+    },
+    {
+      "addr": "0x1300",
+      "insns": 4,
+      "name": "p3",
+      "size": 13
+    },
+    {
+      "addr": "0x1310",
+      "insns": 5,
+      "name": "p4",
+      "size": 15
+    },
+    {
+      "addr": "0x1320",
+      "insns": 8,
+      "name": "p5",
+      "size": 27
+    },
+    {
+      "addr": "0x1340",
+      "insns": 7,
+      "name": "p6",
+      "size": 21
+    },
+    {
+      "addr": "0x1360",
+      "insns": 12,
+      "name": "p7",
+      "size": 42
+    },
+    {
+      "addr": "0x1390",
+      "insns": 10,
+      "name": "p8",
+      "size": 34
+    },
+    {
+      "addr": "0x13c0",
+      "insns": 6,
+      "name": "narrow",
+      "size": 17
+    },
+    {
+      "addr": "0x13e0",
+      "insns": 6,
+      "name": "scale",
+      "size": 21
+    },
+    {
+      "addr": "0x1400",
+      "insns": 51,
+      "name": "sum_va",
+      "size": 185
+    },
+    {
+      "addr": "0x14c0",
+      "insns": 37,
+      "name": "log_msg",
+      "size": 201
+    },
+    {
+      "addr": "0x158c",
+      "insns": 4,
+      "name": "_fini",
+      "size": 0
+    }
+  ],
+  "gaps": [],
+  "generator": {
+    "name": "xtask-fixtures",
+    "version": "1"
+  },
+  "imports": ["__cxa_finalize","__libc_start_main","__stack_chk_fail","__vfprintf_chk"],
+  "jump_tables": [],
+  "leaf_functions": [],
+  "libraries": ["libc.so.6"],
+  "network_imports": [],
+  "program": "varargs",
+  "protections": {
+    "build_id": "30883b102cb97c018f6f36e647fb095ef31b853d",
+    "canary": true,
+    "fortify": true,
+    "ibt": true,
+    "nx": true,
+    "pie": true,
+    "relro": "full",
+    "rpath": false,
+    "runpath": false,
+    "shstk": true
+  },
+  "self_calls": [],
+  "strings": [],
+  "survey_facts": [
+    {
+      "kind": "function",
+      "value": "log_msg"
+    },
+    {
+      "kind": "function",
+      "value": "sum_va"
+    },
+    {
+      "kind": "library",
+      "value": "libc.so.6"
+    },
+    {
+      "kind": "protection",
+      "value": "canary"
+    },
+    {
+      "kind": "protection",
+      "value": "fortify"
+    },
+    {
+      "kind": "protection",
+      "value": "ibt"
+    },
+    {
+      "kind": "protection",
+      "value": "nx"
+    },
+    {
+      "kind": "protection",
+      "value": "pie"
+    },
+    {
+      "kind": "protection",
+      "value": "shstk"
+    }
+  ],
+  "syscall_names": [],
+  "syscalls": [],
+  "tail_calls": [
+    ["frame_dummy","register_tm_clones"]
+  ],
+  "tier": "T1"
+}

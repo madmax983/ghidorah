@@ -1,0 +1,226 @@
+{
+  "binaries": [
+    {
+      "name": "loops.gcc-O2nv",
+      "sha256": "cc27d6d291b7e0b255d7c8c830d74d5348f292615cfb1269cbd39fdb7bafd670",
+      "variant": "none"
+    }
+  ],
+  "build": {
+    "cflags": ["-O2","-fno-tree-vectorize"],
+    "compiler": "gcc 13.3.0",
+    "id": "gcc-O2nv",
+    "ldflags": []
+  },
+  "call_edges": [
+    ["__do_global_dtors_aux","__cxa_finalize"],
+    ["__do_global_dtors_aux","deregister_tm_clones"],
+    ["_start","__libc_start_main"],
+    ["frame_dummy","register_tm_clones"],
+    ["main","__printf_chk"],
+    ["main","count_bits"],
+    ["main","gcd"],
+    ["main","grid_walk"],
+    ["main","reverse_bits"],
+    ["main","strtoull"],
+    ["main","sum_squares"]
+  ],
+  "cold_parts": [],
+  "duplicate_names": {},
+  "elf": {
+    "entry": "0x1120",
+    "image_base": "0x0",
+    "interp": true,
+    "type": "DYN"
+  },
+  "facts": {
+    "claims": [
+      {
+        "args": ["main","gcd"],
+        "rel": "calls"
+      },
+      {
+        "args": ["main","sum_squares"],
+        "rel": "calls"
+      }
+    ],
+    "constants": {
+      "grid_mask": "0xf",
+      "reverse_rounds": "32",
+      "sum_squares_mask": "0x3f"
+    }
+  },
+  "fixture": "loops.gcc-O2nv",
+  "function_count": 13,
+  "functions": [
+    {
+      "addr": "0x1000",
+      "insns": 8,
+      "name": "_init",
+      "size": 0
+    },
+    {
+      "addr": "0x1080",
+      "insns": 49,
+      "name": "main",
+      "size": 148
+    },
+    {
+      "addr": "0x1120",
+      "insns": 13,
+      "name": "_start",
+      "size": 38
+    },
+    {
+      "addr": "0x1150",
+      "insns": 11,
+      "name": "deregister_tm_clones",
+      "size": 0
+    },
+    {
+      "addr": "0x1180",
+      "insns": 16,
+      "name": "register_tm_clones",
+      "size": 0
+    },
+    {
+      "addr": "0x11c0",
+      "insns": 16,
+      "name": "__do_global_dtors_aux",
+      "size": 0
+    },
+    {
+      "addr": "0x1200",
+      "insns": 3,
+      "name": "frame_dummy",
+      "size": 0
+    },
+    {
+      "addr": "0x1210",
+      "insns": 18,
+      "name": "sum_squares",
+      "size": 54
+    },
+    {
+      "addr": "0x1250",
+      "insns": 18,
+      "name": "gcd",
+      "size": 47
+    },
+    {
+      "addr": "0x1280",
+      "insns": 11,
+      "name": "count_bits",
+      "size": 31
+    },
+    {
+      "addr": "0x12a0",
+      "insns": 12,
+      "name": "reverse_bits",
+      "size": 33
+    },
+    {
+      "addr": "0x12d0",
+      "insns": 24,
+      "name": "grid_walk",
+      "size": 65
+    },
+    {
+      "addr": "0x1314",
+      "insns": 4,
+      "name": "_fini",
+      "size": 0
+    }
+  ],
+  "gaps": [],
+  "generator": {
+    "name": "xtask-fixtures",
+    "version": "1"
+  },
+  "imports": ["__cxa_finalize","__libc_start_main","__printf_chk","strtoull"],
+  "jump_tables": [],
+  "leaf_functions": [
+    {
+      "name": "sum_squares",
+      "sig": "u64(u64)",
+      "vectors": "tests/golden/semantics/leaf/loops.gcc-O2nv.jsonl"
+    },
+    {
+      "name": "gcd",
+      "sig": "u64(u64,u64)",
+      "vectors": "tests/golden/semantics/leaf/loops.gcc-O2nv.jsonl"
+    },
+    {
+      "name": "count_bits",
+      "sig": "u32(u64)",
+      "vectors": "tests/golden/semantics/leaf/loops.gcc-O2nv.jsonl"
+    },
+    {
+      "name": "reverse_bits",
+      "sig": "u32(u32)",
+      "vectors": "tests/golden/semantics/leaf/loops.gcc-O2nv.jsonl"
+    },
+    {
+      "name": "grid_walk",
+      "sig": "i32(i32,i32)",
+      "vectors": "tests/golden/semantics/leaf/loops.gcc-O2nv.jsonl"
+    }
+  ],
+  "libraries": ["libc.so.6"],
+  "network_imports": [],
+  "program": "loops",
+  "protections": {
+    "build_id": "214570533d75f753a2a456ee0d62aa66425cbe5a",
+    "canary": false,
+    "fortify": true,
+    "ibt": true,
+    "nx": true,
+    "pie": true,
+    "relro": "full",
+    "rpath": false,
+    "runpath": false,
+    "shstk": true
+  },
+  "self_calls": [],
+  "strings": [],
+  "survey_facts": [
+    {
+      "kind": "function",
+      "value": "count_bits"
+    },
+    {
+      "kind": "function",
+      "value": "gcd"
+    },
+    {
+      "kind": "library",
+      "value": "libc.so.6"
+    },
+    {
+      "kind": "protection",
+      "value": "fortify"
+    },
+    {
+      "kind": "protection",
+      "value": "ibt"
+    },
+    {
+      "kind": "protection",
+      "value": "nx"
+    },
+    {
+      "kind": "protection",
+      "value": "pie"
+    },
+    {
+      "kind": "protection",
+      "value": "shstk"
+    }
+  ],
+  "syscall_names": [],
+  "syscalls": [],
+  "tail_calls": [
+    ["frame_dummy","register_tm_clones"]
+  ],
+  "tier": "T1"
+}

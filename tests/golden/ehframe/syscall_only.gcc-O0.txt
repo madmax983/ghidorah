@@ -1,0 +1,72 @@
+# golden: generator=xtask-fixtures version=1 binutils=2.42 fixture=syscall_only.gcc-O0 fixture_sha256=c281d6368d54ac7b01377770fb70136ec5acb7538cf17cd2e789b517c85cf312
+Contents of the .eh_frame section:
+
+
+00000000 0000000000000014 00000000 CIE
+  Version:               1
+  Augmentation:          "zR"
+  Code alignment factor: 1
+  Data alignment factor: -8
+  Return address column: 16
+  Augmentation data:     1b
+  DW_CFA_def_cfa: r7 (rsp) ofs 8
+  DW_CFA_offset: r16 (rip) at cfa-8
+  DW_CFA_nop
+  DW_CFA_nop
+
+00000018 000000000000001c 0000001c FDE cie=00000000 pc=0000000000401000..0000000000401027
+  DW_CFA_advance_loc: 5 to 0000000000401005
+  DW_CFA_def_cfa_offset: 16
+  DW_CFA_offset: r6 (rbp) at cfa-16
+  DW_CFA_advance_loc: 3 to 0000000000401008
+  DW_CFA_def_cfa_register: r6 (rbp)
+  DW_CFA_advance_loc: 30 to 0000000000401026
+  DW_CFA_def_cfa: r7 (rsp) ofs 8
+  DW_CFA_nop
+  DW_CFA_nop
+  DW_CFA_nop
+
+00000038 000000000000001c 0000003c FDE cie=00000000 pc=0000000000401027..000000000040104e
+  DW_CFA_advance_loc: 5 to 000000000040102c
+  DW_CFA_def_cfa_offset: 16
+  DW_CFA_offset: r6 (rbp) at cfa-16
+  DW_CFA_advance_loc: 3 to 000000000040102f
+  DW_CFA_def_cfa_register: r6 (rbp)
+  DW_CFA_advance_loc: 30 to 000000000040104d
+  DW_CFA_def_cfa: r7 (rsp) ofs 8
+  DW_CFA_nop
+  DW_CFA_nop
+  DW_CFA_nop
+
+00000058 000000000000001c 0000005c FDE cie=00000000 pc=000000000040104e..0000000000401067
+  DW_CFA_advance_loc: 5 to 0000000000401053
+  DW_CFA_def_cfa_offset: 16
+  DW_CFA_offset: r6 (rbp) at cfa-16
+  DW_CFA_advance_loc: 3 to 0000000000401056
+  DW_CFA_def_cfa_register: r6 (rbp)
+  DW_CFA_advance_loc: 16 to 0000000000401066
+  DW_CFA_def_cfa: r7 (rsp) ofs 8
+  DW_CFA_nop
+  DW_CFA_nop
+  DW_CFA_nop
+
+00000078 0000000000000018 0000007c FDE cie=00000000 pc=0000000000401067..0000000000401082
+  DW_CFA_advance_loc: 5 to 000000000040106c
+  DW_CFA_def_cfa_offset: 16
+  DW_CFA_offset: r6 (rbp) at cfa-16
+  DW_CFA_advance_loc: 3 to 000000000040106f
+  DW_CFA_def_cfa_register: r6 (rbp)
+  DW_CFA_nop
+  DW_CFA_nop
+  DW_CFA_nop
+
+00000094 0000000000000018 00000098 FDE cie=00000000 pc=0000000000401082..00000000004010a3
+  DW_CFA_advance_loc: 5 to 0000000000401087
+  DW_CFA_def_cfa_offset: 16
+  DW_CFA_offset: r6 (rbp) at cfa-16
+  DW_CFA_advance_loc: 3 to 000000000040108a
+  DW_CFA_def_cfa_register: r6 (rbp)
+  DW_CFA_nop
+  DW_CFA_nop
+  DW_CFA_nop
+

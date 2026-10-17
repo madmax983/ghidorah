@@ -1,0 +1,97 @@
+{
+  "claims": [
+    {
+      "args": [
+        "die"
+      ],
+      "rel": "noreturn"
+    },
+    {
+      "args": [
+        "die_code"
+      ],
+      "rel": "noreturn"
+    },
+    {
+      "args": [
+        "fatal_abort"
+      ],
+      "rel": "noreturn"
+    },
+    {
+      "args": [
+        "check_args",
+        "die"
+      ],
+      "rel": "calls"
+    },
+    {
+      "args": [
+        "check_args",
+        "fatal_abort"
+      ],
+      "rel": "calls"
+    }
+  ],
+  "noreturn": [
+    "die",
+    "die_code",
+    "fatal_abort",
+    "spin_forever"
+  ],
+  "program": "noreturn_wrappers",
+  "runs": [
+    {
+      "args": [],
+      "exit": 0,
+      "stdout": "ok 2\n"
+    },
+    {
+      "args": [
+        "a",
+        "b",
+        "c"
+      ],
+      "exit": 3,
+      "stdout": ""
+    },
+    {
+      "args": [
+        "a",
+        "b",
+        "c",
+        "d"
+      ],
+      "exit": 2,
+      "stdout": ""
+    }
+  ],
+  "strings": [
+    {
+      "text": "fatal: %s\n"
+    },
+    {
+      "text": "aborting now"
+    },
+    {
+      "text": "internal fault"
+    },
+    {
+      "text": "too many arguments"
+    }
+  ],
+  "survey_facts": [
+    {
+      "kind": "import",
+      "value": "exit"
+    },
+    {
+      "kind": "import",
+      "value": "abort"
+    },
+    {
+      "kind": "import",
+      "value": "_exit"
+    }
+  ]
+}

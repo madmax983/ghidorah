@@ -1,0 +1,37 @@
+{"golden":"generator=tools_examples version=1 fixture=crackme.gcc-O2 fixture_sha256=467a43b75d95c826daba8cb216d01d7fd386aa96c5ef5a95c2effffe1780de8f"}
+{
+  "ok": true,
+  "binary_id": "467a43b75d95c826",
+  "rev": 1,
+  "session": "cli",
+  "analysis": {
+    "state": "complete",
+    "rev": 1
+  },
+  "partial": false,
+  "data": {
+    "addr": "0x3db0",
+    "len": 16,
+    "hex": "c0110000000000008011000000000000",
+    "text": {
+      "text": "\\xc0\\x11\\x00\\x00\\x00\\x00\\x00\\x00\\x80\\x11\\x00\\x00\\x00\\x00\\x00\\x00",
+      "hex": "c0110000000000008011000000000000",
+      "len": 16,
+      "src": "binary"
+    },
+    "values": [
+      {
+        "v": "0x11c0",
+        "name": "frame_dummy"
+      },
+      {
+        "v": "0x1180",
+        "name": "__do_global_dtors_aux"
+      }
+    ],
+    "region": {
+      "name": "seg:5",
+      "perms": "rw-"
+    }
+  }
+}

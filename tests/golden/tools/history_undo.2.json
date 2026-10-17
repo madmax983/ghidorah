@@ -1,0 +1,54 @@
+{"golden":"generator=tools_examples version=1 fixture=crackme.gcc-O2 fixture_sha256=467a43b75d95c826daba8cb216d01d7fd386aa96c5ef5a95c2effffe1780de8f"}
+{
+  "ok": true,
+  "binary_id": "467a43b75d95c826",
+  "rev": 1,
+  "session": "*",
+  "partial": false,
+  "data": {
+    "undone": [
+      {
+        "tx": "tx:1",
+        "label": "symbol_rename",
+        "session": "mcp-1"
+      }
+    ],
+    "new_tx": null,
+    "rev": 1
+  },
+  "noop": true,
+  "diff": [
+    {
+      "op": "SetName",
+      "key": {
+        "k": "symbol",
+        "addr": "0x1090",
+        "key": 0
+      },
+      "old": {
+        "op": "SetName",
+        "addr": "0x1090",
+        "key": 0,
+        "kind": "label",
+        "primary": true,
+        "name": {
+          "value": "read_input",
+          "source": "agent",
+          "tx": 1,
+          "session": "mcp-1",
+          "force": false
+        },
+        "evidence": []
+      },
+      "new": {
+        "op": "SetName",
+        "addr": "0x1090",
+        "key": 0,
+        "kind": "label",
+        "primary": true,
+        "name": null,
+        "evidence": []
+      }
+    }
+  ]
+}

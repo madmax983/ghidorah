@@ -1,0 +1,207 @@
+{
+  "binaries": [
+    {
+      "name": "adversarial_names.gcc-O2",
+      "sha256": "f911e7055ea74404dcec667e557c283d8d739ec13ac68cf2a33b7c196d8395aa",
+      "variant": "none"
+    },
+    {
+      "name": "adversarial_names.gcc-O2.stripped",
+      "sha256": "c08f4b846fe1de7836575c4cc34cfa9f79dfd39e7d5a9f05ee9d78fd73dcc1ac",
+      "variant": "stripped"
+    }
+  ],
+  "build": {
+    "cflags": ["-O2"],
+    "compiler": "gcc 13.3.0",
+    "id": "gcc-O2",
+    "ldflags": []
+  },
+  "call_edges": [
+    ["__do_global_dtors_aux","__cxa_finalize"],
+    ["__do_global_dtors_aux","deregister_tm_clones"],
+    ["_start","__libc_start_main"],
+    ["frame_dummy","register_tm_clones"],
+    ["main",".fini"],
+    ["main","FUN_00401000"],
+    ["main","__printf_chk"],
+    ["main","foo.cold"],
+    ["main","puts@GLIBC_2.2.5"],
+    ["main","x@plt"]
+  ],
+  "cold_parts": [],
+  "duplicate_names": {},
+  "elf": {
+    "entry": "0x10c0",
+    "image_base": "0x0",
+    "interp": true,
+    "type": "DYN"
+  },
+  "facts": {
+    "claims": [
+      {
+        "args": ["main","FUN_00401000"],
+        "rel": "calls"
+      },
+      {
+        "args": ["main","foo.cold"],
+        "rel": "calls"
+      },
+      {
+        "args": ["main",".fini"],
+        "rel": "calls"
+      }
+    ]
+  },
+  "fixture": "adversarial_names.gcc-O2",
+  "function_count": 13,
+  "functions": [
+    {
+      "addr": "0x1000",
+      "insns": 8,
+      "name": "_init",
+      "size": 0
+    },
+    {
+      "addr": "0x1060",
+      "insns": 28,
+      "name": "main",
+      "size": 84
+    },
+    {
+      "addr": "0x10c0",
+      "insns": 13,
+      "name": "_start",
+      "size": 38
+    },
+    {
+      "addr": "0x10f0",
+      "insns": 11,
+      "name": "deregister_tm_clones",
+      "size": 0
+    },
+    {
+      "addr": "0x1120",
+      "insns": 16,
+      "name": "register_tm_clones",
+      "size": 0
+    },
+    {
+      "addr": "0x1160",
+      "insns": 16,
+      "name": "__do_global_dtors_aux",
+      "size": 0
+    },
+    {
+      "addr": "0x11a0",
+      "insns": 3,
+      "name": "frame_dummy",
+      "size": 0
+    },
+    {
+      "addr": "0x11b0",
+      "insns": 2,
+      "name": "x@plt",
+      "size": 5
+    },
+    {
+      "addr": "0x11c0",
+      "insns": 3,
+      "name": "puts@GLIBC_2.2.5",
+      "size": 6
+    },
+    {
+      "addr": "0x11d0",
+      "insns": 3,
+      "name": "FUN_00401000",
+      "size": 8
+    },
+    {
+      "addr": "0x11e0",
+      "insns": 3,
+      "name": ".fini",
+      "size": 12
+    },
+    {
+      "addr": "0x11f0",
+      "insns": 3,
+      "name": "foo.cold",
+      "size": 8
+    },
+    {
+      "addr": "0x11f8",
+      "insns": 4,
+      "name": "_fini",
+      "size": 0
+    }
+  ],
+  "gaps": [],
+  "generator": {
+    "name": "xtask-fixtures",
+    "version": "1"
+  },
+  "imports": ["__cxa_finalize","__libc_start_main","__printf_chk"],
+  "jump_tables": [],
+  "leaf_functions": [],
+  "libraries": ["libc.so.6"],
+  "network_imports": [],
+  "program": "adversarial_names",
+  "protections": {
+    "build_id": "af6b47335ffb102427f97e03b68f428caee8bfe4",
+    "canary": false,
+    "fortify": true,
+    "ibt": true,
+    "nx": true,
+    "pie": true,
+    "relro": "full",
+    "rpath": false,
+    "runpath": false,
+    "shstk": true
+  },
+  "self_calls": [],
+  "strings": [],
+  "survey_facts": [
+    {
+      "kind": "function",
+      "value": "FUN_00401000"
+    },
+    {
+      "kind": "function",
+      "value": "foo.cold"
+    },
+    {
+      "kind": "function",
+      "value": "x@plt"
+    },
+    {
+      "kind": "library",
+      "value": "libc.so.6"
+    },
+    {
+      "kind": "protection",
+      "value": "fortify"
+    },
+    {
+      "kind": "protection",
+      "value": "ibt"
+    },
+    {
+      "kind": "protection",
+      "value": "nx"
+    },
+    {
+      "kind": "protection",
+      "value": "pie"
+    },
+    {
+      "kind": "protection",
+      "value": "shstk"
+    }
+  ],
+  "syscall_names": [],
+  "syscalls": [],
+  "tail_calls": [
+    ["frame_dummy","register_tm_clones"]
+  ],
+  "tier": "T1"
+}
