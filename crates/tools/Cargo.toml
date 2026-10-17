@@ -1,14 +1,15 @@
 [package]
 name = "ghidorah-tools"
-description = "Tool registry and dispatcher pipeline: specs, argument parser, schemas, output shapes, envelope, budgets, errors and hints."
+description = "Tool registry, dispatcher pipeline, session, address resolver, cursors, profiles, server instructions and the helper tools."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
-# The crate has no unit tests. Its tests are in the test binary `tests/tools/main.rs`.
-# The test registry of WP-13a is `tests/support/test_registry.rs`.
+# The crate has no unit tests. The test binary `tests/tools/main.rs` tests the pipeline with
+# the test registry of WP-13a (`tests/support/test_registry.rs`). The test binary
+# `tests/session/main.rs` tests the session, the resolver and the helper tools.
 [lib]
 name = "ghidorah_tools"
 path = "src/lib.rs"
@@ -19,6 +20,8 @@ ghidorah-base = { path = "../base" }
 # `ToolSpec.reads_tables` names the tables of `ghidorah_db::Table`.
 ghidorah-db = { path = "../db" }
 ghidorah-json = { path = "../json" }
+# `binary_load` reads files through the loader.
+ghidorah-loader = { path = "../loader" }
 
 [dev-dependencies]
 ghidorah-testkit = { path = "../testkit" }
