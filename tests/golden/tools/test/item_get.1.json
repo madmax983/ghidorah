@@ -1,0 +1,18 @@
+{"golden":"generator=tools_examples version=1"}
+{
+  "ok": true,
+  "binary_id": "b1",
+  "rev": 7,
+  "session": "test",
+  "analysis": {
+    "state": "complete",
+    "rev": 7
+  },
+  "partial": false,
+  "data": {
+    "id": "fn:0x401010",
+    "addr": "0x401010",
+    "summary": "func_0001 has 38 bytes.",
+    "body": "The body of func_0001 is empty."
+  }
+}

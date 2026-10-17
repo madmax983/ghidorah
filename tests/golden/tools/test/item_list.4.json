@@ -1,0 +1,29 @@
+{"golden":"generator=tools_examples version=1"}
+{
+  "ok": true,
+  "binary_id": "b1",
+  "rev": 7,
+  "session": "test",
+  "analysis": {
+    "state": "complete",
+    "rev": 7
+  },
+  "partial": false,
+  "data": {
+    "count": 40
+  },
+  "page": {
+    "returned": 0,
+    "total": 40,
+    "truncated": false
+  },
+  "next": [
+    {
+      "tool": "item_get",
+      "args": {
+        "target": "fn:0x401000"
+      },
+      "why": "Read the first item."
+    }
+  ]
+}
