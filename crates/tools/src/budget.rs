@@ -8,7 +8,9 @@
 //! `func_get` splits its budget by section weight: `decomp` 6, `disasm` 3, `ir` 3 and 1 for
 //! every other section. Unused budget flows to later sections.
 
-use crate::content::ContentMode;
+use ghidorah_base::fit_prefix;
+
+use crate::content::{ContentMode, cost};
 
 /// The hard cap of `max_chars`.
 pub const HARD_MAX_CHARS: u32 = 60_000;
@@ -53,7 +55,7 @@ impl Budget {
     /// [`PROTOCOL_RESERVE`].
     #[must_use]
     pub const fn limit(&self) -> u64 {
-        0
+        self.max_chars.saturating_sub(PROTOCOL_RESERVE)
     }
 
     /// Gives an estimate of the envelope size that fits: the limit divided by the copies.
@@ -61,7 +63,7 @@ impl Budget {
     /// Handlers use it for sub-budgets, for example the sections of `binary_survey`.
     #[must_use]
     pub const fn envelope_chars(&self) -> u64 {
-        0
+        self.limit() / self.mode.copies()
     }
 }
 
@@ -72,15 +74,18 @@ impl Budget {
 /// The cost of an item and of its separator comes from [`crate::content::cost`].
 #[must_use]
 pub fn fit_items(items: &[String], overhead: u64, limit: u64, mode: ContentMode) -> usize {
-    let _ = (items, overhead, limit, mode);
-    0
+    let sizes: Vec<u64> = items.iter().map(|item| cost(item, mode)).collect();
+    fit_prefix(&sizes, overhead, mode.copies(), limit)
 }
 
 /// Gives the weight of a `func_get` section: `decomp` 6, `disasm` 3, `ir` 3, else 1.
 #[must_use]
 pub fn section_weight(section: &str) -> u64 {
-    let _ = section;
-    0
+    match section {
+        "decomp" => 6,
+        "disasm" | "ir" => 3,
+        _ => 1,
+    }
 }
 
 /// Splits `total` over sections in include order.
@@ -90,13 +95,34 @@ pub fn section_weight(section: &str) -> u64 {
 /// section `i`. The result holds the budget of each section.
 #[must_use]
 pub fn split_by_weight(total: u64, weights: &[u64], needs: &[u64]) -> Vec<u64> {
-    let _ = (total, weights, needs);
-    Vec::new()
+    let count = weights.len().min(needs.len());
+    let mut free = total;
+    let mut left: u64 = weights.iter().take(count).sum();
+    let mut out = Vec::with_capacity(count);
+    for (&weight, &need) in weights.iter().zip(needs).take(count) {
+        let share = if left == 0 {
+            0
+        } else {
+            let wide = u128::from(free) * u128::from(weight) / u128::from(left);
+            u64::try_from(wide).unwrap_or(free)
+        };
+        let given = share.min(need);
+        free -= given;
+        left -= weight;
+        out.push(given);
+    }
+    out
 }
 
 /// Splits `total` evenly over `parts` parts. The first parts get the remainder.
 #[must_use]
 pub fn split_even(total: u64, parts: usize) -> Vec<u64> {
-    let _ = (total, parts);
-    Vec::new()
+    let Ok(n) = u64::try_from(parts) else {
+        return Vec::new();
+    };
+    if n == 0 {
+        return Vec::new();
+    }
+    let (each, rest) = (total / n, total % n);
+    (0..n).map(|i| each + u64::from(i < rest)).collect()
 }

@@ -93,8 +93,11 @@ fn budget_trim_at_item_boundary() {
             "one more item fits at {max}"
         );
     }
-    let tiny = run_mode(&mut host, "item_list", &list_args(200), ContentMode::Plain);
-    assert!(chars(&text(&tiny)) as u64 <= 200, "{}", text(&tiny));
+    let tiny = run_mode(&mut host, "item_list", &list_args(999), ContentMode::Plain);
+    assert_eq!(
+        tiny.pointer("/error/code").and_then(Value::as_str),
+        Some("INVALID_ARGUMENT")
+    );
 }
 
 #[test]

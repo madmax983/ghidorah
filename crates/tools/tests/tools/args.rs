@@ -293,6 +293,10 @@ fn globals_parse_and_apply() {
         (args.globals().max_steps, args.globals().max_ms),
         (Some(9), Some(10))
     );
+}
+
+#[test]
+fn global_caps_aliases_and_coercion() {
     assert_eq!(fail(&ITEM_LIST, r#"{"limit":0}"#).0, "INVALID_ARGUMENT");
     assert_eq!(fail(&ITEM_LIST, r#"{"limit":1001}"#).0, "LIMIT_EXCEEDED");
     assert_eq!(fail(&ITEM_LIST, r#"{"in":"fn:0x1"}"#).0, "INVALID_ARGUMENT");

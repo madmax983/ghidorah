@@ -10,10 +10,13 @@
 //! with at most [`MAX_CANDIDATES`] candidates plus `candidates_total` (AC-134).
 
 use std::fmt;
+use std::ops::{Deref, DerefMut};
 
 use ghidorah_base::ErrorCode;
-use ghidorah_json::{Object, Value};
+use ghidorah_base::catalog::render;
+use ghidorah_json::{Number, Object, Value};
 
+use crate::content::chars;
 use crate::hints::Call;
 
 /// The largest error object in characters.
@@ -56,16 +59,44 @@ impl Candidate {
         }
     }
 
-    /// Gives the JSON form of the candidate.
+    /// Gives the JSON form of the candidate. Each text is cut to [`MAX_TEXT_CHARS`].
     #[must_use]
     pub fn to_json(&self) -> Value {
-        Value::Null
+        let value = match &self.value {
+            Value::String(text) => Value::from(cut(text, MAX_TEXT_CHARS)),
+            Value::Null | Value::Bool(_) | Value::Number(_) => self.value.clone(),
+            Value::Array(_) | Value::Object(_) => {
+                let text = ghidorah_json::write(&self.value);
+                if text.chars().count() <= MAX_TEXT_CHARS {
+                    self.value.clone()
+                } else {
+                    Value::Null
+                }
+            }
+        };
+        let mut out = Object::new();
+        out.push("value", value);
+        out.push("label", Value::from(cut(&self.label, MAX_TEXT_CHARS)));
+        let optional = [("id", &self.id), ("addr", &self.addr), ("kind", &self.kind)];
+        for (key, text) in optional {
+            if let Some(text) = text {
+                out.push(key, Value::from(cut(text, MAX_TEXT_CHARS)));
+            }
+        }
+        Value::Object(out)
     }
 }
 
 /// One tool error.
+///
+/// The error keeps its parts in a box, so a `Result` with it stays small.
+/// Field access goes through `Deref` to [`ErrorParts`].
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ToolError {
+pub struct ToolError(Box<ErrorParts>);
+
+/// The parts of one tool error.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ErrorParts {
     /// The code.
     pub code: ErrorCode,
     /// The values of the message template, for example `("field", "target")`.
@@ -82,11 +113,25 @@ pub struct ToolError {
     pub next: Vec<Call>,
 }
 
+impl Deref for ToolError {
+    type Target = ErrorParts;
+
+    fn deref(&self) -> &ErrorParts {
+        &self.0
+    }
+}
+
+impl DerefMut for ToolError {
+    fn deref_mut(&mut self) -> &mut ErrorParts {
+        &mut self.0
+    }
+}
+
 impl ToolError {
     /// Makes an error with no template value, path, candidate or detail.
     #[must_use]
-    pub const fn new(code: ErrorCode) -> Self {
-        Self {
+    pub fn new(code: ErrorCode) -> Self {
+        Self(Box::new(ErrorParts {
             code,
             vars: Vec::new(),
             field_path: None,
@@ -94,7 +139,7 @@ impl ToolError {
             details: None,
             crash_id: None,
             next: Vec::new(),
-        }
+        }))
     }
 
     /// Sets the template value of `key`, for example `field`.
@@ -114,7 +159,8 @@ impl ToolError {
     /// Adds a member to `details`.
     #[must_use]
     pub fn detail(mut self, key: &str, value: Value) -> Self {
-        self.details
+        let _ = self
+            .details
             .get_or_insert_with(Object::new)
             .insert(key, value);
         self
@@ -139,7 +185,13 @@ impl ToolError {
     /// Each value is cut to [`MAX_TEXT_CHARS`] characters.
     #[must_use]
     pub fn message(&self) -> String {
-        String::new()
+        let values: Vec<(&str, String)> = self
+            .vars
+            .iter()
+            .map(|(key, value)| (*key, cut(value, MAX_TEXT_CHARS)))
+            .collect();
+        let pairs: Vec<(&str, &str)> = values.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        render(self.code.info().message, &pairs)
     }
 
     /// Gives the frozen error object, cut to [`ERROR_CAP`] characters.
@@ -148,7 +200,50 @@ impl ToolError {
     /// keeps the count of all candidates.
     #[must_use]
     pub fn to_json(&self) -> Value {
-        Value::Null
+        let mut shown = self.candidates.len().min(MAX_CANDIDATES);
+        let mut details = self.details.is_some();
+        loop {
+            let object = self.object(shown, details);
+            let fits = chars(&ghidorah_json::write(&object)) <= ERROR_CAP;
+            if fits || (!details && shown == 0) {
+                return object;
+            }
+            if details {
+                details = false;
+            } else {
+                shown -= 1;
+            }
+        }
+    }
+
+    /// Builds the object with the first `shown` candidates, with or without `details`.
+    fn object(&self, shown: usize, details: bool) -> Value {
+        let info = self.code.info();
+        let mut out = Object::new();
+        out.push("code", Value::from(info.name));
+        out.push("num", int(u64::from(info.num)));
+        out.push("message", Value::from(self.message()));
+        out.push("hint", Value::from(info.hint));
+        out.push("retryable", Value::Bool(info.retry));
+        if let Some(path) = &self.field_path {
+            out.push("field_path", Value::from(cut(path, MAX_PATH_CHARS)));
+        }
+        if !self.candidates.is_empty() {
+            let list = self.candidates.iter().take(shown).map(Candidate::to_json);
+            out.push("candidates", Value::Array(list.collect()));
+            out.push("candidates_total", count(self.candidates.len()));
+        }
+        match (&self.details, details) {
+            (Some(object), true) => out.push("details", Value::Object(object.clone())),
+            (Some(_), false) => {
+                out.push("details", Value::object([("truncated", Value::Bool(true))]));
+            }
+            (None, _) => {}
+        }
+        if let Some(id) = &self.crash_id {
+            out.push("crash_id", Value::from(id.as_str()));
+        }
+        Value::Object(out)
     }
 }
 
@@ -160,9 +255,18 @@ impl fmt::Display for ToolError {
 
 impl std::error::Error for ToolError {}
 
+/// Gives a JSON integer.
+pub(crate) fn int(value: u64) -> Value {
+    Number::parse(&value.to_string()).map_or(Value::Null, Value::Number)
+}
+
+/// Gives a JSON integer of a count.
+pub(crate) fn count(value: usize) -> Value {
+    int(u64::try_from(value).unwrap_or(u64::MAX))
+}
+
 /// Cuts `text` to at most `max` characters.
 #[must_use]
 pub fn cut(text: &str, max: usize) -> String {
-    let _ = max;
-    text.to_owned()
+    text.chars().take(max).collect()
 }

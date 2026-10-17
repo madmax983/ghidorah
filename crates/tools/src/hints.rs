@@ -89,7 +89,11 @@ impl Call {
     /// Gives the JSON form `{ tool, args, why }`.
     #[must_use]
     pub fn to_json(&self) -> Value {
-        Value::Null
+        Value::object([
+            ("tool", Value::from(self.tool.as_str())),
+            ("args", self.args.clone()),
+            ("why", Value::from(self.why.as_str())),
+        ])
     }
 }
 
@@ -129,8 +133,12 @@ pub fn check<S: 'static>(
     in_profile: &dyn Fn(&str) -> bool,
     call: &Call,
 ) -> Result<(), HintError> {
-    let _ = (registry, in_profile, call, args::parse_strict::<S>);
-    Err(HintError::UnknownTool)
+    let (_, tool) = registry.get(&call.tool).ok_or(HintError::UnknownTool)?;
+    if !in_profile(tool.name) {
+        return Err(HintError::NotInProfile);
+    }
+    args::parse_strict(tool, &call.args).map_err(|e| HintError::Args(e.code))?;
+    Ok(())
 }
 
 /// Gives the valid hints of `calls` in their order, at most [`MAX_NEXT`].
@@ -140,6 +148,9 @@ pub fn keep_valid<S: 'static>(
     in_profile: &dyn Fn(&str) -> bool,
     calls: Vec<Call>,
 ) -> Vec<Call> {
-    let _ = (registry, in_profile, calls);
-    Vec::new()
+    calls
+        .into_iter()
+        .filter(|call| check(registry, in_profile, call).is_ok())
+        .take(MAX_NEXT)
+        .collect()
 }

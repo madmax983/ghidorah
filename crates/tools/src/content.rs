@@ -10,7 +10,7 @@
 //! A text block holds the envelope as a JSON string. So each `"` and `\` of the envelope costs
 //! one more character in that copy. [`cost`] counts every copy exactly.
 
-use ghidorah_json::Value;
+use ghidorah_json::{Object, Value};
 
 /// The content mode of one result.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
@@ -42,16 +42,19 @@ impl ContentMode {
     /// Parses the value of the server flag `--content`: `both`, `structured` or `text`.
     #[must_use]
     pub fn parse(text: &str) -> Option<Self> {
-        let _ = text;
-        None
+        match text {
+            "both" => Some(Self::Both),
+            "structured" => Some(Self::Structured),
+            "text" => Some(Self::Text),
+            _ => None,
+        }
     }
 }
 
 /// Gives the number of characters of `text`.
 #[must_use]
 pub fn chars(text: &str) -> u64 {
-    let _ = text;
-    0
+    u64::try_from(text.chars().count()).unwrap_or(u64::MAX)
 }
 
 /// Gives the number of characters of compact JSON `json` inside a JSON string.
@@ -59,15 +62,26 @@ pub fn chars(text: &str) -> u64 {
 /// Each `"` and `\` gains one escape character. Compact JSON holds no raw control character.
 #[must_use]
 pub fn escaped_chars(json: &str) -> u64 {
-    let _ = json;
-    0
+    let marks = json.bytes().filter(|b| matches!(b, b'"' | b'\\')).count();
+    chars(json).saturating_add(u64::try_from(marks).unwrap_or(u64::MAX))
 }
 
 /// Gives the characters that the compact JSON fragment `json` adds to a result in `mode`.
 #[must_use]
 pub fn cost(json: &str, mode: ContentMode) -> u64 {
-    let _ = (json, mode);
-    0
+    match mode {
+        ContentMode::Plain | ContentMode::Structured => chars(json),
+        ContentMode::Text => escaped_chars(json),
+        ContentMode::Both => chars(json).saturating_add(escaped_chars(json)),
+    }
+}
+
+/// Gives the text block of an envelope: `{ type: "text", text }`.
+fn text_block(envelope: &Value) -> Value {
+    Value::object([
+        ("type", Value::from("text")),
+        ("text", Value::from(ghidorah_json::write(envelope))),
+    ])
 }
 
 /// Gives the result of one tool call in `mode` for the envelope `envelope`.
@@ -75,13 +89,24 @@ pub fn cost(json: &str, mode: ContentMode) -> u64 {
 /// `is_error` sets the MCP `isError` member. [`ContentMode::Plain`] gives the envelope itself.
 #[must_use]
 pub fn tool_result(envelope: &Value, is_error: bool, mode: ContentMode) -> Value {
-    let _ = (is_error, mode);
-    envelope.clone()
+    let content = match mode {
+        ContentMode::Plain => return envelope.clone(),
+        ContentMode::Structured => Vec::new(),
+        ContentMode::Text | ContentMode::Both => vec![text_block(envelope)],
+    };
+    let mut out = Object::new();
+    out.push("content", Value::Array(content));
+    if mode != ContentMode::Text {
+        out.push("structuredContent", envelope.clone());
+    }
+    out.push("isError", Value::Bool(is_error));
+    Value::Object(out)
 }
 
 /// Gives the exact size in characters of the serialized result of [`tool_result`].
 #[must_use]
 pub fn result_chars(envelope: &Value, is_error: bool, mode: ContentMode) -> u64 {
-    let _ = (envelope, is_error, mode);
-    0
+    chars(&ghidorah_json::write(&tool_result(
+        envelope, is_error, mode,
+    )))
 }

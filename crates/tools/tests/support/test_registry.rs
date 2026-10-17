@@ -153,7 +153,7 @@ impl Host for TestHost {
                     || KeyPart::Text(p.to_owned()),
                     |hex| {
                         u64::from_str_radix(hex, 16)
-                            .map_or(KeyPart::Text(p.to_owned()), KeyPart::Int)
+                            .map_or_else(|_| KeyPart::Text(p.to_owned()), KeyPart::Int)
                     },
                 )
             })
@@ -453,7 +453,7 @@ fn resolve(value: &Value) -> Result<u64, ToolError> {
         _ => None,
     };
     match addr {
-        Some(a) if a >= BASE && (a - BASE) % STEP == 0 => Ok(a),
+        Some(a) if a >= BASE && (a - BASE).is_multiple_of(STEP) => Ok(a),
         _ => {
             let query = value.as_str().unwrap_or_default();
             let names: Vec<String> = (0..40).map(|i| format!("func_{i:04}")).collect();

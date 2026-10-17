@@ -1,0 +1,26 @@
+{"golden":"generator=tools_examples version=1"}
+{
+  "ok": true,
+  "binary_id": "b1",
+  "rev": 7,
+  "session": "test",
+  "analysis": {
+    "state": "complete",
+    "rev": 7
+  },
+  "partial": false,
+  "data": {
+    "items": [
+      {
+        "id": "fn:0x401000",
+        "addr": "0x401000",
+        "summary": "func_0000 has 1 bytes."
+      },
+      {
+        "id": "fn:0x401010",
+        "addr": "0x401010",
+        "summary": "func_0001 has 38 bytes."
+      }
+    ]
+  }
+}

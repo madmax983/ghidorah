@@ -7,6 +7,11 @@
     clippy::expect_used,
     reason = "test helpers outside test functions use expect"
 )]
+#![allow(clippy::panic, reason = "test tools panic on purpose")]
+#![allow(
+    clippy::unnecessary_wraps,
+    reason = "test handlers have the handler type, which returns a Result"
+)]
 
 #[path = "../support/test_registry.rs"]
 mod test_registry;

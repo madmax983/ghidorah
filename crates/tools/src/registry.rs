@@ -18,8 +18,13 @@
 //! | [`LintRule::Args`] | Argument names are valid and unique, and docs, defaults, groups and rules are sound. | - |
 //! | [`LintRule::Examples`] | Each tool has an example, and each example parses. | AC-132a |
 
+mod lint;
+
 use std::fmt;
 
+pub use lint::lint;
+
+use crate::schema::ROOT_COMBINATORS;
 use crate::spec::ToolSpec;
 
 /// The largest number of characters in a description.
@@ -27,6 +32,9 @@ pub const MAX_DESCRIPTION: usize = 1_000;
 
 /// The largest number of characters in an action line.
 pub const MAX_ACTION_LINE: usize = 200;
+
+/// The longest tool or argument name.
+pub const MAX_NAME: usize = 41;
 
 /// A list of tools.
 pub struct Registry<S: 'static> {
@@ -43,8 +51,9 @@ impl<S: 'static> Copy for Registry<S> {}
 
 impl<S: 'static> fmt::Debug for Registry<S> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let names: Vec<&str> = self.tools.iter().map(|t| t.name).collect();
-        f.debug_struct("Registry").field("tools", &names).finish()
+        f.debug_struct("Registry")
+            .field("tools", &self.names())
+            .finish()
     }
 }
 
@@ -64,14 +73,17 @@ impl<S: 'static> Registry<S> {
     /// Gives the index and the spec of the tool `name`, or `None`.
     #[must_use]
     pub fn get(&self, name: &str) -> Option<(usize, &'static ToolSpec<S>)> {
-        let _ = name;
-        None
+        self.tools
+            .iter()
+            .enumerate()
+            .find(|(_, tool)| tool.name == name)
+            .map(|(i, tool)| (i, *tool))
     }
 
     /// Gives the tool names in registry order.
     #[must_use]
     pub fn names(&self) -> Vec<&'static str> {
-        Vec::new()
+        self.tools.iter().map(|tool| tool.name).collect()
     }
 }
 
@@ -123,16 +135,32 @@ impl fmt::Display for LintFinding {
     }
 }
 
+/// Tells if `name` matches `^[a-z][a-z0-9_]{0,40}$`.
+#[must_use]
+pub fn is_name(name: &str) -> bool {
+    let mut bytes = name.bytes();
+    name.len() <= MAX_NAME
+        && bytes.next().is_some_and(|b| b.is_ascii_lowercase())
+        && bytes.all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+}
+
 /// Gives the resource word of a tool name: the part before the first `_`.
 #[must_use]
 pub fn resource_word(name: &str) -> &str {
-    name
+    name.split('_').next().unwrap_or(name)
 }
 
 /// Gives the first sentence of `text`: the text up to the first `.`, `!` or `?` that ends
 /// the text or comes before a space.
 #[must_use]
 pub fn first_sentence(text: &str) -> &str {
+    let bytes = text.as_bytes();
+    for (i, b) in bytes.iter().enumerate() {
+        let next = bytes.get(i + 1);
+        if matches!(b, b'.' | b'!' | b'?') && next.is_none_or(u8::is_ascii_whitespace) {
+            return text.get(..=i).unwrap_or(text);
+        }
+    }
     text
 }
 
@@ -142,13 +170,22 @@ pub fn first_sentence(text: &str) -> &str {
 /// combinator of [`crate::schema::ROOT_COMBINATORS`].
 #[must_use]
 pub fn schema_root_problem(schema: &ghidorah_json::Value) -> Option<String> {
-    let _ = schema;
-    None
-}
-
-/// Runs the lint over every tool of `registry`. The findings are in tool order, then rule order.
-#[must_use]
-pub fn lint<S: 'static>(registry: &Registry<S>) -> Vec<LintFinding> {
-    let _ = registry;
-    Vec::new()
+    use ghidorah_json::Value;
+    if schema.get("type").and_then(Value::as_str) != Some("object") {
+        return Some("the root type is not object".to_owned());
+    }
+    if schema
+        .get("properties")
+        .and_then(Value::as_object)
+        .is_none()
+    {
+        return Some("the root has no properties object".to_owned());
+    }
+    if schema.get("additionalProperties") != Some(&Value::Bool(false)) {
+        return Some("the root does not set additionalProperties to false".to_owned());
+    }
+    ROOT_COMBINATORS
+        .iter()
+        .find(|key| schema.get(key).is_some())
+        .map(|key| format!("the root has the combinator {key}"))
 }

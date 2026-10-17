@@ -35,7 +35,7 @@ pub use args::{Args, Format, Globals, Shape};
 pub use content::ContentMode;
 pub use dispatch::{Ctx, Item, KeyPart, ListPayload, Members, Payload, SortKey, Total};
 pub use envelope::{AnalysisInfo, AnalysisState, Envelope, Frame, Page, Warning};
-pub use errors::{Candidate, ToolError};
+pub use errors::{Candidate, ErrorParts, ToolError};
 pub use hints::Call;
 pub use outshape::{Field, Fit, OutputShape};
 pub use registry::{LintFinding, LintRule, Registry};

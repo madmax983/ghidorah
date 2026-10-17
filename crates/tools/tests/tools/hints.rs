@@ -115,17 +115,22 @@ fn ac_143_executable_hints() {
     }
     assert_eq!(with_next, calls.len(), "every case has a repair or a hint");
 
-    let mut host = TestHost::default();
-    host.analysis = Some(AnalysisInfo {
-        state: AnalysisState::BudgetStopped,
-        rev: 6,
-    });
+    let host = TestHost {
+        analysis: Some(AnalysisInfo {
+            state: AnalysisState::BudgetStopped,
+            rev: 6,
+        }),
+        ..TestHost::default()
+    };
+    let mut host = host;
     let envelope = run_on(&mut host, "item_list", "{}").to_json();
     assert_eq!(envelope.get("partial"), Some(&Value::Bool(true)));
     assert!(problems(&registry, &host, &envelope).is_empty());
 
-    let mut host = TestHost::default();
-    host.profile = Some(["item_list"].into_iter().collect());
+    let mut host = TestHost {
+        profile: Some(std::iter::once("item_list").collect()),
+        ..TestHost::default()
+    };
     let envelope = run_on(&mut host, "item_list", "{}").to_json();
     assert!(envelope.get("next").is_none(), "{envelope}");
 

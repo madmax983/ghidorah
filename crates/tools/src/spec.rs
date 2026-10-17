@@ -214,6 +214,10 @@ pub struct Example {
 
 /// The four MCP annotations of a tool. `openWorldHint` is `false` for every tool.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "the four MCP annotations are booleans"
+)]
 pub struct Annotations {
     /// `readOnlyHint`.
     pub read_only: bool,
@@ -372,20 +376,18 @@ impl<S: 'static> ToolSpec<S> {
     /// Gives the argument with `name`, or `None`.
     #[must_use]
     pub fn arg(&self, name: &str) -> Option<&'static ArgSpec> {
-        let _ = name;
-        None
+        self.args.iter().find(|a| a.name == name)
     }
 
     /// Gives the selector argument of a selector tool, or `None`.
     #[must_use]
     pub fn selector(&self) -> Option<&'static ArgSpec> {
-        None
+        self.args.iter().find(|a| a.role == Role::Selector)
     }
 
     /// Gives the action with the selector value `value`, or `None`.
     #[must_use]
     pub fn action(&self, value: &str) -> Option<&'static ActionSpec> {
-        let _ = value;
-        None
+        self.actions.iter().find(|a| a.value == value)
     }
 }

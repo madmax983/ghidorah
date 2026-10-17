@@ -110,8 +110,10 @@ fn unknown_tool_and_profile() {
             .and_then(Value::as_str)
             .is_some_and(|m| m.contains("item_lst"))
     );
-    let mut host = TestHost::default();
-    host.profile = Some(["item_list", "item_get"].into_iter().collect());
+    let mut host = TestHost {
+        profile: Some(["item_list", "item_get"].into_iter().collect()),
+        ..TestHost::default()
+    };
     let envelope = run_on(
         &mut host,
         "item_edit",
@@ -352,11 +354,13 @@ fn edits_conflicts_and_dry_runs() {
 
 #[test]
 fn partial_coercion_and_aliases() {
-    let mut host = TestHost::default();
-    host.analysis = Some(AnalysisInfo {
-        state: AnalysisState::Stale,
-        rev: 6,
-    });
+    let mut host = TestHost {
+        analysis: Some(AnalysisInfo {
+            state: AnalysisState::Stale,
+            rev: 6,
+        }),
+        ..TestHost::default()
+    };
     let envelope = run_on(&mut host, "item_get", r#"{"target":"0x401000"}"#).to_json();
     assert_eq!(envelope.get("partial"), Some(&Value::Bool(true)));
     assert_eq!(
@@ -382,7 +386,9 @@ fn partial_coercion_and_aliases() {
         Some("W_COERCED")
     );
     assert_eq!(
-        envelope.pointer("/warnings/0/at").and_then(Value::as_str),
+        envelope
+            .pointer("/warnings/0/field")
+            .and_then(Value::as_str),
         Some("/count")
     );
     assert!(envelope.pointer("/warnings/0/details").is_none());
@@ -394,17 +400,17 @@ fn partial_coercion_and_aliases() {
     .to_json();
     assert_eq!(
         detailed.pointer("/warnings/0/details"),
-        Some(&json(r#"{"from":"string","to":"integer"}"#))
+        Some(&json(r#"{"from_type":"string","to_type":"integer"}"#))
     );
     let alias = run("item_get", r#"{"addr":"0x401000","format":"detailed"}"#);
     assert!(ok(&alias));
     assert_eq!(
-        alias.pointer("/warnings/0/at").and_then(Value::as_str),
+        alias.pointer("/warnings/0/field").and_then(Value::as_str),
         Some("/addr")
     );
     assert_eq!(
         alias.pointer("/warnings/0/details"),
-        Some(&json(r#"{"from":"addr","to":"target"}"#))
+        Some(&json(r#"{"from_name":"addr","to_name":"target"}"#))
     );
     assert_eq!(
         alias.pointer("/warnings/0/num").and_then(Value::as_u64),
@@ -527,7 +533,7 @@ fn object_results_fit_or_fail() {
 #[test]
 fn members_and_ctx() {
     let members = Members {
-        ids: ["fn:0x1".to_owned()].into_iter().collect(),
+        ids: std::iter::once("fn:0x1".to_owned()).collect(),
         ranges: vec![(0x10, 0x20)],
     };
     assert!(members.holds(&json(r#"{"id":"fn:0x1","addr":"0x99"}"#)));

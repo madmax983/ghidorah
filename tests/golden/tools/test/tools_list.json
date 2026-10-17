@@ -1,0 +1,445 @@
+{"golden":"generator=tools_list version=1"}
+[
+  {
+    "name": "item_list",
+    "title": "List test items",
+    "description": "List the test items of the open binary, sorted by address, name or size. Use filter.name and filter.size_min to narrow the list. The tool exists only in the test registry.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 20000,
+          "description": "The number of test items in the binary.",
+          "default": 40
+        },
+        "filter": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "maxLength": 64,
+              "description": "Keep the items whose name holds this text."
+            },
+            "size_min": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000,
+              "description": "Keep the items with at least this size."
+            }
+          },
+          "additionalProperties": false,
+          "description": "Filters that narrow the list."
+        },
+        "sort": {
+          "type": "string",
+          "enum": [
+            "addr",
+            "name",
+            "size"
+          ],
+          "description": "The sort order of the items.",
+          "default": "addr"
+        },
+        "binary_id": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "The ID of the target binary. Leave it out when exactly one binary is open."
+        },
+        "format": {
+          "type": "string",
+          "enum": [
+            "concise",
+            "detailed"
+          ],
+          "description": "The detail level. The detailed form adds provenance, coercion details and sizes.",
+          "default": "concise"
+        },
+        "fields": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 256,
+            "description": "A JSON pointer."
+          },
+          "maxItems": 32,
+          "description": "JSON pointers into data. The result keeps only these fields."
+        },
+        "max_chars": {
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 60000,
+          "description": "The largest result in characters. The count includes every copy of the result."
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000,
+          "description": "The largest number of items on one page."
+        },
+        "cursor": {
+          "type": "string",
+          "maxLength": 1024,
+          "description": "The page.next_cursor of the previous page."
+        },
+        "count_only": {
+          "type": "boolean",
+          "description": "Return only the count of the items."
+        },
+        "shape": {
+          "type": "string",
+          "enum": [
+            "objects",
+            "table"
+          ],
+          "description": "The form of the items. The table form gives cols and rows.",
+          "default": "objects"
+        },
+        "in": {
+          "type": "string",
+          "pattern": "^(set):",
+          "description": "Keep only the members of this named set, for example set:parsers."
+        },
+        "session": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "The session label for provenance, filters and the undo scope."
+        }
+      },
+      "additionalProperties": false
+    },
+    "annotations": {
+      "title": "List test items",
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "item_get",
+    "title": "Get test items",
+    "description": "Get one or more test items by address with the selected sections. Send target for one item or targets for up to 50 items.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "target": {
+          "type": [
+            "integer",
+            "string"
+          ],
+          "description": "The address of one item."
+        },
+        "targets": {
+          "type": "array",
+          "items": {
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
+          "maxItems": 50,
+          "description": "The addresses of up to 50 items."
+        },
+        "include": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "summary",
+              "body"
+            ],
+            "description": "One section."
+          },
+          "maxItems": 2,
+          "description": "The sections of each item.",
+          "default": [
+            "summary"
+          ]
+        },
+        "binary_id": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "The ID of the target binary. Leave it out when exactly one binary is open."
+        },
+        "format": {
+          "type": "string",
+          "enum": [
+            "concise",
+            "detailed"
+          ],
+          "description": "The detail level. The detailed form adds provenance, coercion details and sizes.",
+          "default": "concise"
+        },
+        "fields": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 256,
+            "description": "A JSON pointer."
+          },
+          "maxItems": 32,
+          "description": "JSON pointers into data. The result keeps only these fields."
+        },
+        "max_chars": {
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 60000,
+          "description": "The largest result in characters. The count includes every copy of the result."
+        },
+        "session": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "The session label for provenance, filters and the undo scope."
+        }
+      },
+      "additionalProperties": false
+    },
+    "annotations": {
+      "title": "Get test items",
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "item_edit",
+    "title": "Edit test items",
+    "description": "Edit the test items: create, rename or delete one item. Each action has its own required arguments. The delete action is destructive.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "create",
+            "rename",
+            "delete"
+          ],
+          "description": "The edit action."
+        },
+        "target": {
+          "type": [
+            "integer",
+            "string"
+          ],
+          "description": "The address of the item."
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "The new name of the item."
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "One ID."
+          },
+          "maxItems": 16,
+          "description": "IDs that support the name."
+        },
+        "binary_id": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "The ID of the target binary. Leave it out when exactly one binary is open."
+        },
+        "format": {
+          "type": "string",
+          "enum": [
+            "concise",
+            "detailed"
+          ],
+          "description": "The detail level. The detailed form adds provenance, coercion details and sizes.",
+          "default": "concise"
+        },
+        "fields": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 256,
+            "description": "A JSON pointer."
+          },
+          "maxItems": 32,
+          "description": "JSON pointers into data. The result keeps only these fields."
+        },
+        "max_chars": {
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 60000,
+          "description": "The largest result in characters. The count includes every copy of the result."
+        },
+        "session": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "The session label for provenance, filters and the undo scope."
+        },
+        "expected_rev": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "The rev that the call expects. Another rev gives CONFLICT."
+        },
+        "dry_run": {
+          "type": "boolean",
+          "description": "Return the planned edit list with no commit."
+        },
+        "force": {
+          "type": "boolean",
+          "description": "Allow an agent write over an imported fact. The journal records the force."
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "title": "Edit test items",
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "echo_value",
+    "title": "Echo a value",
+    "description": "Echo a JSON value with an optional flag and tag. The tool needs no binary.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "value": {
+          "description": "Any JSON value."
+        },
+        "flag": {
+          "type": "boolean",
+          "description": "A flag that the tool gives back."
+        },
+        "tag": {
+          "type": "string",
+          "pattern": "^(note|set):",
+          "description": "A note ID or a set ID."
+        },
+        "format": {
+          "type": "string",
+          "enum": [
+            "concise",
+            "detailed"
+          ],
+          "description": "The detail level. The detailed form adds provenance, coercion details and sizes.",
+          "default": "concise"
+        },
+        "fields": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 256,
+            "description": "A JSON pointer."
+          },
+          "maxItems": 32,
+          "description": "JSON pointers into data. The result keeps only these fields."
+        },
+        "max_chars": {
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 60000,
+          "description": "The largest result in characters. The count includes every copy of the result."
+        },
+        "session": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "The session label for provenance, filters and the undo scope."
+        }
+      },
+      "required": [
+        "value"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "title": "Echo a value",
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "fuel_run",
+    "title": "Run a fuel test",
+    "description": "Run a fuel test: use a number of work units from the fuel of the call. The tool sends a progress report for each 100 units.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "work": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000000,
+          "description": "The number of fuel units to use."
+        },
+        "binary_id": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "The ID of the target binary. Leave it out when exactly one binary is open."
+        },
+        "format": {
+          "type": "string",
+          "enum": [
+            "concise",
+            "detailed"
+          ],
+          "description": "The detail level. The detailed form adds provenance, coercion details and sizes.",
+          "default": "concise"
+        },
+        "fields": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 256,
+            "description": "A JSON pointer."
+          },
+          "maxItems": 32,
+          "description": "JSON pointers into data. The result keeps only these fields."
+        },
+        "max_chars": {
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 60000,
+          "description": "The largest result in characters. The count includes every copy of the result."
+        },
+        "session": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "The session label for provenance, filters and the undo scope."
+        },
+        "max_steps": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000,
+          "description": "The fuel of the call in work units."
+        },
+        "max_ms": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3600000,
+          "description": "A wall-clock guard in milliseconds. Fuel stays the main stop rule."
+        }
+      },
+      "required": [
+        "work"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "title": "Run a fuel test",
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  }
+]
