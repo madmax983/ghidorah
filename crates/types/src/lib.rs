@@ -56,15 +56,14 @@ pub const CALL_CONVS: &[&CallConv] = &[&cc::SYSV_X86_64];
 /// Gives the calling-convention table with the name `name`.
 #[must_use]
 pub fn call_conv(name: &str) -> Option<&'static CallConv> {
-    let _ = name;
-    None
+    CALL_CONVS.iter().copied().find(|c| c.name == name)
 }
 
+/// A function that gives an embedded noreturn list.
+pub type NoreturnFn = fn() -> Result<&'static NoreturnList, &'static DataError>;
+
 /// The noreturn list of each binary format. The key is the format name of the loader.
-pub const NORETURN_BY_FORMAT: &[(
-    &str,
-    fn() -> Result<&'static NoreturnList, &'static DataError>,
-)] = &[("elf64-le", noreturn::elf)];
+pub const NORETURN_BY_FORMAT: &[(&str, NoreturnFn)] = &[("elf64-le", noreturn::elf)];
 
 /// Gives the noreturn list of the binary format `format`, for example `elf64-le`.
 ///
@@ -72,6 +71,8 @@ pub const NORETURN_BY_FORMAT: &[(
 ///
 /// Returns the [`DataError`] of the embedded list file.
 pub fn noreturn_list(format: &str) -> Option<Result<&'static NoreturnList, &'static DataError>> {
-    let _ = format;
-    None
+    NORETURN_BY_FORMAT
+        .iter()
+        .find(|(name, _)| *name == format)
+        .map(|(_, list)| list())
 }

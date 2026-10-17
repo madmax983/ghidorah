@@ -58,21 +58,18 @@ impl CallConv {
     /// Tells if the callee keeps the register `reg`.
     #[must_use]
     pub fn is_callee_saved(&self, reg: &str) -> bool {
-        let _ = reg;
-        false
+        self.callee_saved.contains(&reg)
     }
 
     /// Gives the position of `reg` in the integer argument list.
     #[must_use]
     pub fn int_arg_index(&self, reg: &str) -> Option<usize> {
-        let _ = reg;
-        None
+        self.int_args.iter().position(|r| *r == reg)
     }
 
     /// Gives the position of `reg` in the floating argument list.
     #[must_use]
     pub fn float_arg_index(&self, reg: &str) -> Option<usize> {
-        let _ = reg;
-        None
+        self.float_args.iter().position(|r| *r == reg)
     }
 }

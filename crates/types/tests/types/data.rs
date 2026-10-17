@@ -79,7 +79,7 @@ fn x86_64_syscall_table() {
     );
     assert!(!table.is_empty());
     for (number, name) in [
-        (0, "read"),
+        (0u16, "read"),
         (1, "write"),
         (2, "open"),
         (9, "mmap"),
@@ -92,8 +92,8 @@ fn x86_64_syscall_table() {
         (318, "getrandom"),
         (435, "clone3"),
     ] {
-        assert_eq!(table.name(number), Some(name), "{number}");
-        assert_eq!(table.number(name), Some(number as u16), "{name}");
+        assert_eq!(table.name(u64::from(number)), Some(name), "{number}");
+        assert_eq!(table.number(name), Some(number), "{name}");
     }
     assert_eq!(table.name(100_000), None);
     assert_eq!(table.name(u64::MAX), None);

@@ -5,11 +5,13 @@
 //! The file header gives the attribute grammar. The index keys are linked names, for example
 //! `__isoc23_scanf`, `__printf_chk` and `open64`. A lookup removes a symbol version first.
 
+mod attrs;
+
 use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::OnceLock;
 
-use crate::cparse::CParseError;
+use crate::cparse::{CParseError, parse_sig};
 use crate::data::TIER0_H;
 use crate::store::TypeStore;
 use crate::ty::{Sig, TypeId};
@@ -74,8 +76,7 @@ impl Category {
     /// Finds the category with the name `name`.
     #[must_use]
     pub fn from_name(name: &str) -> Option<Self> {
-        let _ = name;
-        None
+        Self::ALL.into_iter().find(|c| c.name() == name)
     }
 }
 
@@ -177,8 +178,35 @@ pub enum Tier0Error {
 
 impl fmt::Display for Tier0Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("tier0 error")
+        match self {
+            Self::Prelude(message) => {
+                write!(f, "tier0.h: the prelude does not install: {message}")
+            }
+            Self::Parse { line, error } => write!(f, "tier0.h line {line}: {error}"),
+            Self::Attr { line, word } => {
+                write!(f, "tier0.h line {line}: the attribute `{word}` is bad")
+            }
+            Self::Duplicate { line, name } => {
+                write!(f, "tier0.h line {line}: the name `{name}` comes twice")
+            }
+        }
     }
+}
+
+/// Splits a Tier-0 line into the C text and the attribute comment.
+fn split_line(text: &str, line: u32) -> Result<(&str, &str), Tier0Error> {
+    let bad = |word: &str| Tier0Error::Attr {
+        line,
+        word: word.to_string(),
+    };
+    let Some((c, comment)) = text.split_once("//") else {
+        return Err(bad("the line has no attribute comment"));
+    };
+    let c = c.trim();
+    if !c.ends_with(';') {
+        return Err(bad(c));
+    }
+    Ok((c, comment.trim()))
 }
 
 impl std::error::Error for Tier0Error {}
@@ -198,15 +226,63 @@ impl Tier0 {
     ///
     /// Returns [`Tier0Error`] for the first bad line.
     pub fn parse(text: &str) -> Result<Self, Tier0Error> {
-        let _ = text;
-        Err(Tier0Error::Prelude(String::new()))
+        let mut store =
+            TypeStore::with_prelude().map_err(|e| Tier0Error::Prelude(e.to_string()))?;
+        let mut protos: Vec<Proto> = Vec::new();
+        let mut index = BTreeMap::new();
+        let mut in_block = false;
+        for (raw, line) in text.lines().zip(1u32..) {
+            let t = raw.trim();
+            if in_block {
+                in_block = !t.contains("*/");
+                continue;
+            }
+            if t.starts_with("/*") {
+                in_block = !t.contains("*/");
+                continue;
+            }
+            if t.is_empty() || t.starts_with("//") {
+                continue;
+            }
+            let (c, comment) = split_line(t, line)?;
+            let parsed =
+                parse_sig(&mut store, c).map_err(|error| Tier0Error::Parse { line, error })?;
+            let found = attrs::parse(comment, &parsed.sig, &store, line)?;
+            let names = std::iter::once(&parsed.name).chain(&found.aliases);
+            for name in names.clone() {
+                if index.contains_key(name) {
+                    return Err(Tier0Error::Duplicate {
+                        line,
+                        name: name.clone(),
+                    });
+                }
+            }
+            let slot = protos.len();
+            for name in names {
+                index.insert(name.clone(), slot);
+            }
+            protos.push(Proto {
+                name: parsed.name,
+                text: c.to_string(),
+                ty: parsed.ty,
+                sig: parsed.sig,
+                category: found.category,
+                attrs: found.attrs,
+                aliases: found.aliases,
+            });
+        }
+        Ok(Self {
+            store,
+            protos,
+            index,
+        })
     }
 
     /// Gives the prototype of the linked name `name`. A symbol version drops out first.
     #[must_use]
     pub fn get(&self, name: &str) -> Option<&Proto> {
-        let _ = name;
-        None
+        let bare = name.split_once('@').map_or(name, |(head, _)| head);
+        self.index.get(bare).and_then(|i| self.protos.get(*i))
     }
 
     /// Gives the prototypes in file order.
@@ -217,7 +293,7 @@ impl Tier0 {
 
     /// Gives the linked names of the index in byte order.
     pub fn names(&self) -> impl Iterator<Item = &str> + '_ {
-        self.index.keys().take(0).map(String::as_str)
+        self.index.keys().map(String::as_str)
     }
 
     /// Gives the store of the prototype types.

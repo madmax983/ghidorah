@@ -10,6 +10,9 @@ use ghidorah_types::{CParseError, TypeStore, parse_sig, parse_type};
 
 use crate::support::{first, in_small_stack, store};
 
+/// The nesting depth of the bombs.
+const DEEP: usize = 10_000;
+
 /// One bomb: a name, the mode (`true` for `sig`), the text and the detail code.
 struct Bomb {
     name: &'static str,
@@ -18,8 +21,9 @@ struct Bomb {
     code: DiagCode,
 }
 
-fn bombs() -> Vec<Bomb> {
-    let deep = 10_000;
+/// The bombs of the input, the tokens and the declarators.
+fn declarator_bombs() -> Vec<Bomb> {
+    let deep = DEEP;
     vec![
         Bomb {
             name: "input above 1 MiB",
@@ -76,10 +80,18 @@ fn bombs() -> Vec<Bomb> {
                 "struct {{ {} }}",
                 (0..=MAX_PARAMS)
                     .map(|i| format!("int f{i};"))
-                    .collect::<String>()
+                    .collect::<Vec<_>>()
+                    .concat()
             ),
             code: DiagCode::Limit,
         },
+    ]
+}
+
+/// The bombs of the records and the constant expressions.
+fn nested_bombs() -> Vec<Bomb> {
+    let deep = DEEP;
+    vec![
         Bomb {
             name: "nested function pointer parameters",
             sig: true,
@@ -136,7 +148,7 @@ fn run(store: &mut TypeStore, bomb: &Bomb) -> Result<(), CParseError> {
 #[test]
 fn ac_111_c_parser_limits() {
     assert_eq!(MAX_DEPTH, 64);
-    for bomb in bombs() {
+    for bomb in declarator_bombs().into_iter().chain(nested_bombs()) {
         let started = Instant::now();
         let (result, before, after) = in_small_stack(|| {
             let mut s = store();

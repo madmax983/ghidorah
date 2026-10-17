@@ -7,7 +7,7 @@
 use std::collections::BTreeSet;
 use std::sync::OnceLock;
 
-use crate::data::{DataError, NORETURN_ELF_TXT};
+use crate::data::{DataError, NORETURN_ELF_TXT, data_lines, error};
 
 /// A list of function names that do not return.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -23,19 +23,24 @@ impl NoreturnList {
     /// Returns [`DataError`] for a name with a leading underscore, a character outside
     /// `[A-Za-z0-9_]` or a name that comes twice.
     pub fn parse(file: &'static str, text: &'static str) -> Result<Self, DataError> {
-        let _ = text;
-        Err(DataError {
-            file,
-            line: 0,
-            message: String::new(),
-        })
+        let mut names = BTreeSet::new();
+        for (line, name) in data_lines(text) {
+            let good = !name.starts_with('_')
+                && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_');
+            if !good {
+                return Err(error(file, line, format!("bad name `{name}`")));
+            }
+            if !names.insert(name) {
+                return Err(error(file, line, format!("`{name}` comes twice")));
+            }
+        }
+        Ok(Self { names })
     }
 
     /// Tells if the function `name` does not return.
     #[must_use]
     pub fn contains(&self, name: &str) -> bool {
-        let _ = name;
-        false
+        self.names.contains(match_name(name))
     }
 
     /// Gives the names in byte order.
@@ -59,7 +64,8 @@ impl NoreturnList {
 /// Gives the name part that a list match uses: no symbol version and no leading underscore.
 #[must_use]
 pub fn match_name(name: &str) -> &str {
-    name
+    let bare = name.split_once('@').map_or(name, |(head, _)| head);
+    bare.trim_start_matches('_')
 }
 
 /// Gives the ELF list of `data/noreturn_elf.txt`.

@@ -186,6 +186,16 @@ fn names_and_tags() {
         ),
         Err(StoreError::BadName(String::new()))
     );
+}
+
+#[test]
+fn enums_and_records_without_tags() {
+    let mut s = TypeStore::new();
+    let int = s.prim(Prim::Int);
+    s.typedef("myint", int).expect("typedef");
+    let st = s
+        .define_record(RecordKind::Struct, Some("pt"), vec![Field::new("x", int)])
+        .expect("record");
     let e = s.declare(TagKind::Enum, "color").expect("enum");
     let items = vec![Enumerator {
         name: "RED".to_string(),

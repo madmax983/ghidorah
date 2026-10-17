@@ -1,6 +1,7 @@
-//! AC-112a: SysV layouts of records built through the `TypeStore` API (design Section 9.3).
+//! AC-112a: System V layouts of records built through the `TypeStore` API (design Section 9.3).
 
 use std::collections::BTreeSet;
+use std::fmt::Write as _;
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -419,7 +420,7 @@ fn emit_deps(s: &TypeStore, id: TypeId, seen: &mut BTreeSet<TypeId>, out: &mut S
             if let Some(Type::Record(r)) = s.get(*to)
                 && let Some(tag) = &r.name
             {
-                out.push_str(&format!("{} {tag};\n", r.kind.keyword()));
+                writeln!(out, "{} {tag};", r.kind.keyword()).expect("write");
             } else {
                 emit_deps(s, *to, seen, out);
             }
@@ -465,16 +466,20 @@ fn oracle_program(s: &TypeStore, ids: &[TypeId]) -> String {
     out.push_str("int main(void) {\n");
     for id in ids {
         let t = s.c_text(*id).expect("text");
-        out.push_str(&format!(
-            "  printf(\"{t} size=%zu align=%zu\\n\", sizeof({t}), _Alignof({t}));\n"
-        ));
+        writeln!(
+            out,
+            "  printf(\"{t} size=%zu align=%zu\\n\", sizeof({t}), _Alignof({t}));"
+        )
+        .expect("write");
         if let Some(Type::Record(r)) = s.get(*id) {
             for f in &r.fields {
                 let decl = s.c_decl(f.ty, &f.name).expect("decl");
-                out.push_str(&format!(
-                    "  printf(\"+0x%zx {decl}\\n\", __builtin_offsetof({t}, {}));\n",
+                writeln!(
+                    out,
+                    "  printf(\"+0x%zx {decl}\\n\", __builtin_offsetof({t}, {}));",
                     f.name
-                ));
+                )
+                .expect("write");
             }
         }
         out.push_str("  printf(\"\\n\");\n");

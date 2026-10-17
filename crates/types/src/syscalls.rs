@@ -6,7 +6,9 @@
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
 
-use crate::data::{DataError, SYSCALLS_X86_64_TXT};
+use ghidorah_base::SyscallId;
+
+use crate::data::{DataError, SYSCALLS_X86_64_TXT, data_lines, error};
 
 /// The register that holds the syscall number.
 pub const NUMBER_REG: &str = "rax";
@@ -29,26 +31,39 @@ impl SyscallTable {
     /// Returns [`DataError`] for a bad number, a name outside `[a-z_][a-z0-9_]*`, or a number
     /// or a name that comes twice.
     pub fn parse(file: &'static str, text: &'static str) -> Result<Self, DataError> {
-        let _ = text;
-        Err(DataError {
-            file,
-            line: 0,
-            message: String::new(),
-        })
+        let mut table = Self::default();
+        for (line, data) in data_lines(text) {
+            let mut words = data.split_whitespace();
+            let (Some(number), Some(name), None) = (words.next(), words.next(), words.next())
+            else {
+                return Err(error(file, line, "a line holds a number and a name"));
+            };
+            let Ok(number) = number.parse::<u16>() else {
+                return Err(error(file, line, format!("bad number `{number}`")));
+            };
+            if SyscallId::by_name(name).is_err() {
+                return Err(error(file, line, format!("bad name `{name}`")));
+            }
+            if table.by_number.contains_key(&number) || table.by_name.contains_key(name) {
+                return Err(error(file, line, format!("`{number} {name}` comes twice")));
+            }
+            table.by_number.insert(number, name);
+            table.by_name.insert(name, number);
+        }
+        Ok(table)
     }
 
     /// Gives the name of the syscall `number`.
     #[must_use]
     pub fn name(&self, number: u64) -> Option<&'static str> {
-        let _ = number;
-        None
+        let number = u16::try_from(number).ok()?;
+        self.by_number.get(&number).copied()
     }
 
     /// Gives the number of the syscall `name`.
     #[must_use]
     pub fn number(&self, name: &str) -> Option<u16> {
-        let _ = name;
-        None
+        self.by_name.get(name).copied()
     }
 
     /// Gives the syscalls in number order.

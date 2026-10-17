@@ -1,6 +1,6 @@
 //! The C parser (design Section 9.2).
 //!
-//! The parser is a hand-written recursive descent parser in the style of the LuaJIT FFI.
+//! The parser is a hand-written recursive descent parser in the style of the `LuaJIT` FFI.
 //! It has two modes:
 //!
 //! | Mode | Function | Input |
@@ -20,12 +20,23 @@
 //! 4,096 parameters. Constants evaluate in `i128` with checked operations. A counter limits
 //! the recursion depth to 64. A limit gives the detail code `E_LIMIT`.
 
+mod decl;
+mod diag;
+mod expr;
+mod lex;
+mod parser;
+mod record;
+mod words;
+
 use std::fmt;
 
 use ghidorah_base::{DiagCode, ErrorCode};
 
 use crate::store::TypeStore;
 use crate::ty::{Sig, TypeId};
+
+use diag::Fail;
+use parser::Parser;
 
 /// The largest input in bytes.
 pub const MAX_INPUT: usize = 1 << 20;
@@ -95,13 +106,30 @@ impl CParseError {
     /// Gives the tool error code: `C_PARSE_ERROR`.
     #[must_use]
     pub const fn code(&self) -> ErrorCode {
-        ErrorCode::InternalError
+        ErrorCode::CParseError
     }
 }
 
 impl fmt::Display for CParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("C parse error")
+        let Some(d) = self.errors.first() else {
+            return f.write_str("C_PARSE_ERROR");
+        };
+        write!(
+            f,
+            "C_PARSE_ERROR: {} at {}:{}: {}",
+            d.code.name(),
+            d.at.line,
+            d.at.col,
+            d.code.info().message
+        )?;
+        if !d.expected.is_empty() {
+            write!(f, " Expected: {}.", d.expected.join(", "))?;
+        }
+        if !d.candidates.is_empty() {
+            write!(f, " Candidates: {}.", d.candidates.join(", "))?;
+        }
+        write!(f, " {}", d.hint)
     }
 }
 
@@ -118,6 +146,24 @@ pub struct ParsedSig {
     pub sig: Sig,
 }
 
+/// Lexes `text` and gives the tokens and a copy of the store for the parse.
+fn prepare(store: &TypeStore, text: &str) -> Result<(Vec<lex::Token>, TypeStore), CParseError> {
+    let toks = lex::lex(text).map_err(|f| f.error(text))?;
+    Ok((toks, store.clone()))
+}
+
+/// Gives the store the copy after a parse that succeeds.
+fn finish<T>(
+    store: &mut TypeStore,
+    work: TypeStore,
+    text: &str,
+    result: Result<T, Fail>,
+) -> Result<T, CParseError> {
+    let value = result.map_err(|f| f.error(text))?;
+    *store = work;
+    Ok(value)
+}
+
 /// Parses one function prototype in the `sig` mode.
 ///
 /// The text holds declaration specifiers, one declarator with a name and an optional `;`.
@@ -128,8 +174,9 @@ pub struct ParsedSig {
 ///
 /// Returns [`CParseError`] with the diagnostics of the text. The store does not change.
 pub fn parse_sig(store: &mut TypeStore, text: &str) -> Result<ParsedSig, CParseError> {
-    let _ = (store, text);
-    Err(CParseError { errors: Vec::new() })
+    let (toks, mut work) = prepare(store, text)?;
+    let result = Parser::new(text, toks, &mut work).sig_mode();
+    finish(store, work, text, result)
 }
 
 /// Parses one abstract type in the `type` mode.
@@ -140,6 +187,7 @@ pub fn parse_sig(store: &mut TypeStore, text: &str) -> Result<ParsedSig, CParseE
 ///
 /// Returns [`CParseError`] with the diagnostics of the text. The store does not change.
 pub fn parse_type(store: &mut TypeStore, text: &str) -> Result<TypeId, CParseError> {
-    let _ = (store, text);
-    Err(CParseError { errors: Vec::new() })
+    let (toks, mut work) = prepare(store, text)?;
+    let result = Parser::new(text, toks, &mut work).type_mode();
+    finish(store, work, text, result)
 }

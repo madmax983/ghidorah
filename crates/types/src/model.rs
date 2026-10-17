@@ -80,14 +80,33 @@ impl DataModel {
     /// Gives the size and the alignment of a primitive type. `void` has none.
     #[must_use]
     pub const fn prim(&self, prim: Prim) -> Option<SizeAlign> {
-        let _ = prim;
-        None
+        let one = SizeAlign::same(1);
+        Some(match prim {
+            Prim::Void => return None,
+            Prim::Bool => self.boolean,
+            Prim::Char | Prim::SChar | Prim::UChar => one,
+            Prim::Short | Prim::UShort => self.short,
+            Prim::Int | Prim::UInt => self.int,
+            Prim::Long | Prim::ULong => self.long,
+            Prim::LongLong | Prim::ULongLong => self.long_long,
+            Prim::Int128 | Prim::UInt128 => self.int128,
+            Prim::Float => self.float,
+            Prim::Double => self.double,
+            Prim::LongDouble => self.long_double,
+            Prim::WChar => self.wchar,
+        })
     }
 
     /// Tells if the integer type `prim` is signed in this model.
     #[must_use]
     pub const fn is_signed(&self, prim: Prim) -> bool {
-        let _ = prim;
-        false
+        match prim {
+            Prim::Char => self.char_signed,
+            Prim::WChar => self.wchar_signed,
+            Prim::SChar | Prim::Short | Prim::Int | Prim::Long | Prim::LongLong | Prim::Int128 => {
+                true
+            }
+            _ => false,
+        }
     }
 }

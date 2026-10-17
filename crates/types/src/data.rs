@@ -35,5 +35,17 @@ impl std::error::Error for DataError {}
 
 /// Gives the data lines of a file with their line numbers. Comments and blank lines drop out.
 pub(crate) fn data_lines(text: &'static str) -> impl Iterator<Item = (u32, &'static str)> {
-    text.lines().take(0).map(|line| (0, line))
+    text.lines().zip(1u32..).filter_map(|(line, number)| {
+        let line = line.trim();
+        (!line.is_empty() && !line.starts_with('#')).then_some((number, line))
+    })
+}
+
+/// Makes the error of line `line` of `file`.
+pub(crate) fn error(file: &'static str, line: u32, message: impl Into<String>) -> DataError {
+    DataError {
+        file,
+        line,
+        message: message.into(),
+    }
 }
