@@ -106,16 +106,6 @@ impl<B: Backend> Server<B> {
         self
     }
 
-    /// Gives the backend.
-    pub const fn backend(&self) -> &B {
-        &self.backend
-    }
-
-    /// Gives the era state.
-    pub const fn era(&self) -> &EraState {
-        &self.era
-    }
-
     /// Takes the first write error of the call recorder, if any.
     pub fn take_record_error(&mut self) -> Option<std::io::Error> {
         self.recorder.as_mut().and_then(Recorder::take_error)

@@ -31,29 +31,6 @@ pub const SESSION: &str = "cli";
 /// The shape of one `jsonl` request, for the `details.expected` of a bad line.
 const REQUEST_SHAPE: &str = "one JSON object {\"id\", \"tool\", \"args\"} on each line";
 
-/// Gives the backend options of the session flags `flags` in `env`.
-///
-/// Relative paths start at the current directory of `env`.
-#[must_use]
-pub fn options(flags: &SessionFlags, env: &Env, session: &str) -> Options {
-    let mut options = Options::new(env, flags.session.as_deref().unwrap_or(session));
-    if let Some(root) = &flags.project_root {
-        options.project_root = Some(env.cwd.join(root));
-    }
-    if !flags.roots.is_empty() {
-        options.roots = flags.roots.iter().map(|r| env.cwd.join(r)).collect();
-    }
-    if let Some(profile) = flags.profile {
-        options.profile = profile;
-    }
-    options.tools.clone_from(&flags.tools);
-    options.read_only = flags.read_only;
-    options.open.clone_from(&flags.open);
-    options.break_lock = flags.break_lock;
-    options.source = flags.source;
-    options
-}
-
 /// Gives a JSON pointer token: `~` becomes `~0` and `/` becomes `~1`.
 fn token(key: &str) -> String {
     key.replace('~', "~0").replace('/', "~1")
@@ -149,7 +126,7 @@ fn read_args(input: &ArgsInput, stdin: &mut dyn Read) -> Result<Value, String> {
 
 /// Runs `ghidorah call` with the backend `B`.
 pub fn call<B: Backend>(args: &CallArgs, env: &Env, streams: &mut Streams) -> Exit {
-    let mut backend = match B::open(&options(&args.session, env, SESSION)) {
+    let mut backend = match B::open(&Options::with_flags(env, &args.session, SESSION)) {
         Ok(backend) => backend,
         Err(error) => {
             out::log(&mut streams.stderr, &error.message);
@@ -190,7 +167,7 @@ pub fn call_on<B: Backend>(backend: &mut B, args: &CallArgs, streams: &mut Strea
 
 /// Runs `ghidorah jsonl` with the backend `B`.
 pub fn jsonl<B: Backend>(flags: &SessionFlags, env: &Env, streams: &mut Streams) -> Exit {
-    let mut backend = match B::open(&options(flags, env, SESSION)) {
+    let mut backend = match B::open(&Options::with_flags(env, flags, SESSION)) {
         Ok(backend) => backend,
         Err(error) => {
             out::log(&mut streams.stderr, &error.message);

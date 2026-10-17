@@ -24,7 +24,7 @@ impl CancelMap {
         Self::default()
     }
 
-    /// Gives the flag of request `id`. A new ID gets a new flag that is not set.
+    /// Gives the flag of request `id`. A new ID gets a new flag with the value `false`.
     #[must_use]
     pub fn register(&self, id: &RequestId) -> Arc<AtomicBool> {
         let mut flags = self.flags.lock().unwrap_or_else(PoisonError::into_inner);

@@ -1,8 +1,8 @@
 //! Fuzz target `mcp_line` (design Section 13.5).
 //!
-//! Each case frames the input into lines with a cap of 4,096 bytes and sends each line to a
-//! new MCP server over the test registry in profile `mini`. No case may panic. Each output line must be one
-//! JSON-RPC message, and no tool result may hold `INTERNAL_ERROR`.
+//! Each case frames the input into lines with a cap of 4,096 bytes. It sends each line to a
+//! new MCP server over the test registry in profile `mini`. No case may panic. Each output
+//! line must be one JSON-RPC message, and no tool result may hold `INTERNAL_ERROR`.
 //! This binary has one test, so the global panic hook has no race.
 
 #![allow(

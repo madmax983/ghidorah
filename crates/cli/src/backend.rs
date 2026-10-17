@@ -10,6 +10,7 @@ use std::path::PathBuf;
 
 use ghidorah_tools::{Host, Profile};
 
+use crate::argv::SessionFlags;
 use crate::config::{Env, RunConfig};
 
 /// The provenance source of the edits of a run (design Section 3.6).
@@ -91,6 +92,30 @@ impl Options {
             session: session.to_owned(),
             run: env.run,
         }
+    }
+
+    /// Makes the options of the session flags `flags` in `env`.
+    ///
+    /// The session label is `--session`, else `session`. Relative paths start at the
+    /// current directory of `env`.
+    #[must_use]
+    pub fn with_flags(env: &Env, flags: &SessionFlags, session: &str) -> Self {
+        let mut options = Self::new(env, flags.session.as_deref().unwrap_or(session));
+        if let Some(root) = &flags.project_root {
+            options.project_root = Some(env.cwd.join(root));
+        }
+        if !flags.roots.is_empty() {
+            options.roots = flags.roots.iter().map(|r| env.cwd.join(r)).collect();
+        }
+        if let Some(profile) = flags.profile {
+            options.profile = profile;
+        }
+        options.tools.clone_from(&flags.tools);
+        options.read_only = flags.read_only;
+        options.open.clone_from(&flags.open);
+        options.break_lock = flags.break_lock;
+        options.source = flags.source;
+        options
     }
 }
 

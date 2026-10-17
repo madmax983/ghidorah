@@ -20,6 +20,7 @@
 //! Tests call it with a test backend and in-memory [`Streams`].
 //!
 //! stdout carries only data or protocol lines. Logs and usage errors go to stderr.
+//! The command line prints no color, so it agrees with `NO_COLOR`. It never prompts.
 
 pub mod argv;
 pub mod backend;
@@ -104,7 +105,7 @@ pub fn main_with<B: Backend>(args: &[String], env: &Env, mut streams: Streams) -
         Command::Help => print(&mut streams, argv::USAGE.trim_end()),
         Command::Version => print(&mut streams, &format!("ghidorah {VERSION}")),
         Command::Mcp(args) => {
-            let options = call::options(&args.session, &env, MCP_SESSION);
+            let options = Options::with_flags(&env, &args.session, MCP_SESSION);
             let serve = mcp::ServeOptions {
                 content: args.content,
                 record: args.record.map(|path| env.cwd.join(path)),
