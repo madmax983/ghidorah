@@ -142,18 +142,24 @@ fn ac_155_session_brief() {
             "a renamed function is not weak"
         );
         assert_eq!(int_at(d, "/progress/functions"), 12);
-        assert_eq!(
-            d.get("truncated"),
-            Some(&Value::Bool(long_notes > 0)),
-            "{} chars",
-            chars(&brief)
-        );
         if long_notes == 0 {
+            assert_eq!(d.get("truncated"), Some(&Value::Bool(false)), "{brief}");
             assert!(
                 edits.iter().any(|e| str_of(e, "value") == "check_password"),
                 "{brief}"
             );
         }
+        let small = call(&mut session, "session_brief", r#"{"max_chars":4000}"#);
+        assert!(chars(&small) <= 4_000, "{} chars", chars(&small));
+        assert_eq!(
+            small.pointer("/data/truncated"),
+            Some(&Value::Bool(long_notes > 0)),
+            "{small}"
+        );
+        assert!(
+            !list(&small, "orphans").is_empty() || long_notes > 0,
+            "{small}"
+        );
         let mut request =
             Request::new("session_brief", Value::Object(ghidorah_json::Object::new()));
         request.content = ContentMode::Both;

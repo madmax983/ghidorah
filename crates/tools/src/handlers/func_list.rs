@@ -14,20 +14,23 @@
 //!
 //! The rank of a descending sort is `u64::MAX` minus the value, or the priority position.
 //! `priority` reads only the analysis layer, so names, comments and `visited` never change it
-//! (AC-157). The filter `visited` is a live filter.
+//! (AC-157). The filter `visited` is a live filter. Under `name` sort, a cursor whose boundary
+//! function has another name now gives `CURSOR_STALE` (AC-136b).
 
 use std::collections::BTreeMap;
 
 use ghidorah_analysis::analyzers::metrics;
 use ghidorah_analysis::{CallGraph, Callee};
-use ghidorah_base::{FuncId, Glob};
+use ghidorah_base::{ErrorCode, FuncId, Glob};
 use ghidorah_db::{FuncView, Program, StartReason};
 use ghidorah_json::{Object, Value};
 
 use super::func_sections::{self as fs, Namer};
+use crate::api::Host;
 use crate::args::Args;
-use crate::dispatch::{Ctx, Item, KeyPart, ListPayload, Payload, SortKey};
+use crate::dispatch::{Ctx, CursorCall, Item, KeyPart, ListPayload, Payload, SortKey};
 use crate::errors::ToolError;
+use crate::hints::{Call, WHY_FIRST_PAGE};
 use crate::outshape::{Field, OutputShape};
 use crate::session::Session;
 use crate::spec::{ArgKind, ArgSpec, Example, ListSpec, Profile, Role, ToolSpec};
@@ -324,7 +327,50 @@ fn item(p: &Program, graph: &CallGraph, f: &FuncView<'_>, facts: &Facts, namer: 
     Value::Object(out)
 }
 
+/// Gives `CURSOR_STALE` when the call sorts by name and the boundary item of its cursor has
+/// another name now (design Section 10.9, AC-136b). `next[0]` is the call without `cursor`.
+///
+/// A cursor that does not decode passes here, and the pipeline gives its error.
+fn boundary_check(session: &Session, args: &Args, ctx: &Ctx) -> Result<(), ToolError> {
+    let (Some("name"), Some(text)) = (args.str("sort"), args.globals().cursor.as_deref()) else {
+        return Ok(());
+    };
+    let Some((tool_index, _)) = session.active_registry().get(SPEC.name) else {
+        return Ok(());
+    };
+    let call = CursorCall {
+        tool_index,
+        tool: SPEC.name,
+        args,
+        frame: &ctx.frame,
+    };
+    let Ok(SortKey(key)) = session.decode_cursor(&call, text) else {
+        return Ok(());
+    };
+    let [KeyPart::Text(name), KeyPart::Int(entry)] = key.as_slice() else {
+        return Ok(());
+    };
+    let p = &session.bound(&ctx.frame)?.program;
+    let addr = ghidorah_base::Address::ram(*entry);
+    let now = p
+        .func(FuncId(addr))
+        .map(|_| p.name(addr).map_or_else(|| addr.to_string(), |n| n.text));
+    match now {
+        Some(now) if now != *name => {
+            let mut object = args.canonical().as_object().cloned().unwrap_or_default();
+            let _ = object.remove("cursor");
+            Err(ToolError::new(ErrorCode::CursorStale).next(Call::new(
+                SPEC.name,
+                Value::Object(object),
+                WHY_FIRST_PAGE,
+            )))
+        }
+        _ => Ok(()),
+    }
+}
+
 fn run(session: &mut Session, args: &Args, ctx: &mut Ctx) -> Result<Payload, ToolError> {
+    boundary_check(session, args, ctx)?;
     let p = &session.bound(&ctx.frame)?.program;
     let filter = Filter::of(args)?;
     let sort = args.str("sort").unwrap_or("addr");

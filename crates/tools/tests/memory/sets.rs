@@ -195,24 +195,23 @@ fn tool_step(session: &mut Session, step: &Step, addrs: bool) -> [Option<BTreeSe
     } = step;
     let mut set = ghidorah_json::Object::new();
     set.push("name", Value::from(NAMES[*target]));
-    match from {
-        Some(other) => set.push("from_set", Value::from(format!("set:{}", NAMES[*other]))),
-        None => {
-            let list = members
-                .iter()
-                .map(|m| {
-                    if addrs {
-                        Value::object([
-                            ("start", Value::from(format!("0x{:x}", 0x1000 + m))),
-                            ("size", Value::from(1)),
-                        ])
-                    } else {
-                        Value::from(member_id(*m))
-                    }
-                })
-                .collect();
-            set.push("members", Value::Array(list));
-        }
+    if let Some(other) = from {
+        set.push("from_set", Value::from(format!("set:{}", NAMES[*other])));
+    } else {
+        let list = members
+            .iter()
+            .map(|m| {
+                if addrs {
+                    Value::object([
+                        ("start", Value::from(format!("0x{:x}", 0x1000 + m))),
+                        ("size", Value::from(1)),
+                    ])
+                } else {
+                    Value::from(member_id(*m))
+                }
+            })
+            .collect();
+        set.push("members", Value::Array(list));
     }
     set.push("op", Value::from(*op));
     let args = Value::object([("kind", Value::from("set")), ("set", Value::Object(set))]);

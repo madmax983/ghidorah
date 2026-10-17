@@ -24,14 +24,21 @@
 //! [`TEXT_CHARS`] characters. The call writes the last-brief mark of the session. The mark
 //! changes no fact and no rev.
 
-use ghidorah_json::Object;
+mod parts;
 
+use ghidorah_base::{BinaryId, ErrorCode, Rev};
+use ghidorah_db::MetaLine;
+use ghidorah_json::{Object, Value};
+
+use super::func_sections::{self as fs, safe};
 use crate::args::Args;
 use crate::dispatch::{Ctx, Payload};
 use crate::errors::ToolError;
+use crate::hints::Call;
 use crate::outshape::{Field, OutputShape};
-use crate::session::Session;
+use crate::session::{Session, session_label};
 use crate::spec::{BinaryArg, Example, Profile, ToolSpec};
+use parts::Facts;
 
 /// The largest number of rows of one list of the brief.
 pub const MAX_ROWS: usize = 10;
@@ -175,6 +182,161 @@ pub const SPEC: ToolSpec<Session> = ToolSpec {
     ..ToolSpec::base("session_brief", run)
 };
 
-fn run(_session: &mut Session, _args: &Args, _ctx: &mut Ctx) -> Result<Payload, ToolError> {
-    Ok(Payload::Object(Object::new()))
+/// Gives the largest row cap from [`MAX_ROWS`] down to 0 whose data fits the budget, and the
+/// data with that cap.
+fn fit(
+    ctx: &Ctx,
+    full: usize,
+    render: impl Fn(usize, bool) -> Object,
+    cuts: impl Fn(usize) -> bool,
+) -> Object {
+    let room = fs::room(ctx);
+    let mut cap = full;
+    loop {
+        let data = render(cap, cap < full && cuts(cap));
+        if cap == 0 || fs::chars(ctx, &Value::Object(data.clone())) <= room {
+            return data;
+        }
+        cap -= 1;
+    }
+}
+
+/// Gives the brief with zero open binaries: the projects on disk, newest rev first.
+fn projects(session: &mut Session, ctx: &mut Ctx) -> Object {
+    let all = session.projects();
+    let rows: Vec<Value> = all
+        .iter()
+        .take(MAX_PROJECTS)
+        .map(|p| {
+            Value::object([
+                ("binary_id", Value::from(p.binary_id.to_string())),
+                ("file_name", Value::from(safe(&p.file_name))),
+                ("rev", Value::from(p.rev.0)),
+                (
+                    "last_session",
+                    p.last_session.as_deref().map_or(Value::Null, Value::from),
+                ),
+                ("last_rev", Value::from(p.rev.0)),
+                ("open", Value::Bool(false)),
+            ])
+        })
+        .collect();
+    match all.first() {
+        Some(first) => ctx.hint(Call::new(
+            "binary_load",
+            Value::object([("binary_id", Value::from(first.binary_id.to_string()))]),
+            WHY_REOPEN,
+        )),
+        None => ctx.hint(Call::new(
+            "tool_search",
+            Value::object([
+                ("name", Value::from("binary_load")),
+                ("level", Value::from("full")),
+            ]),
+            WHY_LOAD,
+        )),
+    }
+    let longer = all.len() > MAX_PROJECTS;
+    fit(
+        ctx,
+        rows.len(),
+        |cap, cut| {
+            let mut out = Object::new();
+            out.push(
+                "projects",
+                Value::Array(rows.iter().take(cap).cloned().collect()),
+            );
+            out.push("truncated", Value::Bool(longer || cut));
+            out
+        },
+        |cap| cap < rows.len(),
+    )
+}
+
+/// Adds the `next` calls of a brief. A frame with no bound binary adds `binary_id`.
+fn hints(ctx: &mut Ctx, facts: &Facts, bound: bool) {
+    let with_binary = |pairs: Vec<(&str, Value)>| {
+        let mut object = Object::new();
+        if !bound {
+            object.push("binary_id", Value::from(facts.binary_id.as_str()));
+        }
+        for (k, v) in pairs {
+            object.push(k, v);
+        }
+        Value::Object(object)
+    };
+    let mut calls = Vec::new();
+    if facts.changed_count() > 0 {
+        let args = with_binary(vec![("since_rev", Value::from(facts.changed.0))]);
+        calls.push(Call::new("history_list", args, WHY_CHANGES));
+    }
+    if let Some(id) = facts.weak.first().and_then(|w| w.get("id")) {
+        let include = Value::Array(vec![Value::from("decomp")]);
+        let args = with_binary(vec![("target", id.clone()), ("include", include)]);
+        calls.push(Call::new("func_get", args, WHY_WEAK));
+    }
+    if facts.open_counts.2 > 0 {
+        let filter = Value::object([("status", Value::from("open"))]);
+        let args = with_binary(vec![("kind", Value::from("note")), ("note_filter", filter)]);
+        calls.push(Call::new("search", args, WHY_NOTES));
+    }
+    if let Some(o) = facts.orphans.first() {
+        let args = with_binary(vec![
+            ("action", Value::from("create")),
+            ("target", fs::addr(o.at)),
+        ]);
+        calls.push(Call::new("func_edit", args, WHY_ORPHAN));
+    }
+    for call in calls {
+        ctx.hint(call);
+    }
+}
+
+fn run(session: &mut Session, _args: &Args, ctx: &mut Ctx) -> Result<Payload, ToolError> {
+    let bound = ctx
+        .frame
+        .binary_id
+        .as_deref()
+        .and_then(|t| BinaryId::parse(t).ok());
+    let Some(id) = bound
+        .or_else(|| session.recent())
+        .filter(|id| session.binary(*id).is_some())
+    else {
+        return Ok(Payload::Object(projects(session, ctx)));
+    };
+    let label = session_label(&ctx.frame.session)?;
+    let rows: Vec<Value> = session.binaries().map(parts::binary_row).collect();
+    let (facts, rev) = {
+        let binary = session
+            .binary(id)
+            .ok_or_else(|| ToolError::new(ErrorCode::UnknownBinary))?;
+        let history = session
+            .history(id)
+            .ok_or_else(|| ToolError::new(ErrorCode::UnknownBinary))?;
+        let since = binary
+            .program
+            .progress()
+            .mark(&label)
+            .map_or(Rev(0), |m| m.last_brief_rev);
+        (
+            Facts::gather(binary, rows, history, since),
+            binary.program.rev(),
+        )
+    };
+    hints(ctx, &facts, bound.is_some());
+    let data = fit(
+        ctx,
+        MAX_ROWS,
+        |cap, cut| facts.render(cap, cut),
+        |cap| facts.cuts(cap),
+    );
+    // A failed journal write keeps the mark in memory, so the brief still succeeds.
+    let _ = session.write_meta(
+        id,
+        &MetaLine::Brief {
+            session: label,
+            rev,
+        },
+    );
+    Ok(Payload::Object(data))
 }

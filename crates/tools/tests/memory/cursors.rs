@@ -34,8 +34,13 @@ fn next_page(session: &mut ghidorah_tools::Session, sort: &str, limit: u32, curs
 }
 
 /// Renames the function `id` with `symbol_rename` and makes sure that the call commits.
+/// `force` lets the rename replace an imported stub name.
 fn rename(session: &mut ghidorah_tools::Session, id: &str, name: &str) {
-    let args = Value::object([("target", Value::from(id)), ("name", Value::from(name))]);
+    let args = Value::object([
+        ("target", Value::from(id)),
+        ("name", Value::from(name)),
+        ("force", Value::Bool(true)),
+    ]);
     let envelope = call_value(session, "symbol_rename", args);
     assert_eq!(code(&envelope), "", "{envelope}");
     assert_eq!(

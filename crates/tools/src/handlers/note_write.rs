@@ -28,11 +28,19 @@
 //! with no evidence and no claim gets `W_UNGROUNDED_FINDING`. Every list tool accepts
 //! `in: "set:<name>"`, and `search { ids: ["note:N", "set:<name>"] }` reads the full records.
 
-use ghidorah_json::Object;
+mod build;
+mod members;
 
+use ghidorah_base::WarningCode;
+use ghidorah_db::NoteKind;
+use ghidorah_json::Value;
+
+use super::symbol_rename::edits;
 use crate::args::Args;
 use crate::dispatch::{Ctx, Payload};
+use crate::envelope::Warning;
 use crate::errors::ToolError;
+use crate::hints::Call;
 use crate::outshape::{Field, OutputShape};
 use crate::session::Session;
 use crate::spec::{
@@ -71,8 +79,11 @@ pub const MAX_ITEMS: usize = ghidorah_db::notes::MAX_ITEMS;
 /// The longest note text in characters.
 pub const MAX_TEXT: usize = ghidorah_db::notes::MAX_TEXT;
 
+/// The `why` of the remedy of `W_UNGROUNDED_FINDING`.
+pub const WHY_GROUND: &str = "Add the IDs that support the finding.";
+
 /// Every fixed text of the handler that an agent reads.
-pub const TEXTS: &[&str] = &[];
+pub const TEXTS: &[&str] = &[WHY_GROUND];
 
 const NOT_SET: &[(&str, &str)] = &[
     ("kind", "note"),
@@ -332,6 +343,38 @@ pub const SPEC: ToolSpec<Session> = ToolSpec {
     ..ToolSpec::base("note_write", run)
 };
 
-fn run(_session: &mut Session, _args: &Args, _ctx: &mut Ctx) -> Result<Payload, ToolError> {
-    Ok(Payload::Object(Object::new()))
+/// Gives the `W_UNGROUNDED_FINDING` warning of the note `id`. The remedy adds the function of
+/// the note as evidence when the note names a function.
+fn ungrounded(id: &str, func: Option<ghidorah_base::FuncId>) -> Warning {
+    let mut warning = Warning::new(WarningCode::UngroundedFinding);
+    warning.at = Some(id.to_owned());
+    warning.remedy = func.map(|f| {
+        let args = Value::object([
+            ("target", Value::from(id)),
+            ("evidence", Value::Array(vec![Value::from(f.to_string())])),
+        ]);
+        Call::new("note_write", args, WHY_GROUND)
+    });
+    warning
+}
+
+fn run(session: &mut Session, args: &Args, ctx: &mut Ctx) -> Result<Payload, ToolError> {
+    let delete = args.bool("delete").unwrap_or(false);
+    let ((mut out, warning), committed) = edits::commit(session, args, ctx, |tx| {
+        if delete {
+            return build::delete(tx, args).map(|out| (out, None));
+        }
+        let note = build::build(tx, args)?;
+        let out = build::summary(&note);
+        let bare =
+            note.kind == NoteKind::Finding && note.evidence.is_empty() && note.claims.is_empty();
+        let warning = bare.then(|| ungrounded(&note.id.to_string(), note.func));
+        build::write(tx, note)?;
+        Ok((out, warning))
+    })?;
+    if let Some(warning) = warning {
+        ctx.warn(warning);
+    }
+    out.push("rev", Value::from(committed.rev));
+    Ok(Payload::Object(out))
 }

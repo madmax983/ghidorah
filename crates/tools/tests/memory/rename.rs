@@ -84,7 +84,7 @@ fn rename_items_in_one_transaction() {
     let before = int_at(&call(&mut session, "calc", r#"{"expr":"1"}"#), "/rev");
     let args = r#"{"items":[
         {"target":"fn:0x1110","name":"deregister_tm_clones"},
-        {"target":"0x10","name":"nowhere"},
+        {"target":"0x900000","name":"nowhere"},
         {"target":"fn:0x1140","name":"register_tm_clones","evidence":["fn:0x1110"]}
     ],"evidence":["op2:Add.64,Get.gpr"],"confidence":"high"}"#;
     let envelope = call(&mut session, "symbol_rename", args);
@@ -123,13 +123,13 @@ fn rename_items_in_one_transaction() {
     );
     let undo = call(&mut session, "history_undo", "{}");
     assert_eq!(code(&undo), "", "{undo}");
-    let names = call(&mut session, "func_list", r#"{"limit":1000}"#);
-    let named: Vec<String> = items(&names)
+    let listing = call(&mut session, "func_list", r#"{"limit":1000}"#);
+    let left: Vec<String> = items(&listing)
         .iter()
         .filter(|i| str_of(i, "name").contains("tm_clones"))
         .map(|i| str_of(i, "id"))
         .collect();
-    assert!(named.is_empty(), "one undo reverts the batch: {named:?}");
+    assert!(left.is_empty(), "one undo reverts the batch: {left:?}");
 }
 
 #[test]

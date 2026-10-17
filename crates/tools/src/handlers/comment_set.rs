@@ -11,8 +11,12 @@
 //! `func_get` shows the comments in the disassembly rows, and `addr_info` and
 //! `search { kind: "comment" }` read them back.
 
-use ghidorah_json::Object;
+use ghidorah_db::{CommentKind, Edit, Tx};
+use ghidorah_json::{Object, Value};
 
+use super::func_sections as fs;
+use super::symbol_rename::edits;
+use super::symbol_rename::{address_at, missing, not_with_items};
 use crate::args::Args;
 use crate::dispatch::{Ctx, Payload};
 use crate::errors::ToolError;
@@ -127,6 +131,88 @@ pub const SPEC: ToolSpec<Session> = ToolSpec {
     ..ToolSpec::base("comment_set", run)
 };
 
-fn run(_session: &mut Session, _args: &Args, _ctx: &mut Ctx) -> Result<Payload, ToolError> {
-    Ok(Payload::Object(Object::new()))
+/// One comment of a call: the target, the kind name, the text and the argument path.
+struct Comment<'a> {
+    target: &'a Value,
+    kind: &'a str,
+    text: &'a str,
+    /// The JSON pointer of the comment in the arguments: empty, or `/items/<i>`.
+    at: String,
+    /// The repair call with `force: true`, for a call with one comment.
+    retry: Option<crate::hints::Call>,
+}
+
+/// Gives the text of a string value, or an empty text.
+fn text(value: Option<&Value>) -> &str {
+    value.and_then(Value::as_str).unwrap_or_default()
+}
+
+/// Applies one comment. Gives its result item `{ target, addr, kind, old, new, noop }`.
+fn comment_one(tx: &mut Tx<'_>, c: Comment<'_>) -> Result<Value, ToolError> {
+    let addr = address_at(tx, c.target, &format!("{}/target", c.at))?;
+    let kind = CommentKind::parse(c.kind).unwrap_or(CommentKind::Eol);
+    let old = tx
+        .program()
+        .comment(addr, kind)
+        .map(|f| Value::from(f.value.as_str()));
+    let text = (!c.text.is_empty()).then(|| tx.fact(c.text.to_owned()));
+    let applied = tx
+        .apply(Edit::SetComment { addr, kind, text })
+        .map_err(|e| edits::edit_error(&e, &format!("{}/text", c.at), c.retry))?;
+    let mut out = Object::new();
+    out.push("target", c.target.clone());
+    out.push("addr", fs::addr(addr));
+    out.push("kind", Value::from(kind.name()));
+    out.push("old", old.unwrap_or(Value::Null));
+    out.push(
+        "new",
+        if c.text.is_empty() {
+            Value::Null
+        } else {
+            Value::from(c.text)
+        },
+    );
+    out.push("noop", Value::Bool(applied.is_none()));
+    Ok(Value::Object(out))
+}
+
+fn run(session: &mut Session, args: &Args, ctx: &mut Ctx) -> Result<Payload, ToolError> {
+    let single = args.given("target");
+    for field in ["kind", "text"] {
+        match (single, args.given(field)) {
+            (true, false) => return Err(missing(field)),
+            (false, true) => return Err(not_with_items(field)),
+            _ => {}
+        }
+    }
+    let none = Value::Null;
+    let (mut out, committed) = edits::commit(session, args, ctx, |tx| {
+        if single {
+            let c = Comment {
+                target: args.get("target").unwrap_or(&none),
+                kind: text(args.get("kind")),
+                text: text(args.get("text")),
+                at: String::new(),
+                retry: Some(edits::with_force(args)),
+            };
+            let item = comment_one(tx, c)?;
+            let mut out = Object::new();
+            out.push("items", Value::Array(vec![item]));
+            return Ok(out);
+        }
+        let inputs = args.list("items").unwrap_or_default();
+        Ok(fs::per_item("items", inputs, |i, input| {
+            let c = Comment {
+                target: input.get("target").unwrap_or(&none),
+                kind: text(input.get("kind")),
+                text: text(input.get("text")),
+                at: fs::item_path("items", i),
+                retry: None,
+            };
+            comment_one(tx, c)
+        }))
+    })?;
+    out.push("rev", Value::from(committed.rev));
+    out.push("tx", committed.tx_value());
+    Ok(Payload::Object(out))
 }

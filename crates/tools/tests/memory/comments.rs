@@ -79,7 +79,7 @@ fn comment_items_and_errors() {
         "comment_set",
         r#"{"items":[
             {"target":"fn:0x11e0","kind":"plate","text":"Checks the password."},
-            {"target":"0x10","kind":"eol","text":"x"},
+            {"target":"0x900000","kind":"eol","text":"x"},
             {"target":"0x11e4","kind":"repeatable","text":"The length."}
         ]}"#,
     );

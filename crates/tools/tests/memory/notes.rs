@@ -32,7 +32,14 @@ fn note_kinds_and_records() {
         .map(<[Value]>::to_vec)
         .unwrap_or_default();
     assert_eq!(list.len(), 2, "{records}");
-    let first = &list[0];
+    let by_id = |id: &str| {
+        list.iter()
+            .find(|i| str_of(i, "id") == id)
+            .cloned()
+            .expect("the record exists")
+    };
+    let (first, second) = (by_id("note:1"), by_id("note:2"));
+    let first = &first;
     assert_eq!(str_of(first, "addr"), "0x11e8");
     assert_eq!(
         str_of(first, "func"),
@@ -42,7 +49,7 @@ fn note_kinds_and_records() {
     assert_eq!(text_at(first, "/extra/kind"), "todo");
     assert_eq!(first.pointer("/extra/tags"), Some(&json(r#"["auth"]"#)));
     assert_eq!(
-        list[1].pointer("/extra/claims"),
+        second.pointer("/extra/claims"),
         Some(&json(
             r#"[{"rel":"calls","args":["fn:0x1080","imp:strlen"]}]"#
         )),
@@ -156,7 +163,7 @@ fn findings_and_errors() {
         ),
         (r#"{"target":"note:1","kind":"set"}"#, "MISSING_ARGUMENT"),
         (
-            r#"{"kind":"note","text":"x","at":"0x10"}"#,
+            r#"{"kind":"note","text":"x","at":"0x900000"}"#,
             "ADDRESS_UNMAPPED",
         ),
     ];

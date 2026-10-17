@@ -252,6 +252,18 @@ fn note_item(n: &Note) -> New {
     new.extra.push("tags", Value::Array(tags));
     let evidence = n.evidence.iter().map(|e| Value::from(e.as_str())).collect();
     new.extra.push("evidence", Value::Array(evidence));
+    let claims = n
+        .claims
+        .iter()
+        .map(|c| {
+            let args = c.args.iter().map(|a| Value::from(a.as_str())).collect();
+            Value::object([
+                ("rel", Value::from(c.rel.as_str())),
+                ("args", Value::Array(args)),
+            ])
+        })
+        .collect();
+    new.extra.push("claims", Value::Array(claims));
     new.extra.push("src", Value::from(n.src.name()));
     new.extra.push("session", Value::from(n.session.as_str()));
     new.extra.push("rev", Value::from(n.rev.0));
