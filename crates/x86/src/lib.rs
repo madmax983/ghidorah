@@ -6,7 +6,7 @@
 //! |---|---|---|
 //! | [`length`] | Layer 1: the structural length of one instruction | Section 5.1 |
 //! | [`decode`] | Layer 2: an [`Insn`] with a mnemonic, operands and flow | Sections 5.1, 5.3 |
-//! | [`print`] | The Intel display text of an [`Insn`] | Section 5.4 |
+//! | [`print()`] | The Intel display text of an [`Insn`] | Section 5.4 |
 //! | [`Mnem`] | The canonical mnemonics | Section 5.4 |
 //! | [`Reg`], [`RegSet`] | The register model, with XMM registers | Section 5.3 |
 //! | [`Operand`], [`Mem`] | The operand model | Section 5.3 |

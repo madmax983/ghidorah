@@ -81,8 +81,12 @@ fn is_string(m: Mnem) -> bool {
     )
 }
 
-fn is_compare_string(m: Mnem) -> bool {
-    matches!(m, Mnem::Cmps | Mnem::Scas)
+/// Tells if `F2` is a `bnd` prefix: on a near `jmp`, `call`, `ret` or `jcc`.
+fn takes_bnd(insn: &Insn) -> bool {
+    match insn.mnem() {
+        Mnem::Jmp | Mnem::Call | Mnem::Ret => true,
+        m => insn.flow() == Flow::Jcc && Mnem::Jo <= m && m <= Mnem::Jg,
+    }
 }
 
 /// Gives the prefix words before the mnemonic, for example `lock ` or `data16 cs `.
@@ -97,8 +101,7 @@ fn prefix_words(insn: &Insn) -> String {
         out.push_str(if is_string(m) { "rep " } else { "repz " });
     }
     if p.repne() && !p.rep_used() {
-        let branch = insn.flow().is_branch() && !is_compare_string(m);
-        out.push_str(if branch { "bnd " } else { "repnz " });
+        out.push_str(if takes_bnd(insn) { "bnd " } else { "repnz " });
     }
     let used = u8::from(p.osz_used());
     for _ in used..p.count_66() {

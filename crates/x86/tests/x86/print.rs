@@ -90,3 +90,21 @@ fn symbolizer_names() {
         "call qword ptr [rip+0x2fba] ; __libc_start_main"
     );
 }
+
+#[test]
+fn regress_bnd_only_on_near_branches() {
+    // GNU objdump prints `bnd` for `F2` on `jcc`, `jmp`, `call` and `ret` only.
+    let cases: &[(&str, &str)] = &[
+        ("f2 cc", "repnz int3"),
+        ("f2 e2 00", "repnz loop 0x1003"),
+        ("f2 0f 0b", "repnz ud2"),
+        ("f2 74 00", "bnd je 0x1003"),
+        ("f2 ff 20", "bnd jmp qword ptr [rax]"),
+        ("f2 e8 00 00 00 00", "bnd call 0x1006"),
+        ("64 90", "fs nop"),
+        ("2e aa", "cs stos byte ptr es:[rdi], al"),
+    ];
+    for &(bytes, want) in cases {
+        assert_eq!(text(bytes, 0x1000), want, "{bytes}");
+    }
+}
