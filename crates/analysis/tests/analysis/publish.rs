@@ -42,7 +42,14 @@ fn changed_counts_tables() {
         all.refs,
         u64::try_from(p.analysis().refs().len()).expect("small")
     );
-    assert_eq!((all.strings, all.jumptables), (0, 0));
+    assert_eq!(
+        all.strings,
+        u64::try_from(p.analysis().strings().len()).expect("small")
+    );
+    assert_eq!(
+        all.jumptables,
+        u64::try_from(p.analysis().jumptables().len()).expect("small")
+    );
     assert_eq!(
         Changed::between(p.analysis(), p.analysis()),
         Changed::default()

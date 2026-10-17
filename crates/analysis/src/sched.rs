@@ -1,7 +1,7 @@
 //! The scheduler: pending sets, the queue, fuel slices, and the committed and shadow runs
 //! (design Sections 3.9 and 7.2, ADR-0016).
 //!
-//! Each analyzer of [`ANALYZERS`] has a pending [`RangeSet`]. One step picks the analyzer with
+//! Each analyzer of the scheduler has a pending [`RangeSet`]. One step picks the analyzer with
 //! the lowest `(priority, name)` that has pending work. It takes the whole pending set or the
 //! first range, by the grain of the spec. Then it runs the analyzer and queues the event
 //! ranges for the analyzers that listen to their triggers. A run stops at a fixpoint, or at
@@ -14,6 +14,8 @@
 //! | [`Mode::Shadow`] | once, at completion: reads see the committed set until then |
 //!
 //! A fresh scheduler gives every address to each analyzer that listens to `Bytes`.
+//! [`Scheduler::new`] runs the shipped list [`ANALYZERS`]. [`Scheduler::with_analyzers`] runs
+//! another list, for example a list with an analyzer before its register step.
 
 use ghidorah_base::{Fuel, Range};
 use ghidorah_db::{AnalysisSet, Commit, Program};
@@ -123,6 +125,7 @@ pub struct Ran {
 /// The analysis scheduler of one program.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Scheduler {
+    specs: Vec<&'static AnalyzerSpec>,
     work: Work,
     pending: Vec<RangeSet>,
     runs: Vec<u64>,
@@ -173,11 +176,34 @@ fn all() -> RangeSet {
 }
 
 impl Scheduler {
-    /// Makes the scheduler of the first analysis after a load. Each analyzer that listens to
-    /// `Bytes` gets every address.
+    /// Makes the scheduler of the first analysis after a load over [`ANALYZERS`]. Each
+    /// analyzer that listens to `Bytes` gets every address.
     #[must_use]
     pub fn new() -> Self {
-        let pending = ANALYZERS
+        Self::with_analyzers(ANALYZERS.to_vec())
+    }
+
+    /// Makes the scheduler of the first analysis after a load over the analyzers `specs`.
+    /// The list order gives the row order. Each analyzer that listens to `Bytes` gets every
+    /// address.
+    #[must_use]
+    pub fn with_analyzers(specs: Vec<&'static AnalyzerSpec>) -> Self {
+        let pending = Self::fresh(&specs);
+        let runs = vec![0; specs.len()];
+        Self {
+            specs,
+            work: Work::default(),
+            pending,
+            runs,
+            steps: 0,
+            mode: Mode::First,
+            dirty: false,
+        }
+    }
+
+    /// Gives the fresh pending sets of `specs`: every address for each listener of `Bytes`.
+    fn fresh(specs: &[&AnalyzerSpec]) -> Vec<RangeSet> {
+        specs
             .iter()
             .map(|s| {
                 if s.listens(Trigger::Bytes) {
@@ -186,15 +212,13 @@ impl Scheduler {
                     RangeSet::new()
                 }
             })
-            .collect();
-        Self {
-            work: Work::default(),
-            pending,
-            runs: vec![0; ANALYZERS.len()],
-            steps: 0,
-            mode: Mode::First,
-            dirty: false,
-        }
+            .collect()
+    }
+
+    /// Gives the analyzers of the scheduler in row order.
+    #[must_use]
+    pub fn analyzers(&self) -> &[&'static AnalyzerSpec] {
+        &self.specs
     }
 
     /// Makes a shadow scheduler of a re-analysis with no earlier work state. A shadow with no
@@ -210,13 +234,12 @@ impl Scheduler {
     /// below `band` stays. Each analyzer at `band` or above gets every address again. A band
     /// at or below the first band starts with an empty work state.
     pub fn restart(&mut self, band: u16) {
-        let first = ANALYZERS.iter().map(|s| s.priority).min().unwrap_or(0);
+        let first = self.specs.iter().map(|s| s.priority).min().unwrap_or(0);
         if band <= first {
-            let fresh = Self::new();
-            self.work = fresh.work;
-            self.pending = fresh.pending;
+            self.work = Work::default();
+            self.pending = Self::fresh(&self.specs);
         } else {
-            for (spec, set) in ANALYZERS.iter().zip(self.pending.iter_mut()) {
+            for (spec, set) in self.specs.iter().zip(self.pending.iter_mut()) {
                 if spec.priority >= band {
                     *set = all();
                 }
@@ -241,13 +264,13 @@ impl Scheduler {
     /// Tells if no analyzer up to the last band of `until` has pending work.
     #[must_use]
     pub fn is_done(&self, until: Until) -> bool {
-        pick(ANALYZERS, &self.pending, until.last_band()).is_none()
+        pick(&self.specs, &self.pending, until.last_band()).is_none()
     }
 
-    /// Gives one row for each analyzer in registry order.
+    /// Gives one row for each analyzer in list order.
     #[must_use]
     pub fn rows(&self) -> Vec<AnalyzerRow> {
-        ANALYZERS
+        self.specs
             .iter()
             .zip(&self.pending)
             .zip(&self.runs)
@@ -262,8 +285,8 @@ impl Scheduler {
 
     /// Runs one step. Gives `None` at a fixpoint of the bands of `until`.
     pub fn step(&mut self, program: &Program, until: Until) -> Option<Ran> {
-        let i = pick(ANALYZERS, &self.pending, until.last_band())?;
-        let spec = ANALYZERS.get(i)?;
+        let i = pick(&self.specs, &self.pending, until.last_band())?;
+        let spec = *self.specs.get(i)?;
         let current = self.pending.get_mut(i)?;
         let ranges = unit(spec, current);
         *current = current.subtract(&ranges);
@@ -271,14 +294,15 @@ impl Scheduler {
         let step = registry::run(spec.id, &mut ctx, &ranges);
         let (events, requeue, changed) = ctx.finish();
         for (trigger, set) in events {
-            for (s, p) in ANALYZERS.iter().zip(self.pending.iter_mut()) {
+            for (s, p) in self.specs.iter().zip(self.pending.iter_mut()) {
                 if s.listens(trigger) {
                     *p = p.union(&set);
                 }
             }
         }
         for (id, set) in requeue {
-            if let Some(p) = registry::index(id).and_then(|j| self.pending.get_mut(j)) {
+            let index = self.specs.iter().position(|s| s.id == id);
+            if let Some(p) = index.and_then(|j| self.pending.get_mut(j)) {
                 *p = p.union(&set);
             }
         }

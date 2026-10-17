@@ -18,6 +18,11 @@
 //! | `R_NORETURN_KNOWN` | the noreturn flag of a PLT stub | the stub and its import |
 //! | `R_NORETURN_BODY` | the noreturn flag of a function with no return path | the function and the noreturn callees |
 //! | `R_NORETURN_FALLTHROUGH` | the noreturn flag of a callee with 3 unsafe call sites | the function and the call sites |
+//! | `R_OPERAND_REF` | a data reference of an instruction operand | the code unit of the instruction |
+//! | `R_RELOC_PTR` | a pointer slot and its reference | the relocation, and the slot for the reference |
+//! | `R_ADDR_TABLE` | a pointer slot of an array or an address table, and its reference | none for the slot, the slot for the reference |
+//! | `R_STRING_REF` | a string at the target of a reference | the references to the string |
+//! | `R_STRING_SCAN` | a string in read-only data | none: the bytes |
 
 use std::fmt;
 
@@ -50,11 +55,21 @@ pub enum Rule {
     NoreturnBody,
     /// `R_NORETURN_FALLTHROUGH`.
     NoreturnFallthrough,
+    /// `R_OPERAND_REF`.
+    OperandRef,
+    /// `R_RELOC_PTR`.
+    RelocPtr,
+    /// `R_ADDR_TABLE`.
+    AddrTable,
+    /// `R_STRING_REF`.
+    StringRef,
+    /// `R_STRING_SCAN`.
+    StringScan,
 }
 
 impl Rule {
     /// All rules in catalog order.
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 16] = [
         Self::Entry,
         Self::SymbolFunc,
         Self::PltRelocSlot,
@@ -66,6 +81,11 @@ impl Rule {
         Self::NoreturnKnown,
         Self::NoreturnBody,
         Self::NoreturnFallthrough,
+        Self::OperandRef,
+        Self::RelocPtr,
+        Self::AddrTable,
+        Self::StringRef,
+        Self::StringScan,
     ];
 
     /// Gives the rule code, for example `R_FDE_START`.
@@ -83,6 +103,11 @@ impl Rule {
             Self::NoreturnKnown => "R_NORETURN_KNOWN",
             Self::NoreturnBody => "R_NORETURN_BODY",
             Self::NoreturnFallthrough => "R_NORETURN_FALLTHROUGH",
+            Self::OperandRef => "R_OPERAND_REF",
+            Self::RelocPtr => "R_RELOC_PTR",
+            Self::AddrTable => "R_ADDR_TABLE",
+            Self::StringRef => "R_STRING_REF",
+            Self::StringScan => "R_STRING_SCAN",
         }
     }
 
@@ -103,6 +128,13 @@ impl Rule {
             Self::NoreturnFallthrough => {
                 "Three or more call sites fall through into bad code or into a function."
             }
+            Self::OperandRef => "An operand of the instruction points to the target.",
+            Self::RelocPtr => "A relocation puts a pointer to the target in the slot.",
+            Self::AddrTable => {
+                "The slot is in a pointer array or in a run of two or more pointers."
+            }
+            Self::StringRef => "A reference points to text that ends with a terminator.",
+            Self::StringScan => "Read-only data holds text that ends with a terminator.",
         }
     }
 

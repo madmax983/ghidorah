@@ -13,9 +13,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use ghidorah_base::{Address, ImportId, Range};
-use ghidorah_db::{FlowKind, Program, RefKey, StartReason};
+use ghidorah_db::{FlowKind, Program, RefKey, StartReason, StrInfo};
 use ghidorah_kernel::RangeSet;
 
+use crate::analyzers::refs::DataRefs;
 use crate::ctx::{Body, Summary, UnitRec};
 use crate::why::Why;
 
@@ -116,6 +117,10 @@ pub(crate) struct Work {
     pub import_slots: Option<BTreeMap<u64, SlotImport>>,
     /// The PLT area of the binary. The first step fills it.
     pub plt: Option<RangeSet>,
+    /// The data references of operands and pointer slots.
+    pub data: DataRefs,
+    /// The strings by start, each with its why-record.
+    pub strings: BTreeMap<u64, (StrInfo, Why)>,
 }
 
 /// Gives the import of each import slot of `program`: the ELF slot map, then the slots of
