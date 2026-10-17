@@ -19,7 +19,7 @@ use std::collections::BTreeMap;
 pub use malformed::{EhdrField, Malformed, PhdrField, ShdrField, Variant, malformed_variants};
 
 use consts::{
-    ET_DYN, ET_EXEC, EM_X86_64, SHF_ALLOC, SHF_EXECINSTR, SHF_WRITE, SHT_NOBITS, SHT_PROGBITS,
+    EM_X86_64, ET_DYN, ET_EXEC, SHF_ALLOC, SHF_EXECINSTR, SHF_WRITE, SHT_NOBITS, SHT_PROGBITS,
     STB_GLOBAL, STB_LOCAL, STB_WEAK, STT_FUNC, STT_OBJECT,
 };
 

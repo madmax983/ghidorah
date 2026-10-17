@@ -2,6 +2,8 @@
 //!
 //! This binary has one test, so the global panic hook has no race.
 
+#![allow(clippy::panic, reason = "a test fails through a panic")]
+
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::PathBuf;
 
@@ -18,10 +20,14 @@ fn parse_tlv(input: &[u8]) -> Outcome {
     let mut records = 0u32;
     while pos < input.len() && records < 64 {
         let Some(&tag) = input.get(pos) else { break };
-        let Some(&len) = input.get(pos + 1) else { break };
+        let Some(&len) = input.get(pos + 1) else {
+            break;
+        };
         let start = pos + 2;
         let end = start + usize::from(len);
-        let Some(value) = input.get(start..end) else { break };
+        let Some(value) = input.get(start..end) else {
+            break;
+        };
         stage = stage.max(1);
         if tag == 7 {
             stage = 2;
@@ -58,7 +64,10 @@ fn fuzz_finds_tlv_bug() {
     assert!(!report.ok());
     assert!(!report.crashes.is_empty());
     assert!(report.crashes.len() <= config.max_crashes);
-    assert!(fuzz::panic_count() >= report.panics, "the hook counts each panic");
+    assert!(
+        fuzz::panic_count() >= report.panics,
+        "the hook counts each panic"
+    );
     for crash in &report.crashes {
         assert!(
             panics(&crash.input) || parse_tlv(&crash.input).violation.is_some(),

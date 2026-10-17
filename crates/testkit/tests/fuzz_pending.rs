@@ -2,6 +2,8 @@
 //!
 //! The test runs this binary again as a child. The child test aborts during a case.
 
+#![allow(clippy::panic, reason = "a test fails through a panic")]
+
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -31,7 +33,10 @@ fn fuzz_pending_file_survives_abort() {
     let pending = dir.join(PENDING_FILE);
     let bytes = std::fs::read(&pending)
         .unwrap_or_else(|e| panic!("the pending file {} exists: {e}", pending.display()));
-    assert!(bytes.contains(&TRIGGER), "the pending file holds the abort input");
+    assert!(
+        bytes.contains(&TRIGGER),
+        "the pending file holds the abort input"
+    );
 
     // A replay runs the leftover pending input.
     let report = fuzz::replay_regress(&dir, |input| {

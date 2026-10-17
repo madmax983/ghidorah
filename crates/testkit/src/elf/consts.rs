@@ -15,7 +15,7 @@ pub const ET_EXEC: u16 = 2;
 pub const ET_DYN: u16 = 3;
 /// Machine: x86-64.
 pub const EM_X86_64: u16 = 62;
-/// Machine: AArch64.
+/// Machine: `AArch64`.
 pub const EM_AARCH64: u16 = 183;
 
 /// Program header type: loadable segment.
@@ -52,7 +52,7 @@ pub const SHT_SYMTAB: u32 = 2;
 pub const SHT_STRTAB: u32 = 3;
 /// Section type: relocations with addends.
 pub const SHT_RELA: u32 = 4;
-/// Section type: SysV hash table.
+/// Section type: System V hash table.
 pub const SHT_HASH: u32 = 5;
 /// Section type: dynamic table.
 pub const SHT_DYNAMIC: u32 = 6;
@@ -114,7 +114,7 @@ pub const DT_NEEDED: u64 = 1;
 pub const DT_PLTRELSZ: u64 = 2;
 /// Dynamic tag: address of `.got.plt`.
 pub const DT_PLTGOT: u64 = 3;
-/// Dynamic tag: SysV hash table.
+/// Dynamic tag: System V hash table.
 pub const DT_HASH: u64 = 4;
 /// Dynamic tag: dynamic string table.
 pub const DT_STRTAB: u64 = 5;

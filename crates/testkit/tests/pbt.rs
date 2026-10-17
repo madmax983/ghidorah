@@ -1,5 +1,7 @@
 //! Tests of the property-test module.
 
+#![allow(clippy::panic, reason = "a test fails through a panic")]
+
 use std::cell::Cell;
 
 use ghidorah_testkit::pbt::{self, Config, DEFAULT_SHRINK_BUDGET, Gen};
@@ -30,7 +32,11 @@ fn pbt_shrinks_to_minimal() {
     };
     let mut g = Gen::replay(failure.choices.clone());
     let v = g.vec(16, |g| g.draw(1000));
-    assert_eq!(v, vec![500], "the minimal list has one item with the value 500");
+    assert_eq!(
+        v,
+        vec![500],
+        "the minimal list has one item with the value 500"
+    );
     assert!(failure.message.contains("[500]"), "{}", failure.message);
     let repro = failure.repro();
     assert!(repro.contains("sum_below_500"), "{repro}");
@@ -104,7 +110,11 @@ fn pbt_replay_reads_zero_after_end() {
 #[test]
 fn pbt_replay_clamps_large_choices() {
     let mut g = Gen::replay(vec![50]);
-    assert_eq!(g.draw(10), 9, "a choice above the bound reads as the largest value");
+    assert_eq!(
+        g.draw(10),
+        9,
+        "a choice above the bound reads as the largest value"
+    );
 }
 
 #[test]

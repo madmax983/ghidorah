@@ -1,5 +1,7 @@
 //! Tests of the fixture cache.
 
+#![allow(clippy::panic, reason = "a test fails through a panic")]
+
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use ghidorah_testkit::fixture;
@@ -14,7 +16,11 @@ fn build() -> Vec<u8> {
 #[test]
 fn cached_builds_once_per_key() {
     let threads: Vec<_> = (0..8)
-        .map(|_| std::thread::spawn(|| fixture::cached("shared_fixture", build) as *const Vec<u8> as usize))
+        .map(|_| {
+            std::thread::spawn(|| {
+                std::ptr::from_ref(fixture::cached("shared_fixture", build)) as usize
+            })
+        })
         .collect();
     let mut addresses = Vec::new();
     for t in threads {
@@ -24,7 +30,10 @@ fn cached_builds_once_per_key() {
     assert_eq!(first, &vec![1, 2, 3]);
     assert_eq!(BUILDS.load(Ordering::SeqCst), 1, "the build ran once");
     let want = std::ptr::from_ref(first) as usize;
-    assert!(addresses.iter().all(|&a| a == want), "every caller gets the same value");
+    assert!(
+        addresses.iter().all(|&a| a == want),
+        "every caller gets the same value"
+    );
 }
 
 #[test]

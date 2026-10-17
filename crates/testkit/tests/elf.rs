@@ -1,5 +1,7 @@
 //! Tests of `ElfBuilder`.
 
+#![allow(clippy::panic, reason = "a test fails through a panic")]
+
 mod elf_read;
 
 use std::path::{Path, PathBuf};
@@ -8,11 +10,10 @@ use std::process::Command;
 use elf_read::{Elf, Shdr};
 use ghidorah_testkit::elf::consts::{
     DF_1_PIE, DT_FLAGS_1, DT_GNU_HASH, DT_HASH, DT_INIT_ARRAY, DT_INIT_ARRAYSZ, DT_JMPREL,
-    DT_NEEDED, DT_NULL, DT_PLTGOT, DT_PLTREL, DT_PLTRELSZ, DT_RELA, DT_RELR, DT_RELRSZ,
-    DT_RUNPATH, DT_SONAME, DT_STRTAB, DT_SYMTAB, EM_X86_64, ET_DYN, ET_EXEC, PF_R, PF_W, PF_X,
-    PT_DYNAMIC, PT_GNU_EH_FRAME, PT_GNU_RELRO, PT_GNU_STACK, PT_INTERP, PT_LOAD, PT_NOTE,
-    R_X86_64_GLOB_DAT, R_X86_64_JUMP_SLOT, R_X86_64_RELATIVE, SHF_ALLOC, SHF_EXECINSTR,
-    SHF_WRITE, SHT_NOBITS,
+    DT_NEEDED, DT_NULL, DT_PLTGOT, DT_PLTREL, DT_PLTRELSZ, DT_RELA, DT_RELR, DT_RELRSZ, DT_RUNPATH,
+    DT_SONAME, DT_STRTAB, DT_SYMTAB, EM_X86_64, ET_DYN, ET_EXEC, PF_R, PF_W, PF_X, PT_DYNAMIC,
+    PT_GNU_EH_FRAME, PT_GNU_RELRO, PT_GNU_STACK, PT_INTERP, PT_LOAD, PT_NOTE, R_X86_64_GLOB_DAT,
+    R_X86_64_JUMP_SLOT, R_X86_64_RELATIVE, SHF_ALLOC, SHF_EXECINSTR, SHF_WRITE, SHT_NOBITS,
 };
 use ghidorah_testkit::elf::{
     self, Class, EhdrField, ElfBuilder, Endian, Fde, FixupKind, HashStyle, ImportKind, Loc,
@@ -32,7 +33,7 @@ fn golden_path() -> PathBuf {
 fn readelf_value<'a>(body: &'a str, label: &str) -> Option<&'a str> {
     body.lines()
         .find_map(|l| l.trim().strip_prefix(label))
-        .map(|rest| rest.trim().split_whitespace().next().unwrap_or(""))
+        .map(|rest| rest.split_whitespace().next().unwrap_or(""))
 }
 
 fn parse_num(text: &str) -> u64 {
@@ -64,14 +65,21 @@ fn elf_builder_minimal_matches_readelf_golden() {
         panic!("the readelf golden is readable: {read:?}");
     };
     assert_eq!(header.generator(), "testkit-elf-minimal");
-    assert_eq!(header.field("bytes"), Some(bytes.len().to_string().as_str()));
+    assert_eq!(
+        header.field("bytes"),
+        Some(bytes.len().to_string().as_str())
+    );
     let fnv = format!("{:016x}", fnv1a64(&bytes));
     assert_eq!(
         header.field("fnv1a64"),
         Some(fnv.as_str()),
         "the golden comes from these exact bytes"
     );
-    assert!(header.field("oracle").is_some_and(|o| o.starts_with("readelf")));
+    assert!(
+        header
+            .field("oracle")
+            .is_some_and(|o| o.starts_with("readelf"))
+    );
     let e = Elf::new(&bytes);
     assert_eq!(
         readelf_value(&body, "Entry point address:").map(parse_num),
@@ -177,7 +185,11 @@ fn elf_builder_full_readelf_clean() {
         .lines()
         .filter(|l| l.contains("Warning") || l.contains("Error") || l.contains("warning"))
         .collect();
-    assert!(bad.is_empty(), "readelf complains:\n{}\n{text}", bad.join("\n"));
+    assert!(
+        bad.is_empty(),
+        "readelf complains:\n{}\n{text}",
+        bad.join("\n")
+    );
     let frames = readelf(&bytes, "elf_full_frames.bin", &["--debug-dump=frames"]);
     assert!(!frames.contains("Warning"), "{frames}");
     assert!(frames.contains("FDE"), "{frames}");
@@ -230,18 +242,32 @@ fn elf_header_only_elf32_and_big_endian() {
 }
 
 fn load_covers(e: &Elf, s: &Shdr, base: u64) {
-    let size = if s.sh_type == SHT_NOBITS { s.size } else { s.size.max(1) };
+    let size = if s.sh_type == SHT_NOBITS {
+        s.size
+    } else {
+        s.size.max(1)
+    };
     let want = PF_R
         | if s.flags & SHF_WRITE != 0 { PF_W } else { 0 }
-        | if s.flags & SHF_EXECINSTR != 0 { PF_X } else { 0 };
-    let hit = e.phdrs().into_iter().find(|p| {
-        p.p_type == PT_LOAD && s.addr >= p.vaddr && s.addr + size <= p.vaddr + p.memsz
-    });
+        | if s.flags & SHF_EXECINSTR != 0 {
+            PF_X
+        } else {
+            0
+        };
+    let hit = e
+        .phdrs()
+        .into_iter()
+        .find(|p| p.p_type == PT_LOAD && s.addr >= p.vaddr && s.addr + size <= p.vaddr + p.memsz);
     let Some(p) = hit else {
         panic!("no PT_LOAD covers {}", s.name);
     };
     assert_eq!(p.flags, want, "segment flags of {}", s.name);
-    assert_eq!(p.vaddr - p.offset, base, "VA = base + offset for {}", s.name);
+    assert_eq!(
+        p.vaddr - p.offset,
+        base,
+        "VA = base + offset for {}",
+        s.name
+    );
     if s.sh_type != SHT_NOBITS {
         assert_eq!(s.addr - base, s.offset, "{}", s.name);
     }
@@ -255,14 +281,31 @@ fn elf_segments_cover_alloc_sections() {
         load_covers(&e, s, 0);
     }
     assert!(layout.section(".bss").is_some());
-    let loads: Vec<_> = e.phdrs().into_iter().filter(|p| p.p_type == PT_LOAD).collect();
+    let loads: Vec<_> = e
+        .phdrs()
+        .into_iter()
+        .filter(|p| p.p_type == PT_LOAD)
+        .collect();
     assert!(loads.len() >= 3, "R, RX and RW runs: {loads:?}");
     assert_eq!(loads[0].offset, 0, "the first PT_LOAD maps the headers");
     let last = loads.last().copied();
-    assert!(last.is_some_and(|p| p.memsz > p.filesz), "the .bss tail is zero-fill");
+    assert!(
+        last.is_some_and(|p| p.memsz > p.filesz),
+        "the .bss tail is zero-fill"
+    );
     let types: Vec<u32> = e.phdrs().iter().map(|p| p.p_type).collect();
-    for t in [PT_INTERP, PT_DYNAMIC, PT_NOTE, PT_GNU_EH_FRAME, PT_GNU_STACK, PT_GNU_RELRO] {
-        assert!(types.contains(&t), "program header type {t:#x} is present: {types:x?}");
+    for t in [
+        PT_INTERP,
+        PT_DYNAMIC,
+        PT_NOTE,
+        PT_GNU_EH_FRAME,
+        PT_GNU_STACK,
+        PT_GNU_RELRO,
+    ] {
+        assert!(
+            types.contains(&t),
+            "program header type {t:#x} is present: {types:x?}"
+        );
     }
     assert_eq!(usize::from(e.e_phnum()), types.len());
     assert_eq!(layout.phnum, e.e_phnum());
@@ -282,7 +325,11 @@ fn elf_exec_segments_with_base() {
     for s in e.shdrs().iter().filter(|s| s.flags & SHF_ALLOC != 0) {
         load_covers(&e, s, 0x40_0000);
     }
-    assert_eq!(e.e_entry(), e.section(".text").map_or(0, |s| s.addr), "entry defaults to .text");
+    assert_eq!(
+        e.e_entry(),
+        e.section(".text").map_or(0, |s| s.addr),
+        "entry defaults to .text"
+    );
 }
 
 fn rela_entries(e: &Elf, name: &str) -> Vec<(u64, u32, u32, i64)> {
@@ -320,7 +367,11 @@ fn elf_plt_stubs_name_slots_through_relocations() {
     for name in ["puts", "printf"] {
         let stub = layout.plt[name];
         let off = e.va_to_off(stub).unwrap_or(u64::MAX);
-        assert_eq!(&bytes[usize::try_from(off).unwrap_or(0)..][..2], &[0xff, 0x25], "{name}");
+        assert_eq!(
+            &bytes[usize::try_from(off).unwrap_or(0)..][..2],
+            &[0xff, 0x25],
+            "{name}"
+        );
         let disp = e.i32(off + 2);
         let slot = (stub + 6).wrapping_add_signed(i64::from(disp));
         assert_eq!(slot, layout.got[name], "slot of {name}");
@@ -338,7 +389,11 @@ fn elf_plt_stubs_name_slots_through_relocations() {
         .map(|r| dynsym_name(&e, r.1))
         .collect();
     assert_eq!(glob, ["exit", "free"]);
-    assert!(dyn_rel.iter().any(|r| r.2 == R_X86_64_RELATIVE && r.3 == 0x40));
+    assert!(
+        dyn_rel
+            .iter()
+            .any(|r| r.2 == R_X86_64_RELATIVE && r.3 == 0x40)
+    );
     // `.plt.got`: ff 25 disp32 66 90
     let stub = layout.plt_got["free"];
     let off = usize::try_from(e.va_to_off(stub).unwrap_or(0)).unwrap_or(0);
@@ -348,12 +403,22 @@ fn elf_plt_stubs_name_slots_through_relocations() {
     let text = e.section(".text").unwrap_or_else(|| panic!("no .text"));
     let call = text.addr + 9;
     let rel32 = e.i32(text.offset + 5);
-    assert_eq!(call.wrapping_add_signed(i64::from(rel32)), layout.plt["puts"]);
+    assert_eq!(
+        call.wrapping_add_signed(i64::from(rel32)),
+        layout.plt["puts"]
+    );
     let next = text.addr + 15;
     let disp = e.i32(text.offset + 11);
-    assert_eq!(next.wrapping_add_signed(i64::from(disp)), layout.got["exit"]);
+    assert_eq!(
+        next.wrapping_add_signed(i64::from(disp)),
+        layout.got["exit"]
+    );
     let data = e.section(".data").unwrap_or_else(|| panic!("no .data"));
-    assert_eq!(e.u64(data.offset), layout.symbols["main"], "the Abs64 fixup");
+    assert_eq!(
+        e.u64(data.offset),
+        layout.symbols["main"],
+        "the Abs64 fixup"
+    );
 }
 
 #[test]
@@ -365,16 +430,28 @@ fn elf_plt_sec_ibt_stubs() {
         .needed("libc.so.6");
     let (bytes, layout) = b.build_with_layout();
     let e = Elf::new(&bytes);
-    let sec = e.section(".plt.sec").unwrap_or_else(|| panic!("no .plt.sec"));
+    let sec = e
+        .section(".plt.sec")
+        .unwrap_or_else(|| panic!("no .plt.sec"));
     let stub = layout.plt["puts"];
     assert_eq!(stub, sec.addr, "the import address is the .plt.sec stub");
     let off = usize::try_from(sec.offset).unwrap_or(0);
-    assert_eq!(&bytes[off..off + 7], &[0xf3, 0x0f, 0x1e, 0xfa, 0xf2, 0xff, 0x25]);
+    assert_eq!(
+        &bytes[off..off + 7],
+        &[0xf3, 0x0f, 0x1e, 0xfa, 0xf2, 0xff, 0x25]
+    );
     let disp = e.i32(sec.offset + 7);
-    assert_eq!((stub + 11).wrapping_add_signed(i64::from(disp)), layout.got["puts"]);
+    assert_eq!(
+        (stub + 11).wrapping_add_signed(i64::from(disp)),
+        layout.got["puts"]
+    );
     let plt = e.section(".plt").unwrap_or_else(|| panic!("no .plt"));
     let lazy = usize::try_from(plt.offset + 16).unwrap_or(0);
-    assert_eq!(&bytes[lazy..lazy + 5], &[0xf3, 0x0f, 0x1e, 0xfa, 0x68], "IBT lazy entry");
+    assert_eq!(
+        &bytes[lazy..lazy + 5],
+        &[0xf3, 0x0f, 0x1e, 0xfa, 0x68],
+        "IBT lazy entry"
+    );
 }
 
 fn gnu_hash_count(e: &Elf, s: &Shdr) -> Option<u64> {
@@ -383,7 +460,9 @@ fn gnu_hash_count(e: &Elf, s: &Shdr) -> Option<u64> {
     let bloom = u64::from(e.u32(s.offset + 8));
     let buckets = s.offset + 16 + 8 * bloom;
     let chains = buckets + 4 * nbuckets;
-    let max = (0..nbuckets).map(|i| u64::from(e.u32(buckets + 4 * i))).max()?;
+    let max = (0..nbuckets)
+        .map(|i| u64::from(e.u32(buckets + 4 * i)))
+        .max()?;
     if max == 0 {
         return Some(symoffset);
     }
@@ -422,7 +501,9 @@ fn elf_gnu_hash_gives_the_dynamic_symbol_count() {
     let bytes = exports_builder(HashStyle::Gnu).build();
     let e = Elf::new(&bytes);
     let dynsym = e.section(".dynsym").unwrap_or_else(|| panic!("no .dynsym"));
-    let gh = e.section(".gnu.hash").unwrap_or_else(|| panic!("no .gnu.hash"));
+    let gh = e
+        .section(".gnu.hash")
+        .unwrap_or_else(|| panic!("no .gnu.hash"));
     assert_eq!(gnu_hash_count(&e, &gh), Some(dynsym.size / 24));
     assert_eq!(e.dyn_value(DT_GNU_HASH), Some(gh.addr));
     assert_eq!(e.dyn_value(DT_HASH), None);
@@ -479,8 +560,12 @@ fn elf_relr_encoding_roundtrip() {
     }
     let (bytes, layout) = b.build_with_layout();
     let e = Elf::new(&bytes);
-    let relr = e.section(".relr.dyn").unwrap_or_else(|| panic!("no .relr.dyn"));
-    let entries: Vec<u64> = (0..relr.size / 8).map(|i| e.u64(relr.offset + i * 8)).collect();
+    let relr = e
+        .section(".relr.dyn")
+        .unwrap_or_else(|| panic!("no .relr.dyn"));
+    let entries: Vec<u64> = (0..relr.size / 8)
+        .map(|i| e.u64(relr.offset + i * 8))
+        .collect();
     let data = layout.section(".data").map_or(0, |s| s.addr);
     let want: Vec<u64> = offsets.iter().map(|o| data + o).collect();
     assert_eq!(relr_decode(&entries), want);
@@ -493,15 +578,29 @@ fn elf_relr_encoding_roundtrip() {
 fn elf_notes_build_id_and_property() {
     let (bytes, _) = full_builder().build_with_layout();
     let e = Elf::new(&bytes);
-    let notes: Vec<_> = e.phdrs().into_iter().filter(|p| p.p_type == PT_NOTE).collect();
+    let notes: Vec<_> = e
+        .phdrs()
+        .into_iter()
+        .filter(|p| p.p_type == PT_NOTE)
+        .collect();
     assert_eq!(notes.len(), 2);
-    let id = e.section(".note.gnu.build-id").unwrap_or_else(|| panic!("no build-id"));
+    let id = e
+        .section(".note.gnu.build-id")
+        .unwrap_or_else(|| panic!("no build-id"));
     assert_eq!(e.u32(id.offset), 4, "namesz");
     assert_eq!(e.u32(id.offset + 4), 20, "descsz");
     assert_eq!(e.u32(id.offset + 8), 3, "NT_GNU_BUILD_ID");
-    assert_eq!(&bytes[usize::try_from(id.offset + 12).unwrap_or(0)..][..4], b"GNU\0");
-    assert_eq!(&bytes[usize::try_from(id.offset + 16).unwrap_or(0)..][..20], &[0x11; 20]);
-    let prop = e.section(".note.gnu.property").unwrap_or_else(|| panic!("no property"));
+    assert_eq!(
+        &bytes[usize::try_from(id.offset + 12).unwrap_or(0)..][..4],
+        b"GNU\0"
+    );
+    assert_eq!(
+        &bytes[usize::try_from(id.offset + 16).unwrap_or(0)..][..20],
+        &[0x11; 20]
+    );
+    let prop = e
+        .section(".note.gnu.property")
+        .unwrap_or_else(|| panic!("no property"));
     assert_eq!(prop.align, 8);
     assert_eq!(e.u32(prop.offset + 16), 0xc000_0002);
     assert_eq!(e.u32(prop.offset + 24), 3, "IBT and SHSTK");
@@ -513,20 +612,32 @@ fn elf_notes_build_id_and_property() {
 fn elf_eh_frame_fde_range_and_header() {
     let (bytes, layout) = full_builder().build_with_layout();
     let e = Elf::new(&bytes);
-    let eh = e.section(".eh_frame").unwrap_or_else(|| panic!("no .eh_frame"));
+    let eh = e
+        .section(".eh_frame")
+        .unwrap_or_else(|| panic!("no .eh_frame"));
     let cie_len = u64::from(e.u32(eh.offset));
     assert_eq!(e.u32(eh.offset + 4), 0, "CIE id");
-    assert_eq!(bytes[usize::try_from(eh.offset + 8).unwrap_or(0)], 1, "CIE version");
+    assert_eq!(
+        bytes[usize::try_from(eh.offset + 8).unwrap_or(0)],
+        1,
+        "CIE version"
+    );
     let fde = eh.offset + 4 + cie_len;
     let fde_len = u64::from(e.u32(fde));
     assert!(fde_len > 0);
-    assert_eq!(u64::from(e.u32(fde + 4)), fde + 4 - eh.offset, "CIE pointer");
+    assert_eq!(
+        u64::from(e.u32(fde + 4)),
+        fde + 4 - eh.offset,
+        "CIE pointer"
+    );
     let pc_field = eh.addr + (fde + 8 - eh.offset);
     let pc_begin = pc_field.wrapping_add_signed(i64::from(e.i32(fde + 8)));
     assert_eq!(pc_begin, layout.symbols["main"]);
     assert_eq!(e.u32(fde + 12), 17, "pc_range");
     assert_eq!(e.u32(fde + 4 + fde_len), 0, "the terminator");
-    let hdr = e.section(".eh_frame_hdr").unwrap_or_else(|| panic!("no .eh_frame_hdr"));
+    let hdr = e
+        .section(".eh_frame_hdr")
+        .unwrap_or_else(|| panic!("no .eh_frame_hdr"));
     let off = usize::try_from(hdr.offset).unwrap_or(0);
     assert_eq!(&bytes[off..off + 4], &[1, 0x1b, 0x03, 0x3b]);
     let ptr = (hdr.addr + 4).wrapping_add_signed(i64::from(e.i32(hdr.offset + 4)));
@@ -537,7 +648,10 @@ fn elf_eh_frame_fde_range_and_header() {
 }
 
 fn dynstr(e: &Elf, value: u64) -> String {
-    let strtab = e.dyn_value(DT_STRTAB).and_then(|va| e.va_to_off(va)).unwrap_or(0);
+    let strtab = e
+        .dyn_value(DT_STRTAB)
+        .and_then(|va| e.va_to_off(va))
+        .unwrap_or(0);
     e.cstr(strtab + value)
 }
 
@@ -551,14 +665,29 @@ fn elf_dynamic_tags() {
     assert_eq!(needed.as_deref(), Some("libc.so.6"));
     let runpath = e.dyn_value(DT_RUNPATH).map(|v| dynstr(&e, v));
     assert_eq!(runpath.as_deref(), Some("$ORIGIN"));
-    assert_eq!(e.dyn_value(DT_SYMTAB), layout.section(".dynsym").map(|s| s.addr));
-    assert_eq!(e.dyn_value(DT_STRTAB), layout.section(".dynstr").map(|s| s.addr));
-    assert_eq!(e.dyn_value(DT_JMPREL), layout.section(".rela.plt").map(|s| s.addr));
+    assert_eq!(
+        e.dyn_value(DT_SYMTAB),
+        layout.section(".dynsym").map(|s| s.addr)
+    );
+    assert_eq!(
+        e.dyn_value(DT_STRTAB),
+        layout.section(".dynstr").map(|s| s.addr)
+    );
+    assert_eq!(
+        e.dyn_value(DT_JMPREL),
+        layout.section(".rela.plt").map(|s| s.addr)
+    );
     assert_eq!(e.dyn_value(DT_PLTRELSZ), Some(48));
     assert_eq!(e.dyn_value(DT_PLTREL), Some(DT_RELA));
-    assert_eq!(e.dyn_value(DT_PLTGOT), layout.section(".got.plt").map(|s| s.addr));
+    assert_eq!(
+        e.dyn_value(DT_PLTGOT),
+        layout.section(".got.plt").map(|s| s.addr)
+    );
     assert_eq!(e.dyn_value(DT_FLAGS_1), Some(DF_1_PIE));
-    assert_eq!(e.dyn_value(DT_INIT_ARRAY), layout.section(".init_array").map(|s| s.addr));
+    assert_eq!(
+        e.dyn_value(DT_INIT_ARRAY),
+        layout.section(".init_array").map(|s| s.addr)
+    );
     assert_eq!(e.dyn_value(DT_INIT_ARRAYSZ), Some(8));
     let init = layout.section(".init_array").map_or(0, |s| s.offset);
     assert_eq!(e.u64(init), layout.symbols["main"]);
@@ -590,14 +719,23 @@ fn elf_malformed_knobs_change_fields() {
     assert_ne!(bad_magic[0], 0x7f);
     let cut = base.clone().malformed(Malformed::Truncate(40)).build();
     assert_eq!(cut.len(), 40);
-    let small = base.clone().malformed(Malformed::Ehdr(EhdrField::Phentsize, 32)).build();
+    let small = base
+        .clone()
+        .malformed(Malformed::Ehdr(EhdrField::Phentsize, 32))
+        .build();
     assert_eq!(Elf::new(&small).e_phentsize(), 32);
     let zero = base
         .clone()
         .malformed(Malformed::Shdr(".dynsym".into(), ShdrField::Entsize, 0))
         .build();
-    assert_eq!(Elf::new(&zero).section(".dynsym").map(|s| s.entsize), Some(0));
-    let patched = base.clone().malformed(Malformed::Patch(8, vec![0xaa, 0xbb])).build();
+    assert_eq!(
+        Elf::new(&zero).section(".dynsym").map(|s| s.entsize),
+        Some(0)
+    );
+    let patched = base
+        .clone()
+        .malformed(Malformed::Patch(8, vec![0xaa, 0xbb]))
+        .build();
     assert_eq!(&patched[8..10], &[0xaa, 0xbb]);
     let escaped = base.clone().malformed(Malformed::EscapeCounts).build();
     let e = Elf::new(&escaped);
@@ -605,20 +743,37 @@ fn elf_malformed_knobs_change_fields() {
     assert_eq!(e.e_shnum(), 0);
     assert_eq!(e.e_shstrndx(), 0xffff);
     let s0 = e.e_shoff();
-    assert_eq!(e.u32(s0 + 44), u32::from(real.e_phnum()), "sh_info holds e_phnum");
-    assert_eq!(e.u64(s0 + 32), u64::from(real.e_shnum()), "sh_size holds e_shnum");
-    assert_eq!(e.u32(s0 + 40), u32::from(real.e_shstrndx()), "sh_link holds e_shstrndx");
+    assert_eq!(
+        e.u32(s0 + 44),
+        u32::from(real.e_phnum()),
+        "sh_info holds e_phnum"
+    );
+    assert_eq!(
+        e.u64(s0 + 32),
+        u64::from(real.e_shnum()),
+        "sh_size holds e_shnum"
+    );
+    assert_eq!(
+        e.u32(s0 + 40),
+        u32::from(real.e_shstrndx()),
+        "sh_link holds e_shstrndx"
+    );
     let open = base.clone().malformed(Malformed::DropDynamicNull).build();
     assert!(Elf::new(&open).dynamic().iter().all(|t| t.0 != DT_NULL));
-    let set = base
-        .clone()
-        .malformed(Malformed::Dynamic(DT_PLTRELSZ, 0))
-        .build();
+    let set = base.malformed(Malformed::Dynamic(DT_PLTRELSZ, 0)).build();
     assert_eq!(Elf::new(&set).dyn_value(DT_PLTRELSZ), Some(0));
-    let hashed = exports_builder(HashStyle::Gnu).malformed(Malformed::GnuHashOpenChain).build();
+    let hashed = exports_builder(HashStyle::Gnu)
+        .malformed(Malformed::GnuHashOpenChain)
+        .build();
     let e = Elf::new(&hashed);
-    let gh = e.section(".gnu.hash").unwrap_or_else(|| panic!("no .gnu.hash"));
-    assert_eq!(gnu_hash_count(&e, &gh), None, "the chain runs off the table");
+    let gh = e
+        .section(".gnu.hash")
+        .unwrap_or_else(|| panic!("no .gnu.hash"));
+    assert_eq!(
+        gnu_hash_count(&e, &gh),
+        None,
+        "the chain runs off the table"
+    );
 }
 
 #[test]
@@ -650,5 +805,9 @@ fn elf_malformed_variants_catalog() {
         assert!(codes.contains(&v.expect), "{} expects a known code", v.name);
         assert!(v.bytes.len() >= 4 || v.expect == "E_OOB", "{}", v.name);
     }
-    assert_eq!(elf::malformed_variants(), variants, "the catalog is deterministic");
+    assert_eq!(
+        elf::malformed_variants(),
+        variants,
+        "the catalog is deterministic"
+    );
 }

@@ -1,5 +1,7 @@
 //! Tests of the benchmark harness (ADR-0026).
 
+#![allow(clippy::panic, reason = "a test fails through a panic")]
+
 use std::cell::Cell;
 
 use ghidorah_testkit::bench::{self, MAX_RUNS, SAMPLES, Stats, Verdict, WARMUP};

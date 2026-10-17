@@ -38,12 +38,26 @@ where
     Op: Debug,
     O: PartialEq + Debug,
 {
-    let _ = (init, gen_op, sut_apply, model_apply);
-    pbt::run(
-        name,
-        &Config::from_env(name, settings.cases),
-        |_g: &mut Gen| Ok(()),
-    )
+    let config = Config::from_env(name, settings.cases);
+    pbt::run(name, &config, |g: &mut Gen| {
+        let (mut sut, mut model) = init();
+        let mut ops = Vec::new();
+        for step in 0..settings.max_steps {
+            if !g.more() {
+                break;
+            }
+            let op = gen_op(g);
+            let got = sut_apply(&mut sut, &op);
+            let want = model_apply(&mut model, &op);
+            ops.push(op);
+            if got != want {
+                return Err(format!(
+                    "ops: {ops:?}; step {step}: sut {got:?} != model {want:?}"
+                ));
+            }
+        }
+        Ok(())
+    })
 }
 
 /// Runs a model test with the settings of [`try_model_check`].
@@ -51,6 +65,7 @@ where
 /// # Panics
 ///
 /// Panics with the repro line when a sequence fails. This fails the calling test.
+#[allow(clippy::panic, reason = "a model mismatch must fail the calling test")]
 pub fn model_check<S, M, Op, O>(
     name: &str,
     settings: Settings,
@@ -62,5 +77,7 @@ pub fn model_check<S, M, Op, O>(
     Op: Debug,
     O: PartialEq + Debug,
 {
-    let _ = try_model_check(name, settings, init, gen_op, sut_apply, model_apply);
+    if let Err(failure) = try_model_check(name, settings, init, gen_op, sut_apply, model_apply) {
+        panic!("{}", failure.repro());
+    }
 }

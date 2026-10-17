@@ -1,5 +1,7 @@
 //! Tests of the STE checker (AC-225 and the checker contract of ADR-0019).
 
+#![allow(clippy::panic, reason = "a test fails through a panic")]
+
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
@@ -67,7 +69,11 @@ fn ac_225_ste_corpus() {
             }
         }
     }
-    assert!(errors.is_empty(), "corpus mismatches:\n{}", errors.join("\n"));
+    assert!(
+        errors.is_empty(),
+        "corpus mismatches:\n{}",
+        errors.join("\n")
+    );
 }
 
 #[test]
@@ -115,7 +121,10 @@ fn ste_markdown_list_items_are_paragraphs() {
     let text = "- The reader starts. It reads a byte. It checks the byte.\n\
                 - It moves on. It reads more. It stops at the end. It returns the count.\n";
     let findings = checker().check(text, TextKind::Markdown);
-    assert!(findings.is_empty(), "two items with 3 and 4 sentences: {findings:?}");
+    assert!(
+        findings.is_empty(),
+        "two items with 3 and 4 sentences: {findings:?}"
+    );
     let joined = "The reader starts. It reads a byte. It checks the byte.\n\
                   It moves on. It reads more. It stops at the end. It returns the count.\n";
     let findings = checker().check(joined, TextKind::Markdown);
@@ -187,7 +196,7 @@ fn ste_allowlist_parse_and_allow() {
     assert!(!allow.allows("docs/b.md", &finding));
     let other_rule = Finding {
         rule: Rule::Ste6,
-        ..finding.clone()
+        ..finding
     };
     assert!(!allow.allows("docs/a.md", &other_rule));
     assert!(Allowlist::parse("docs/a.md STE-9 x\n").is_err());
@@ -207,7 +216,10 @@ fn ste_allow_entry_for_finding_roundtrip() {
     let entry = AllowEntry::for_finding("docs/x.md", &finding);
     assert_eq!(entry.fragment, "one two three four five six seven eight");
     let line = entry.to_string();
-    assert_eq!(line, "docs/x.md STE-2 one two three four five six seven eight");
+    assert_eq!(
+        line,
+        "docs/x.md STE-2 one two three four five six seven eight"
+    );
     let parsed = Allowlist::parse(&line);
     assert!(parsed.is_ok_and(|a| a.allows("docs/x.md", &finding)));
 }
@@ -222,8 +234,14 @@ fn ste_exempt_paths() {
 
 #[test]
 fn ste_text_kind_of_path() {
-    assert_eq!(TextKind::of_path("docs/design.md"), Some(TextKind::Markdown));
-    assert_eq!(TextKind::of_path("crates/a/src/lib.rs"), Some(TextKind::RustComments));
+    assert_eq!(
+        TextKind::of_path("docs/design.md"),
+        Some(TextKind::Markdown)
+    );
+    assert_eq!(
+        TextKind::of_path("crates/a/src/lib.rs"),
+        Some(TextKind::RustComments)
+    );
     assert_eq!(TextKind::of_path("tests/data/ste/pass.txt"), None);
 }
 
@@ -254,7 +272,8 @@ fn ste_check_agent_text_is_deny_mode() {
 fn write(root: &Path, path: &str, text: &str) {
     let full = root.join(path);
     if let Some(parent) = full.parent() {
-        std::fs::create_dir_all(parent).unwrap_or_else(|e| panic!("mkdir {}: {e}", parent.display()));
+        std::fs::create_dir_all(parent)
+            .unwrap_or_else(|e| panic!("mkdir {}: {e}", parent.display()));
     }
     std::fs::write(&full, text).unwrap_or_else(|e| panic!("write {}: {e}", full.display()));
 }
@@ -262,15 +281,35 @@ fn write(root: &Path, path: &str, text: &str) {
 fn temp_tree() -> PathBuf {
     let root = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("ste_scan_tree");
     let _ = std::fs::remove_dir_all(&root);
-    write(&root, "docs/a.md", "# Title\n\nThe file is read by the loader.\n");
-    write(&root, "docs/research.md", "The file is read by the loader.\n");
-    write(&root, "docs/planning/x.md", "The file is read by the loader.\n");
-    write(&root, "crates/x/src/lib.rs", "// The value should change.\nfn f() {}\n");
+    write(
+        &root,
+        "docs/a.md",
+        "# Title\n\nThe file is read by the loader.\n",
+    );
+    write(
+        &root,
+        "docs/research.md",
+        "The file is read by the loader.\n",
+    );
+    write(
+        &root,
+        "docs/planning/x.md",
+        "The file is read by the loader.\n",
+    );
+    write(
+        &root,
+        "crates/x/src/lib.rs",
+        "// The value should change.\nfn f() {}\n",
+    );
     write(&root, "target/x.md", "The file is read by the loader.\n");
     write(&root, ".hidden/x.md", "The file is read by the loader.\n");
     write(&root, "docs/notes.txt", "The file is read by the loader.\n");
     write(&root, "docs/ste-banlist.txt", "frobnicate\n");
-    write(&root, "docs/ste-allowlist.txt", "crates/x/src/lib.rs STE-6 The value should change\nREADME.md STE-4 unused entry\n");
+    write(
+        &root,
+        "docs/ste-allowlist.txt",
+        "crates/x/src/lib.rs STE-6 The value should change\nREADME.md STE-4 unused entry\n",
+    );
     write(&root, "README.md", "Frobnicate the value.\n");
     root
 }

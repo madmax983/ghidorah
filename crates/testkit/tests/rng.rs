@@ -1,5 +1,7 @@
 //! Tests of the PRNG module (AC-044a, AC-044b).
 
+#![allow(clippy::panic, reason = "a test fails through a panic")]
+
 use ghidorah_testkit::rng::{Rng, SplitMix64, Xoshiro256ss, below, fnv1a64};
 
 /// Parses the reference vector file into `(state, outputs)` blocks.
@@ -68,7 +70,11 @@ fn below_one_is_zero() {
         }
     }
     let mut g = Xoshiro256ss::seed_from_u64(1);
-    assert_eq!(below(&mut g, 0), 0, "no value is below 0, so the result is 0");
+    assert_eq!(
+        below(&mut g, 0),
+        0,
+        "no value is below 0, so the result is 0"
+    );
 }
 
 #[test]

@@ -1,5 +1,7 @@
 //! Tests of the golden-file module.
 
+#![allow(clippy::panic, reason = "a test fails through a panic")]
+
 use std::path::PathBuf;
 
 use ghidorah_testkit::golden::{self, Format, GoldenError, Header, Outcome};
@@ -103,11 +105,15 @@ fn golden_json_header_form() {
 
 #[test]
 fn golden_header_parse_roundtrip() {
-    let h = Header::new("gen", "0.1").with("oracle", "readelf 2.42").with("b", "2");
+    let h = Header::new("gen", "0.1")
+        .with("oracle", "readelf 2.42")
+        .with("b", "2");
     for format in [Format::Text, Format::Json] {
         let line = h.render(format);
         let back = Header::parse(&line, format);
-        let want = Header::new("gen", "0.1").with("oracle", "readelf_2.42").with("b", "2");
+        let want = Header::new("gen", "0.1")
+            .with("oracle", "readelf_2.42")
+            .with("b", "2");
         assert_eq!(back, Ok(want), "{line}");
     }
     assert_eq!(h.field("b"), Some("2"));

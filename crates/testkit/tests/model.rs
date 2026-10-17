@@ -1,5 +1,7 @@
 //! Tests of the model-based test module.
 
+#![allow(clippy::panic, reason = "a test fails through a panic")]
+
 use std::collections::{BTreeSet, VecDeque};
 
 use ghidorah_testkit::model::{self, Settings};

@@ -4,12 +4,16 @@
 //! It skips `docs/research.md` and `docs/planning/`. The reviewed allowlist
 //! `docs/ste-allowlist.txt` allows the remaining findings.
 
+#![allow(clippy::panic, reason = "a test fails through a panic")]
+
 use std::path::PathBuf;
 
 use ghidorah_testkit::ste::{self, AllowEntry, Checker, Mode};
 
 fn repo_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..").join("..")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
 }
 
 #[test]
@@ -24,7 +28,11 @@ fn ac_025_ste_docs() {
     let Ok(report) = report else {
         panic!("the scan fails: {report:?}");
     };
-    assert!(report.files >= 10, "the scan reads the docs and sources: {}", report.files);
+    assert!(
+        report.files >= 10,
+        "the scan reads the docs and sources: {}",
+        report.files
+    );
     if !report.ok() {
         let lines: Vec<String> = report
             .findings
