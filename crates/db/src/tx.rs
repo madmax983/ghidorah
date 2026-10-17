@@ -27,8 +27,8 @@ use std::fmt;
 
 use ghidorah_base::{ErrorCode, Rev, TxId};
 
-use crate::edit::{Edit, EditError};
-use crate::epochs::Epochs;
+use crate::edit::{Ctx, Edit, EditError, Mode, apply, normalize};
+use crate::epochs::{Epochs, Touch};
 use crate::events::Events;
 use crate::fact::{Fact, Origin, SessionLabel};
 use crate::program::Program;
@@ -51,8 +51,11 @@ impl TxLabel {
     /// Returns [`TxError::BadLabel`] for an empty label, a label above [`MAX_TX_LABEL`] bytes
     /// or a byte outside `[A-Za-z0-9._+-]`.
     pub fn new(text: &str) -> Result<Self, TxError> {
-        let _ = text;
-        Err(TxError::BadLabel)
+        let byte_ok = |b: u8| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'+' | b'-');
+        if text.is_empty() || text.len() > MAX_TX_LABEL || !text.bytes().all(byte_ok) {
+            return Err(TxError::BadLabel);
+        }
+        Ok(Self(text.to_string()))
     }
 
     /// Gives the label text.
@@ -140,7 +143,7 @@ impl Commit {
     /// Gives the lowest start band of the edits, or `None` when no edit affects analysis.
     #[must_use]
     pub fn start_band(&self) -> Option<u16> {
-        None
+        self.edits.iter().filter_map(|a| a.edit.kind().band()).min()
     }
 }
 
@@ -178,12 +181,15 @@ impl Program {
         source: Source,
         session: SessionLabel,
     ) -> Result<Tx<'_>, TxError> {
-        let label = TxLabel(label.to_string());
-        let origin = Origin::new(source, TxId(0), session, false);
+        if source == Source::Default {
+            return Err(TxError::DefaultSource);
+        }
+        let label = TxLabel::new(label)?;
+        let next = self.last_tx().0.checked_add(1).ok_or(TxError::Exhausted)?;
         Ok(Tx {
             program: self,
             label,
-            origin,
+            origin: Origin::new(source, TxId(next), session, false),
             log: Vec::new(),
             used_force: false,
             poisoned: false,
@@ -232,13 +238,13 @@ impl<'p> Tx<'p> {
     /// Gives the revision that a commit with edits gives.
     #[must_use]
     pub fn pending_rev(&self) -> Rev {
-        self.program.rev()
+        Rev(self.program.rev().0.saturating_add(1))
     }
 
     /// Sets the force flag of the next facts. `force` lets an `Agent` write replace an
     /// `Imported` fact. The journal records the flag.
-    pub fn set_force(&mut self, force: bool) {
-        let _ = force;
+    pub const fn set_force(&mut self, force: bool) {
+        self.origin.force = force;
     }
 
     /// Makes a fact with the origin of the Tx.
@@ -272,8 +278,7 @@ impl<'p> Tx<'p> {
     /// Returns [`EditError::Poisoned`] for a poisoned Tx, or the [`EditError`] of the edit.
     /// Then the program does not change.
     pub fn apply(&mut self, edit: Edit) -> Result<Option<&Applied>, EditError> {
-        let _ = edit;
-        Ok(None)
+        self.run(edit, Mode::Forward)
     }
 
     /// Applies an exact edit: an inverse, an undo or a replayed edit. It puts its exact state
@@ -283,8 +288,48 @@ impl<'p> Tx<'p> {
     ///
     /// Returns [`EditError::Poisoned`] for a poisoned Tx, or the [`EditError`] of the edit.
     pub(crate) fn restore(&mut self, edit: Edit) -> Result<Option<&Applied>, EditError> {
-        let _ = edit;
-        Ok(None)
+        self.run(edit, Mode::Exact)
+    }
+
+    /// Applies one edit in `mode` and logs it with its inverse.
+    fn run(&mut self, mut edit: Edit, mode: Mode) -> Result<Option<&Applied>, EditError> {
+        if self.poisoned {
+            return Err(EditError::Poisoned);
+        }
+        if mode == Mode::Forward {
+            normalize(&mut edit);
+        }
+        let rev = self.pending_rev();
+        let ctx = Ctx {
+            origin: &self.origin,
+            mode,
+            rev,
+        };
+        let Some(inverse) = apply(self.program, &edit, &ctx)? else {
+            return Ok(None);
+        };
+        if mode == Mode::Forward && self.origin.force {
+            self.used_force = true;
+        }
+        self.log.push(Applied { edit, inverse });
+        Ok(self.log.last())
+    }
+
+    /// Rolls back the edits after the first `mark` edits, in reverse order.
+    fn rollback(&mut self, mark: usize) {
+        let rev = self.pending_rev();
+        while self.log.len() > mark {
+            let Some(applied) = self.log.pop() else {
+                break;
+            };
+            let ctx = Ctx {
+                origin: &self.origin,
+                mode: Mode::Exact,
+                rev,
+            };
+            // An exact inverse puts back a state that held before, so it succeeds.
+            let _ = apply(self.program, &applied.inverse, &ctx);
+        }
     }
 
     /// Opens a nested scope. Its abort poisons this Tx.
@@ -304,25 +349,66 @@ impl<'p> Tx<'p> {
     /// Returns [`TxError::Poisoned`] after a nested abort and [`TxError::Exhausted`] when the
     /// revision counter is full. Then the Tx rolls back.
     pub fn commit(mut self) -> Result<Commit, TxError> {
+        let next = self.program.rev().0.checked_add(1);
+        let failed = match next {
+            _ if self.poisoned => Some(TxError::Poisoned),
+            None if !self.log.is_empty() => Some(TxError::Exhausted),
+            _ => None,
+        };
+        if let Some(e) = failed {
+            self.rollback(0);
+            self.open = false;
+            return Err(e);
+        }
         self.open = false;
+        let edits = std::mem::take(&mut self.log);
+        let noop = edits.is_empty();
+        if let (false, Some(next)) = (noop, next) {
+            let rev = Rev(next);
+            let mut touch = Touch::default();
+            for a in &edits {
+                touch.add(&a.edit);
+                touch.add(&a.inverse);
+            }
+            self.program.set_rev(rev);
+            let changes = self.program.changes_mut();
+            changes.last_tx = self.origin.tx;
+            changes.epochs.record(rev, &touch);
+            changes.events.push(touch.events(rev, self.origin.tx));
+            debug_check(self.program);
+        }
         Ok(Commit {
             rev: self.program.rev(),
             tx: self.origin.tx,
-            noop: true,
+            noop,
             label: self.label.clone(),
             source: self.origin.source,
             session: self.origin.session.clone(),
             force: self.used_force,
-            edits: std::mem::take(&mut self.log),
+            edits,
         })
     }
 
     /// Rolls the Tx back.
-    pub fn abort(self) {}
+    pub fn abort(self) {
+        drop(self);
+    }
+}
+
+/// Runs the invariant checker after a commit under `debug_assertions`.
+fn debug_check(program: &Program) {
+    if cfg!(debug_assertions) {
+        let found = program.check_invariants();
+        debug_assert!(found.is_empty(), "a commit breaks invariants: {found:?}");
+    }
 }
 
 impl Drop for Tx<'_> {
-    fn drop(&mut self) {}
+    fn drop(&mut self) {
+        if self.open && !std::thread::panicking() {
+            self.rollback(0);
+        }
+    }
 }
 
 /// A nested scope of a transaction. A drop without a commit rolls back its edits and
@@ -361,11 +447,16 @@ impl<'p> Nested<'_, 'p> {
     }
 
     /// Rolls back the edits of the scope and poisons the Tx.
-    pub fn abort(self) {}
+    pub fn abort(self) {
+        drop(self);
+    }
 }
 
 impl Drop for Nested<'_, '_> {
     fn drop(&mut self) {
-        let _ = self.mark;
+        if self.open && !std::thread::panicking() {
+            self.tx.rollback(self.mark);
+            self.tx.poisoned = true;
+        }
     }
 }

@@ -18,17 +18,22 @@
 //! Rule 8 reads "instruction start" as an address in an executable region that no code unit
 //! holds after its first byte. So a new agent target is valid before the re-analysis.
 
+mod whys;
+
 #[cfg(test)]
 mod tests;
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use ghidorah_base::{Address, FuncId, JumpTableId, NoteId, Range, Rev};
+use ghidorah_loader::Perms;
 
-use crate::edit::Layer;
+use crate::edit::{Layer, is_id, starts_unit};
 use crate::epochs::Table;
 use crate::funcs::Function;
-use crate::notes::Note;
+use crate::notes::{Note, NoteSet, SetMembers};
+use crate::overrides::FlowOverride;
 use crate::program::Program;
 use crate::refs::RefKey;
 use crate::symbols::Symbol;
@@ -188,8 +193,12 @@ impl fmt::Display for Violation {
 }
 
 /// Rule 1: compares the keys of the from-index and of the to-index.
-fn ref_index(layer: Layer, from: Vec<RefKey>, to: Vec<RefKey>, out: &mut Vec<Violation>) {
-    let _ = (layer, from, to, out);
+fn ref_index(layer: Layer, mut from: Vec<RefKey>, mut to: Vec<RefKey>, out: &mut Vec<Violation>) {
+    from.sort_unstable();
+    to.sort_unstable();
+    if from != to {
+        out.push(Violation::RefIndex { layer });
+    }
 }
 
 /// Rule 3: checks the bodies of the functions of a layer, in entry order, and the map.
@@ -199,7 +208,31 @@ fn bodies(
     ownership: &[(Range, FuncId)],
     out: &mut Vec<Violation>,
 ) {
-    let _ = (layer, funcs, ownership, out);
+    let mut expect: Vec<(Range, FuncId)> = Vec::new();
+    for f in funcs {
+        if !(f.entry.is_ram() && f.body.contains(f.entry.off)) {
+            out.push(Violation::FuncEntry {
+                layer,
+                func: f.id(),
+            });
+        }
+        expect.extend(f.body.ranges().iter().map(|r| (*r, f.id())));
+    }
+    expect.sort_unstable();
+    let mut overlapping = BTreeSet::new();
+    for pair in expect.windows(2) {
+        if let [(a, fa), (b, fb)] = pair
+            && a.last >= b.first
+        {
+            overlapping.insert((*fa).max(*fb));
+        }
+    }
+    for func in overlapping {
+        out.push(Violation::FuncOverlap { layer, func });
+    }
+    if expect != ownership {
+        out.push(Violation::Ownership { layer });
+    }
 }
 
 /// Rule 4: checks the primary flags and the name index of the symbols of a layer.
@@ -209,30 +242,203 @@ fn symbols(
     names: &[(&str, &[Address])],
     out: &mut Vec<Violation>,
 ) {
-    let _ = (layer, symbols, names, out);
+    let mut primaries: BTreeMap<Address, usize> = BTreeMap::new();
+    for s in symbols {
+        let count = primaries.entry(s.addr).or_default();
+        *count = count.saturating_add(usize::from(s.primary));
+    }
+    for (addr, count) in primaries {
+        if count != 1 {
+            out.push(Violation::Primary { layer, addr, count });
+        }
+    }
+    let held: BTreeSet<(&str, Address)> = symbols
+        .iter()
+        .map(|s| (s.name.value.as_str(), s.addr))
+        .collect();
+    let index: BTreeSet<(&str, Address)> = names
+        .iter()
+        .flat_map(|(name, addrs)| addrs.iter().map(move |a| (*name, *a)))
+        .collect();
+    let bad: BTreeSet<&str> = held
+        .symmetric_difference(&index)
+        .map(|(name, _)| *name)
+        .collect();
+    for name in bad {
+        out.push(Violation::NameIndex {
+            layer,
+            name: name.to_string(),
+        });
+    }
 }
 
 /// Rule 5: checks that the spans `(start, len)` in start order do not overlap.
 fn overlaps(layer: Layer, spans: &[(u64, u64)], data: bool, out: &mut Vec<Violation>) {
-    let _ = (layer, spans, data, out);
+    for pair in spans.windows(2) {
+        let [(at, len), (next, _)] = pair else {
+            continue;
+        };
+        let last = len.checked_sub(1).and_then(|l| at.checked_add(l));
+        if last.is_some_and(|last| *next <= last) {
+            out.push(if data {
+                Violation::DataOverlap { layer, at: *at }
+            } else {
+                Violation::UnitOverlap { layer, at: *at }
+            });
+        }
+    }
 }
 
 /// Rule 9: checks the evidence entries and the ID members of the notes.
 fn evidence(notes: &[&Note], out: &mut Vec<Violation>) {
-    let _ = (notes, out);
+    for n in notes {
+        let members = match &n.set {
+            Some(NoteSet {
+                members: SetMembers::Ids(ids),
+                ..
+            }) => ids.as_slice(),
+            _ => &[],
+        };
+        for text in n.evidence.iter().chain(members) {
+            if !is_id(text) {
+                out.push(Violation::Evidence {
+                    note: n.id,
+                    text: text.clone(),
+                });
+            }
+        }
+    }
 }
+
+/// All RAM offsets.
+const ALL: Range = Range {
+    first: 0,
+    last: u64::MAX,
+};
 
 impl Program {
     /// Checks the invariants of design Section 3.11. Gives the violations in rule order.
     #[must_use]
     pub fn check_invariants(&self) -> Vec<Violation> {
-        Vec::new()
+        let mut out = Vec::new();
+        let layers = [
+            (Layer::Base, self.base()),
+            (Layer::Analysis, self.analysis()),
+        ];
+        for (layer, t) in layers {
+            let from = t.refs().iter().map(|f| f.value.key).collect();
+            ref_index(layer, from, t.refs().to_index().collect(), &mut out);
+        }
+        for (layer, t) in layers {
+            for r in t.refs().iter() {
+                let from = r.value.key.from;
+                if !starts_unit(self, from) {
+                    out.push(Violation::RefFrom { layer, from });
+                }
+            }
+        }
+        for (layer, t) in layers {
+            let funcs: Vec<&Function> = t.funcs().iter().collect();
+            bodies(layer, &funcs, t.funcs().ownership(), &mut out);
+        }
+        for (layer, t) in layers {
+            let syms: Vec<&Symbol> = t.symbols().iter().collect();
+            let names: Vec<(&str, &[Address])> = t.symbols().names().collect();
+            symbols(layer, &syms, &names, &mut out);
+        }
+        for (layer, t) in layers {
+            let units: Vec<(u64, u64)> = t
+                .listing()
+                .units_in(ALL)
+                .map(|(at, u)| (at, u64::from(u.len())))
+                .collect();
+            overlaps(layer, &units, false, &mut out);
+            let data: Vec<(u64, u64)> = t
+                .listing()
+                .data_defs()
+                .map(|(at, d)| (at, u64::from(d.value.len)))
+                .collect();
+            overlaps(layer, &data, true, &mut out);
+        }
+        whys::check(self, &mut out);
+        self.check_events(&mut out);
+        for (layer, t) in layers {
+            for (table, jt) in t.jumptables().iter() {
+                for target in jt
+                    .value
+                    .targets
+                    .iter()
+                    .filter(|a| !self.is_code_target(**a))
+                {
+                    out.push(Violation::JumpTarget {
+                        layer,
+                        table,
+                        target: *target,
+                    });
+                }
+            }
+            for (at, flow) in t.overrides().iter() {
+                if let FlowOverride::IndirectTargets(list) = &flow.value {
+                    for target in list.iter().filter(|a| !self.is_code_target(**a)) {
+                        out.push(Violation::CallTarget {
+                            layer,
+                            at,
+                            target: *target,
+                        });
+                    }
+                }
+            }
+        }
+        let notes: Vec<&Note> = self.notes().iter().collect();
+        evidence(&notes, &mut out);
+        out
+    }
+
+    /// Rule 7: checks the revisions of the events and the epochs.
+    fn check_events(&self, out: &mut Vec<Violation>) {
+        let rev = self.rev();
+        let events = self.events();
+        let mut prev: Option<Rev> = None;
+        for e in events.iter() {
+            let step_ok = match prev {
+                None => e.rev > events.lost(),
+                Some(p) => e.rev == p || Some(e.rev.0) == p.0.checked_add(1),
+            };
+            if !step_ok || e.rev > rev {
+                out.push(Violation::EventRev { rev: e.rev });
+            }
+            prev = Some(e.rev);
+        }
+        if let Some(last) = prev
+            && last < rev
+        {
+            out.push(Violation::EventRev { rev: last });
+        }
+        for table in Table::ALL {
+            if self.epochs().table(table) > rev {
+                out.push(Violation::EpochAhead { table });
+            }
+        }
     }
 
     /// Tells if `target` is a valid jump-table target or indirect target (rule 8).
+    ///
+    /// A RAM target is in an executable region, and no code unit holds it after its first
+    /// byte. Another target is the EXTERNAL address of an import.
     #[must_use]
     pub fn is_code_target(&self, target: Address) -> bool {
-        let _ = target;
-        true
+        if !target.is_ram() {
+            return self.imports().values().any(|i| i.ext == target);
+        }
+        let exec = self
+            .mem()
+            .region_at(target.off)
+            .is_some_and(|r| r.perms.contains(Perms::EXECUTE));
+        let inside = [self.base(), self.analysis()].iter().any(|t| {
+            t.listing()
+                .unit_containing(target.off)
+                .is_some_and(|(start, _)| start != target.off)
+        });
+        exec && !inside
     }
 }

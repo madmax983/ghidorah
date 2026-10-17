@@ -8,7 +8,7 @@ use crate::notes::{Note, NoteKind, NoteStatus};
 use crate::program::Program;
 use crate::source::Source;
 use crate::symbols::SymKind;
-use crate::test_support::{analysis_set, ram, seeded, session};
+use crate::tests::{analysis_set, ram, seeded, session};
 
 /// Commits one edit that `make` builds for the Tx.
 fn commit(p: &mut Program, source: Source, make: impl Fn(&crate::Tx<'_>) -> Edit) {

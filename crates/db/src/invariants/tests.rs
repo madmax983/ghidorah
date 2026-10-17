@@ -18,8 +18,8 @@ use crate::overrides::FlowOverride;
 use crate::refs::{Ref, RefKey, RefType};
 use crate::source::Source;
 use crate::symbols::{SymKey, SymKind, Symbol};
-use crate::test_support::ops::{Pools, analysis_edit, base_edit};
-use crate::test_support::{analysis_set, fixture, func_type, origin, ram, seeded};
+use crate::tests::ops::{Pools, analysis_edit, base_edit};
+use crate::tests::{analysis_set, fixture, func_type, origin, ram, seeded};
 use crate::tx::Applied;
 use crate::why::{FactKey, RuleCode, Why};
 
@@ -35,6 +35,21 @@ struct Entry {
     session: &'static str,
 }
 
+/// Reverts the commit of `entry` with its exact inverses, as `history_undo` does.
+fn undo(p: &mut crate::Program, entry: &Entry) -> Result<(), String> {
+    let label = crate::tests::session(entry.session);
+    let mut tx = p.begin("history_undo", entry.source, label).unwrap();
+    for a in entry.edits.iter().rev() {
+        tx.restore(a.inverse.clone()).map_err(|e| e.to_string())?;
+    }
+    tx.commit().map_err(|e| e.to_string())?;
+    if hash(p) == entry.before {
+        Ok(())
+    } else {
+        Err("undo does not restore the state".to_string())
+    }
+}
+
 #[test]
 fn ac_123_program_invariants() {
     let mut start = seeded();
@@ -42,12 +57,11 @@ fn ac_123_program_invariants() {
     let pools = Pools::of(&start, fn_type);
     let sets = [analysis_set(&start, 0), analysis_set(&start, 1)];
     let counts = RefCell::new([0usize; 15]);
-    check("ac_123_program_invariants", 48, |g| {
+    check("ac_123_program_invariants", 96, |g| {
         let mut p = start.clone();
         let mut stack: Vec<Entry> = Vec::new();
-        let mut steps = 0;
-        while steps < 40 && g.more() {
-            steps += 1;
+        let count = 20 + g.draw(40);
+        for steps in 1..=count {
             let before = hash(&p);
             let (source, session) = match g.draw(4) {
                 0 => (Source::User, "cli"),
@@ -57,18 +71,10 @@ fn ac_123_program_invariants() {
             let end = g.draw(10);
             if end == 9 {
                 let Some(entry) = stack.pop() else { continue };
-                let label = crate::test_support::session(entry.session);
-                let mut tx = p.begin("history_undo", entry.source, label).unwrap();
-                for a in entry.edits.iter().rev() {
-                    tx.restore(a.inverse.clone()).map_err(|e| e.to_string())?;
-                }
-                tx.commit().map_err(|e| e.to_string())?;
-                if hash(&p) != entry.before {
-                    return Err(format!("step {steps}: undo does not restore the state"));
-                }
+                undo(&mut p, &entry).map_err(|e| format!("step {steps}: {e}"))?;
             } else {
                 let mut tx = p
-                    .begin("model", source, crate::test_support::session(session))
+                    .begin("model", source, crate::tests::session(session))
                     .unwrap();
                 for _ in 0..=g.draw(3) {
                     let edit = if source == Source::Analysis {
@@ -132,9 +138,15 @@ fn ac_123_program_invariants() {
         Ok(())
     });
     let counts = counts.into_inner();
-    for (kind, count) in EditKind::ALL.iter().zip(counts) {
-        assert!(count >= 20, "{kind} applies {count} times");
-    }
+    let table: Vec<String> = EditKind::ALL
+        .iter()
+        .zip(counts)
+        .map(|(kind, count)| format!("{kind}={count}"))
+        .collect();
+    assert!(
+        counts.iter().all(|c| *c >= 20),
+        "each kind applies 20 times: {table:?}"
+    );
 }
 
 #[test]
@@ -153,8 +165,8 @@ fn why(rule: &str, premises: Vec<FactKey>) -> Why {
     }
 }
 
-#[test]
-fn each_rule_finds_its_violation() {
+/// Gives the seeded program with broken facts for rules 2, 6, 7 and 8.
+fn broken() -> crate::Program {
     let mut p = seeded();
     let a = Origin::analysis();
     let agent = origin(Source::Agent, 1, "mcp-1");
@@ -203,6 +215,11 @@ fn each_rule_finds_its_violation() {
             ),
         )
         .unwrap();
+    // A new record for 0x1090 gives it a higher order than its user at 0x1084.
+    layer
+        .why
+        .insert(FactKey::CodeUnit(0x1090), why("R_TEST_AGAIN", Vec::new()))
+        .unwrap();
     // Rule 8: a jump target inside an instruction and an indirect target in data.
     layer
         .jumptables
@@ -243,7 +260,12 @@ fn each_rule_finds_its_violation() {
         ranges: RangeSet::new(),
         ids: Vec::new(),
     }]);
-    let found = p.check_invariants();
+    p
+}
+
+#[test]
+fn each_rule_finds_its_violation() {
+    let found = broken().check_invariants();
     let want = [
         Violation::RefFrom {
             layer: Layer::Base,
@@ -309,24 +331,24 @@ fn structural_rules_find_broken_tables() {
     super::ref_index(layer, vec![key], Vec::new(), &mut out);
     super::ref_index(layer, vec![key], vec![key], &mut out);
     // Rule 3: a body without its entry, two bodies that overlap and a wrong ownership map.
-    let mut f = Function::new(ram(0x100), StartReason::Call, 50, Source::Analysis);
-    f.body = RangeSet::from_ranges(&[Range {
+    let mut low = Function::new(ram(0x100), StartReason::Call, 50, Source::Analysis);
+    low.body = RangeSet::from_ranges(&[Range {
         first: 0x101,
         last: 0x10f,
     }]);
-    let mut g = Function::new(ram(0x108), StartReason::Call, 50, Source::Analysis);
-    g.body = RangeSet::from_ranges(&[Range {
+    let mut high = Function::new(ram(0x108), StartReason::Call, 50, Source::Analysis);
+    high.body = RangeSet::from_ranges(&[Range {
         first: 0x108,
         last: 0x11f,
     }]);
-    super::bodies(layer, &[&f, &g], &[], &mut out);
+    super::bodies(layer, &[&low, &high], &[], &mut out);
     // Rule 4: two primary symbols at one address, and a name index without a symbol.
-    let a = sym(0x200, 0, "one", true);
-    let b = sym(0x200, 1, "two", true);
-    let c = sym(0x300, 0, "three", false);
+    let one = sym(0x200, 0, "one", true);
+    let two = sym(0x200, 1, "two", true);
+    let three = sym(0x300, 0, "three", false);
     let addrs = [ram(0x200)];
     let names: [(&str, &[Address]); 3] = [("one", &addrs), ("ghost", &addrs), ("two", &addrs)];
-    super::symbols(layer, &[&a, &b, &c], &names, &mut out);
+    super::symbols(layer, &[&one, &two, &three], &names, &mut out);
     // Rule 5: units and data definitions that overlap.
     super::overlaps(layer, &[(0x10, 4), (0x12, 4), (0x16, 1)], false, &mut out);
     super::overlaps(layer, &[(0x40, 16), (0x48, 8)], true, &mut out);
@@ -346,7 +368,7 @@ fn structural_rules_find_broken_tables() {
             members: SetMembers::Ids(vec!["nope".to_string()]),
         }),
         src: Source::Agent,
-        session: crate::test_support::session("mcp-1"),
+        session: crate::tests::session("mcp-1"),
         rev: Rev(0),
     };
     super::evidence(&[&note], &mut out);

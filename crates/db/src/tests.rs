@@ -1,7 +1,7 @@
 //! Shared test helpers: a fixture program with a seeded analysis layer.
 //!
-//! The seeded layer of `hello.gcc-O2` has 4-byte code units from `0x1080` to `0x117f`,
-//! three functions, two references, a string, a jump table and an analysis symbol. Each
+//! The seeded layer of `hello.gcc-O2` has 4-byte code units from `0x1080` to `0x117f`.
+//! It also has three functions, two references, a string, a jump table and a symbol. Each
 //! analysis fact has a why-record, so the program holds every invariant.
 
 pub(crate) mod ops;
@@ -85,7 +85,6 @@ fn body(first: u64, last: u64) -> RangeSet {
 
 /// Builds a seeded analysis set. `variant` 1 adds a fourth function and a second string.
 pub(crate) fn analysis_set(p: &Program, variant: u8) -> AnalysisSet {
-    let o = Origin::analysis();
     let entry = p.binary().entry_points.first().map_or(0, |e| e.addr);
     let mut t = AnalysisSet::default();
     for off in units() {
@@ -126,6 +125,13 @@ pub(crate) fn analysis_set(p: &Program, variant: u8) -> AnalysisSet {
             )
             .unwrap();
     }
+    add_rest(&mut t, variant);
+    t
+}
+
+/// Adds the references, the strings, the symbol and the jump table of a seeded set.
+fn add_rest(t: &mut AnalysisSet, variant: u8) {
+    let o = Origin::analysis();
     let refs = [
         (0x1084, 0x10c0, RefType::UnconditionalCall),
         (0x1088, STRING, RefType::Read),
@@ -193,7 +199,6 @@ pub(crate) fn analysis_set(p: &Program, variant: u8) -> AnalysisSet {
             why("R_TEST_JT", vec![FactKey::CodeUnit(JUMP)]),
         )
         .unwrap();
-    t
 }
 
 /// Gives the ID of the function type `int (void)` in the types of `p`. The first call adds it.

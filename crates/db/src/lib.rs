@@ -32,13 +32,14 @@
 //!
 //! The crate reads no file. The persistence modules get file access through the `Fs` seam.
 
-// The Tx guard, the analysis engine and the tools call the manager mutators. Until they
-// exist, the mutators have callers only in the unit tests.
+// The Tx guard calls most manager mutators. The analysis engine (WP-15) and the journal
+// replay and undo (WP-20) call the others and `Tx::restore`. Until they exist, these
+// functions have callers only in the unit tests.
 #![cfg_attr(
     not(test),
     allow(
         dead_code,
-        reason = "the Tx guard of WP-11b calls the manager mutators"
+        reason = "the analysis engine and the journal replay call the other mutators"
     )
 )]
 
@@ -67,7 +68,7 @@ pub mod vars;
 pub mod why;
 
 #[cfg(test)]
-mod test_support;
+mod tests;
 
 pub use codec::{CodecError, Reason};
 pub use comments::{CommentKind, Comments};

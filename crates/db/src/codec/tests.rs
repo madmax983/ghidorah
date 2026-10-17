@@ -23,7 +23,7 @@ use crate::progress::{FuncProgress, Mark};
 use crate::refs::{Ref, RefKey, RefType};
 use crate::source::Source;
 use crate::symbols::{SymKey, SymKind};
-use crate::test_support::{origin, ram, seeded, session};
+use crate::tests::{origin, ram, seeded, session};
 use crate::vars::VarFact;
 use crate::why::FactKey;
 
@@ -140,12 +140,6 @@ fn samples() -> Vec<Edit> {
         to: Address::external(2),
         kind: RefType::ComputedCall,
     };
-    let flows = [
-        FlowOverride::Fallthrough(ram(0x1090)),
-        FlowOverride::CallAsJump,
-        FlowOverride::JumpAsCall,
-        FlowOverride::IndirectTargets(vec![ram(0x1090), Address::external(1)]),
-    ];
     let mut out = vec![
         Edit::SetName {
             addr: ram(0x1084),
@@ -225,15 +219,27 @@ fn samples() -> Vec<Edit> {
         ))),
         Edit::DeleteNote { id: NoteId(9) },
     ];
-    for flow in flows {
-        out.push(Edit::SetFlowOverride {
-            at: ram(0x1090),
-            flow: Some(o.fact(flow)),
-        });
-    }
+    out.extend(flow_samples(&o));
     let p = seeded();
     out.push(Edit::ReplaceAnalysis(Box::new(p.analysis().clone())));
     out
+}
+
+/// Gives one `SetFlowOverride` edit for each kind of override.
+fn flow_samples(o: &Origin) -> Vec<Edit> {
+    let flows = [
+        FlowOverride::Fallthrough(ram(0x1090)),
+        FlowOverride::CallAsJump,
+        FlowOverride::JumpAsCall,
+        FlowOverride::IndirectTargets(vec![ram(0x1090), Address::external(1)]),
+    ];
+    flows
+        .into_iter()
+        .map(|flow| Edit::SetFlowOverride {
+            at: ram(0x1090),
+            flow: Some(o.fact(flow)),
+        })
+        .collect()
 }
 
 fn reparse(v: &Value) -> Value {
@@ -389,7 +395,7 @@ fn facts_dump_leaves_out_counters() {
     assert_eq!(names, vec!["analysis", "base", "binary", "notes", "types"]);
     assert!(dump.pointer("/analysis/why_next").is_none());
     assert!(tables_to_json(p.analysis()).get("why_next").is_some());
-    let sha: String = p.meta().sha256.iter().map(|b| format!("{b:02x}")).collect();
+    let sha = ghidorah_base::hex::encode(&p.meta().sha256);
     assert_eq!(
         dump.get("binary").and_then(Value::as_str),
         Some(sha.as_str())

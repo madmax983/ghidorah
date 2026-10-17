@@ -10,7 +10,8 @@ mod tests;
 
 use std::fmt;
 
-use ghidorah_json::JcsError;
+use ghidorah_base::sha256;
+use ghidorah_json::{JcsError, write_jcs};
 
 use crate::program::Program;
 
@@ -35,6 +36,7 @@ impl Program {
     /// Returns the [`JcsError`] of a dump without a JCS form. The dump of a program has
     /// unique member names and integer numbers only, so the error does not occur.
     pub fn state_hash(&self) -> Result<StateHash, JcsError> {
-        Ok(StateHash([0; 32]))
+        let text = write_jcs(&crate::codec::facts(self))?;
+        Ok(StateHash(sha256(text.as_bytes())))
     }
 }

@@ -19,7 +19,7 @@ use crate::program::Program;
 use crate::refs::{Ref, RefKey, RefType};
 use crate::source::Source;
 use crate::symbols::SymKind;
-use crate::test_support::{analysis_set, func_type, ram, seeded, session};
+use crate::tests::{analysis_set, func_type, ram, seeded, session};
 use crate::vars::VarFact;
 
 fn agent(p: &mut Program) -> Tx<'_> {
@@ -135,16 +135,16 @@ fn tx_drop_rolls_back() {
         let mut tx = agent(&mut p);
         let e = rename(&tx, 0x1084, "alpha");
         tx.apply(e).unwrap();
-        let f = base_func(&tx, 0x1140, 0x114f);
+        let func = base_func(&tx, 0x1140, 0x114f);
         tx.apply(Edit::CreateFunction(Box::new(FuncRecord {
-            func: f,
+            func,
             vars: Vec::new(),
             plate: None,
         })))
         .unwrap();
-        let n = note(&tx, 1, "check");
-        tx.apply(Edit::WriteNote(Box::new(n))).unwrap();
-        let r = tx.fact(Ref {
+        let todo = note(&tx, 1, "check");
+        tx.apply(Edit::WriteNote(Box::new(todo))).unwrap();
+        let reference = tx.fact(Ref {
             key: RefKey {
                 from: ram(0x1090),
                 op_index: 0,
@@ -153,7 +153,7 @@ fn tx_drop_rolls_back() {
             },
             primary: true,
         });
-        tx.apply(Edit::AddRef { fact: r }).unwrap();
+        tx.apply(Edit::AddRef { fact: reference }).unwrap();
         assert_eq!(tx.edits().len(), 4);
         assert_eq!(tx.program().name(ram(0x1084)).unwrap().text, "alpha");
         assert!(tx.program().func(FuncId(ram(0x1140))).is_some());
@@ -248,7 +248,7 @@ fn blocked_with_and_without_force() {
         (Source::Agent, false, true)
     );
     assert_eq!(
-        EditError::Blocked(b.clone()).code(),
+        EditError::Blocked(b).code(),
         ErrorCode::BlockedByHigherPrioritySource
     );
     tx.set_force(true);
@@ -429,8 +429,9 @@ fn replace_analysis_rollback() {
     assert_eq!(kinds, vec![Table::Analysis]);
 }
 
-#[test]
-fn delete_function_inverse_captures_side_effects() {
+/// Gives the seeded program with a full base function at `0x1140`. The function has parts,
+/// a signature, a noreturn flag, two variables, a plate comment and an EOL comment.
+fn full_function() -> (Program, Function, [VarId; 2]) {
     let mut p = seeded();
     let fn_type = func_type(&mut p);
     let long = p.types().store().prim(Prim::Long);
@@ -453,27 +454,34 @@ fn delete_function_inverse_captures_side_effects() {
         plate: None,
     })))
     .unwrap();
-    for v in &vars {
+    for var in &vars {
         let name = Edit::SetVarFact {
-            var: v.clone(),
+            var: var.clone(),
             field: VarField::Name(Some(tx.fact("v".to_string()))),
         };
         tx.apply(name).unwrap();
         let ty = Edit::SetVarFact {
-            var: v.clone(),
+            var: var.clone(),
             field: VarField::Type(Some(tx.fact(long))),
         };
         tx.apply(ty).unwrap();
     }
     for kind in [CommentKind::Plate, CommentKind::Eol] {
-        let c = Edit::SetComment {
+        let comment = Edit::SetComment {
             addr: ram(0x1140),
             kind,
             text: Some(tx.fact(kind.name().to_string())),
         };
-        tx.apply(c).unwrap();
+        tx.apply(comment).unwrap();
     }
     tx.commit().unwrap();
+    (p, func, vars)
+}
+
+#[test]
+fn delete_function_inverse_captures_side_effects() {
+    let (mut p, func, vars) = full_function();
+    let f = func.id();
     let before = hash(&p);
     let mut tx = agent(&mut p);
     let applied = tx
@@ -488,46 +496,25 @@ fn delete_function_inverse_captures_side_effects() {
         panic!("the inverse of a delete is a create");
     };
     assert_eq!(record.func, func);
-    let want_vars: Vec<(VarId, VarFact)> = vars
-        .iter()
-        .map(|v| {
-            (
-                v.clone(),
-                tx.program()
-                    .base()
-                    .vars()
-                    .get(v)
-                    .cloned()
-                    .unwrap_or_default(),
-            )
-        })
-        .collect();
     assert!(
-        want_vars
-            .iter()
-            .all(|(_, v)| v.name.is_none() && v.ty.is_none())
+        vars.iter()
+            .all(|v| tx.program().base().vars().get(v).is_none())
     );
-    assert_eq!(record.vars.len(), 2);
+    let names: Vec<&VarId> = record.vars.iter().map(|(v, _)| v).collect();
+    assert_eq!(names, vars.iter().collect::<Vec<_>>());
     assert!(
         record
             .vars
             .iter()
-            .all(|(_, v)| v.name.is_some() && v.ty.is_some())
+            .all(|(_, facts): &(VarId, VarFact)| facts.name.is_some() && facts.ty.is_some())
     );
     assert_eq!(
         record.plate.as_ref().map(|c| c.value.as_str()),
         Some("plate")
     );
-    assert!(
-        tx.program()
-            .comment(ram(0x1140), CommentKind::Plate)
-            .is_none()
-    );
-    assert!(
-        tx.program()
-            .comment(ram(0x1140), CommentKind::Eol)
-            .is_some()
-    );
+    let program = tx.program();
+    assert!(program.comment(ram(0x1140), CommentKind::Plate).is_none());
+    assert!(program.comment(ram(0x1140), CommentKind::Eol).is_some());
     tx.commit().unwrap();
     // The inverse puts the function, its variables and its plate comment back.
     let label = SessionLabel::new("mcp-1").unwrap();

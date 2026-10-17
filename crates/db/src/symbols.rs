@@ -311,10 +311,15 @@ impl Symbols {
     pub(crate) fn next_key(&self, addr: Address) -> Result<SymKey, Invalid> {
         match self.table.range(span(addr)).next_back() {
             None => Ok(SymKey(0)),
-            Some((_, s)) => s.key.0.checked_add(1).map(SymKey).ok_or(Invalid::TooMany {
-                count: usize::from(u16::MAX) + 1,
-                max: usize::from(u16::MAX),
-            }),
+            Some((_, s)) => s
+                .key
+                .0
+                .checked_add(1)
+                .map(SymKey)
+                .ok_or_else(|| Invalid::TooMany {
+                    count: usize::from(u16::MAX) + 1,
+                    max: usize::from(u16::MAX),
+                }),
         }
     }
 

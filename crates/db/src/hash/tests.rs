@@ -5,7 +5,7 @@ use crate::edit::Edit;
 use crate::fact::Origin;
 use crate::progress::FuncProgress;
 use crate::source::Source;
-use crate::test_support::{fixture, ram, seeded, session};
+use crate::tests::{fixture, ram, seeded, session};
 
 #[test]
 fn state_hash_tracks_facts_only() {

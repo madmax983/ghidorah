@@ -33,8 +33,8 @@ pub(crate) struct Pools {
 impl Pools {
     /// Gives the pools of a seeded program.
     pub(crate) fn of(p: &Program, fn_type: TypeId) -> Self {
-        let mut addrs: Vec<Address> = p.base().symbols().iter().map(|s| s.addr).take(4).collect();
-        addrs.extend([ram(0x1080), ram(0x1084), ram(0x10c0), ram(0x4000)]);
+        let mut addrs: Vec<Address> = p.base().symbols().iter().map(|s| s.addr).take(2).collect();
+        addrs.extend([0x1080, 0x1084, 0x1088, 0x108c, 0x1100, 0x1104, 0x1110].map(ram));
         Self {
             addrs,
             fn_type,
@@ -64,7 +64,18 @@ fn names(g: &mut Gen) -> String {
     pick(g, &["alpha", "beta", "gamma", "main"]).to_string()
 }
 
-fn func_id(g: &mut Gen) -> FuncId {
+/// Draws a function: a base function of `tx` most of the time, else a fixed entry.
+fn func_id(g: &mut Gen, tx: &Tx<'_>) -> FuncId {
+    let base: Vec<FuncId> = tx
+        .program()
+        .base()
+        .funcs()
+        .iter()
+        .map(Function::id)
+        .collect();
+    if !base.is_empty() && g.draw(3) > 0 {
+        return pick(g, &base);
+    }
     let entries = [FUNCS[0], FUNCS[1], FUNCS[2], 0x1140, 0x1144, 0x1170];
     FuncId(ram(pick(g, &entries)))
 }
@@ -146,7 +157,7 @@ pub(crate) fn base_edit(g: &mut Gen, tx: &Tx<'_>, pools: &Pools, kind: u64) -> E
         },
         2 => Edit::SetVarFact {
             var: VarId {
-                func: func_id(g),
+                func: func_id(g, tx),
                 storage: g
                     .pick(&[Storage::Param(0), Storage::Stack(-8), Storage::Ret])
                     .cloned()
@@ -164,31 +175,28 @@ pub(crate) fn base_edit(g: &mut Gen, tx: &Tx<'_>, pools: &Pools, kind: u64) -> E
                 primary: g.bool(),
             }),
         },
-        4 => Edit::RemoveRef { key: ref_key(g) },
-        5 => {
-            let entry = pick(g, &[0x1140, 0x1144, 0x1170, 0x1080]);
-            let mut func = Function::new(ram(entry), StartReason::Agent, 100, tx.origin().source);
-            let mut body = RangeSet::new();
-            body.insert(Range {
-                first: entry,
-                last: entry + 3,
-            });
-            func.body = body;
-            if g.bool() {
-                func.sig = Some(tx.fact(pools.fn_type));
-            }
-            Edit::CreateFunction(Box::new(FuncRecord {
-                func,
-                vars: Vec::new(),
-                plate: None,
-            }))
+        4 => {
+            let keys: Vec<RefKey> = tx
+                .program()
+                .base()
+                .refs()
+                .iter()
+                .map(|r| r.value.key)
+                .collect();
+            let key = if keys.is_empty() || g.draw(4) == 0 {
+                ref_key(g)
+            } else {
+                pick(g, &keys)
+            };
+            Edit::RemoveRef { key }
         }
+        5 => create(g, tx, pools),
         6 => Edit::DeleteFunction {
-            id: func_id(g),
+            id: func_id(g, tx),
             cascade: g.bool(),
         },
         7 => Edit::SetSignature {
-            id: func_id(g),
+            id: func_id(g, tx),
             sig: (!gone).then(|| {
                 tx.fact(if g.draw(4) == 0 {
                     pools.long
@@ -198,22 +206,10 @@ pub(crate) fn base_edit(g: &mut Gen, tx: &Tx<'_>, pools: &Pools, kind: u64) -> E
             }),
         },
         8 => Edit::SetNoreturn {
-            id: func_id(g),
+            id: func_id(g, tx),
             noreturn: (!gone).then(|| tx.fact(g.bool())),
         },
-        9 => Edit::SetJumpTable {
-            id: JumpTableId(ram(unit(g))),
-            table: (!gone).then(|| {
-                tx.fact(JumpTable {
-                    base: None,
-                    entry_size: 0,
-                    count: 2,
-                    targets: vec![target(g), target(g)],
-                    method: JtMethod::Agent,
-                    resolved: true,
-                })
-            }),
-        },
+        9 => jump_table(g, tx, gone),
         10 => Edit::SetFlowOverride {
             at: ram(unit(g)),
             flow: (!gone).then(|| tx.fact(flow(g))),
@@ -228,10 +224,53 @@ pub(crate) fn base_edit(g: &mut Gen, tx: &Tx<'_>, pools: &Pools, kind: u64) -> E
             }),
         },
         12 => Edit::WriteNote(Box::new(note(g, tx))),
-        _ => Edit::DeleteNote {
-            id: NoteId(g.range(1, 3)),
-        },
+        _ => {
+            let ids: Vec<NoteId> = tx.program().notes().iter().map(|n| n.id).collect();
+            let id = if ids.is_empty() || g.draw(4) == 0 {
+                NoteId(g.range(1, 3))
+            } else {
+                pick(g, &ids)
+            };
+            Edit::DeleteNote { id }
+        }
     }
+}
+
+/// Draws a `SetJumpTable` edit. `gone` removes the table.
+fn jump_table(g: &mut Gen, tx: &Tx<'_>, gone: bool) -> Edit {
+    Edit::SetJumpTable {
+        id: JumpTableId(ram(unit(g))),
+        table: (!gone).then(|| {
+            tx.fact(JumpTable {
+                base: None,
+                entry_size: 0,
+                count: 2,
+                targets: vec![target(g), target(g)],
+                method: JtMethod::Agent,
+                resolved: true,
+            })
+        }),
+    }
+}
+
+/// Draws a `CreateFunction` edit with a body of one unit.
+fn create(g: &mut Gen, tx: &Tx<'_>, pools: &Pools) -> Edit {
+    let entry = pick(g, &[0x1140, 0x1144, 0x1170, 0x1080]);
+    let mut func = Function::new(ram(entry), StartReason::Agent, 100, tx.origin().source);
+    let mut body = RangeSet::new();
+    body.insert(Range {
+        first: entry,
+        last: entry + 3,
+    });
+    func.body = body;
+    if g.bool() {
+        func.sig = Some(tx.fact(pools.fn_type));
+    }
+    Edit::CreateFunction(Box::new(FuncRecord {
+        func,
+        vars: Vec::new(),
+        plate: None,
+    }))
 }
 
 fn ref_key(g: &mut Gen) -> RefKey {

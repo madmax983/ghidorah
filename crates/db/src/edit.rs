@@ -48,6 +48,7 @@ use ghidorah_json::Value;
 use ghidorah_types::TypeId;
 
 pub(crate) use apply::{Ctx, Mode, apply};
+pub(crate) use rules::{is_id, normalize, starts_unit};
 
 use crate::comments::CommentKind;
 use crate::fact::{Fact, Invalid, Origin};

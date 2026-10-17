@@ -14,7 +14,7 @@ use crate::program::Program;
 use crate::refs::{Ref, RefKey, RefType};
 use crate::source::Source;
 use crate::symbols::{SymKey, SymKind};
-use crate::test_support::{func_type, origin, ram, seeded, session};
+use crate::tests::{func_type, origin, ram, seeded, session};
 use crate::tx::Tx;
 use crate::why::FactKey;
 
@@ -70,6 +70,26 @@ fn kinds_names_and_bands_match_the_design() {
 
 #[test]
 fn keys_name_the_slots() {
+    for (edit, want) in key_cases() {
+        let mut want = want;
+        want.sort();
+        assert_eq!(edit.keys(), want, "{}", edit.kind());
+    }
+}
+
+/// Gives a record at `0x1080` with a signature, one variable and a plate comment.
+fn key_record(o: &Origin, var: &VarId) -> FuncRecord {
+    let mut func = Function::new(ram(0x1080), StartReason::Agent, 100, Source::Agent);
+    func.sig = Some(o.fact(TypeId::from_index(1)));
+    FuncRecord {
+        func,
+        vars: vec![(var.clone(), crate::VarFact::default())],
+        plate: Some(o.fact("p".to_string())),
+    }
+}
+
+/// Gives one edit of each kind with the keys that it names.
+fn key_cases() -> Vec<(Edit, Vec<FactKey>)> {
     let o = origin(Source::Agent, 1, "mcp-1");
     let f = FuncId(ram(0x1080));
     let key = RefKey {
@@ -82,14 +102,8 @@ fn keys_name_the_slots() {
         func: f,
         storage: Storage::Param(1),
     };
-    let mut func = Function::new(ram(0x1080), StartReason::Agent, 100, Source::Agent);
-    func.sig = Some(o.fact(TypeId::from_index(1)));
-    let record = FuncRecord {
-        func,
-        vars: vec![(var.clone(), crate::VarFact::default())],
-        plate: Some(o.fact("p".to_string())),
-    };
-    let cases = vec![
+    let record = key_record(&o, &var);
+    vec![
         (
             name_edit(ram(0x10), Some(SymKey(2)), None),
             vec![FactKey::Symbol(ram(0x10), SymKey(2))],
@@ -170,12 +184,7 @@ fn keys_name_the_slots() {
             vec![FactKey::Note(NoteId(3))],
         ),
         (Edit::ReplaceAnalysis(Box::default()), vec![]),
-    ];
-    for (edit, want) in cases {
-        let mut want = want;
-        want.sort();
-        assert_eq!(edit.keys(), want, "{}", edit.kind());
-    }
+    ]
 }
 
 #[test]
@@ -387,24 +396,27 @@ fn targets_need_code_or_an_import() {
             flow: Some(flow),
         };
         match tx.apply(e) {
-            Ok(a) => {
+            Ok(applied) => {
                 assert!(ok);
-                let Some(a) = a else { continue };
-                let Edit::SetFlowOverride { flow: Some(f), .. } = &a.edit else {
+                let Some(applied) = applied else { continue };
+                let Edit::SetFlowOverride {
+                    flow: Some(fact), ..
+                } = &applied.edit
+                else {
                     panic!("the edit keeps its kind");
                 };
-                let FlowOverride::IndirectTargets(t) = &f.value else {
+                let FlowOverride::IndirectTargets(list) = &fact.value else {
                     panic!("the override keeps its kind");
                 };
                 assert!(
-                    t.windows(2).all(|w| w[0] < w[1]),
-                    "targets are sorted: {t:?}"
+                    list.windows(2).all(|w| w[0] < w[1]),
+                    "targets are sorted: {list:?}"
                 );
             }
-            Err(e) => {
+            Err(err) => {
                 assert!(!ok);
-                assert_eq!(e, EditError::BadTarget(target));
-                assert_eq!(e.code(), ErrorCode::InvalidArgument);
+                assert_eq!(err, EditError::BadTarget(target));
+                assert_eq!(err.code(), ErrorCode::InvalidArgument);
             }
         }
     }
@@ -483,9 +495,9 @@ fn signature_on_a_discovered_function_makes_a_holder_record() {
         id: f,
         sig: Some(tx.fact(fn_type)),
     };
-    let a = tx.apply(e).unwrap().unwrap().clone();
+    let sig = tx.apply(e).unwrap().unwrap().clone();
     assert_eq!(
-        a.inverse,
+        sig.inverse,
         Edit::DeleteFunction {
             id: f,
             cascade: false
@@ -495,7 +507,7 @@ fn signature_on_a_discovered_function_makes_a_holder_record() {
     assert_eq!(holder.source, Source::Agent);
     assert_eq!(holder.start_reason, StartReason::Call);
     let view = tx.program().func(f).unwrap();
-    assert_eq!(view.sig.map(|s| s.value), Some(fn_type));
+    assert_eq!(view.sig.map(|fact| fact.value), Some(fn_type));
     assert_eq!(
         view.func.body,
         tx.program().analysis().funcs().get(f).unwrap().body
@@ -504,16 +516,16 @@ fn signature_on_a_discovered_function_makes_a_holder_record() {
         id: FuncId(ram(0x1100)),
         noreturn: Some(tx.fact(true)),
     };
-    let n = tx.apply(e).unwrap().unwrap().clone();
+    let flag = tx.apply(e).unwrap().unwrap().clone();
     assert_eq!(
-        n.inverse,
+        flag.inverse,
         Edit::DeleteFunction {
             id: FuncId(ram(0x1100)),
             cascade: false
         }
     );
-    tx.restore(n.inverse).unwrap();
-    tx.restore(a.inverse).unwrap();
+    tx.restore(flag.inverse).unwrap();
+    tx.restore(sig.inverse).unwrap();
     assert_eq!(tx.program().state_hash().unwrap(), before);
 }
 
@@ -543,7 +555,7 @@ fn create_with_listed_slots_needs_empty_slots() {
     let rec = FuncRecord {
         func: func.clone(),
         vars: vec![(
-            other.clone(),
+            other,
             crate::VarFact {
                 name: Some(tx.fact("new".to_string())),
                 ty: None,

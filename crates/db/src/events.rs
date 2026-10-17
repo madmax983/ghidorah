@@ -75,13 +75,26 @@ impl Events {
     /// tables again.
     #[must_use]
     pub fn since(&self, rev: Rev) -> Option<Vec<&Event>> {
-        let _ = rev;
-        None
+        if rev < self.lost {
+            return None;
+        }
+        Some(self.ring.iter().filter(|e| e.rev > rev).collect())
     }
 
     /// Appends the events of one commit. The oldest revisions leave the ring as a whole.
+    ///
+    /// A commit has at most one event per table, so the ring stays at [`EVENT_RING`] entries.
     pub(crate) fn push(&mut self, events: Vec<Event>) {
-        let _ = events;
+        while self.ring.len().saturating_add(events.len()) > EVENT_RING {
+            let Some(rev) = self.ring.front().map(|e| e.rev) else {
+                break;
+            };
+            while self.ring.front().is_some_and(|e| e.rev == rev) {
+                self.ring.pop_front();
+            }
+            self.lost = self.lost.max(rev);
+        }
+        self.ring.extend(events);
     }
 }
 

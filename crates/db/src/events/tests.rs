@@ -8,7 +8,7 @@ use crate::epochs::Table;
 use crate::refs::{Ref, RefKey, RefType};
 use crate::source::Source;
 use crate::symbols::{SymKey, SymKind};
-use crate::test_support::{ram, seeded, session};
+use crate::tests::{ram, seeded, session};
 use crate::why::FactKey;
 
 #[test]

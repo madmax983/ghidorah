@@ -31,10 +31,11 @@ mod tests;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
-use ghidorah_base::{Address, FuncId, Rev};
+use ghidorah_base::{Address, FuncId, Range, Rev, TxId};
 use ghidorah_kernel::RangeSet;
 
 use crate::edit::Edit;
+use crate::events::Event;
 use crate::program::Program;
 use crate::why::FactKey;
 
@@ -151,13 +152,30 @@ impl Epochs {
     /// Gives the highest revision of the address facts in `ranges`, or 0.
     #[must_use]
     pub fn in_ranges(&self, ranges: &RangeSet) -> Rev {
-        let _ = ranges;
-        Rev(0)
+        ranges
+            .ranges()
+            .iter()
+            .filter_map(|r| {
+                self.addrs
+                    .range(Address::ram(r.first)..=Address::ram(r.last))
+                    .map(|(_, rev)| *rev)
+                    .max()
+            })
+            .max()
+            .unwrap_or_default()
     }
 
     /// Records the changes of one commit at `rev`.
     pub(crate) fn record(&mut self, rev: Rev, touch: &Touch) {
-        let _ = (rev, touch);
+        for table in touch.tables.keys() {
+            self.tables.insert(*table, rev);
+        }
+        for func in &touch.funcs {
+            self.funcs.insert(*func, rev);
+        }
+        for addr in &touch.addrs {
+            self.addrs.insert(*addr, rev);
+        }
     }
 }
 
@@ -172,10 +190,90 @@ pub(crate) struct Touch {
     pub addrs: BTreeSet<Address>,
 }
 
+/// Gives the table of a fact key.
+const fn key_table(key: &FactKey) -> Table {
+    match key {
+        FactKey::CodeUnit(_)
+        | FactKey::Data(_)
+        | FactKey::JumpTable(_)
+        | FactKey::FlowOverride(_) => Table::Listing,
+        FactKey::Symbol(..) => Table::Symbols,
+        FactKey::Func(_) | FactKey::Signature(_) | FactKey::Noreturn(_) => Table::Functions,
+        FactKey::Ref(_) => Table::Refs,
+        FactKey::Comment(..) => Table::Comments,
+        FactKey::Str(_) => Table::Strings,
+        FactKey::Var(_) => Table::Vars,
+        FactKey::Note(_) => Table::Notes,
+        FactKey::Import(_)
+        | FactKey::Export(_)
+        | FactKey::Entry(_)
+        | FactKey::Reloc(_)
+        | FactKey::Fde(_) => Table::Memory,
+    }
+}
+
+/// Gives the address of the fact of a key, when it has one.
+const fn key_addr(key: &FactKey) -> Option<Address> {
+    match key {
+        FactKey::CodeUnit(o) | FactKey::Data(o) => Some(Address::ram(*o)),
+        FactKey::Symbol(a, _) | FactKey::Comment(a, _) | FactKey::FlowOverride(a) => Some(*a),
+        FactKey::Func(f) | FactKey::Signature(f) | FactKey::Noreturn(f) => Some(f.0),
+        FactKey::Ref(r) => Some(r.from),
+        FactKey::JumpTable(j) => Some(j.0),
+        FactKey::Str(s) => Some(s.0),
+        _ => None,
+    }
+}
+
+/// Gives the function whose record facts a key changes. A name at an entry, a variable and
+/// the target of a reference name a function too.
+const fn key_func(key: &FactKey) -> Option<FuncId> {
+    match key {
+        FactKey::Func(f) | FactKey::Signature(f) | FactKey::Noreturn(f) => Some(*f),
+        FactKey::Symbol(a, _) => Some(FuncId(*a)),
+        FactKey::Var(v) => Some(v.func),
+        FactKey::Ref(r) => Some(FuncId(r.to)),
+        _ => None,
+    }
+}
+
 impl Touch {
-    /// Adds the changes of `edit`.
+    /// Adds the changes of `edit`. A commit adds each edit and its inverse.
     pub(crate) fn add(&mut self, edit: &Edit) {
-        let _ = edit;
+        if let Edit::ReplaceAnalysis(_) = edit {
+            self.tables.entry(Table::Analysis).or_default();
+        }
+        if let Edit::CreateFunction(r) = edit {
+            let (ranges, _) = self.tables.entry(Table::Functions).or_default();
+            *ranges = ranges.union(&r.func.body);
+        }
+        for key in edit.keys() {
+            let (ranges, ids) = self.tables.entry(key_table(&key)).or_default();
+            if let Some(a) = key_addr(&key) {
+                if a.is_ram() {
+                    ranges.insert(Range::single(a.off));
+                }
+                self.addrs.insert(a);
+            }
+            if let Some(f) = key_func(&key) {
+                self.funcs.insert(f);
+            }
+            ids.insert(key);
+        }
+    }
+
+    /// Gives the events of the commit at `rev`: one per table, in table order.
+    pub(crate) fn events(&self, rev: Rev, tx: TxId) -> Vec<Event> {
+        self.tables
+            .iter()
+            .map(|(kind, (ranges, ids))| Event {
+                rev,
+                tx,
+                kind: *kind,
+                ranges: ranges.clone(),
+                ids: ids.iter().cloned().collect(),
+            })
+            .collect()
     }
 }
 
@@ -191,8 +289,12 @@ impl Program {
     /// A table that merges the analysis layer has at least the epoch of the analysis table.
     #[must_use]
     pub fn epoch(&self, table: Table) -> Rev {
-        let _ = table;
-        Rev(0)
+        let e = self.epochs();
+        if table.merges_analysis() {
+            e.table(table).max(e.table(Table::Analysis))
+        } else {
+            e.table(table)
+        }
     }
 
     /// Gives the epoch of a function: the highest epoch of the facts that its views read.
@@ -201,7 +303,22 @@ impl Program {
     /// facts and of the analysis table.
     #[must_use]
     pub fn func_epoch(&self, func: FuncId) -> Rev {
-        let _ = func;
-        Rev(0)
+        let e = self.epochs();
+        let mut best = e.table(Table::Analysis).max(e.func(func));
+        let Some(view) = self.func(func) else {
+            return best;
+        };
+        best = best.max(e.in_ranges(&view.func.body));
+        for range in view.func.body.ranges() {
+            let units = self.analysis().listing().units_in(*range);
+            for (off, _) in units.chain(self.base().listing().units_in(*range)) {
+                for r in self.refs_from(Address::ram(off)) {
+                    if r.value.key.kind.is_call() {
+                        best = best.max(e.func(FuncId(r.value.key.to)));
+                    }
+                }
+            }
+        }
+        best
     }
 }
