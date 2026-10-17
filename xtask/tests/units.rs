@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use xtask::ac::{self, Evidence, Op, Tier};
 use xtask::acrun::{self, Status};
 use xtask::ci::{self, Step};
-use xtask::cov;
+use xtask::cov::{self, Counts, Coverage};
 use xtask::json::{self, MAX_DEPTH, Value};
 use xtask::rustsrc;
 
@@ -372,4 +372,40 @@ fn regress_xtask_evidence_runs_the_xtask_command() {
     let outcomes = acrun::run_rows(&xtask::workspace::root(), &[row], true).expect("the item runs");
     let statuses: Vec<Status> = outcomes.iter().map(|o| o.status).collect();
     assert_eq!(statuses, [Status::Pass]);
+}
+
+#[test]
+fn regress_coverage_takes_the_best_copy_of_each_line() {
+    // Two test binaries link the same kernel file. Only the second one runs line 3.
+    let first = "SF:/w/crates/kernel/src/reader.rs\nDA:1,4\nDA:2,4\nDA:3,0\nend_of_record\n";
+    let second = "SF:/w/crates/kernel/src/reader.rs\nDA:1,0\nDA:3,7\nend_of_record\n\
+                  SF:/w/crates/json/src/lib.rs\nDA:9,1\nDA:9,0\nend_of_record\n";
+    let mut hits = cov::parse_lcov(first);
+    cov::combine(&mut hits, cov::parse_lcov(second));
+    let kernel = hits
+        .get("/w/crates/kernel/src/reader.rs")
+        .expect("kernel file");
+    assert_eq!(kernel.get(&1), Some(&4));
+    assert_eq!(kernel.get(&3), Some(&7));
+    assert_eq!(
+        hits.get("/w/crates/json/src/lib.rs")
+            .and_then(|l| l.get(&9)),
+        Some(&1)
+    );
+    let mut coverage = Coverage::default();
+    coverage.crates.insert(
+        "kernel".to_owned(),
+        Counts {
+            lines: 3,
+            covered: 2,
+            regions: 5,
+            regions_covered: 4,
+        },
+    );
+    cov::apply_lines(Path::new("/w"), &mut coverage, &hits);
+    let kernel = coverage.crates.get("kernel").copied().expect("kernel");
+    assert_eq!((kernel.lines, kernel.covered), (3, 3));
+    assert_eq!((kernel.regions, kernel.regions_covered), (5, 4));
+    let json = coverage.crates.get("json").copied().expect("json");
+    assert_eq!((json.lines, json.covered), (1, 1));
 }

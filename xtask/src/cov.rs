@@ -5,6 +5,10 @@
 //!
 //! Method: build and run the tier-1 tests with `-C instrument-coverage` in `target/cov`,
 //! merge the profiles with `llvm-profdata`, then read `llvm-cov export --summary-only`.
+//!
+//! Line counts come from one lcov export per test object. A line counts as run when one object
+//! gives it a count above 0. One export over all objects keeps only the first copy of a shared
+//! function. That copy can show run code as not run.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -135,6 +139,74 @@ pub fn summarize(root: &Path, export: &Value) -> Result<Coverage, Error> {
             .add(counts);
     }
     Ok(coverage)
+}
+
+/// Line hit counts by source file and line number.
+pub type LineHits = BTreeMap<String, BTreeMap<u64, u64>>;
+
+/// Reads the `SF:` and `DA:` records of one `llvm-cov export --format=lcov` output.
+///
+/// When a line occurs twice in one file record, the larger count stays.
+#[must_use]
+pub fn parse_lcov(text: &str) -> LineHits {
+    let mut hits = LineHits::new();
+    let mut file: Option<&str> = None;
+    for line in text.lines() {
+        if let Some(name) = line.strip_prefix("SF:") {
+            file = Some(name);
+        } else if line == "end_of_record" {
+            file = None;
+        } else if let (Some(name), Some(rest)) = (file, line.strip_prefix("DA:")) {
+            let mut parts = rest.split(',');
+            let number = parts.next().and_then(|n| n.parse::<u64>().ok());
+            let count = parts.next().and_then(|c| c.parse::<u64>().ok());
+            if let (Some(number), Some(count)) = (number, count) {
+                let slot = hits
+                    .entry(name.to_owned())
+                    .or_default()
+                    .entry(number)
+                    .or_insert(0);
+                *slot = (*slot).max(count);
+            }
+        }
+    }
+    hits
+}
+
+/// Adds the lines of `other` to `into`. Each line keeps the larger count.
+pub fn combine(into: &mut LineHits, other: LineHits) {
+    for (file, lines) in other {
+        let target = into.entry(file).or_default();
+        for (number, count) in lines {
+            let slot = target.entry(number).or_insert(0);
+            *slot = (*slot).max(count);
+        }
+    }
+}
+
+/// Replaces the line counts of each crate with the counts from `hits`.
+///
+/// The region counts stay as they are.
+pub fn apply_lines(root: &Path, coverage: &mut Coverage, hits: &LineHits) {
+    for counts in coverage.crates.values_mut() {
+        counts.lines = 0;
+        counts.covered = 0;
+    }
+    for (name, lines) in hits {
+        let path = Path::new(name);
+        if !path.starts_with(root) {
+            continue;
+        }
+        let rel = workspace::rel(root, path);
+        let Some(dir) = crate_of(&rel) else {
+            continue;
+        };
+        let counts = coverage.crates.entry(dir.to_owned()).or_default();
+        let total = u64::try_from(lines.len()).unwrap_or(u64::MAX);
+        let run = u64::try_from(lines.values().filter(|c| **c > 0).count()).unwrap_or(u64::MAX);
+        counts.lines = counts.lines.saturating_add(total);
+        counts.covered = counts.covered.saturating_add(run);
+    }
 }
 
 fn percent_x100(covered: u64, total: u64) -> u64 {
@@ -306,7 +378,17 @@ pub fn run(root: &Path, args: &[String]) -> Result<Value, Error> {
         let out = proc::run_ok(&mut export)?;
         let value =
             json::parse(&out.stdout).map_err(|e| Error::data("llvm-cov export", e.to_string()))?;
-        summarize(root, &value)?
+        let mut coverage = summarize(root, &value)?;
+        let mut hits = LineHits::new();
+        for object in &objects {
+            let mut lcov = Command::new(&tools.cov);
+            lcov.args(["export", "--format=lcov", "--instr-profile"])
+                .arg(&merged)
+                .arg(object);
+            combine(&mut hits, parse_lcov(&proc::run_ok(&mut lcov)?.stdout));
+        }
+        apply_lines(root, &mut coverage, &hits);
+        coverage
     };
     let mut report = gate(&coverage);
     if let Value::Object(members) = &mut report {
