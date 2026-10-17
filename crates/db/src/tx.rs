@@ -19,6 +19,8 @@
 //!   no effective change is a no-op: it gives `noop: true` and keeps `rev` (AC-127).
 //! - Each commit with edits takes the next transaction ID. A rollback or a no-op takes none.
 //! - Under `debug_assertions`, each commit runs [`Program::check_invariants`].
+//! - [`Tx::parse_sig`] and [`Tx::parse_type`] add types to the store. A rollback and a no-op
+//!   commit put the store back. A commit with edits gives the inputs in [`Commit::types`].
 
 #[cfg(test)]
 mod tests;
@@ -26,6 +28,7 @@ mod tests;
 use std::fmt;
 
 use ghidorah_base::{ErrorCode, Rev, TxId};
+use ghidorah_types::{CParseError, ParsedSig, TypeId};
 
 use crate::edit::{Ctx, Edit, EditError, Mode, apply, normalize};
 use crate::epochs::{Epochs, Touch};
@@ -33,6 +36,7 @@ use crate::events::Events;
 use crate::fact::{Fact, Origin, SessionLabel};
 use crate::program::Program;
 use crate::source::Source;
+use crate::typesglue::TypeInput;
 
 /// The longest transaction label in bytes.
 pub const MAX_TX_LABEL: usize = 128;
@@ -137,6 +141,8 @@ pub struct Commit {
     pub force: bool,
     /// The applied edits in apply order.
     pub edits: Vec<Applied>,
+    /// The C texts that added types to the store, in parse order.
+    pub types: Vec<TypeInput>,
 }
 
 impl Commit {
@@ -265,6 +271,24 @@ impl<'p> Tx<'p> {
         &self.log
     }
 
+    /// Parses the prototype `text` in `sig` mode into the type store of the program.
+    ///
+    /// # Errors
+    ///
+    /// Returns the [`CParseError`] of the text. Then the store does not change.
+    pub fn parse_sig(&mut self, text: &str) -> Result<ParsedSig, CParseError> {
+        self.program.types_mut().parse_sig(text)
+    }
+
+    /// Parses the abstract type `text` in `type` mode into the type store of the program.
+    ///
+    /// # Errors
+    ///
+    /// Returns the [`CParseError`] of the text. Then the store does not change.
+    pub fn parse_type(&mut self, text: &str) -> Result<TypeId, CParseError> {
+        self.program.types_mut().parse_type(text)
+    }
+
     /// Tells if a nested abort poisoned the Tx.
     #[must_use]
     pub const fn is_poisoned(&self) -> bool {
@@ -386,6 +410,7 @@ impl<'p> Tx<'p> {
             session: self.origin.session.clone(),
             force: self.used_force,
             edits,
+            types: Vec::new(),
         })
     }
 

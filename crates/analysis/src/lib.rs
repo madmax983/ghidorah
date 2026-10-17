@@ -17,6 +17,7 @@
 //! | [`fir`] | [`FuncIr`]: the L0 function IR builder | Section 7.12 |
 //! | [`stack`] | [`Frame`]: stack tracking, frames and the escape rule | Section 7.9 |
 //! | [`overrides`] | `Overrides` (160): the seeds of the agent facts | Sections 3.6, 7.1 |
+//! | [`orphans`] | The agent facts that lost their anchor: `W_FACT_ORPHANED` | Section 3.9 |
 //! | [`jumptable`] | `JumpTables` (410): method A | Section 7.8 |
 //! | [`tailcall`] | `TailCallsAndParts` (420): FETCH tail calls and cold parts | Section 7.3 |
 //! | [`main_discovery`] | `MainDiscovery` (430) | Section 7.11 |
@@ -39,6 +40,7 @@ pub mod inputs;
 mod irfacts;
 pub mod jumptable;
 pub mod main_discovery;
+pub mod orphans;
 pub mod overrides;
 pub mod publish;
 pub mod registry;

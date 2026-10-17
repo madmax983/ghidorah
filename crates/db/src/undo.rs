@@ -202,6 +202,7 @@ pub fn run(
         source: commit.source,
         session: commit.session,
         force: req.force && user,
+        types: commit.types,
         edits: commit.edits,
         of,
         undo_of: if req.redo {

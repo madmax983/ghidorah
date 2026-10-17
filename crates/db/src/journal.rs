@@ -38,6 +38,7 @@ use crate::meta::{META_KEY, MetaLine};
 use crate::snapshot::hash_from;
 use crate::source::Source;
 use crate::tx::{Applied, Commit, TxLabel};
+use crate::typesglue::TypeInput;
 
 /// The version member `v` of each line.
 pub const VERSION: u64 = 1;
@@ -90,6 +91,8 @@ pub struct TxLine {
     pub session: SessionLabel,
     /// An edit of the transaction used `force: true`.
     pub force: bool,
+    /// The C texts that added types to the store before the edits, in parse order.
+    pub types: Vec<TypeInput>,
     /// The applied edits with their exact inverses, in apply order.
     pub edits: Vec<Applied>,
     /// For each edit of an undo or a redo commit: the transaction that it reverts or applies
@@ -112,6 +115,7 @@ impl TxLine {
             source: commit.source,
             session: commit.session.clone(),
             force: commit.force,
+            types: commit.types.clone(),
             edits: commit.edits.clone(),
             of: Vec::new(),
             undo_of: Vec::new(),
@@ -461,6 +465,7 @@ fn read_tx(value: &Value) -> Result<TxLine, CodecError> {
         source: o.get("source")?,
         session: o.get("session")?,
         force: o.get("force")?,
+        types: Vec::new(),
         edits,
         of,
         undo_of,

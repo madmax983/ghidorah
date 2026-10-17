@@ -124,7 +124,7 @@ pub use source::{Source, Verdict, write_rule};
 pub use strings::{Encoding, StrInfo, Strings};
 pub use symbols::{SymKey, SymKind, Symbol, Symbols};
 pub use tx::{Applied, Commit, Nested, Tx, TxError, TxLabel};
-pub use typesglue::Types;
+pub use typesglue::{InputError, TypeInput, TypeMode, Types};
 pub use undo::{UndoError, UndoOutcome, UndoRequest};
 pub use vars::{VarFact, Vars};
 pub use why::{FactKey, RuleCode, Why, WhyStore};
