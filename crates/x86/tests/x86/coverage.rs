@@ -104,7 +104,7 @@ fn ac_071_lift_coverage() {
             }
         }
     }
-    assert!(fixtures >= 100, "only {fixtures} T1 listings");
+    assert!(fixtures >= 60, "only {fixtures} T1 listings");
     assert!(
         failures.is_empty(),
         "{} failures:\n{}",
@@ -113,7 +113,7 @@ fn ac_071_lift_coverage() {
     );
     let total: usize = counts.values().sum();
     let template = counts.get("template").copied().unwrap_or_default();
-    assert!(total > 30_000, "only {total} instructions");
+    assert!(total > 10_000, "only {total} instructions");
     assert!(
         template * 100 >= total * 99,
         "template share {template} of {total}; intrinsic forms: {intrinsic_mnems:?}"

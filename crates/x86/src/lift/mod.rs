@@ -26,15 +26,23 @@
 //! - An `Intrinsic` op of an instruction names the instruction by [`IntrinsicId`]: the
 //!   code of its [`Mnem`] ([`intrinsic_mnem`] gives it back).
 
+mod alu;
+mod ctx;
+mod data;
+mod flow;
 mod rows;
+mod single;
+mod sse;
 
 use std::fmt;
 
 use ghidorah_ir::{
-    BuildError, Builder, Effect, FlagOp, IntrinsicId, IntrinsicNames, Loc, LocSet, MemEffect, Opc,
+    Arg, BuildError, Builder, Effect, FlagOp, IntrinsicId, IntrinsicNames, Loc, LocSet, MemEffect,
+    Opc,
 };
 
-use crate::{Insn, Mnem, Reg, RegClass};
+use crate::{Access, Flow, Insn, Mnem, Operand, Reg, RegClass, Seg};
+use ctx::{Cx, Fail, Res, mem_ok, op_width, operands_ok};
 
 /// The version of the lifter. Each function IR and each op ID in a note records it.
 pub const LIFT_VER: u32 = 1;
@@ -202,11 +210,112 @@ impl From<BuildError> for LiftError {
     }
 }
 
+/// Tells if a template supports the operands of an instruction.
+fn fits(row: Row, insn: &Insn) -> bool {
+    match row.template {
+        Template::Lea => {
+            matches!(insn.op(1), Some(Operand::Mem(m)) if mem_ok(&m))
+                && operands_ok(insn, false)
+                && op_width(insn.op(0).unwrap_or(Operand::Opaque)) >= 16
+        }
+        Template::Branch => {
+            let wide = insn.ops().all(|op| match op {
+                Operand::Reg { .. } | Operand::Mem(_) => op_width(op) == 64,
+                _ => true,
+            });
+            let loop_ecx = matches!(row.mnem, Mnem::Loop | Mnem::Loope | Mnem::Loopne)
+                && insn.prefixes().asz();
+            wide && !loop_ecx && operands_ok(insn, false)
+        }
+        Template::Stack => {
+            let short_leave = row.mnem == Mnem::Leave && insn.prefixes().osz();
+            let narrow_flags = matches!(row.mnem, Mnem::Pushf | Mnem::Popf) && insn.n_ops() > 0;
+            !short_leave && !narrow_flags && operands_ok(insn, false)
+        }
+        Template::String => insn.ops().all(|op| match op {
+            Operand::Mem(m) => {
+                m.addr_width == 64
+                    && matches!(m.seg, Some(Seg::Es | Seg::Ds))
+                    && matches!(m.width_bytes, 1 | 2 | 4 | 8)
+            }
+            Operand::Reg { reg, .. } => ctx::reg_ok(reg, false),
+            _ => false,
+        }),
+        Template::SseMove => sse::move_fits(insn),
+        Template::SseZero => sse::zero_fits(insn),
+        Template::Single => match row.mnem {
+            Mnem::Bswap => matches!(insn.op(0).map(op_width), Some(32 | 64)),
+            Mnem::Nop | Mnem::Endbr64 | Mnem::Pause | Mnem::Cld => true,
+            _ => operands_ok(insn, false),
+        },
+        _ => operands_ok(insn, false),
+    }
+}
+
 /// Tells what [`lift`] does with `insn`. The function adds no op.
 #[must_use]
 pub fn kind(insn: &Insn) -> LiftKind {
-    let _ = insn;
-    LiftKind::Unimpl
+    if insn.mnem() == Mnem::Syscall {
+        return LiftKind::Syscall;
+    }
+    match row(insn.mnem()) {
+        Some(r) if fits(*r, insn) => LiftKind::Template(r),
+        _ if matches!(insn.flow(), Flow::Seq | Flow::Trap) => LiftKind::Intrinsic,
+        _ => LiftKind::Unimpl,
+    }
+}
+
+/// Runs the template of a row.
+fn template(cx: &mut Cx<'_>, row: Row) -> Res<()> {
+    match row.template {
+        Template::Alu2 => alu::alu2(cx, row),
+        Template::Alu1 => alu::alu1(cx, row),
+        Template::Mov => data::mov(cx),
+        Template::Movx => data::movx(cx, row),
+        Template::Lea => data::lea(cx),
+        Template::Cmov => data::cmov(cx, row),
+        Template::Setcc => data::setcc(cx, row),
+        Template::Branch => flow::branch(cx, row),
+        Template::Shift => alu::shift(cx, row),
+        Template::MulDiv => alu::muldiv(cx, row),
+        Template::Stack => data::stack(cx, row),
+        Template::String => flow::string(cx, row),
+        Template::SseMove => sse::sse_move(cx, row),
+        Template::SseZero => sse::sse_zero(cx),
+        Template::Single => single::single(cx, row),
+    }
+}
+
+/// The effect of `syscall`: the call number and six arguments in, `rax`, `rcx` and `r11`
+/// out.
+fn syscall_effect() -> Effect {
+    let defs = [Loc::RAX, Loc::RCX, Loc::R11].into_iter().collect();
+    let uses = [
+        Loc::RAX,
+        Loc::RDI,
+        Loc::RSI,
+        Loc::RDX,
+        Loc::R10,
+        Loc::R8,
+        Loc::R9,
+    ]
+    .into_iter()
+    .collect();
+    Effect {
+        name: IntrinsicId(Mnem::Syscall as u16),
+        defs,
+        uses,
+        mem: MemEffect::None,
+    }
+}
+
+/// Adds the `Intrinsic` op of an instruction with the address of its memory operand.
+fn intrinsic(cx: &mut Cx<'_>) -> Res<()> {
+    let addr = match cx.insn.mem() {
+        Some(m) if m.access != Access::Address && mem_ok(&m) => cx.addr(&m, true)?,
+        _ => Arg::Nil,
+    };
+    Ok(cx.b.effect_op(Opc::Intrinsic, effect(cx.insn), addr)?)
 }
 
 /// Adds the ops of `insn` to `b`. The call starts the instruction with [`Builder::begin`].
@@ -217,8 +326,18 @@ pub fn kind(insn: &Insn) -> LiftKind {
 /// example an address that is not above the address of the instruction before it.
 pub fn lift(insn: &Insn, b: &mut Builder) -> Result<(), LiftError> {
     b.begin(insn.addr(), insn.len())?;
-    b.flow(Opc::Unimpl, ghidorah_ir::Arg::Nil, ghidorah_ir::Arg::Nil)?;
-    Ok(())
+    let mut cx = Cx { b, insn };
+    let done = match kind(insn) {
+        LiftKind::Template(r) => template(&mut cx, *r),
+        LiftKind::Syscall => Ok(cx.b.effect_op(Opc::Syscall, syscall_effect(), Arg::Nil)?),
+        LiftKind::Intrinsic => intrinsic(&mut cx),
+        LiftKind::Unimpl => Err(Fail::Operand),
+    };
+    match done {
+        Ok(()) => Ok(()),
+        Err(Fail::Build(e)) => Err(LiftError::Build(e)),
+        Err(Fail::Operand) => Ok(cx.b.flow(Opc::Unimpl, Arg::Nil, Arg::Nil)?),
+    }
 }
 
 /// Gives the effect of the `Intrinsic` op of `insn`: its name, the locations that it
@@ -231,11 +350,46 @@ pub fn lift(insn: &Insn, b: &mut Builder) -> Result<(), LiftError> {
 /// unknown size.
 #[must_use]
 pub fn effect(insn: &Insn) -> Effect {
+    let mut defs: LocSet = insn.regs_written().iter().filter_map(loc).collect();
+    let mut uses: LocSet = insn.regs_read().iter().filter_map(loc).collect();
+    let opaque = insn.is_opaque();
+    if opaque || !insn.flags_written().is_empty() {
+        defs.insert(Loc::Flags);
+    }
+    if opaque || !insn.flags_read().is_empty() {
+        uses.insert(Loc::Flags);
+    }
+    let mut mem = MemEffect::None;
+    for op in insn.ops() {
+        match op {
+            Operand::Mem(m) => {
+                if let Some(s) = m.seg.filter(|s| s.has_base()) {
+                    uses.insert(if s == Seg::Fs {
+                        Loc::FS_BASE
+                    } else {
+                        Loc::GS_BASE
+                    });
+                }
+                let size = u32::from(m.width_bytes);
+                let this = match m.access {
+                    Access::Read => MemEffect::Read { size },
+                    Access::Write => MemEffect::Write { size },
+                    Access::ReadWrite => MemEffect::ReadWrite { size },
+                    Access::Address => MemEffect::None,
+                };
+                if mem == MemEffect::None {
+                    mem = this;
+                }
+            }
+            Operand::Opaque if mem == MemEffect::None => mem = MemEffect::ReadWrite { size: 0 },
+            _ => {}
+        }
+    }
     Effect {
         name: IntrinsicId(insn.mnem() as u16),
-        defs: LocSet::EMPTY,
-        uses: LocSet::EMPTY,
-        mem: MemEffect::None,
+        defs,
+        uses,
+        mem,
     }
 }
 
@@ -251,8 +405,7 @@ pub struct Names;
 
 impl IntrinsicNames for Names {
     fn name(&self, id: IntrinsicId) -> Option<&'static str> {
-        let _ = id;
-        None
+        intrinsic_mnem(id).map(Mnem::name)
     }
 }
 
@@ -262,6 +415,7 @@ impl IntrinsicNames for Names {
 pub fn loc(reg: Reg) -> Option<Loc> {
     match reg.class() {
         RegClass::Gpr => Loc::gpr(reg.number()),
+        RegClass::Xmm | RegClass::Ymm | RegClass::Zmm => Loc::xmm(reg.number()),
         _ => None,
     }
 }
