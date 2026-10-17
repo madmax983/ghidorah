@@ -10,7 +10,8 @@
 //! - `contains(x) == covers(view, x)`.
 //!
 //! `insert` and `remove` find the affected run `[i, j)` with a binary search.
-//! Then they make the new range list with `push` loops.
+//! Then they cut the list at the run with `split_off`, add the new ranges and append the rest.
+//! So an insert at the end of the list copies no range. The code uses no `splice` and no `drain`.
 
 #[cfg(not(verus_only))]
 use ghidorah_spec::{proof, verus_spec, verus_verify};

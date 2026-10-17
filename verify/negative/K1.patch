@@ -1,12 +1,12 @@
 diff --git a/crates/kernel/src/reader/leb.rs b/crates/kernel/src/reader/leb.rs
 --- a/crates/kernel/src/reader/leb.rs
 +++ b/crates/kernel/src/reader/leb.rs
-@@ -107,7 +107,7 @@
+@@ -174,7 +174,7 @@
              proof! {
-                 assert(b == old(self).tail()[i as int]);
+                 assert(b == self.tail()[i as int]);
              }
--            if i == 9 && b > 1 {
-+            if i == 9 && b > 3 {
+-            let tenth_ok = if signed { b == 0 || b == 0x7f } else { b <= 1 };
++            let tenth_ok = if signed { b == 0 || b == 0x7f } else { b <= 3 };
+             if i == 9 && !tenth_ok {
                  return Err(ReadError::BadLeb);
              }
-             value |= u64::from(b & 0x7f) << (7 * i);

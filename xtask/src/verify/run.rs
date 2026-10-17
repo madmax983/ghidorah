@@ -122,20 +122,27 @@ fn prove(
     Ok((Value::object(row), super::parse_tools(&out.stdout, z3_text)))
 }
 
-/// Applies the negative patch of `kernel` to a copy of the kernel. Gives the copy root.
-fn negative_copy(root: &Path, kernel: &Kernel) -> Result<Result<PathBuf, String>, Error> {
-    let patch_path = root.join(kernel.patch());
-    let Ok(text) = std::fs::read_to_string(&patch_path) else {
-        return Ok(Err(format!("{} is missing", kernel.patch())));
+/// The result of a negative copy.
+enum Prepared {
+    /// The root of the patched copy.
+    Patched(PathBuf),
+    /// The reason that the patch does not apply.
+    Refused(String),
+}
+
+/// Applies the negative patch of `kernel` to a copy of the kernel sources.
+fn negative_copy(root: &Path, kernel: &Kernel) -> Result<Prepared, Error> {
+    let Ok(text) = std::fs::read_to_string(root.join(kernel.patch())) else {
+        return Ok(Prepared::Refused(format!("{} is missing", kernel.patch())));
     };
     let parsed = match patch::parse(&text) {
-        Ok(p) => p,
-        Err(e) => return Ok(Err(e.to_string())),
+        Ok(parsed) => parsed,
+        Err(e) => return Ok(Prepared::Refused(e.to_string())),
     };
     let inside =
         parsed.path == kernel.file() || parsed.path.starts_with(&format!("{}/", kernel.dir()));
     if !inside || parsed.path.split('/').any(|part| part == "..") {
-        return Ok(Err(format!(
+        return Ok(Prepared::Refused(format!(
             "the patch changes {}, not a file of {}",
             parsed.path, kernel.name
         )));
@@ -150,12 +157,13 @@ fn negative_copy(root: &Path, kernel: &Kernel) -> Result<Result<PathBuf, String>
     )?;
     let target = copy.join(&parsed.path);
     let source = std::fs::read_to_string(&target).map_err(|e| Error::io(&target, e))?;
-    let changed = match patch::apply(&source, &parsed) {
-        Ok(changed) => changed,
-        Err(e) => return Ok(Err(e.to_string())),
-    };
-    std::fs::write(&target, changed).map_err(|e| Error::io(&target, e))?;
-    Ok(Ok(copy))
+    match patch::apply(&source, &parsed) {
+        Ok(changed) => {
+            std::fs::write(&target, changed).map_err(|e| Error::io(&target, e))?;
+            Ok(Prepared::Patched(copy))
+        }
+        Err(e) => Ok(Prepared::Refused(e.to_string())),
+    }
 }
 
 /// Runs the negative patch of one kernel and gives its record row.
@@ -165,7 +173,7 @@ fn negative(root: &Path, verus: &Path, z3: Option<&Path>, kernel: &Kernel) -> Re
         ("patch", Value::from(kernel.patch())),
     ];
     match negative_copy(root, kernel)? {
-        Err(message) => {
+        Prepared::Refused(message) => {
             row.extend([
                 ("error_kind", Value::Null),
                 ("verified", Value::from(0u64)),
@@ -174,7 +182,7 @@ fn negative(root: &Path, verus: &Path, z3: Option<&Path>, kernel: &Kernel) -> Re
                 ("error", Value::from(message)),
             ]);
         }
-        Ok(copy) => {
+        Prepared::Patched(copy) => {
             let out = verus_run(verus, z3, &copy, kernel.module)?;
             let counts = super::parse_counts(&out.stdout).unwrap_or_default();
             let kind = super::error_kind(&out.stderr);

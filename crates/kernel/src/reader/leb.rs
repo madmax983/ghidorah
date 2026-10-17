@@ -81,42 +81,11 @@ impl Reader<'_> {
                     && final(self).moved(old(self), 0),
             },
     )]
-    #[expect(clippy::indexing_slicing, reason = "bound proved by Verus")]
     #[expect(clippy::arithmetic_side_effects, reason = "bound proved by Verus")]
     pub fn uleb128(&mut self) -> Result<u64, ReadError> {
-        let start = self.pos;
-        let left = self.buf.len() - start;
-        let mut value: u64 = 0;
-        let mut i: usize = 0;
-        #[cfg_attr(verus_only, verus_spec(
-            invariant
-                self.moved(old(self), 0),
-                start as int == old(self).at(),
-                start as int + left as int == self.data().len(),
-                self.data().len() <= usize::MAX,
-                i <= 9,
-                forall|k: int| 0 <= k < i ==> old(self).tail()[k] >= 0x80,
-                value == spec_leb_bits(old(self).tail(), i as nat),
-            decreases 10 - i,
-        ))]
-        loop {
-            if i >= left {
-                return Err(ReadError::Eof);
-            }
-            let b = self.buf[start + i];
-            proof! {
-                assert(b == old(self).tail()[i as int]);
-            }
-            if i == 9 && b > 1 {
-                return Err(ReadError::BadLeb);
-            }
-            value |= u64::from(b & 0x7f) << (7 * i);
-            if b < 0x80 {
-                self.pos = start + i + 1;
-                return Ok(value);
-            }
-            i += 1;
-        }
+        let (value, n, _) = self.leb_scan(false)?;
+        self.pos += n;
+        Ok(value)
     }
 
     /// Reads a signed LEB128 value of at most 64 bits.
@@ -142,26 +111,59 @@ impl Reader<'_> {
                     && final(self).moved(old(self), 0),
             },
     )]
-    #[expect(clippy::indexing_slicing, reason = "bound proved by Verus")]
     #[expect(clippy::arithmetic_side_effects, reason = "bound proved by Verus")]
     #[expect(
         clippy::cast_possible_wrap,
         reason = "the two's complement view of the 64 bits is the value"
     )]
     pub fn sleb128(&mut self) -> Result<i64, ReadError> {
+        let (mut value, n, last) = self.leb_scan(true)?;
+        // A value of fewer than 10 bytes takes the sign from bit 6 of its last byte.
+        if n < 10 && (last & 0x40) != 0 {
+            value |= u64::MAX << (7 * n);
+        }
+        self.pos += n;
+        Ok(value as i64)
+    }
+
+    /// Reads the bytes of a LEB128 value at the position. The position does not move.
+    ///
+    /// Gives the bits without sign extension, the byte count and the last byte.
+    /// The 10th byte must be 0 or 1. With `signed`, it must be `0x00` or `0x7f`.
+    #[verus_spec(r =>
+        requires
+            self.wf(),
+        ensures
+            self.data().len() <= usize::MAX,
+            match r {
+                Ok((v, n, last)) => {
+                    &&& if signed {
+                        sleb_valid(self.tail(), n as int)
+                    } else {
+                        uleb_valid(self.tail(), n as int)
+                    }
+                    &&& v == spec_leb_bits(self.tail(), n as nat)
+                    &&& last == self.tail()[n - 1]
+                },
+                Err(e) => e == ReadError::Eof || e == ReadError::BadLeb,
+            },
+    )]
+    #[expect(clippy::indexing_slicing, reason = "bound proved by Verus")]
+    #[expect(clippy::arithmetic_side_effects, reason = "bound proved by Verus")]
+    fn leb_scan(&self, signed: bool) -> Result<(u64, usize, u8), ReadError> {
         let start = self.pos;
         let left = self.buf.len() - start;
         let mut value: u64 = 0;
         let mut i: usize = 0;
         #[cfg_attr(verus_only, verus_spec(
             invariant
-                self.moved(old(self), 0),
-                start as int == old(self).at(),
+                self.wf(),
+                start as int == self.at(),
                 start as int + left as int == self.data().len(),
                 self.data().len() <= usize::MAX,
                 i <= 9,
-                forall|k: int| 0 <= k < i ==> old(self).tail()[k] >= 0x80,
-                value == spec_leb_bits(old(self).tail(), i as nat),
+                forall|k: int| 0 <= k < i ==> self.tail()[k] >= 0x80,
+                value == spec_leb_bits(self.tail(), i as nat),
             decreases 10 - i,
         ))]
         loop {
@@ -170,19 +172,15 @@ impl Reader<'_> {
             }
             let b = self.buf[start + i];
             proof! {
-                assert(b == old(self).tail()[i as int]);
+                assert(b == self.tail()[i as int]);
             }
-            if i == 9 && b != 0 && b != 0x7f {
+            let tenth_ok = if signed { b == 0 || b == 0x7f } else { b <= 1 };
+            if i == 9 && !tenth_ok {
                 return Err(ReadError::BadLeb);
             }
             value |= u64::from(b & 0x7f) << (7 * i);
             if b < 0x80 {
-                let n = i + 1;
-                if n < 10 && (b & 0x40) != 0 {
-                    value |= u64::MAX << (7 * n);
-                }
-                self.pos = start + n;
-                return Ok(value as i64);
+                return Ok((value, i + 1, b));
             }
             i += 1;
         }
