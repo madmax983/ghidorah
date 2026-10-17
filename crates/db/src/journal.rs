@@ -29,12 +29,13 @@ mod tests;
 use std::fmt;
 
 use ghidorah_base::{Rev, TxId, hex, sha256};
-use ghidorah_json::{Limits, Object, Value};
+use ghidorah_json::{DecodeKind, Limits, Object, Value};
 
-use crate::codec::{CodecError, Json, Obj, edit_from_json, edit_to_json};
+use crate::codec::{CodecError, Json, Obj, Reason, edit_from_json, edit_to_json};
 use crate::edit::EditKind;
 use crate::fact::SessionLabel;
 use crate::meta::{META_KEY, MetaLine};
+use crate::snapshot::hash_from;
 use crate::source::Source;
 use crate::tx::{Applied, Commit, TxLabel};
 
@@ -345,6 +346,19 @@ pub fn encode(line: &Line) -> String {
     format!("{open},\"crc\":\"{sum}\"}}")
 }
 
+/// Gives the line text without its `crc` member when the checksum matches, else `None`.
+fn checked_body(text: &str) -> Option<String> {
+    const KEY: &str = ",\"crc\":\"";
+    let at = text.rfind(KEY)?;
+    let tail = text.get(at..)?;
+    let sum = tail.get(KEY.len()..KEY.len().checked_add(16)?)?;
+    if tail.get(KEY.len().checked_add(16)?..) != Some("\"}") {
+        return None;
+    }
+    let body = format!("{}}}", text.get(..at)?);
+    (crc(&body) == sum).then_some(body)
+}
+
 /// Reads one line text without its line end.
 ///
 /// # Errors
@@ -353,8 +367,25 @@ pub fn encode(line: &Line) -> String {
 /// that is not JSON, [`LineError::Version`] for another version and [`LineError::Shape`] for a
 /// bad member.
 pub fn decode(text: &str) -> Result<Line, LineError> {
-    let _ = text;
-    Err(LineError::Crc)
+    checked_body(text).ok_or(LineError::Crc)?;
+    let value =
+        ghidorah_json::parse(text, &LINE_LIMITS).map_err(|e| LineError::Json(e.to_string()))?;
+    match value.get("v").map(Value::as_u64) {
+        Some(Some(VERSION)) => {}
+        Some(Some(v)) => return Err(LineError::Version(v)),
+        Some(None) => return Err(LineError::Shape(CodecError::text("version").at("v"))),
+        None => {
+            let missing = CodecError::new(Reason::Json(DecodeKind::Missing)).at("v");
+            return Err(LineError::Shape(missing));
+        }
+    }
+    if value.get(META_KEY).is_some() {
+        return Ok(Line::Meta(MetaLine::from_json(&value)?));
+    }
+    if value.get("op").and_then(Value::as_str) == Some(RUN_OP) {
+        return Ok(Line::Run(read_run(&value)?));
+    }
+    Ok(Line::Tx(Box::new(read_tx(&value)?)))
 }
 
 /// Reads a journal file.
@@ -364,8 +395,95 @@ pub fn decode(text: &str) -> Result<Line, LineError> {
 /// Returns [`JournalError::Corrupt`] with the line number of the first line that ends with a
 /// line end and does not decode.
 pub fn parse(bytes: &[u8]) -> Result<Journal, JournalError> {
-    let _ = (bytes, LINE_LIMITS, TX_MEMBERS, RUN_MEMBERS, META_KEY);
-    Ok(Journal::default())
+    let mut out = Journal::default();
+    let mut start = 0usize;
+    let mut number = 0usize;
+    // Each pass moves `start` past one line end, so the loop ends.
+    while let Some(rest) = bytes.get(start..).filter(|r| !r.is_empty()) {
+        let Some(end) = rest.iter().position(|b| *b == b'\n') else {
+            out.torn = true;
+            break;
+        };
+        number = number.saturating_add(1);
+        let corrupt = |reason| JournalError::Corrupt {
+            line: number,
+            reason,
+        };
+        let line = rest.get(..end).unwrap_or_default();
+        let text = std::str::from_utf8(line)
+            .map_err(|_| corrupt(LineError::Json("the line is not UTF-8".to_owned())))?;
+        out.lines.push(decode(text).map_err(corrupt)?);
+        start = start.saturating_add(end).saturating_add(1);
+        out.valid_len = start;
+    }
+    Ok(out)
+}
+
+/// Reads a list of transaction IDs: `null` or an array.
+fn tx_ids(o: Obj<'_>, name: &str) -> Result<Vec<TxId>, CodecError> {
+    o.with(name, |v| {
+        if v.is_null() {
+            return Ok(Vec::new());
+        }
+        let items = v.as_array().ok_or_else(|| CodecError::kind("array", v))?;
+        items
+            .iter()
+            .enumerate()
+            .map(|(i, x)| TxId::dec(x).map_err(|e| e.at_index(i)))
+            .collect()
+    })
+}
+
+/// Reads a commit line.
+fn read_tx(value: &Value) -> Result<TxLine, CodecError> {
+    let o = Obj::new(value, &TX_MEMBERS)?;
+    let label = o.with("label", |v| {
+        v.as_str()
+            .and_then(|t| TxLabel::new(t).ok())
+            .ok_or_else(|| CodecError::text("transaction label"))
+    })?;
+    let mut edits = Vec::new();
+    let mut of = Vec::new();
+    for (applied, item_of) in o.each("edits", read_item)? {
+        edits.push(applied);
+        of.extend(item_of);
+    }
+    let undo_of = tx_ids(o, "undo_of")?;
+    let redo_of = tx_ids(o, "redo_of")?;
+    let original = undo_of.is_empty() && redo_of.is_empty();
+    if (original && !of.is_empty()) || (!original && of.len() != edits.len()) {
+        return Err(CodecError::text("list of the of members").at("edits"));
+    }
+    Ok(TxLine {
+        rev: o.get("rev")?,
+        tx: o.get("tx")?,
+        label,
+        source: o.get("source")?,
+        session: o.get("session")?,
+        force: o.get("force")?,
+        edits,
+        of,
+        undo_of,
+        redo_of,
+    })
+}
+
+/// Reads an analysis run line.
+fn read_run(value: &Value) -> Result<RunLine, CodecError> {
+    let o = Obj::new(value, &RUN_MEMBERS)?;
+    let state = o.with("state", |v| {
+        v.as_str()
+            .and_then(RunState::parse)
+            .ok_or_else(|| CodecError::text("run state"))
+    })?;
+    Ok(RunLine {
+        rev: o.get("rev")?,
+        tx: o.get("tx")?,
+        state,
+        inputs_hash: o.with("inputs_hash", hash_from)?,
+        fuel_used: o.get("fuel_used")?,
+        result_hash: o.with("result_hash", hash_from)?,
+    })
 }
 
 /// Reads an edit item of a commit line. Gives the applied edit and its `of` member.

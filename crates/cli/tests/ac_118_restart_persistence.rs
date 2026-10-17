@@ -41,16 +41,17 @@ fn ac_118_restart_persistence() {
     let mut first = Server::spawn(&args);
     let opened = first.call("binary_load", demo_args());
     assert_eq!(rev_of(&opened), Some(4), "{opened}");
-    let mut expected = 4;
-    if first.tools().iter().any(|t| t == "history_undo") {
+    let expected = if first.tools().iter().any(|t| t == "history_undo") {
         let all = Value::object([("session", Value::from("*"))]);
         let undo = first.call("history_undo", all);
         assert_eq!(rev_of(&undo), Some(5), "{undo}");
         let redo = Value::object([("session", Value::from("*")), ("redo", Value::Bool(true))]);
         let redone = first.call("history_undo", redo);
         assert_eq!(rev_of(&redone), Some(6), "{redone}");
-        expected = 6;
-    }
+        6
+    } else {
+        4
+    };
     first.kill();
     assert!(
         dir.join("project.lock").exists(),
@@ -82,7 +83,7 @@ fn ac_118_restart_persistence() {
         Roots::new(&workspace, &[PathBuf::from(".")]).expect("the root is valid"),
     );
     config.projects = Some(ProjectsConfig {
-        root: projects.clone(),
+        root: projects,
         named: true,
         break_lock: false,
     });

@@ -15,6 +15,8 @@
 //! [`History::rows`] gives the rows of `history_list`: one raw row per edit of each commit,
 //! or one coalesced row per changed fact, plus one row per analysis run.
 
+mod rows;
+
 #[cfg(test)]
 mod tests;
 
@@ -298,6 +300,7 @@ impl History {
     }
 
     /// Gives the entries in transaction order.
+    #[must_use]
     pub fn entries(&self) -> impl DoubleEndedIterator<Item = &Entry> {
         self.entries.values()
     }
@@ -347,8 +350,74 @@ impl History {
     /// each fact and come in the order of their last revision. Run rows stay one per run.
     #[must_use]
     pub fn rows(&self, program: &Program, query: &RowQuery) -> Vec<Row> {
-        let _ = (program, query);
-        Vec::new()
+        let session_ok = |s: &str| {
+            query.session.as_deref().is_none_or(|want| want == s)
+                && query.exclude_session.as_deref() != Some(s)
+        };
+        let kind_ok = |k: ChangeKind| query.kinds.is_empty() || query.kinds.contains(&k);
+        let mut out = Vec::new();
+        for line in &self.lines {
+            match line {
+                Line::Tx(t) if t.rev > query.since_rev && session_ok(t.session.as_str()) => {
+                    let undone_by = self
+                        .entries
+                        .get(&t.tx)
+                        .filter(|e| t.is_original() && e.state == EntryState::Undone)
+                        .map(|e| e.changed_by);
+                    for (seq, a) in t.edits.iter().enumerate() {
+                        let c = rows::change(program, a);
+                        if kind_ok(c.kind) {
+                            out.push(Row {
+                                rev: t.rev,
+                                tx: t.tx,
+                                seq: u32::try_from(seq).unwrap_or(u32::MAX),
+                                label: t.label.as_str().to_owned(),
+                                source: t.source,
+                                session: t.session.as_str().to_owned(),
+                                kind: c.kind,
+                                id: c.id,
+                                addr: c.addr,
+                                fields: c.fields,
+                                undone_by,
+                                key: c.key,
+                            });
+                        }
+                    }
+                }
+                Line::Run(r)
+                    if r.rev > query.since_rev
+                        && session_ok(SessionLabel::ANALYSIS)
+                        && kind_ok(ChangeKind::Analysis) =>
+                {
+                    let c = rows::run_change(r);
+                    out.push(Row {
+                        rev: r.rev,
+                        tx: r.tx,
+                        seq: 0,
+                        label: RUN_LABEL.to_owned(),
+                        source: Source::Analysis,
+                        session: SessionLabel::ANALYSIS.to_owned(),
+                        kind: c.kind,
+                        id: c.id,
+                        addr: c.addr,
+                        fields: c.fields,
+                        undone_by: None,
+                        key: c.key,
+                    });
+                }
+                _ => {}
+            }
+        }
+        if !query.coalesce {
+            return out;
+        }
+        let mut last: BTreeMap<String, Row> = BTreeMap::new();
+        for row in out {
+            last.insert(row.key.clone(), row);
+        }
+        let mut rows: Vec<Row> = last.into_values().collect();
+        rows.sort_by(|a, b| (a.rev, &a.key).cmp(&(b.rev, &b.key)));
+        rows
     }
 }
 

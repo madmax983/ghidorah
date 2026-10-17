@@ -22,14 +22,18 @@ mod tests;
 use std::fmt;
 use std::path::Path;
 
-use ghidorah_base::{Rev, hex, sha256};
+use ghidorah_base::{Rev, TxId, hex, sha256};
 use ghidorah_json::{Limits, Value, write_jcs};
 
-use crate::codec::{CodecError, Json, Obj, tables_to_json};
+use crate::codec::{
+    CodecError, Json, Obj, notes_from_json, notes_to_json, progress_from_json, progress_to_json,
+    tables_from_json, tables_to_json,
+};
 use crate::fs::{Fs, FsError};
 use crate::notes::Notes;
 use crate::program::{AnalysisSet, Program, Tables};
 use crate::progress::Progress;
+use crate::source::Source;
 
 /// The format version of the project files.
 pub const FORMAT_VERSION: u64 = 1;
@@ -39,6 +43,20 @@ pub const SNAPSHOT_FILE: &str = "snapshot.json";
 
 /// The file name of the temporary snapshot.
 pub const SNAPSHOT_TMP: &str = "snapshot.json.tmp";
+
+/// The member names of a snapshot.
+const SNAPSHOT_MEMBERS: [&str; 7] = [
+    "analysis_inputs_hash",
+    "facts",
+    "format_version",
+    "journal_lines",
+    "marks",
+    "progress",
+    "rev",
+];
+
+/// The member names of the facts of a snapshot.
+const FACT_MEMBERS: [&str; 5] = ["analysis", "base", "binary", "notes", "types"];
 
 /// The JSON limits of a snapshot: depth 128 and 1 GiB.
 pub const SNAPSHOT_LIMITS: Limits = Limits {
@@ -124,8 +142,25 @@ impl Snapshot {
     /// Returns [`SnapshotError::Binary`] for another input file and [`SnapshotError::Types`]
     /// when the number of types differs. Then the program does not change.
     pub fn restore(self, program: &mut Program) -> Result<(), SnapshotError> {
-        let _ = program;
-        Err(SnapshotError::Binary)
+        if self.binary != program.meta().sha256 {
+            return Err(SnapshotError::Binary);
+        }
+        let have = u64::try_from(program.types().store().len()).unwrap_or(u64::MAX);
+        if have != self.types {
+            return Err(SnapshotError::Types {
+                have,
+                want: self.types,
+            });
+        }
+        if let Ok(base) = program.layer_mut(Source::Agent) {
+            *base = self.base;
+        }
+        program.swap_analysis(Box::new(self.analysis));
+        *program.notes_mut() = self.notes;
+        *program.progress_mut() = self.progress;
+        program.set_rev(self.rev);
+        program.changes_mut().last_tx = TxId(self.rev.0);
+        Ok(())
     }
 }
 
@@ -140,8 +175,30 @@ pub fn encode(
     journal_lines: u64,
     inputs: Option<[u8; 32]>,
 ) -> Result<String, SnapshotError> {
-    let _ = (program, journal_lines, inputs);
-    Ok(String::new())
+    let progress = progress_to_json(program.progress());
+    let part = |name: &str| {
+        progress
+            .get(name)
+            .cloned()
+            .unwrap_or(Value::Array(Vec::new()))
+    };
+    let facts = Value::object([
+        ("analysis", tables_to_json(program.analysis())),
+        ("base", tables_to_json(program.base())),
+        ("binary", Value::from(hex::encode(&program.meta().sha256))),
+        ("notes", notes_to_json(program.notes())),
+        ("types", Value::from(program.types().store().len())),
+    ]);
+    let all = Value::object([
+        ("analysis_inputs_hash", hash_json(inputs.as_ref())),
+        ("facts", facts),
+        ("format_version", Value::from(FORMAT_VERSION)),
+        ("journal_lines", Value::from(journal_lines)),
+        ("marks", part("marks")),
+        ("progress", part("funcs")),
+        ("rev", program.rev().enc()),
+    ]);
+    write_jcs(&all).map_err(|e| SnapshotError::Jcs(e.to_string()))
 }
 
 /// Reads a snapshot.
@@ -150,8 +207,37 @@ pub fn encode(
 ///
 /// Returns a [`SnapshotError`] for text that is not JSON, a bad shape or another version.
 pub fn decode(bytes: &[u8]) -> Result<Snapshot, SnapshotError> {
-    let _ = (bytes, SNAPSHOT_LIMITS);
-    Err(SnapshotError::Version(0))
+    let text =
+        std::str::from_utf8(bytes).map_err(|_| SnapshotError::Json("not UTF-8".to_owned()))?;
+    let value = ghidorah_json::parse(text, &SNAPSHOT_LIMITS)
+        .map_err(|e| SnapshotError::Json(e.to_string()))?;
+    if let Some(v) = value.get("format_version").and_then(Value::as_u64)
+        && v != FORMAT_VERSION
+    {
+        return Err(SnapshotError::Version(v));
+    }
+    let o = Obj::new(&value, &SNAPSHOT_MEMBERS)?;
+    let format: u64 = o.get("format_version")?;
+    if format != FORMAT_VERSION {
+        return Err(SnapshotError::Version(format));
+    }
+    let f = Obj::new(o.member("facts")?, &FACT_MEMBERS).map_err(|e| e.at("facts"))?;
+    let at = |e: CodecError| e.at("facts");
+    let progress = Value::object([
+        ("funcs", o.member("progress")?.clone()),
+        ("marks", o.member("marks")?.clone()),
+    ]);
+    Ok(Snapshot {
+        rev: o.get("rev")?,
+        journal_lines: o.get("journal_lines")?,
+        analysis_inputs_hash: optional_hash(o, "analysis_inputs_hash")?,
+        binary: f.with("binary", hash_from).map_err(at)?,
+        types: f.get("types").map_err(at)?,
+        base: f.with("base", tables_from_json).map_err(at)?,
+        analysis: f.with("analysis", tables_from_json).map_err(at)?,
+        notes: f.with("notes", notes_from_json).map_err(at)?,
+        progress: progress_from_json(&progress)?,
+    })
 }
 
 /// Writes `text` as the snapshot of the project directory `dir`.
@@ -163,8 +249,15 @@ pub fn decode(bytes: &[u8]) -> Result<Snapshot, SnapshotError> {
 ///
 /// Returns the [`FsError`] of the first failed operation.
 pub fn write(fs: &mut dyn Fs, dir: &Path, text: &str) -> Result<(), FsError> {
-    let _ = (fs, dir, text);
-    Ok(())
+    let tmp = dir.join(SNAPSHOT_TMP);
+    if fs.exists(&tmp) {
+        fs.remove(&tmp)?;
+    }
+    fs.create_new(&tmp)?;
+    fs.write_all(&tmp, text.as_bytes())?;
+    fs.sync_file(&tmp)?;
+    fs.rename(&tmp, &dir.join(SNAPSHOT_FILE))?;
+    fs.sync_dir(dir)
 }
 
 /// Gives the analysis inputs hash of `program` (design Section 3.9).
@@ -221,11 +314,6 @@ fn optional_hash(o: Obj<'_>, name: &str) -> Result<Option<[u8; 32]>, CodecError>
             hash_from(v).map(Some)
         }
     })
-}
-
-/// Reads the member `name` of `o` as a revision.
-fn rev_of(o: Obj<'_>, name: &str) -> Result<Rev, CodecError> {
-    o.get(name)
 }
 
 /// Gives the JSON of an optional hash.

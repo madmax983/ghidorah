@@ -62,7 +62,7 @@ fn replay_applies_lines_after_the_skip() {
     assert!(p.progress().get(func).visited);
     assert_eq!(h.entries().count(), 3);
     // A skip of the first line: the snapshot covers it.
-    let mut covered = start.clone();
+    let mut covered = start;
     apply_tx(&mut covered, &first).unwrap();
     let mut h = History::new();
     let out = replay(&mut covered, &lines, 1, &mut h).unwrap();
@@ -74,16 +74,16 @@ fn replay_applies_lines_after_the_skip() {
 #[test]
 fn replay_refuses_a_wrong_rev() {
     let start = seeded();
-    let mut live = start.clone();
-    let mut line = rename_line(&mut live, 0x1084);
+    let mut first = start.clone();
+    let mut line = rename_line(&mut first, 0x1084);
     line.rev = Rev(5);
     let mut p = start.clone();
     let error = replay(&mut p, &[Line::Tx(Box::new(line))], 0, &mut History::new()).unwrap_err();
     assert_eq!(error.line, 1);
     assert_eq!(p.state_hash(), start.state_hash());
-    let mut live = start.clone();
-    let mut wrong = rename_line(&mut live, 0x1084);
+    let mut second = start.clone();
+    let mut wrong = rename_line(&mut second, 0x1084);
     wrong.edits[0].inverse = wrong.edits[0].edit.clone();
-    let mut p = start.clone();
+    let mut p = start;
     assert!(apply_tx(&mut p, &wrong).is_err(), "the inverse must match");
 }

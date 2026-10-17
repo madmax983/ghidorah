@@ -414,6 +414,9 @@ fn open_by_id(
 }
 
 /// Sets the frame of the call to the loaded binary and gives the payload.
+///
+/// A call with the default session label echoes the label of the binary. For example, a
+/// project with one `mcp-` label in its journal gives `mcp-2`.
 fn finish(
     session: &Session,
     id: BinaryId,
@@ -424,6 +427,9 @@ fn finish(
     let binary = session
         .binary(id)
         .ok_or_else(|| ToolError::new(ErrorCode::UnknownBinary))?;
+    if ctx.frame.session == session.new_label() {
+        ctx.frame.session.clone_from(&binary.label);
+    }
     ctx.frame.binary_id = Some(id.to_string());
     ctx.frame.rev = binary.program.rev().0;
     ctx.frame.analysis = binary.analysis;

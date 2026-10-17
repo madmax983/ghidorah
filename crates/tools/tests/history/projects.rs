@@ -91,6 +91,20 @@ fn second_writer_and_read_only() {
         refused.map(|_| ()).map_err(|e| e.code.name()),
         Err("READ_ONLY_PROJECT")
     );
+    // A read-only load by path opens the project on disk too.
+    let mut path_config = config_in(&dir);
+    path_config.read_only = true;
+    let mut by_path = session_with(path_config);
+    let args = r#"{"path":"fixtures/bin/crackme.gcc-O2","analysis":"none"}"#;
+    let envelope = call(&mut by_path, "binary_load", args);
+    assert_eq!(data(&envelope).get("read_only"), Some(&Value::Bool(true)));
+    assert!(by_path.store(id).and_then(|s| s.project()).is_some());
+    // A read-only load of a binary with no project makes none.
+    let mut fresh_config = config_in(&tmp("locked_fresh"));
+    fresh_config.read_only = true;
+    let mut fresh = session_with(fresh_config);
+    data(&call(&mut fresh, "binary_load", args));
+    assert!(fresh.store(id).and_then(|s| s.project()).is_none());
 }
 
 #[test]

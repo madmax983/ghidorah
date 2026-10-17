@@ -1,0 +1,11 @@
+{
+  "format_version": 1,
+  "binary_id": "467a43b75d95c826",
+  "sha256": "467a43b75d95c826daba8cb216d01d7fd386aa96c5ef5a95c2effffe1780de8f",
+  "file_name": "demo.elf",
+  "load": {
+    "format": "auto"
+  },
+  "analysis_config": {},
+  "ghidorah_version": "0.1.0"
+}

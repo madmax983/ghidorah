@@ -18,9 +18,11 @@
 //! the bound binary. A binary gets its label from the [`LabelRule`] when it opens. A project
 //! that opens gives the rule the number of distinct `mcp-` labels in its journal.
 //!
-//! The [`store`] module keeps the history and the project of each binary. Tool handlers commit
+//! The `store` module keeps the history and the project of each binary. Tool handlers commit
 //! through [`Session::transact`] and [`Session::undo`], so each commit gets its journal line.
+//! The `open` module opens, reloads and closes the projects.
 
+mod open;
 mod store;
 
 use std::cell::RefCell;
@@ -32,8 +34,9 @@ pub use ghidorah_db::Source;
 use ghidorah_db::{Fs, LockInfo, Program, RealFs, SetMembers};
 use ghidorah_json::Value;
 
+pub use open::{Admitted, FULL_BAND};
 pub(crate) use store::session_label;
-pub use store::{Admitted, ProjectsConfig, Store};
+pub use store::{ProjectsConfig, Store};
 
 use crate::api::Host;
 use crate::args::Globals;
@@ -330,9 +333,9 @@ impl Session {
     /// A binary with no store gets a store in memory.
     pub fn open(&mut self, binary: OpenBinary) {
         let id = binary.id;
-        if !self.stores.contains_key(&id) {
-            self.stores.insert(id, Store::in_memory(&binary.program));
-        }
+        self.stores
+            .entry(id)
+            .or_insert_with(|| Store::in_memory(&binary.program));
         self.binaries.insert(id, binary);
         self.touch(id);
     }
@@ -390,13 +393,19 @@ impl Session {
     }
 
     /// Gives the binary that a call binds, or `None` for a call with no binary.
-    fn bind(&self, given: Option<&str>, mode: BinaryArg) -> Result<Option<BinaryId>, ToolError> {
+    fn bind(
+        &mut self,
+        given: Option<&str>,
+        mode: BinaryArg,
+    ) -> Result<Option<BinaryId>, ToolError> {
         if let Some(text) = given {
-            return BinaryId::parse(text)
+            let open = BinaryId::parse(text)
                 .ok()
-                .filter(|id| self.binaries.contains_key(id))
-                .map(Some)
-                .ok_or_else(|| self.unknown_binary());
+                .filter(|id| self.binaries.contains_key(id));
+            return match open {
+                Some(id) => Ok(Some(id)),
+                None => Err(self.unknown_binary_id(text)),
+            };
         }
         match (self.binaries.len(), mode) {
             (1, _) => Ok(self.binaries.keys().next().copied()),

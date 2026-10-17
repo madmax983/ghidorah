@@ -1,6 +1,8 @@
 //! A spawned `ghidorah mcp` for the persistence tests: legacy handshake, tool calls, a clean
 //! close and a SIGKILL.
 
+#![allow(dead_code, reason = "each test binary uses a part of the helpers")]
+
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::ChildStdin;

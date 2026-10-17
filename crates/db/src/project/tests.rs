@@ -186,7 +186,7 @@ fn ac_117_journal_replay() {
         let fs = sim(&[100]);
         let (mut project, mut p, dir) = create(&fs, 100);
         let mut h = History::new();
-        for _ in 0..1 + g.draw(30) {
+        for _ in 0..=g.draw(30) {
             if g.draw(5) == 0 {
                 let req = UndoRequest {
                     scope: Scope::All,
@@ -578,7 +578,7 @@ fn ac_125_project_safety() {
     let owner = crate::lock::current(&mut me_now).unwrap_or_else(|| me(1));
     let mut options = write(1);
     options.me = owner;
-    let made = Project::create(
+    let created = Project::create(
         Box::new(crate::fs::RealFs),
         &tmp,
         meta,
@@ -587,14 +587,14 @@ fn ac_125_project_safety() {
         &options,
     )
     .unwrap();
-    let file = made.dir().join("bin").join(&sha);
+    let file = created.dir().join("bin").join(&sha);
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let mode = std::fs::metadata(&file).unwrap().permissions().mode();
-        assert_eq!(mode & 0o777, 0o444);
+        let bits = std::fs::metadata(&file).unwrap().permissions().mode();
+        assert_eq!(bits & 0o777, 0o444);
     }
-    drop(made);
+    drop(created);
     let _ = std::fs::remove_dir_all(&tmp);
 }
 

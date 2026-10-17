@@ -89,7 +89,6 @@ fn ac_116a_undo_redo_model() {
         let commands = 1 + g.draw(50);
         for _ in 0..commands {
             let (source, name) = match (one_session, g.draw(5)) {
-                (true, _) => (Source::Agent, "mcp-1"),
                 (false, 0) => (Source::User, "cli"),
                 (false, 1) => (Source::Analysis, "analysis"),
                 (false, 2) => (Source::Agent, "mcp-2"),
@@ -326,7 +325,7 @@ fn undo_commit_is_a_forward_commit() {
     let t1 = rename(&mut p, &mut h, "mcp-1", 0x1084, "alpha");
     let rev = p.rev();
     let out = run(&mut p, &h, &request(of("mcp-1"), false)).unwrap();
-    let line = out.line.clone().unwrap();
+    let line = out.line.unwrap();
     assert_eq!(line.rev, Rev(rev.0 + 1));
     assert_eq!(line.tx, TxId(t1.0 + 1));
     assert_eq!(line.undo_of, vec![t1]);

@@ -1,9 +1,10 @@
 //! Fuzz target `journal_replay` (design Section 13.5).
 //!
 //! This binary has one test, so the global panic hook has no race. Each case parses the input
-//! as a journal and replays its lines into a fresh program. A case gives lines, a
-//! `JOURNAL_CORRUPT` error or a replay error, and never a panic. A replay error leaves the
-//! program state of the lines before the bad line.
+//! as a journal. Then the case gives each line a correct checksum, so the mutated lines reach
+//! the line decoder, and replays the lines into a fresh program. A case gives lines, a
+//! `JOURNAL_CORRUPT` error or a replay error, and never a panic. A replay that works keeps
+//! every program invariant.
 
 #![allow(clippy::panic, reason = "a test fails through a panic")]
 #![allow(clippy::expect_used, reason = "test setup uses expect")]
@@ -17,8 +18,31 @@ use ghidorah_db::{Edit, FuncProgress, History, Program, SessionLabel, Source, Sy
 use ghidorah_loader::{LoadOpts, load};
 use ghidorah_testkit::fuzz::{self, Config, Outcome};
 
-/// Stage 0: any input. Stage 1: the journal parses. Stage 2: the lines replay.
+/// Stage 0: any input. Stage 1: the journal with new checksums parses. Stage 2: the lines
+/// replay.
 const STAGES: [&str; 3] = ["input", "parsed", "replayed"];
+
+/// Gives the input with a correct checksum on each line that has a checksum member.
+fn recrc(input: &[u8]) -> Vec<u8> {
+    const KEY: &[u8] = b",\"crc\":\"";
+    let mut out = Vec::with_capacity(input.len());
+    let mut lines = input.split(|b| *b == b'\n').peekable();
+    while let Some(line) = lines.next() {
+        let at = line.windows(KEY.len()).rposition(|w| w == KEY);
+        match (at, std::str::from_utf8(line)) {
+            (Some(at), Ok(_)) => {
+                let head = String::from_utf8_lossy(&line[..at]).into_owned();
+                let sum = journal::crc(&format!("{head}}}"));
+                out.extend_from_slice(format!("{head},\"crc\":\"{sum}\"}}").as_bytes());
+            }
+            _ => out.extend_from_slice(line),
+        }
+        if lines.peek().is_some() {
+            out.push(b'\n');
+        }
+    }
+    out
+}
 
 fn regress_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/regress/journal_replay")
@@ -67,7 +91,8 @@ fn corpus(start: &Program) -> Vec<Vec<u8>> {
 }
 
 fn target(start: &Program, input: &[u8]) -> Outcome {
-    let Ok(parsed) = journal::parse(input) else {
+    let _ = journal::parse(input);
+    let Ok(parsed) = journal::parse(&recrc(input)) else {
         return Outcome::reached(0);
     };
     let mut p = start.clone();
@@ -90,6 +115,12 @@ fn fuzz_journal_replay() {
     let corpus = corpus(&start);
     let seed = journal::parse(corpus.first().expect("a corpus input")).expect("the seed parses");
     assert_eq!(seed.lines.len(), 4, "the seed journal has four lines");
+    let again = corpus.first().map(|c| recrc(c));
+    assert_eq!(
+        again.as_ref(),
+        corpus.first(),
+        "a new checksum keeps a good line"
+    );
     let run = |input: &[u8]| target(&start, input);
     let replay = fuzz::replay_regress(&regress_dir(), run)
         .unwrap_or_else(|e| panic!("replay of the regression files: {e}"));

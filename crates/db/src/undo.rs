@@ -17,18 +17,21 @@
 //! - An entry that a later applied entry overlaps (one fact key or more) gives `CONFLICT` with
 //!   the later transaction IDs.
 //! - An agent undo of a `user` transaction needs `force: true`.
-//! - An analysis run has no edits. No undo selects it.
+//! - An analysis run marker has no edits. No undo selects it.
+//! - A commit changes one fact layer. A `count` stops at an entry of the other layer. An entry
+//!   of the analysis layer reverts in a commit with the source `analysis`.
 
 #[cfg(test)]
 mod tests;
 
+use std::collections::BTreeMap;
 use std::fmt;
 
 use ghidorah_base::{ErrorCode, Rev, TxId};
 
-use crate::edit::EditError;
+use crate::edit::{EditError, Layer};
 use crate::fact::SessionLabel;
-use crate::history::{History, Scope};
+use crate::history::{Entry, EntryState, History, Scope};
 use crate::journal::TxLine;
 use crate::program::Program;
 use crate::source::Source;
@@ -148,6 +151,180 @@ pub fn run(
     history: &History,
     req: &UndoRequest,
 ) -> Result<UndoOutcome, UndoError> {
-    let _ = (program, history, req);
-    Err(UndoError::NothingToUndo)
+    let (selected, layer) = select(history, req)?;
+    let source = match layer {
+        Layer::Analysis => Source::Analysis,
+        Layer::Base => req.source,
+    };
+    let mut tx = program
+        .begin(UNDO_LABEL, source, req.session.clone())
+        .map_err(UndoError::Tx)?;
+    let mut of = Vec::new();
+    for id in &selected {
+        let edits = history
+            .entry(*id)
+            .and_then(|e| e.edits.as_ref())
+            .ok_or(UndoError::NotInvertible(*id))?;
+        for a in edits.iter().rev() {
+            if tx
+                .restore(a.inverse.clone())
+                .map_err(UndoError::Edit)?
+                .is_some()
+            {
+                of.push(*id);
+            }
+        }
+    }
+    let planned = tx.edits().to_vec();
+    let start_band = planned.iter().filter_map(|a| a.edit.kind().band()).min();
+    if req.dry_run {
+        tx.abort();
+        return Ok(UndoOutcome {
+            line: None,
+            entries: selected,
+            planned,
+            rev: program.rev(),
+            start_band,
+        });
+    }
+    let commit = tx.commit().map_err(UndoError::Tx)?;
+    if commit.noop {
+        return Err(nothing(req.redo));
+    }
+    let user = selected
+        .iter()
+        .filter_map(|id| history.entry(*id))
+        .any(|e| e.source == Source::User);
+    let line = TxLine {
+        rev: commit.rev,
+        tx: commit.tx,
+        label: commit.label,
+        source: commit.source,
+        session: commit.session,
+        force: req.force && user,
+        edits: commit.edits,
+        of,
+        undo_of: if req.redo {
+            Vec::new()
+        } else {
+            selected.clone()
+        },
+        redo_of: if req.redo {
+            selected.clone()
+        } else {
+            Vec::new()
+        },
+    };
+    Ok(UndoOutcome {
+        planned: line.edits.clone(),
+        rev: line.rev,
+        line: Some(line),
+        entries: selected,
+        start_band,
+    })
+}
+
+/// Gives the error of a scope with no entry in reach.
+const fn nothing(redo: bool) -> UndoError {
+    if redo {
+        UndoError::NothingToRedo
+    } else {
+        UndoError::NothingToUndo
+    }
+}
+
+/// The entry states of a request: the history states with the entries of the request so far.
+struct States<'h> {
+    history: &'h History,
+    changed: BTreeMap<TxId, EntryState>,
+}
+
+impl States<'_> {
+    fn of(&self, e: &Entry) -> EntryState {
+        self.changed.get(&e.tx).copied().unwrap_or(e.state)
+    }
+
+    /// Checks the force rule and the overlap of later applied entries.
+    fn check(&self, e: &Entry, req: &UndoRequest) -> Result<(), UndoError> {
+        if e.source == Source::User && req.source == Source::Agent && !req.force {
+            return Err(UndoError::UserTx(e.tx));
+        }
+        let later: Vec<TxId> = self
+            .history
+            .entries()
+            .filter(|l| l.tx > e.tx && self.of(l) == EntryState::Applied)
+            .filter(|l| !l.keys.is_disjoint(&e.keys))
+            .map(|l| l.tx)
+            .collect();
+        if later.is_empty() {
+            Ok(())
+        } else {
+            Err(UndoError::Conflict { tx: e.tx, later })
+        }
+    }
+
+    /// Gives the next entry of a request with no `tx`.
+    fn next(&self, req: &UndoRequest) -> Option<&Entry> {
+        let found = self
+            .history
+            .entries()
+            .filter(|e| req.scope.holds(&e.session) && e.edits.is_some());
+        if req.redo {
+            let e = found
+                .filter(|e| self.of(e) == EntryState::Undone)
+                .max_by_key(|e| e.changed_by)?;
+            let reach = self.history.last_original(&req.scope);
+            (reach < Some(e.changed_by)).then_some(e)
+        } else {
+            found.rev().find(|e| self.of(e) == EntryState::Applied)
+        }
+    }
+}
+
+/// Selects the entries of a request in apply order. Gives them with their fact layer.
+fn select(history: &History, req: &UndoRequest) -> Result<(Vec<TxId>, Layer), UndoError> {
+    let mut states = States {
+        history,
+        changed: BTreeMap::new(),
+    };
+    let want = if req.redo {
+        EntryState::Undone
+    } else {
+        EntryState::Applied
+    };
+    if let Some(tx) = req.tx {
+        let e = history.entry(tx).ok_or(UndoError::UnknownTx(tx))?;
+        if e.state != want {
+            return Err(nothing(req.redo));
+        }
+        if e.edits.is_none() {
+            return Err(UndoError::NotInvertible(tx));
+        }
+        states.check(e, req)?;
+        return Ok((vec![tx], Layer::of(e.source).unwrap_or(Layer::Base)));
+    }
+    let mut out = Vec::new();
+    let mut layer = None;
+    for _ in 0..req.count.clamp(1, MAX_COUNT) {
+        let Some(e) = states.next(req) else {
+            break;
+        };
+        let this = Layer::of(e.source).unwrap_or(Layer::Base);
+        if layer.is_some_and(|l| l != this) {
+            break;
+        }
+        states.check(e, req)?;
+        layer = Some(this);
+        out.push(e.tx);
+        let state = if req.redo {
+            EntryState::Applied
+        } else {
+            EntryState::Undone
+        };
+        states.changed.insert(e.tx, state);
+    }
+    match layer {
+        Some(l) if !out.is_empty() => Ok((out, l)),
+        _ => Err(nothing(req.redo)),
+    }
 }

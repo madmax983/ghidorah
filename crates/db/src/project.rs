@@ -19,23 +19,28 @@
 //! [`Project::append`] writes one line and syncs it. After every [`SNAPSHOT_EVERY`] lines it
 //! also writes a snapshot.
 
+mod disk;
+mod roots;
+
 #[cfg(test)]
 pub(crate) mod tests;
 
 use std::fmt;
 use std::path::{Path, PathBuf};
 
-use ghidorah_base::{BinaryId, ErrorCode, Limits, Rev, hex};
+use ghidorah_base::{BinaryId, ErrorCode, Limits, hex, sha256};
 use ghidorah_json::Value;
 use ghidorah_loader::LoadOpts;
 
 use crate::fs::{Fs, FsError};
 use crate::history::History;
-use crate::journal::{Line, RunLine};
-use crate::lock::LockInfo;
+use crate::journal::{JOURNAL_FILE, Line, RunLine};
+use crate::lock::{self, LockInfo};
 use crate::program::Program;
 use crate::replay::ReplayError;
-use crate::snapshot::FORMAT_VERSION;
+use crate::snapshot::{self, FORMAT_VERSION};
+
+pub use roots::{ProjectSummary, check_root, inside_git_tree, list};
 
 /// The file name of the project file.
 pub const PROJECT_FILE: &str = "project.json";
@@ -156,8 +161,7 @@ impl ProjectMeta {
     /// Returns [`ProjectError::BadMeta`] for a bad shape, another format version or a binary
     /// ID that is not the start of the SHA-256.
     pub fn from_json(value: &Value) -> Result<Self, ProjectError> {
-        let _ = value;
-        Err(ProjectError::BadMeta("the reader is not ready".to_owned()))
+        disk::meta_from_json(value)
     }
 }
 
@@ -195,6 +199,19 @@ pub struct AnalysisStatus {
     pub behind: bool,
     /// The last run has the analysis inputs hash of the program, and the layer is not behind.
     pub current: bool,
+}
+
+/// The state of a project that [`Project::load`] reads.
+#[derive(Debug)]
+pub struct Loaded {
+    /// The program after the snapshot and the replay.
+    pub program: Program,
+    /// The history of all journal lines.
+    pub history: History,
+    /// The load dropped a torn last line.
+    pub tail_discarded: bool,
+    /// The analysis state.
+    pub analysis: AnalysisStatus,
 }
 
 /// An opened project.
@@ -353,8 +370,30 @@ impl Project {
         program: &Program,
         opts: &OpenOptions,
     ) -> Result<Self, ProjectError> {
-        let _ = (fs, root, meta, bytes, program, opts);
-        Err(ProjectError::BadMeta("create is not ready".to_owned()))
+        if sha256(bytes) != meta.sha256 || program.meta().sha256 != meta.sha256 {
+            return Err(ProjectError::BadInput);
+        }
+        let mut fs = fs;
+        let dir = Self::dir_of(root, meta.binary_id);
+        if Self::exists(fs.as_mut(), &dir) {
+            return Err(ProjectError::Fs(FsError::Exists(dir.join(PROJECT_FILE))));
+        }
+        fs.create_dir_all(&dir.join(BIN_DIR))?;
+        // A directory without a project file holds no facts, so its lock can go.
+        lock::acquire(fs.as_mut(), &dir, &opts.me, true).map_err(disk::lock_error)?;
+        let mut project = Self {
+            fs,
+            dir,
+            meta,
+            read_only: false,
+            owner: Some(opts.me.clone()),
+            lines: 0,
+            since_snapshot: 0,
+            last_run: None,
+            engine: opts.engine.clone(),
+        };
+        disk::write_new(&mut project, bytes)?;
+        Ok(project)
     }
 
     /// Opens the project in `dir` (the open flow of design Section 3.10).
@@ -366,8 +405,51 @@ impl Project {
     /// middle of the journal gives [`ProjectError::Corrupt`], and a line that does not replay
     /// gives [`ProjectError::Replay`].
     pub fn open(fs: Box<dyn Fs>, dir: &Path, opts: &OpenOptions) -> Result<Opened, ProjectError> {
-        let _ = (fs, dir, opts);
-        Err(ProjectError::BadMeta("open is not ready".to_owned()))
+        let mut fs = fs;
+        let bytes = fs.read(&dir.join(PROJECT_FILE))?;
+        let text = std::str::from_utf8(&bytes)
+            .map_err(|_| ProjectError::BadMeta("the project file is not UTF-8".to_owned()))?;
+        let value = ghidorah_json::parse(text, &ghidorah_json::Limits::DEFAULT)
+            .map_err(|e| ProjectError::BadMeta(e.to_string()))?;
+        let meta = ProjectMeta::from_json(&value)?;
+        let owner = match opts.access {
+            Access::Write { break_lock } => {
+                lock::acquire(fs.as_mut(), dir, &opts.me, break_lock).map_err(disk::lock_error)?;
+                Some(opts.me.clone())
+            }
+            Access::ReadOnly => None,
+        };
+        let mut project = Self {
+            fs,
+            dir: dir.to_path_buf(),
+            meta,
+            read_only: owner.is_none(),
+            owner,
+            lines: 0,
+            since_snapshot: 0,
+            last_run: None,
+            engine: opts.engine.clone(),
+        };
+        let loaded = project.load(&opts.limits)?;
+        Ok(Opened {
+            project,
+            program: loaded.program,
+            history: loaded.history,
+            tail_discarded: loaded.tail_discarded,
+            analysis: loaded.analysis,
+        })
+    }
+
+    /// Reads the state of the project again: the input copy, the snapshot and the journal. A
+    /// write open keeps its lock. A torn last line of a write open goes out of the journal.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProjectError::BadInput`] for a changed input copy. A bad line in the middle of
+    /// the journal gives [`ProjectError::Corrupt`], and a line that does not replay gives
+    /// [`ProjectError::Replay`].
+    pub fn load(&mut self, limits: &Limits) -> Result<Loaded, ProjectError> {
+        disk::load(self, limits)
     }
 
     /// Gives the project directory.
@@ -413,8 +495,24 @@ impl Project {
     /// Returns [`ProjectError::ReadOnly`] for a read-only project and [`ProjectError::Fs`]
     /// for a failed write or sync.
     pub fn append(&mut self, line: &Line, program: &Program) -> Result<bool, ProjectError> {
-        let _ = (line, program);
-        Err(ProjectError::ReadOnly)
+        if self.read_only {
+            return Err(ProjectError::ReadOnly);
+        }
+        let mut text = crate::journal::encode(line);
+        text.push('\n');
+        let path = self.dir.join(JOURNAL_FILE);
+        self.fs.append(&path, text.as_bytes())?;
+        self.fs.sync_file(&path)?;
+        self.lines = self.lines.saturating_add(1);
+        self.since_snapshot = self.since_snapshot.saturating_add(1);
+        if let Line::Run(run) = line {
+            self.last_run = Some(*run);
+        }
+        if self.since_snapshot >= SNAPSHOT_EVERY {
+            self.snapshot(program)?;
+            return Ok(true);
+        }
+        Ok(false)
     }
 
     /// Writes a snapshot of `program` that covers all journal lines.
@@ -424,8 +522,15 @@ impl Project {
     /// Returns [`ProjectError::ReadOnly`] for a read-only project and [`ProjectError::Fs`]
     /// for a failed operation.
     pub fn snapshot(&mut self, program: &Program) -> Result<(), ProjectError> {
-        let _ = program;
-        Err(ProjectError::ReadOnly)
+        if self.read_only {
+            return Err(ProjectError::ReadOnly);
+        }
+        let inputs = self.last_run.map(|run| run.inputs_hash);
+        let text = snapshot::encode(program, self.lines, inputs)
+            .map_err(|e| ProjectError::Program(e.to_string()))?;
+        snapshot::write(self.fs.as_mut(), &self.dir, &text)?;
+        self.since_snapshot = 0;
+        Ok(())
     }
 
     /// Writes the crash record `crash/<id>.json`. Gives its path relative to the project.
@@ -435,8 +540,25 @@ impl Project {
     /// Returns [`ProjectError::ReadOnly`] for a read-only project and [`ProjectError::Fs`]
     /// for a failed operation.
     pub fn write_crash(&mut self, id: &str, record: &Value) -> Result<String, ProjectError> {
-        let _ = (id, record);
-        Err(ProjectError::ReadOnly)
+        if self.read_only {
+            return Err(ProjectError::ReadOnly);
+        }
+        if id.is_empty() || id.len() > 64 || !id.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return Err(ProjectError::BadMeta("the crash ID is not hex".to_owned()));
+        }
+        let dir = self.dir.join(CRASH_DIR);
+        self.fs.create_dir_all(&dir)?;
+        let name = format!("{id}.json");
+        let mut text = ghidorah_json::write_pretty(record);
+        text.push('\n');
+        disk::put(
+            self.fs.as_mut(),
+            &dir.join(&name),
+            &dir.join(format!("{id}.tmp")),
+            text.as_bytes(),
+        )?;
+        self.fs.sync_dir(&dir)?;
+        Ok(format!("{CRASH_DIR}/{name}"))
     }
 
     /// Removes the lock of this process. A second call does nothing.
@@ -451,43 +573,4 @@ impl Drop for Project {
     fn drop(&mut self) {
         self.release();
     }
-}
-
-/// Tells if `path` or one of its parents holds a `.git` entry: a git working tree.
-pub fn inside_git_tree(fs: &mut dyn Fs, path: &Path) -> bool {
-    path.ancestors().any(|dir| fs.exists(&dir.join(".git")))
-}
-
-/// Checks a projects root (ADR-0022). A default root must be outside every git working tree.
-/// A root that `--project-root` names can be anywhere.
-///
-/// # Errors
-///
-/// Returns [`ProjectError::InsideGitTree`] for a default root inside a git working tree.
-pub fn check_root(fs: &mut dyn Fs, root: &Path, named: bool) -> Result<(), ProjectError> {
-    if !named && inside_git_tree(fs, root) {
-        return Err(ProjectError::InsideGitTree(root.to_path_buf()));
-    }
-    Ok(())
-}
-
-/// One project on disk.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ProjectSummary {
-    /// The binary ID.
-    pub binary_id: BinaryId,
-    /// The file name of the input.
-    pub file_name: String,
-    /// The revision of the last commit line.
-    pub rev: Rev,
-    /// The session of the last commit line, or `None`.
-    pub last_session: Option<String>,
-}
-
-/// Gives the projects under `root`, newest revision first, then binary ID order.
-///
-/// A directory that is not a project, or a project with a bad project file, does not count.
-pub fn list(fs: &mut dyn Fs, root: &Path) -> Vec<ProjectSummary> {
-    let _ = (fs, root);
-    Vec::new()
 }

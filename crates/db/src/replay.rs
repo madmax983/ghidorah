@@ -69,8 +69,56 @@ pub fn replay(
     skip: usize,
     history: &mut History,
 ) -> Result<Replay, ReplayError> {
-    let _ = (program, lines, skip, history, meta::apply);
-    Ok(Replay::default())
+    let mut out = Replay::default();
+    for (i, line) in lines.iter().enumerate() {
+        let covered = i < skip;
+        let fail = |reason: String| ReplayError {
+            line: i.saturating_add(1),
+            reason,
+        };
+        match line {
+            Line::Tx(t) => {
+                if !covered {
+                    apply_tx(program, t).map_err(fail)?;
+                }
+                history.record(t);
+            }
+            Line::Run(r) => {
+                if !covered {
+                    next_ids(program, r.rev, r.tx).map_err(fail)?;
+                    skip_to(program, r.rev, r.tx);
+                    out.behind = true;
+                }
+                out.last_run = Some(*r);
+                history.record_run(r);
+            }
+            Line::Meta(m) => {
+                if !covered {
+                    meta::apply(program, m);
+                }
+                history.record_meta(m);
+            }
+        }
+        if !covered {
+            out.applied = out.applied.saturating_add(1);
+        }
+    }
+    Ok(out)
+}
+
+/// Checks that `rev` and `tx` are the next revision and the next transaction of `program`.
+fn next_ids(program: &Program, rev: Rev, tx: TxId) -> Result<(), String> {
+    let want_rev = program.rev().0.checked_add(1);
+    let want_tx = program.last_tx().0.checked_add(1);
+    if want_rev == Some(rev.0) && want_tx == Some(tx.0) {
+        Ok(())
+    } else {
+        Err(format!(
+            "the line has rev {} and {tx}, and the program needs the next rev after {}",
+            rev.0,
+            program.rev().0
+        ))
+    }
 }
 
 /// Applies one commit line to `program` with its exact edits.
@@ -80,8 +128,27 @@ pub fn replay(
 /// Returns the reason when the line has a wrong `rev` or `tx`, or an edit does not apply to
 /// the exact inverse of the line.
 pub fn apply_tx(program: &mut Program, line: &TxLine) -> Result<(), String> {
-    let _ = (program, line);
-    Err("replay is not ready".to_owned())
+    next_ids(program, line.rev, line.tx)?;
+    let mut tx = program
+        .begin(line.label.as_str(), line.source, line.session.clone())
+        .map_err(|e| e.to_string())?;
+    for a in &line.edits {
+        let same = tx
+            .restore(a.edit.clone())
+            .map_err(|e| e.to_string())?
+            .is_some_and(|applied| applied.inverse == a.inverse);
+        if !same {
+            return Err(format!(
+                "the edit {} does not give the inverse of the line",
+                a.edit.kind()
+            ));
+        }
+    }
+    let commit = tx.commit().map_err(|e| e.to_string())?;
+    if commit.noop {
+        return Err("the line has no edit".to_owned());
+    }
+    Ok(())
 }
 
 /// Moves the revision and the transaction counter of `program` to `rev` and `tx`, for an

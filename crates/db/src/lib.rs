@@ -116,8 +116,8 @@ pub use program::{
 };
 pub use progress::{FuncProgress, Mark, Progress, ProgressCounts};
 pub use project::{
-    Access, AnalysisStatus, LoadSpec, OpenOptions, Opened, Project, ProjectError, ProjectMeta,
-    ProjectSummary,
+    Access, AnalysisStatus, LoadSpec, Loaded, OpenOptions, Opened, Project, ProjectError,
+    ProjectMeta, ProjectSummary,
 };
 pub use refs::{Ref, RefKey, RefType, Refs};
 pub use source::{Source, Verdict, write_rule};

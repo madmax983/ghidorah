@@ -14,18 +14,15 @@
 
 use std::path::PathBuf;
 
-use ghidorah_base::{BinaryId, ErrorCode, Fuel, Rev, TxId, WarningCode};
-use ghidorah_db::project::{Access, LoadSpec, OpenOptions, ProjectMeta};
+use ghidorah_base::{BinaryId, ErrorCode};
 use ghidorah_db::{
-    Commit, Fs, History, Line, MetaLine, Program, Project, ProjectError, ProjectSummary, RunLine,
-    RunState, SessionLabel, Tx, TxLine, UndoError, UndoOutcome, UndoRequest,
+    Commit, History, Line, MetaLine, Program, Project, ProjectError, SessionLabel, Tx, TxLine,
+    UndoError, UndoOutcome, UndoRequest,
 };
 use ghidorah_json::Value;
 
-use super::{OpenBinary, RunReport, Session};
-use crate::dispatch::Crash;
-use crate::envelope::{AnalysisInfo, AnalysisState, Warning};
-use crate::errors::ToolError;
+use super::Session;
+use crate::errors::{Candidate, ToolError};
 
 /// The projects settings of a session.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -42,9 +39,10 @@ pub struct ProjectsConfig {
 /// The history and the project of one open binary.
 #[derive(Debug)]
 pub struct Store {
-    history: History,
-    project: Option<Project>,
-    checkpoint: Option<Box<Program>>,
+    pub(super) history: History,
+    pub(super) project: Option<Project>,
+    pub(super) checkpoint: Option<Box<Program>>,
+    pub(super) checkpoint_lines: usize,
 }
 
 impl Store {
@@ -56,6 +54,7 @@ impl Store {
             history: History::new(),
             project: None,
             checkpoint: Some(Box::new(program.clone())),
+            checkpoint_lines: 0,
         }
     }
 
@@ -66,6 +65,7 @@ impl Store {
             history,
             project: Some(project),
             checkpoint: None,
+            checkpoint_lines: 0,
         }
     }
 
@@ -80,17 +80,14 @@ impl Store {
     pub const fn project(&self) -> Option<&Project> {
         self.project.as_ref()
     }
-}
 
-/// What the session must do after it opens a binary.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Admitted {
-    /// The binary has no analysis yet.
-    Fresh,
-    /// The analysis of the project is current.
-    Current,
-    /// The analysis inputs changed. A re-analysis from this start band is due.
-    Stale(u16),
+    /// Puts a copy of `program` in place of the checkpoint of a store in memory.
+    pub(super) fn checkpoint(&mut self, program: &Program) {
+        if self.checkpoint.is_some() {
+            self.checkpoint = Some(Box::new(program.clone()));
+            self.checkpoint_lines = self.history.lines().len();
+        }
+    }
 }
 
 /// Gives the tool error of a project error.
@@ -122,7 +119,7 @@ pub(crate) fn undo_error(error: &UndoError) -> ToolError {
             out.detail("tx", Value::from(tx.to_string())).candidates(
                 later
                     .iter()
-                    .map(|t| crate::errors::Candidate::text(&t.to_string(), "tx"))
+                    .map(|t| Candidate::text(&t.to_string(), "tx"))
                     .collect(),
             )
         }
@@ -134,20 +131,7 @@ pub(crate) fn undo_error(error: &UndoError) -> ToolError {
     }
 }
 
-/// Gives the analysis state of a run state.
-const fn state_of(state: RunState) -> AnalysisState {
-    match state {
-        RunState::Complete => AnalysisState::Complete,
-        RunState::BudgetStopped => AnalysisState::BudgetStopped,
-    }
-}
-
 impl Session {
-    /// Replaces the file system of the projects, for example with a simulated one in tests.
-    pub fn set_fs(&mut self, fs: Box<dyn Fs>) {
-        self.fs = fs;
-    }
-
     /// Gives the store of the open binary `id`.
     #[must_use]
     pub fn store(&self, id: BinaryId) -> Option<&Store> {
@@ -160,95 +144,6 @@ impl Session {
         self.stores.get(&id).map(Store::history)
     }
 
-    /// Gives the projects root when the session keeps projects there, else `None`.
-    pub(crate) fn projects_root(&mut self) -> Option<PathBuf> {
-        let _ = self.config.projects.as_ref()?;
-        None
-    }
-
-    /// Gives the projects on disk, newest revision first.
-    pub fn projects(&mut self) -> Vec<ProjectSummary> {
-        match self.projects_root() {
-            Some(root) => ghidorah_db::project::list(self.fs.as_mut(), &root),
-            None => Vec::new(),
-        }
-    }
-
-    /// Tells if the projects root holds a project of `id`.
-    pub fn has_project(&mut self, id: BinaryId) -> bool {
-        match self.projects_root() {
-            Some(root) => Project::exists(self.fs.as_mut(), &Project::dir_of(&root, id)),
-            None => false,
-        }
-    }
-
-    /// Gives the open settings of a project of this session.
-    pub(crate) fn open_options(&self, read_only: bool) -> OpenOptions {
-        let break_lock = self.config.projects.as_ref().is_some_and(|p| p.break_lock);
-        OpenOptions {
-            access: if read_only {
-                Access::ReadOnly
-            } else {
-                Access::Write { break_lock }
-            },
-            me: self.me.clone(),
-            limits: self.config.limits,
-            engine: self.inputs_tag(),
-        }
-    }
-
-    /// Gives the analyzer versions of the engine, or `null` with no engine.
-    pub(crate) fn inputs_tag(&self) -> Value {
-        self.engine
-            .as_ref()
-            .map_or(Value::Null, |engine| engine.inputs_tag())
-    }
-
-    /// Opens a new binary of `bytes` with its project: an existing project of the binary or a
-    /// new one. A session with no projects root keeps the binary in memory.
-    ///
-    /// # Errors
-    ///
-    /// Returns `PROJECT_LOCKED`, `JOURNAL_CORRUPT` or another project error.
-    pub(crate) fn admit(
-        &mut self,
-        binary: OpenBinary,
-        bytes: &[u8],
-        load: LoadSpec,
-    ) -> Result<(Admitted, Vec<Warning>), ToolError> {
-        let _ = (bytes, load);
-        let store = Store::in_memory(&binary.program);
-        self.stores.insert(binary.id, store);
-        self.open(binary);
-        Ok((Admitted::Fresh, Vec::new()))
-    }
-
-    /// Opens the project of `id` from the projects root. Gives `None` when no project exists.
-    ///
-    /// # Errors
-    ///
-    /// Returns `PROJECT_LOCKED`, `JOURNAL_CORRUPT` or another project error.
-    pub(crate) fn reopen(
-        &mut self,
-        id: BinaryId,
-    ) -> Result<Option<(Admitted, Vec<Warning>)>, ToolError> {
-        let _ = (id, state_of);
-        Ok(None)
-    }
-
-    /// Opens the project of `id` from the projects root, for `--open`. Gives `false` when no
-    /// project exists. The analysis of a stale project stays `stale`.
-    ///
-    /// # Errors
-    ///
-    /// Returns `PROJECT_LOCKED`, `JOURNAL_CORRUPT` or another project error.
-    pub fn open_project(&mut self, id: BinaryId) -> Result<bool, ToolError> {
-        if self.binaries.contains_key(&id) {
-            return Ok(true);
-        }
-        Ok(self.reopen(id)?.is_some())
-    }
-
     /// Runs `edit` in one transaction on the open binary `id`, commits it and writes its
     /// journal line. A no-op commit writes no line.
     ///
@@ -258,8 +153,8 @@ impl Session {
     /// # Errors
     ///
     /// Returns `READ_ONLY_PROJECT` for a read-only binary, `INVALID_ARGUMENT` for a bad session
-    /// label, the error of `edit`, or `INTERNAL_ERROR` when the journal write fails. Then the
-    /// program has the durable state.
+    /// label, the error of `edit`, or the error of a failed journal write. Then the program has
+    /// the durable state.
     pub fn transact<T>(
         &mut self,
         id: BinaryId,
@@ -292,8 +187,8 @@ impl Session {
     ///
     /// # Errors
     ///
-    /// Returns `NOTHING_TO_UNDO`, `NOTHING_TO_REDO`, `CONFLICT`, `READ_ONLY_PROJECT` or
-    /// `INTERNAL_ERROR` for a failed journal write.
+    /// Returns `NOTHING_TO_UNDO`, `NOTHING_TO_REDO`, `CONFLICT`, `READ_ONLY_PROJECT` or the
+    /// error of a failed journal write.
     pub fn undo(&mut self, id: BinaryId, req: &UndoRequest) -> Result<UndoOutcome, ToolError> {
         let (Some(binary), Some(store)) = (self.binaries.get_mut(&id), self.stores.get(&id)) else {
             return Err(ToolError::new(ErrorCode::UnknownBinary));
@@ -313,87 +208,19 @@ impl Session {
     ///
     /// # Errors
     ///
-    /// Returns `INTERNAL_ERROR` when the journal write fails.
-    pub fn write_meta(&mut self, id: BinaryId, line: MetaLine) -> Result<(), ToolError> {
+    /// Returns the error of a failed journal write.
+    pub fn write_meta(&mut self, id: BinaryId, line: &MetaLine) -> Result<(), ToolError> {
         let (Some(binary), Some(store)) = (self.binaries.get_mut(&id), self.stores.get_mut(&id))
         else {
             return Err(ToolError::new(ErrorCode::UnknownBinary));
         };
-        ghidorah_db::meta::apply(&mut binary.program, &line);
+        ghidorah_db::meta::apply(&mut binary.program, line);
         if let Some(project) = store.project.as_mut().filter(|p| !p.is_read_only()) {
             project
                 .append(&Line::Meta(line.clone()), &binary.program)
                 .map_err(|e| project_error(&e))?;
         }
-        store.history.record_meta(&line);
-        Ok(())
-    }
-
-    /// Starts the re-analysis after an analysis-affecting commit with the start band `band`.
-    /// With no engine, the analysis state becomes `stale`.
-    ///
-    /// # Errors
-    ///
-    /// Returns the error of the engine.
-    pub fn after_edit(
-        &mut self,
-        id: BinaryId,
-        band: Option<u16>,
-        fuel: &mut Fuel,
-    ) -> Result<Option<RunReport>, ToolError> {
-        let Some(band) = band else {
-            return Ok(None);
-        };
-        self.reanalyze(id, band, fuel)
-    }
-
-    /// Runs the re-analysis of the open binary `id` from the start band `band`. With no
-    /// engine, the analysis state becomes `stale`.
-    ///
-    /// # Errors
-    ///
-    /// Returns the error of the engine.
-    pub fn reanalyze(
-        &mut self,
-        id: BinaryId,
-        band: u16,
-        fuel: &mut Fuel,
-    ) -> Result<Option<RunReport>, ToolError> {
-        let (Some(engine), Some(binary)) = (self.engine.as_mut(), self.binaries.get_mut(&id))
-        else {
-            if let Some(binary) = self.binaries.get_mut(&id) {
-                binary.analysis = binary.analysis.map(|a| AnalysisInfo {
-                    state: AnalysisState::Stale,
-                    rev: a.rev,
-                });
-            }
-            return Ok(None);
-        };
-        let before = binary.program.rev();
-        let report = engine.reanalyze(binary, band, fuel)?;
-        self.finish_run(id, before, report)?;
-        Ok(Some(report))
-    }
-
-    /// Records the analysis commits of a run: one marker line per new revision, and a snapshot
-    /// after a complete run. Sets the analysis state of the binary.
-    ///
-    /// # Errors
-    ///
-    /// Returns `INTERNAL_ERROR` when the journal write fails.
-    pub(crate) fn finish_run(
-        &mut self,
-        id: BinaryId,
-        before: Rev,
-        report: RunReport,
-    ) -> Result<(), ToolError> {
-        let _ = (before, Line::Run, RunLine::clone);
-        if let Some(binary) = self.binaries.get_mut(&id) {
-            binary.analysis = Some(AnalysisInfo {
-                state: report.state,
-                rev: binary.program.rev().0,
-            });
-        }
+        store.history.record_meta(line);
         Ok(())
     }
 
@@ -410,45 +237,6 @@ impl Session {
         }
         store.history.record(line);
         Ok(())
-    }
-
-    /// Drops the program of the open binary `id` and loads it again. A project gives the
-    /// snapshot and the journal. A binary in memory gives its checkpoint and its history.
-    ///
-    /// # Errors
-    ///
-    /// Returns the project error of a failed load.
-    pub fn reload(&mut self, id: BinaryId) -> Result<(), ToolError> {
-        let _ = id;
-        Ok(())
-    }
-
-    /// Writes the snapshot of the open binary `id` and releases its lock.
-    pub fn close(&mut self, id: BinaryId) {
-        let (Some(binary), Some(store)) = (self.binaries.get(&id), self.stores.get_mut(&id)) else {
-            return;
-        };
-        if let Some(project) = store.project.as_mut() {
-            if !project.is_read_only() {
-                let _ = project.snapshot(&binary.program);
-            }
-            project.release();
-        }
-    }
-
-    /// Writes the crash record of a handler panic for the bound binary.
-    pub(crate) fn write_crash(&mut self, crash: &Crash) {
-        let _ = (
-            crash,
-            TxId(0),
-            WarningCode::JournalTailDiscarded,
-            Warning::new,
-        );
-    }
-
-    /// Gives the project file of a new project of `binary`.
-    pub(crate) fn project_meta(binary: &OpenBinary, load: LoadSpec) -> ProjectMeta {
-        ProjectMeta::new(&binary.program, &binary.file_name, load)
     }
 }
 

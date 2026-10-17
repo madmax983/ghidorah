@@ -117,7 +117,7 @@ pub fn path(dir: &Path) -> PathBuf {
 /// after the last `)`. Gives `None` for text with another shape.
 #[must_use]
 pub fn stat_start_time(text: &str) -> Option<u64> {
-    let rest = &text[text.rfind(')')?.checked_add(1)?..];
+    let rest = text.get(text.rfind(')')?.checked_add(1)?..)?;
     // Field 3 (the state) is the first field after the name. Field 22 is the start time.
     rest.split_whitespace().nth(19)?.parse().ok()
 }
@@ -158,16 +158,51 @@ pub fn acquire(
     me: &LockInfo,
     break_lock: bool,
 ) -> Result<(), LockError> {
-    let _ = (fs, dir, me, break_lock);
-    Err(LockError::Stale(None))
+    let file = path(dir);
+    match fs.create_new(&file) {
+        Ok(()) => return write_owner(fs, &file, me),
+        Err(FsError::Exists(_)) => {}
+        Err(e) => return Err(e.into()),
+    }
+    let owner = read_owner(fs, &file);
+    match owner {
+        Some(owner) if is_alive(fs, &owner) => Err(LockError::Held(owner)),
+        _ if !break_lock => Err(LockError::Stale(owner)),
+        _ => {
+            fs.remove(&file)?;
+            fs.create_new(&file)?;
+            write_owner(fs, &file, me)
+        }
+    }
 }
 
-/// Removes the lock of `dir` when it names `me`. Another owner keeps its lock.
+/// Writes the owner `me` into the new lock file and syncs it.
+fn write_owner(fs: &mut dyn Fs, file: &Path, me: &LockInfo) -> Result<(), LockError> {
+    let text = ghidorah_json::write(&me.to_json());
+    fs.write_all(file, text.as_bytes())?;
+    fs.sync_file(file)?;
+    Ok(())
+}
+
+/// Reads the owner of a lock file. A file that does not parse gives `None`.
+fn read_owner(fs: &mut dyn Fs, file: &Path) -> Option<LockInfo> {
+    let bytes = fs.read(file).ok()?;
+    let text = std::str::from_utf8(&bytes).ok()?;
+    let value = ghidorah_json::parse(text, &ghidorah_json::Limits::DEFAULT).ok()?;
+    LockInfo::from_json(&value)
+}
+
+/// Removes the lock of `dir` when it names `me`, and syncs the directory. Another owner keeps
+/// its lock.
 ///
 /// # Errors
 ///
 /// Returns the [`FsError`] of a failed remove.
 pub fn release(fs: &mut dyn Fs, dir: &Path, me: &LockInfo) -> Result<(), FsError> {
-    let _ = (fs, dir, me);
+    let file = path(dir);
+    if read_owner(fs, &file).as_ref() == Some(me) {
+        fs.remove(&file)?;
+        fs.sync_dir(dir)?;
+    }
     Ok(())
 }
