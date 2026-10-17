@@ -1,0 +1,6 @@
+{"golden":"generator=mcp_transcript version=1"}
+{"c":{"jsonrpc":"2.0","id":1,"method":"tools/list"}}
+{"c":{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}}}}
+{"c":{"jsonrpc":"2.0","id":3,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2025-03-26","io.modelcontextprotocol/clientCapabilities":{}}}}}
+{"c":{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"echo_text","arguments":{"text":"x"}}}}
+{"c":{"jsonrpc":"2.0","id":5,"method":"ping"}}

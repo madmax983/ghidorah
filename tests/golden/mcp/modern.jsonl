@@ -1,0 +1,5 @@
+{"golden":"generator=mcp_transcript version=1"}
+{"c":{"jsonrpc":"2.0","id":1,"method":"server/discover"}}
+{"c":{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}}
+{"c":{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"item_list","arguments":{"count":2},"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{},"dev.ghidorah/session":"agent-7"}}}}
+{"c":{"jsonrpc":"2.0","id":4,"method":"ping","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}}
