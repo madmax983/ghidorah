@@ -149,12 +149,53 @@ fn gen_large_matches_source() {
 }
 
 #[test]
-#[ignore = "tier2"]
-fn fixtures_build_reproduces_checked_in_files() {
-    let report = fixtures::build::run(&root(), true).expect("the fixture build runs");
+fn fixtures_and_golden_commands() {
+    let root = root();
+    let report = fixtures::run(&root, &["check".to_owned()]).expect("the check runs");
     assert_eq!(
-        report.get("ok").and_then(xtask::json::Value::as_bool),
+        report.get("ok").and_then(Value::as_bool),
         Some(true),
         "{report}"
     );
+    let bad = fixtures::run(&root, &["bogus".to_owned()]);
+    assert!(matches!(bad, Err(xtask::Error::Usage(_))), "{bad:?}");
+    let headers = xtask::golden::run(&root, &["headers".to_owned()]).expect("headers runs");
+    assert_eq!(
+        headers.get("ok").and_then(Value::as_bool),
+        Some(true),
+        "{headers}"
+    );
+    let bad = xtask::golden::run(&root, &[]);
+    assert!(matches!(bad, Err(xtask::Error::Usage(_))), "{bad:?}");
+    let snap = xtask::golden::snapshot(&root).expect("the goldens read");
+    assert!(snap.keys().any(|k| k.starts_with("tests/golden/loader/")));
+}
+
+#[test]
+#[ignore = "tier2"]
+fn fixtures_build_reproduces_checked_in_files() {
+    let root = root();
+    let tools = fixtures::toolchain::detect().expect("gcc, clang and binutils are on PATH");
+    let manifest = manifest::read(&root).expect("the manifest reads");
+    let report = fixtures::build::run(&root, true).expect("the fixture build runs");
+    let count = report.get("fixtures").and_then(Value::as_u64);
+    assert_eq!(
+        count,
+        u64::try_from(spec::fixtures().len()).ok(),
+        "{report}"
+    );
+    if tools.map() == manifest.tools {
+        assert_eq!(
+            report.get("ok").and_then(Value::as_bool),
+            Some(true),
+            "{report}"
+        );
+    } else {
+        // Other tool versions give other bytes. The facts still hold, so the build passes.
+        eprintln!(
+            "tool versions {:?} differ from {:?}; bytes not compared",
+            tools.map(),
+            manifest.tools
+        );
+    }
 }
