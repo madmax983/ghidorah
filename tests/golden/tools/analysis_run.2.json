@@ -1,0 +1,80 @@
+{"golden":"generator=tools_examples version=1 fixture=crackme.gcc-O2 fixture_sha256=467a43b75d95c826daba8cb216d01d7fd386aa96c5ef5a95c2effffe1780de8f"}
+{
+  "ok": true,
+  "binary_id": "467a43b75d95c826",
+  "rev": 1,
+  "session": "cli",
+  "analysis": {
+    "state": "complete",
+    "rev": 1
+  },
+  "partial": false,
+  "data": {
+    "state": "complete",
+    "steps_used": 369,
+    "resume": false,
+    "analyzers": [
+      {
+        "name": "Entry",
+        "priority": 100,
+        "pending": 0,
+        "runs": 1
+      },
+      {
+        "name": "Symbols",
+        "priority": 110,
+        "pending": 0,
+        "runs": 1
+      },
+      {
+        "name": "ImportStubs",
+        "priority": 120,
+        "pending": 0,
+        "runs": 1
+      },
+      {
+        "name": "FdeSeeds",
+        "priority": 150,
+        "pending": 0,
+        "runs": 1
+      },
+      {
+        "name": "Disasm",
+        "priority": 300,
+        "pending": 0,
+        "runs": 15
+      },
+      {
+        "name": "NoReturnKnown",
+        "priority": 301,
+        "pending": 0,
+        "runs": 2
+      },
+      {
+        "name": "NoReturnDiscovered",
+        "priority": 302,
+        "pending": 0,
+        "runs": 2
+      },
+      {
+        "name": "CallTargets",
+        "priority": 400,
+        "pending": 0,
+        "runs": 2
+      },
+      {
+        "name": "EndbrSeeds",
+        "priority": 440,
+        "pending": 0,
+        "runs": 1
+      }
+    ],
+    "changed": {
+      "functions": 11,
+      "refs": 26,
+      "strings": 0,
+      "jumptables": 0
+    }
+  },
+  "noop": false
+}

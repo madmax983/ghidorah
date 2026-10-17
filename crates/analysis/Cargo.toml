@@ -1,0 +1,31 @@
+[package]
+name = "ghidorah-analysis"
+description = "Analysis engine: the fuel-sliced scheduler, the discovery analyzers, why-records, the CFG and the call graph."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# The crate has no unit tests. Its tests are in the test binary `tests/analysis/main.rs`.
+[lib]
+name = "ghidorah_analysis"
+path = "src/lib.rs"
+test = false
+
+[dependencies]
+ghidorah-base = { path = "../base" }
+ghidorah-db = { path = "../db" }
+ghidorah-ir = { path = "../ir" }
+# The analysis set goes into the program through the JSON codec of `ghidorah-db`.
+ghidorah-json = { path = "../json" }
+ghidorah-kernel = { path = "../kernel" }
+ghidorah-loader = { path = "../loader" }
+ghidorah-types = { path = "../types" }
+ghidorah-x86 = { path = "../x86" }
+
+[dev-dependencies]
+ghidorah-testkit = { path = "../testkit" }
+
+[lints]
+workspace = true

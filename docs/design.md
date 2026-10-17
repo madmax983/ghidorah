@@ -266,6 +266,9 @@ graph TD
   analysis --> x86
   analysis --> types
   analysis --> loader
+  analysis --> base
+  analysis --> kernel
+  analysis --> json
   decomp --> analysis
   decomp --> ir
   decomp --> db
@@ -293,6 +296,7 @@ Rules:
 
 - Every production crate can take `ghidorah-testkit` as a dev-dependency. Only the `loader` tests take `ghidorah-oracle` as a dev-dependency (counting allocator, AC-055).
 - `json` and `testkit` are leaves. They have no workspace dependencies.
+- `analysis` names `Address`, `FuncId` and `Fuel` of `base` and the `RangeSet` of `kernel`. It writes its analysis set through the JSON codec of `db`, so it also takes `json` (WP-15).
 - Pure core crates (`kernel`, `base`, `json`, `loader`, `x86`, `ir`, `types`, `analysis`, `decomp`) do not use `std::fs`, `std::net`, `std::process`, `std::env` or `std::time::SystemTime` (AC-017). `db`, `tools` and `cli` get file access and a clock from the edge.
 - No crate calls `std::env::set_var` or `std::env::remove_var` (AC-223). The `cli` crate reads every `GHIDORAH_*` variable once into `RunConfig` (Section 10.11).
 
