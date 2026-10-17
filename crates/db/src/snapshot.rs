@@ -8,7 +8,8 @@
 //! ```
 //!
 //! - `facts` holds the tables of both layers with their counters, the note store, the SHA-256
-//!   of the input and the number of types.
+//!   of the input and the types: their number, and the C texts that added types after the
+//!   prelude.
 //! - `journal_lines` is the number of journal lines that the snapshot covers. Replay applies
 //!   only the lines after them.
 //! - `analysis_inputs_hash` is the inputs hash of the last analysis run, or `null`.
@@ -27,13 +28,14 @@ use ghidorah_json::{Limits, Value, write_jcs};
 
 use crate::codec::{
     CodecError, Json, Obj, notes_from_json, notes_to_json, progress_from_json, progress_to_json,
-    tables_from_json, tables_to_json,
+    tables_from_json, tables_to_json, types_from_json, types_to_json,
 };
 use crate::fs::{Fs, FsError, replace_file};
 use crate::notes::Notes;
 use crate::program::{AnalysisSet, Program, Tables};
 use crate::progress::Progress;
 use crate::source::Source;
+use crate::typesglue::{TypeInput, Types};
 
 /// The format version of the project files.
 pub const FORMAT_VERSION: u64 = 1;
@@ -123,6 +125,8 @@ pub struct Snapshot {
     pub binary: [u8; 32],
     /// The number of types.
     pub types: u64,
+    /// The C texts that added types after the prelude, in parse order.
+    pub type_inputs: Vec<TypeInput>,
     /// The base layer.
     pub base: Tables,
     /// The analysis layer.
@@ -135,23 +139,37 @@ pub struct Snapshot {
 
 impl Snapshot {
     /// Puts the content of the snapshot into `program`: both layers, the notes, the progress
-    /// rows, the marks and the revision.
+    /// rows, the marks and the revision. The type inputs of the snapshot that the program does
+    /// not hold yet parse first.
     ///
     /// # Errors
     ///
     /// Returns [`SnapshotError::Binary`] for another input file and [`SnapshotError::Types`]
-    /// when the number of types differs. Then the program does not change.
+    /// when the inputs do not parse or the number of types differs. Then the program does
+    /// not change.
     pub fn restore(self, program: &mut Program) -> Result<(), SnapshotError> {
         if self.binary != program.meta().sha256 {
             return Err(SnapshotError::Binary);
         }
-        let have = u64::try_from(program.types().store().len()).unwrap_or(u64::MAX);
-        if have != self.types {
-            return Err(SnapshotError::Types {
-                have,
-                want: self.types,
-            });
+        let mut types = program.types().clone();
+        let held = types.inputs().len();
+        let fail = |types: &Types| SnapshotError::Types {
+            have: u64::try_from(types.store().len()).unwrap_or(u64::MAX),
+            want: self.types,
+        };
+        match self.type_inputs.get(..held) {
+            Some(prefix) if prefix == types.inputs() => {}
+            _ => return Err(fail(&types)),
         }
+        let rest = self.type_inputs.get(held..).unwrap_or_default();
+        if types.replay(rest).is_err() {
+            return Err(fail(&types));
+        }
+        let have = u64::try_from(types.store().len()).unwrap_or(u64::MAX);
+        if have != self.types {
+            return Err(fail(&types));
+        }
+        *program.types_mut() = types;
         if let Ok(base) = program.layer_mut(Source::Agent) {
             *base = self.base;
         }
@@ -187,7 +205,7 @@ pub fn encode(
         ("base", tables_to_json(program.base())),
         ("binary", Value::from(hex::encode(&program.meta().sha256))),
         ("notes", notes_to_json(program.notes())),
-        ("types", Value::from(program.types().store().len())),
+        ("types", types_to_json(program.types())),
     ]);
     let all = Value::object([
         ("analysis_inputs_hash", hash_json(inputs.as_ref())),
@@ -223,6 +241,7 @@ pub fn decode(bytes: &[u8]) -> Result<Snapshot, SnapshotError> {
     }
     let f = Obj::new(o.member("facts")?, &FACT_MEMBERS).map_err(|e| e.at("facts"))?;
     let at = |e: CodecError| e.at("facts");
+    let (types, type_inputs) = f.with("types", types_from_json).map_err(at)?;
     let progress = Value::object([
         ("funcs", o.member("progress")?.clone()),
         ("marks", o.member("marks")?.clone()),
@@ -232,7 +251,8 @@ pub fn decode(bytes: &[u8]) -> Result<Snapshot, SnapshotError> {
         journal_lines: o.get("journal_lines")?,
         analysis_inputs_hash: optional_hash(o, "analysis_inputs_hash")?,
         binary: f.with("binary", hash_from).map_err(at)?,
-        types: f.get("types").map_err(at)?,
+        types,
+        type_inputs,
         base: f.with("base", tables_from_json).map_err(at)?,
         analysis: f.with("analysis", tables_from_json).map_err(at)?,
         notes: f.with("notes", notes_from_json).map_err(at)?,

@@ -6,7 +6,7 @@
 //!
 //! | Line | Members after `v` |
 //! |---|---|
-//! | commit | `rev`, `tx`, `label`, `source`, `session`, `force`, `edits`, `undo_of`, `redo_of` |
+//! | commit | `rev`, `tx`, `label`, `source`, `session`, `force`, `types` (only when a C text added types), `edits`, `undo_of`, `redo_of` |
 //! | analysis run | `rev`, `tx`, `op: "AnalysisRun"`, `state`, `inputs_hash`, `fuel_used`, `result_hash` |
 //! | meta | see [`crate::meta`] |
 //!
@@ -59,8 +59,9 @@ const LINE_LIMITS: Limits = Limits {
 };
 
 /// The member names of a commit line.
-const TX_MEMBERS: [&str; 11] = [
-    "v", "rev", "tx", "label", "source", "session", "force", "edits", "undo_of", "redo_of", "crc",
+const TX_MEMBERS: [&str; 12] = [
+    "v", "rev", "tx", "label", "source", "session", "force", "types", "edits", "undo_of",
+    "redo_of", "crc",
 ];
 
 /// The member names of an analysis run line.
@@ -292,6 +293,12 @@ fn body(line: &Line) -> Value {
             out.push("source", t.source.enc());
             out.push("session", t.session.enc());
             out.push("force", t.force.enc());
+            if !t.types.is_empty() {
+                out.push(
+                    "types",
+                    Value::Array(t.types.iter().map(Json::enc).collect()),
+                );
+            }
             let edits = t
                 .edits
                 .iter()
@@ -446,6 +453,11 @@ fn read_tx(value: &Value) -> Result<TxLine, CodecError> {
             .and_then(|t| TxLabel::new(t).ok())
             .ok_or_else(|| CodecError::text("transaction label"))
     })?;
+    let types = if value.get("types").is_some() {
+        o.each("types", TypeInput::dec)?
+    } else {
+        Vec::new()
+    };
     let mut edits = Vec::new();
     let mut of = Vec::new();
     for (applied, item_of) in o.each("edits", read_item)? {
@@ -465,7 +477,7 @@ fn read_tx(value: &Value) -> Result<TxLine, CodecError> {
         source: o.get("source")?,
         session: o.get("session")?,
         force: o.get("force")?,
-        types: Vec::new(),
+        types,
         edits,
         of,
         undo_of,

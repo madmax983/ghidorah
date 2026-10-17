@@ -132,7 +132,10 @@ impl Types {
     ///
     /// Returns the [`CParseError`] of the text. Then the store does not change.
     pub(crate) fn parse_sig(&mut self, text: &str) -> Result<ParsedSig, CParseError> {
-        ghidorah_types::parse_sig(&mut self.store, text)
+        let before = self.store.len();
+        let parsed = ghidorah_types::parse_sig(&mut self.store, text)?;
+        self.record(TypeMode::Sig, text, before);
+        Ok(parsed)
     }
 
     /// Parses the abstract type `text` in `type` mode into the store. A text that adds a type
@@ -142,7 +145,20 @@ impl Types {
     ///
     /// Returns the [`CParseError`] of the text. Then the store does not change.
     pub(crate) fn parse_type(&mut self, text: &str) -> Result<TypeId, CParseError> {
-        ghidorah_types::parse_type(&mut self.store, text)
+        let before = self.store.len();
+        let id = ghidorah_types::parse_type(&mut self.store, text)?;
+        self.record(TypeMode::Type, text, before);
+        Ok(id)
+    }
+
+    /// Records `text` as an input when the store has more than `before` types.
+    fn record(&mut self, mode: TypeMode, text: &str, before: usize) {
+        if self.store.len() > before {
+            self.inputs.push(TypeInput {
+                mode,
+                text: text.to_owned(),
+            });
+        }
     }
 
     /// Parses `input` into the store in its mode.

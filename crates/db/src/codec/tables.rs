@@ -330,6 +330,6 @@ pub(super) fn facts(p: &Program) -> Value {
         ("base", encode(p.base(), false)),
         ("binary", Value::from(sha)),
         ("notes", notes),
-        ("types", Value::from(p.types().store().len())),
+        ("types", super::types_to_json(p.types())),
     ])
 }
