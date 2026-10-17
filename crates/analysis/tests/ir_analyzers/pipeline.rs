@@ -66,7 +66,6 @@ fn ac_077_f1_eh() {
 }
 
 #[test]
-#[ignore = "F1 0.749 < 0.90: no seed reaches the functions that only code pointers in data reach"]
 fn ac_078_f1_noeh() {
     let s = f1("noeh");
     assert!(s.tp > 600, "the noeh functions: {}", s.tp);

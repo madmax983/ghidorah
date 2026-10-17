@@ -16,6 +16,7 @@ use ghidorah_base::{Address, ImportId, Range};
 use ghidorah_db::{FlowKind, Program, RefKey, StartReason, StrInfo};
 use ghidorah_kernel::RangeSet;
 
+use crate::analyzers::dataptr::CodePtrs;
 use crate::analyzers::refs::DataRefs;
 use crate::ctx::{Body, Summary, UnitRec};
 use crate::irfacts::IrFacts;
@@ -124,6 +125,8 @@ pub(crate) struct Work {
     pub strings: BTreeMap<u64, (StrInfo, Why)>,
     /// The facts of the IR-based analyzers.
     pub ir: IrFacts,
+    /// The code pointers in data and the address-taken sites.
+    pub codeptrs: CodePtrs,
 }
 
 /// Gives the import of each import slot of `program`: the ELF slot map, then the slots of
