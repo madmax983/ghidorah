@@ -564,3 +564,19 @@ fn regress_refs_from_merge_keeps_key_order() {
     let keys: Vec<RefKey> = p.refs_from(from).iter().map(|f| f.value.key).collect();
     assert_eq!(keys, [first, second], "refs_from keeps the RefKey order");
 }
+
+#[test]
+fn load_names_escape_bad_utf8_and_drop_long_names() {
+    use ghidorah_base::BinText;
+    assert_eq!(
+        super::load::text(&BinText::new(b"ok".to_vec())),
+        Some("ok".to_string())
+    );
+    assert_eq!(
+        super::load::text(&BinText::new(b"a\xffb".to_vec())),
+        Some("a\\xffb".to_string())
+    );
+    assert_eq!(super::load::text(&BinText::new(Vec::new())), None);
+    let long = vec![b'x'; ghidorah_base::id::MAX_NAME_LEN + 1];
+    assert_eq!(super::load::text(&BinText::new(long)), None);
+}

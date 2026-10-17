@@ -4,4 +4,5 @@
 #![allow(clippy::panic, reason = "a test fails through a panic")]
 
 mod fixtures;
+mod hostile;
 mod provenance;

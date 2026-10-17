@@ -176,6 +176,11 @@ impl Symbols {
         self.by_name.iter().map(|(n, a)| (n.as_str(), a.as_slice()))
     }
 
+    /// Tells if a symbol at `addr` has the name `name`. The name index answers in log time.
+    fn has_name(&self, addr: Address, name: &str) -> bool {
+        self.by_name(name).binary_search(&addr).is_ok()
+    }
+
     /// Adds `addr` to the index entry of `name`.
     fn index_add(&mut self, name: &str, addr: Address) {
         let list = self.by_name.entry(name.to_string()).or_default();
@@ -215,10 +220,16 @@ impl Symbols {
             return Err(Invalid::DefaultSource);
         }
         check_name(&name)?;
-        if let Some(same) = self.at(addr).find(|s| s.name.value == name) {
+        if self.has_name(addr, &name)
+            && let Some(same) = self.at(addr).find(|s| s.name.value == name)
+        {
             return Ok(same.key);
         }
-        let last = self.at(addr).last().map(|s| s.key.0);
+        let last = self
+            .table
+            .range(span(addr))
+            .next_back()
+            .map(|(_, s)| s.key.0);
         let key = match last {
             None => SymKey(0),
             Some(k) => SymKey(k.checked_add(1).ok_or_else(|| Invalid::TooMany {
@@ -267,7 +278,7 @@ impl Symbols {
             return Ok(self.remove(addr, key).map(|s| s.name));
         };
         check_name(&name)?;
-        if name != current.value && self.at(addr).any(|s| s.name.value == name) {
+        if name != current.value && self.has_name(addr, &name) {
             return Err(Invalid::DuplicateName(name).into());
         }
         self.index_remove(&current.value, addr);

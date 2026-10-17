@@ -38,7 +38,7 @@ struct Candidate {
 /// Gives the text of a name: the exact text, or the escaped text when it is not UTF-8.
 ///
 /// An empty name and a name above [`MAX_NAME_LEN`] bytes give `None`.
-fn text(name: &BinText) -> Option<String> {
+pub(super) fn text(name: &BinText) -> Option<String> {
     let out = name
         .as_str()
         .map_or_else(|| name.render(Caps::DETAILED).text, ToString::to_string);
@@ -207,6 +207,9 @@ pub(super) fn from_binary(
     table_symbols(&binary, &mem, &mut candidates);
     stub_symbols(&binary, &mem, limits, &mut candidates);
     import_symbols(&binary, &mem, &imports, &mut candidates);
+    // One candidate per address and name: the one with the best preference.
+    candidates.sort_by(|a, b| (a.addr, &a.name, a.pref).cmp(&(b.addr, &b.name, b.pref)));
+    candidates.dedup_by(|later, first| later.addr == first.addr && later.name == first.name);
     candidates.sort();
     let mut base = Tables::default();
     let origin = Origin::load();
