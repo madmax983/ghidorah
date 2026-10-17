@@ -5,11 +5,32 @@
   "session": "cli",
   "partial": false,
   "data": {
-    "items": []
+    "items": [
+      {
+        "name": "func_get",
+        "summary": "Get one or more functions with selected sections: summary, disassembly, IR, xrefs, callers, callees, strings, variables, notes, why, CFG and jump tables.",
+        "annotations": {
+          "readOnlyHint": true,
+          "destructiveHint": false,
+          "idempotentHint": true,
+          "openWorldHint": false
+        }
+      },
+      {
+        "name": "func_list",
+        "summary": "List and filter the functions of a binary, and sort them by address, name, size or priority.",
+        "annotations": {
+          "readOnlyHint": true,
+          "destructiveHint": false,
+          "idempotentHint": true,
+          "openWorldHint": false
+        }
+      }
+    ]
   },
   "page": {
-    "returned": 0,
-    "total": 0,
+    "returned": 2,
+    "total": 2,
     "truncated": false
   }
 }

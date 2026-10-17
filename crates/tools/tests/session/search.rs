@@ -42,6 +42,32 @@ fn item_names(envelope: &Value) -> Vec<String> {
         .collect()
 }
 
+/// The largest number of pages that [`all_names`] reads.
+const MAX_PAGES: usize = 16;
+
+/// Gives the item names of all pages of `query` at `level`. The output budget can cut the
+/// list of the level `full`, and the next cursor then gives the next page.
+fn all_names(session: &mut Session, query: &str, level: &str) -> Vec<String> {
+    let mut names = Vec::new();
+    let mut cursor: Option<String> = None;
+    for _ in 0..MAX_PAGES {
+        let mut args = vec![("query", Value::from(query)), ("level", Value::from(level))];
+        if let Some(next) = &cursor {
+            args.push(("cursor", Value::from(next.as_str())));
+        }
+        let envelope = call_value(session, "tool_search", Value::object(args));
+        names.extend(item_names(&envelope));
+        cursor = envelope
+            .pointer("/page/next_cursor")
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        if cursor.is_none() {
+            return names;
+        }
+    }
+    panic!("{query} {level}: more than {MAX_PAGES} pages");
+}
+
 fn keys(item: &Value) -> Vec<String> {
     item.as_object()
         .map(|o| o.iter().map(|(k, _)| k.to_owned()).collect())
@@ -62,7 +88,7 @@ fn ac_152a_tool_search_levels() {
                 "{query} {}",
                 level.name()
             );
-            let names = item_names(&first);
+            let names = all_names(&mut s, query, level.name());
             match &ranked {
                 Some(want) => assert_eq!(&names, want, "{query} {}", level.name()),
                 None => ranked = Some(names),
@@ -132,7 +158,11 @@ fn tool_search_ranking() {
     };
     assert_eq!(first("load a file"), Some("binary_load"));
     assert_eq!(first("calculate a hex address"), Some("calc"));
-    assert_eq!(first("search the tools and topics"), Some("tool_search"));
+    assert_eq!(first("discover the tools and topics"), Some("tool_search"));
+    // A query word that is the whole name of a tool ranks that tool first.
+    assert_eq!(first("search the strings"), Some("search"));
+    assert_eq!(first("disassemble a function"), Some("func_get"));
+    assert_eq!(first("an overview of the binary"), Some("binary_survey"));
     let ranked = rank(tools, "");
     let order: Vec<usize> = ranked.iter().map(|(i, _)| *i).collect();
     assert_eq!(

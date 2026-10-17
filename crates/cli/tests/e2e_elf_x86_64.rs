@@ -1,10 +1,11 @@
 //! The walking skeleton: `tests/golden/mcp/e2e.jsonl` over a spawned `ghidorah mcp`
 //! (design Section 14.1).
 //!
-//! Version 1 holds the legacy handshake and `tools/list`. The next version spawns the server
-//! with a new projects root. It loads the demo binary, which runs the analysis, then calls
-//! `analysis_run`, `history_list` and a dry run of `history_undo`. Later WPs add client lines
-//! and bless the server lines again with `GHIDORAH_BLESS=1`.
+//! Version 1 holds the legacy handshake and `tools/list`. The next versions spawn the server
+//! with a new projects root. It loads the demo binary, which runs the analysis. Then it calls
+//! the read tools `binary_survey`, `func_list`, `func_get` and `xref_list` (version 2), and
+//! `analysis_run`, `history_list` and a dry run of `history_undo` (version 3). Later WPs add
+//! client lines and bless the server lines again with `GHIDORAH_BLESS=1`.
 
 #![allow(
     clippy::expect_used,
@@ -41,7 +42,7 @@ fn text<'a>(reply: &'a Value, pointer: &str) -> Option<&'a str> {
 fn e2e_elf_x86_64() {
     let clients = clients("e2e");
     assert!(
-        clients.len() >= 7,
+        clients.len() >= 11,
         "the transcript has the handshake, tools/list and the tool calls"
     );
     let projects = tmp("e2e_projects");
@@ -70,15 +71,37 @@ fn e2e_elf_x86_64() {
         projects.join("467a43b75d95c826/journal.jsonl").exists(),
         "binary_load makes the project of the demo binary"
     );
-    let run = reply(&steps, 4);
+    for id in 4..=7 {
+        let read = reply(&steps, id);
+        assert_eq!(
+            read.pointer("/result/structuredContent/ok"),
+            Some(&Value::Bool(true)),
+            "{read}"
+        );
+    }
+    let survey = reply(&steps, 4);
+    assert_eq!(
+        text(&survey, "/binary_id"),
+        Some("467a43b75d95c826"),
+        "binary_survey uses the open binary: {survey}"
+    );
+    let main = reply(&steps, 6);
+    assert_eq!(text(&main, "/data/name"), Some("main"), "{main}");
+    let puts = reply(&steps, 7);
+    assert_eq!(
+        text(&puts, "/data/items/0/from_func/name"),
+        Some("main"),
+        "main calls puts: {puts}"
+    );
+    let run = reply(&steps, 8);
     assert_eq!(text(&run, "/data/state"), Some("complete"), "{run}");
-    let history = reply(&steps, 5);
+    let history = reply(&steps, 9);
     assert_eq!(
         history.pointer("/result/structuredContent/ok"),
         Some(&Value::Bool(true)),
         "{history}"
     );
-    let undo = reply(&steps, 6);
+    let undo = reply(&steps, 10);
     assert_eq!(
         text(&undo, "/error/code"),
         Some("NOTHING_TO_UNDO"),

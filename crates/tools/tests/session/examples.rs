@@ -18,9 +18,32 @@ use crate::support::{
 /// The tools whose examples need one committed edit in the session `mcp-1`.
 const NEEDS_EDIT: &[&str] = &["history_list", "history_undo"];
 
-/// Gives the session of the examples of `tool`: the demo binary, and for a history tool one
-/// rename in the session `mcp-1`. So `history_undo` has a transaction to undo.
+/// The read tools of WP-17b: their examples need the facts of the analysis engine.
+const NEEDS_ANALYSIS: &[&str] = &[
+    "binary_survey",
+    "func_list",
+    "func_get",
+    "xref_list",
+    "search",
+    "mem_read",
+    "addr_info",
+];
+
+/// Gives the session of the examples of `tool`: the demo binary. A read tool gets the
+/// analysis engine, as in the read tests that own its goldens. A history tool gets one rename
+/// in the session `mcp-1`, so `history_undo` has a transaction to undo.
 fn example_session(tool: &str) -> Session {
+    if NEEDS_ANALYSIS.contains(&tool) {
+        let mut session = session_with(config());
+        handlers::analysis_run::install(&mut session);
+        let envelope = call(&mut session, "binary_load", r#"{"builtin":"demo"}"#);
+        assert_eq!(
+            envelope.pointer("/data/binary_id").and_then(Value::as_str),
+            Some(DEMO_ID),
+            "{envelope}"
+        );
+        return session;
+    }
     if !NEEDS_EDIT.contains(&tool) {
         return demo_session();
     }
@@ -140,6 +163,12 @@ fn agent_text_is_ste() {
         .chain(handlers::history_list::TEXTS)
         .chain(handlers::tool_search::TEXTS)
         .chain(handlers::history_undo::TEXTS)
+        .chain(handlers::survey::TEXTS)
+        .chain(handlers::func_list::TEXTS)
+        .chain(handlers::func_sections::TEXTS)
+        .chain(handlers::xref_list::TEXTS)
+        .chain(handlers::search::TEXTS)
+        .chain(handlers::mem_read::TEXTS)
         .chain(&[ghidorah_tools::session::WHY_REOPEN]);
     for text in handler_texts {
         texts.push(("handler text".to_owned(), (*text).to_owned()));

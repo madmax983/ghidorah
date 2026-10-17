@@ -7,7 +7,7 @@ use ghidorah_testkit::ste::check_agent_text;
 use ghidorah_tools::args::{globals_of, parse};
 use ghidorah_tools::outshape::Fit;
 use ghidorah_tools::registry::lint;
-use ghidorah_tools::{ArgKind, ArgSpec, demo, handlers};
+use ghidorah_tools::{ArgKind, ArgSpec, Host, Session, demo, handlers};
 
 use crate::support::{WP17B, call, demo as demo_session, json, registry, root};
 
@@ -15,6 +15,19 @@ use crate::support::{WP17B, call, demo as demo_session, json, registry, root};
 fn read_tools_lint_is_clean() {
     let found = lint(&registry());
     assert!(found.is_empty(), "{found:?}");
+}
+
+#[test]
+fn shipped_registry_holds_the_read_tools() {
+    let shipped = <Session as Host>::registry();
+    assert_eq!(shipped.names(), registry().names());
+    for tool in WP17B {
+        assert!(
+            shipped.get(tool.name).is_some(),
+            "{} is not shipped",
+            tool.name
+        );
+    }
 }
 
 fn arg_docs(spec: &ArgSpec, out: &mut Vec<String>) {

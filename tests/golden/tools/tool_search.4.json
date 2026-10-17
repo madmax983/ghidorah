@@ -28,9 +28,9 @@
   },
   "page": {
     "returned": 2,
-    "total": 3,
+    "total": 5,
     "truncated": true,
-    "next_cursor": "010400f744652ad9b175db00000000000000000000010001000000000000006897fcd0",
+    "next_cursor": "010b00f744652ad9b175db00000000000000000000010001000000000000007f35b022",
     "hint": "Add words to query, or send level names for shorter items."
   }
 }

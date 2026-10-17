@@ -25,5 +25,14 @@
       "by_code": []
     }
   },
+  "next": [
+    {
+      "tool": "binary_survey",
+      "args": {
+        "binary_id": "98b111e4fc0ef006"
+      },
+      "why": "Survey the binary that the call loaded."
+    }
+  ],
   "noop": false
 }
