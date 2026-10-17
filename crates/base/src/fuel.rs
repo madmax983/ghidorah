@@ -64,8 +64,16 @@ impl Fuel {
     ///
     /// Returns [`OutOfFuel`] when fewer than `units` remain. The tank is then empty.
     pub fn take(&mut self, units: u64) -> Result<(), OutOfFuel> {
-        let _ = units;
-        Ok(())
+        if units <= self.remaining() {
+            self.used += units;
+            Ok(())
+        } else {
+            self.used = self.limit;
+            Err(OutOfFuel {
+                limit: self.limit,
+                needed: units,
+            })
+        }
     }
 
     /// Takes one unit.
@@ -92,12 +100,12 @@ impl Fuel {
     /// Gives the units that remain.
     #[must_use]
     pub const fn remaining(&self) -> u64 {
-        0
+        self.limit.saturating_sub(self.used)
     }
 
     /// Tells if no unit remains.
     #[must_use]
     pub const fn is_empty(&self) -> bool {
-        false
+        self.remaining() == 0
     }
 }

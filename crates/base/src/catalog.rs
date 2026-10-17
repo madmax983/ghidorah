@@ -11,7 +11,13 @@
 //! A template can hold placeholders such as `{field}`. [`render`] fills them.
 //! [`errors_markdown`] gives the text of `docs/errors.md`.
 
+mod doc;
+
 use std::fmt;
+
+pub use doc::errors_markdown;
+
+use crate::tables;
 
 /// The path of the generated catalog document, relative to the workspace root.
 pub const ERRORS_DOC_PATH: &str = "docs/errors.md";
@@ -47,8 +53,27 @@ impl RepairClass {
     /// Gives the short text of the class: `R`, `R*`, `C`, `H` or `N`.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
-        let _ = self;
-        ""
+        match self {
+            Self::Repair => "R",
+            Self::RepairWhen => "R*",
+            Self::Choice => "C",
+            Self::Helper => "H",
+            Self::None => "N",
+        }
+    }
+
+    /// Gives the meaning of the class in one sentence.
+    #[must_use]
+    pub const fn meaning(self) -> &'static str {
+        match self {
+            Self::Repair => "The result holds the complete corrected call in next[0].",
+            Self::RepairWhen => {
+                "The class is R only when the fix is mechanical. Else the result has no repair call."
+            }
+            Self::Choice => "The candidates hold the choices. No client picks one by rule.",
+            Self::Helper => "The result holds a helper call in next[0], for example tool_search.",
+            Self::None => "No mechanical repair exists.",
+        }
     }
 }
 
@@ -246,16 +271,6 @@ pub enum DiagCode {
     Unsupported = 15,
 }
 
-/// The empty catalog data that the bodies give before the tables exist.
-const EMPTY: CodeInfo = CodeInfo {
-    num: 0,
-    name: "",
-    class: RepairClass::None,
-    retry: false,
-    message: "",
-    hint: "",
-};
-
 impl ErrorCode {
     /// All codes in number order.
     pub const ALL: [Self; 38] = [
@@ -317,40 +332,6 @@ impl ErrorCode {
             stretch: "S19",
         },
     ];
-
-    /// Gives the frozen number of the code.
-    #[must_use]
-    pub const fn num(self) -> u16 {
-        let _ = self;
-        0
-    }
-
-    /// Gives the catalog data of the code.
-    #[must_use]
-    pub const fn info(self) -> CodeInfo {
-        let _ = self;
-        EMPTY
-    }
-
-    /// Gives the `UPPER_SNAKE` name of the code.
-    #[must_use]
-    pub const fn name(self) -> &'static str {
-        self.info().name
-    }
-
-    /// Gives the code of a frozen number. A reserved or unknown number gives `None`.
-    #[must_use]
-    pub fn from_num(num: u16) -> Option<Self> {
-        let _ = num;
-        None
-    }
-
-    /// Gives the code of an `UPPER_SNAKE` name.
-    #[must_use]
-    pub fn from_name(name: &str) -> Option<Self> {
-        let _ = name;
-        None
-    }
 }
 
 impl WarningCode {
@@ -389,40 +370,6 @@ impl WarningCode {
             stretch: "S16",
         },
     ];
-
-    /// Gives the frozen number of the code.
-    #[must_use]
-    pub const fn num(self) -> u16 {
-        let _ = self;
-        0
-    }
-
-    /// Gives the catalog data of the code.
-    #[must_use]
-    pub const fn info(self) -> CodeInfo {
-        let _ = self;
-        EMPTY
-    }
-
-    /// Gives the `UPPER_SNAKE` name of the code.
-    #[must_use]
-    pub const fn name(self) -> &'static str {
-        self.info().name
-    }
-
-    /// Gives the code of a frozen number. A reserved or unknown number gives `None`.
-    #[must_use]
-    pub fn from_num(num: u16) -> Option<Self> {
-        let _ = num;
-        None
-    }
-
-    /// Gives the code of an `UPPER_SNAKE` name.
-    #[must_use]
-    pub fn from_name(name: &str) -> Option<Self> {
-        let _ = name;
-        None
-    }
 }
 
 impl DiagCode {
@@ -444,67 +391,67 @@ impl DiagCode {
         Self::ConstExpr,
         Self::Unsupported,
     ];
-
-    /// Gives the frozen number of the code.
-    #[must_use]
-    pub const fn num(self) -> u16 {
-        let _ = self;
-        0
-    }
-
-    /// Gives the catalog data of the code.
-    #[must_use]
-    pub const fn info(self) -> CodeInfo {
-        let _ = self;
-        EMPTY
-    }
-
-    /// Gives the `UPPER_SNAKE` name of the code.
-    #[must_use]
-    pub const fn name(self) -> &'static str {
-        self.info().name
-    }
-
-    /// Gives the code of a frozen number. An unknown number gives `None`.
-    #[must_use]
-    pub fn from_num(num: u16) -> Option<Self> {
-        let _ = num;
-        None
-    }
-
-    /// Gives the code of an `UPPER_SNAKE` name.
-    #[must_use]
-    pub fn from_name(name: &str) -> Option<Self> {
-        let _ = name;
-        None
-    }
 }
 
-impl fmt::Display for ErrorCode {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.name())
-    }
+/// Adds the shared methods of a catalog enum. `$info` gives the table row of a code.
+macro_rules! catalog_methods {
+    ($ty:ident, $info:path) => {
+        impl $ty {
+            /// Gives the frozen number of the code.
+            #[must_use]
+            pub const fn num(self) -> u16 {
+                self as u16
+            }
+
+            /// Gives the catalog data of the code.
+            #[must_use]
+            pub const fn info(self) -> CodeInfo {
+                $info(self)
+            }
+
+            /// Gives the `UPPER_SNAKE` name of the code.
+            #[must_use]
+            pub const fn name(self) -> &'static str {
+                self.info().name
+            }
+
+            /// Gives the code of a frozen number. A reserved or unknown number gives `None`.
+            #[must_use]
+            pub fn from_num(num: u16) -> Option<Self> {
+                Self::ALL.into_iter().find(|code| code.num() == num)
+            }
+
+            /// Gives the code of an `UPPER_SNAKE` name. The match is exact.
+            #[must_use]
+            pub fn from_name(name: &str) -> Option<Self> {
+                Self::ALL.into_iter().find(|code| code.name() == name)
+            }
+        }
+
+        impl fmt::Display for $ty {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str(self.name())
+            }
+        }
+    };
 }
 
-impl fmt::Display for WarningCode {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.name())
-    }
-}
-
-impl fmt::Display for DiagCode {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.name())
-    }
-}
+catalog_methods!(ErrorCode, tables::errors::info);
+catalog_methods!(WarningCode, tables::warnings::info);
+catalog_methods!(DiagCode, tables::diags::info);
 
 /// Gives the placeholder names of a template in text order, for example `["field"]`.
 ///
 /// A placeholder is `{` and a name of `a-z` and `_`, then `}`.
 #[must_use]
 pub fn placeholders(template: &str) -> Vec<&str> {
-    let _ = template;
-    Vec::new()
+    pieces(template)
+        .into_iter()
+        .filter_map(|piece| match piece {
+            Piece::Key(key) => Some(key),
+            Piece::Text(_) => None,
+        })
+        .collect()
 }
 
 /// Fills the placeholders of a template.
@@ -513,14 +460,54 @@ pub fn placeholders(template: &str) -> Vec<&str> {
 /// Values must hold no binary text (ADR-0022).
 #[must_use]
 pub fn render(template: &str, args: &[(&str, &str)]) -> String {
-    let _ = (template, args);
-    String::new()
+    let mut out = String::with_capacity(template.len());
+    for piece in pieces(template) {
+        match piece {
+            Piece::Text(text) => out.push_str(text),
+            Piece::Key(key) => {
+                if let Some((_, value)) = args.iter().find(|(k, _)| *k == key) {
+                    out.push_str(value);
+                } else {
+                    out.push('{');
+                    out.push_str(key);
+                    out.push('}');
+                }
+            }
+        }
+    }
+    out
 }
 
-/// Gives the body of `docs/errors.md`: the three catalogs as Markdown tables.
-///
-/// The golden header line comes before this body.
-#[must_use]
-pub fn errors_markdown() -> String {
-    String::new()
+/// One piece of a template.
+enum Piece<'a> {
+    /// Literal text.
+    Text(&'a str),
+    /// The name of a placeholder, without the braces.
+    Key(&'a str),
+}
+
+/// Splits a template into literal text and placeholders.
+fn pieces(template: &str) -> Vec<Piece<'_>> {
+    let mut out = Vec::new();
+    let mut rest = template;
+    while let Some(open) = rest.find('{') {
+        let (before, from_brace) = rest.split_at(open);
+        let after = from_brace.get(1..).unwrap_or_default();
+        let len = after
+            .bytes()
+            .take_while(|b| b.is_ascii_lowercase() || *b == b'_')
+            .count();
+        let key = after.get(..len).unwrap_or_default();
+        let closed = after.as_bytes().get(len) == Some(&b'}');
+        if len > 0 && closed {
+            out.push(Piece::Text(before));
+            out.push(Piece::Key(key));
+            rest = after.get(len + 1..).unwrap_or_default();
+        } else {
+            out.push(Piece::Text(rest.get(..=open).unwrap_or_default()));
+            rest = after;
+        }
+    }
+    out.push(Piece::Text(rest));
+    out
 }

@@ -98,15 +98,7 @@ fn random_id(g: &mut Gen) -> Option<Id> {
             storage: storage(g)?,
         }),
         IdKind::Note => Id::Note(NoteId(g.u64())),
-        IdKind::Set => Id::Set(
-            SetName::new(&ident(
-                g,
-                b"aZ09_.-",
-                b"abcXYZ0189_.-",
-                64,
-            ))
-            .ok()?,
-        ),
+        IdKind::Set => Id::Set(SetName::new(&ident(g, b"aZ09_.-", b"abcXYZ0189_.-", 64)).ok()?),
         IdKind::Type => Id::Type(if g.bool() {
             TypeRef::anon(g.u64())
         } else {
@@ -149,10 +141,15 @@ fn ac_045_id_roundtrip() {
             kinds_seen.insert(id.kind());
         }
     }
-    assert_eq!(kinds_seen.len(), IdKind::ALL.len(), "kinds seen: {kinds_seen:?}");
+    assert_eq!(
+        kinds_seen.len(),
+        IdKind::ALL.len(),
+        "kinds seen: {kinds_seen:?}"
+    );
 }
 
 #[test]
+#[expect(clippy::too_many_lines, reason = "one table of text forms")]
 fn id_text_table() {
     let table: Vec<(&str, Id)> = vec![
         ("fn:0x401130", Id::Func(FuncId(Address::ram(0x40_1130)))),
@@ -185,14 +182,23 @@ fn id_text_table() {
         ("exp:main", Id::Export(ExportId::by_name("main").unwrap())),
         ("exp:#7", Id::Export(ExportId::by_ordinal(7))),
         ("exp:#x", Id::Export(ExportId::by_name("#x").unwrap())),
-        ("sys:openat", Id::Syscall(SyscallId::by_name("openat").unwrap())),
+        (
+            "sys:openat",
+            Id::Syscall(SyscallId::by_name("openat").unwrap()),
+        ),
         ("sys:257", Id::Syscall(SyscallId::by_number(257))),
-        ("sec:14:.text", Id::Section(SectionId::new(14, ".text").unwrap())),
+        (
+            "sec:14:.text",
+            Id::Section(SectionId::new(14, ".text").unwrap()),
+        ),
         ("sec:0:", Id::Section(SectionId::new(0, "").unwrap())),
         ("sec:3:a:b", Id::Section(SectionId::new(3, "a:b").unwrap())),
         ("seg:2", Id::Segment(SegmentId(2))),
         ("str:0x402010", Id::Str(StringId(Address::ram(0x40_2010)))),
-        ("jt:0x401200", Id::JumpTable(JumpTableId(Address::ram(0x40_1200)))),
+        (
+            "jt:0x401200",
+            Id::JumpTable(JumpTableId(Address::ram(0x40_1200))),
+        ),
         ("ext:0x3", Id::External(3)),
         ("file:0x1040", Id::File(FileOffset(0x1040))),
         (
@@ -244,8 +250,14 @@ fn id_text_table() {
         ),
         ("note:7", Id::Note(NoteId(7))),
         ("set:parsers", Id::Set(SetName::new("parsers").unwrap())),
-        ("t:sockaddr_in", Id::Type(TypeRef::named("sockaddr_in").unwrap())),
-        ("t:struct in_addr *", Id::Type(TypeRef::named("struct in_addr *").unwrap())),
+        (
+            "t:sockaddr_in",
+            Id::Type(TypeRef::named("sockaddr_in").unwrap()),
+        ),
+        (
+            "t:struct in_addr *",
+            Id::Type(TypeRef::named("struct in_addr *").unwrap()),
+        ),
         ("t:#00000000deadbeef", Id::Type(TypeRef::anon(0xdead_beef))),
         ("tx:42", Id::Tx(TxId(42))),
         (
@@ -269,7 +281,10 @@ fn id_lenient_input() {
     let table: Vec<(&str, &str)> = vec![
         ("fn:0x00401130", "fn:0x401130"),
         ("fn:0x40113A", "fn:0x40113a"),
-        ("imp:KERNEL32.DLL!ExitProcess", "imp:kernel32.dll!ExitProcess"),
+        (
+            "imp:KERNEL32.DLL!ExitProcess",
+            "imp:kernel32.dll!ExitProcess",
+        ),
         ("t:#DEADBEEF", "t:#00000000deadbeef"),
         ("note:007", "note:7"),
     ];
@@ -289,7 +304,12 @@ fn id_rejects_table() {
         ("foo", IdError::UnknownPrefix),
         ("fn", IdError::UnknownPrefix),
         ("FN:0x1", IdError::UnknownPrefix),
-        (too_long.as_str(), IdError::TooLong { len: too_long.len() }),
+        (
+            too_long.as_str(),
+            IdError::TooLong {
+                len: too_long.len(),
+            },
+        ),
     ];
     for (text, want) in cases {
         assert_eq!(Id::parse(text), Err(want), "{text:.40}");
@@ -466,8 +486,14 @@ fn id_newtype_from_str() {
     assert!("op:0x1:0".parse::<OpId>().is_ok());
     assert!("var:0x1/ret".parse::<VarId>().is_ok());
     assert!("ref:0x1>0x2:read".parse::<RefId>().is_ok());
-    assert_eq!(Id::parse("fn:0x10").map(|id| id.address()), Ok(Some(Address::ram(0x10))));
-    assert_eq!(Id::parse("ext:0x10").map(|id| id.address()), Ok(Some(Address::external(0x10))));
+    assert_eq!(
+        Id::parse("fn:0x10").map(|id| id.address()),
+        Ok(Some(Address::ram(0x10)))
+    );
+    assert_eq!(
+        Id::parse("ext:0x10").map(|id| id.address()),
+        Ok(Some(Address::external(0x10)))
+    );
     assert_eq!(Id::parse("tx:1").map(|id| id.address()), Ok(None));
 }
 
@@ -483,7 +509,13 @@ fn binary_id_and_rev_forms() {
         Ok(id)
     );
     assert_eq!("ba7816bf8f01cfea".parse::<BinaryId>(), Ok(id));
-    for bad in ["", "ba7816bf8f01cfe", "ba7816bf8f01cfeag", "0xba7816bf8f01cfea", "ba78 6bf8f01cfea"] {
+    for bad in [
+        "",
+        "ba7816bf8f01cfe",
+        "ba7816bf8f01cfeag",
+        "0xba7816bf8f01cfea",
+        "ba78 6bf8f01cfea",
+    ] {
         assert!(BinaryId::parse(bad).is_err(), "{bad}");
     }
     assert_eq!(Rev(57).to_string(), "57");

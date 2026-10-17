@@ -159,6 +159,10 @@ fn fuzz_addr_expr() {
         report.crashes
     );
     assert_eq!(fuzz::panic_count(), 0, "no case panics");
-    assert!(report.reached_percent(2) >= 10, "parsed share: {:?}", report.reached);
+    assert!(
+        report.reached_percent(2) >= 10,
+        "parsed share: {:?}",
+        report.reached
+    );
     assert!(report.reached[3] > 0, "ID share: {:?}", report.reached);
 }

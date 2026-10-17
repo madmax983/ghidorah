@@ -193,7 +193,10 @@ fn sut_apply(map: &mut IntervalMap<u8>, op: &Op) -> Obs {
     let slice = map.as_slice();
     let sorted = slice.windows(2).all(|w| w[0].0.last < w[1].0.first);
     let valid = slice.iter().all(|(r, _)| r.first <= r.last);
-    assert!(sorted && valid, "entries are valid, sorted and disjoint: {slice:?}");
+    assert!(
+        sorted && valid,
+        "entries are valid, sorted and disjoint: {slice:?}"
+    );
     (result, observe(map))
 }
 
@@ -216,7 +219,14 @@ fn ac_037_intervalmap_model() {
 fn intervalmap_remove_at_removes_one_entry() {
     let mut map = IntervalMap::new();
     map.insert(Range { first: 0, last: 9 }, 'a').unwrap();
-    map.insert(Range { first: 10, last: 19 }, 'a').unwrap();
+    map.insert(
+        Range {
+            first: 10,
+            last: 19,
+        },
+        'a',
+    )
+    .unwrap();
     assert_eq!(map.remove_at(5), Some((Range { first: 0, last: 9 }, 'a')));
     assert_eq!(map.get(5), None);
     assert_eq!(map.get(10), Some(&'a'));
@@ -257,7 +267,10 @@ fn intervalmap_boundaries() {
     assert_eq!(map.nearest(u64::MAX), Some(u64::MAX));
     assert_eq!(map.overlapping(all).len(), 2);
     assert!(!map.is_free(all));
-    assert!(map.is_free(Range { first: 1, last: 100 }));
+    assert!(map.is_free(Range {
+        first: 1,
+        last: 100
+    }));
     if let Some(v) = map.get_mut(0) {
         *v = 9;
     }
@@ -271,7 +284,10 @@ fn intervalmap_boundaries() {
     });
     assert_eq!(
         map.as_slice(),
-        &[(Range { first: 0, last: 0 }, 7), (Range::single(u64::MAX), 7)]
+        &[
+            (Range { first: 0, last: 0 }, 7),
+            (Range::single(u64::MAX), 7)
+        ]
     );
     assert_eq!(IntervalMap::<u8>::default(), IntervalMap::new());
 }
@@ -279,29 +295,72 @@ fn intervalmap_boundaries() {
 #[test]
 fn intervalmap_extend_sorted() {
     let mut map = IntervalMap::new();
-    map.insert(Range { first: 100, last: 199 }, 'm').unwrap();
+    map.insert(
+        Range {
+            first: 100,
+            last: 199,
+        },
+        'm',
+    )
+    .unwrap();
     let items = vec![
-        (Range { first: 300, last: 399 }, 'c'),
+        (
+            Range {
+                first: 300,
+                last: 399,
+            },
+            'c',
+        ),
         (Range { first: 0, last: 99 }, 'a'),
-        (Range { first: 200, last: 299 }, 'b'),
+        (
+            Range {
+                first: 200,
+                last: 299,
+            },
+            'b',
+        ),
     ];
     map.extend_sorted(items).unwrap();
     let firsts: Vec<u64> = map.iter().map(|(r, _)| r.first).collect();
     assert_eq!(firsts, [0, 100, 200, 300]);
     let before = map.clone();
     let clash = vec![
-        (Range { first: 400, last: 499 }, 'x'),
-        (Range { first: 450, last: 460 }, 'y'),
+        (
+            Range {
+                first: 400,
+                last: 499,
+            },
+            'x',
+        ),
+        (
+            Range {
+                first: 450,
+                last: 460,
+            },
+            'y',
+        ),
     ];
     assert_eq!(
         map.extend_sorted(clash),
         Err(IntervalError::Overlap {
-            new: Range { first: 450, last: 460 },
-            existing: Range { first: 400, last: 499 },
+            new: Range {
+                first: 450,
+                last: 460
+            },
+            existing: Range {
+                first: 400,
+                last: 499
+            },
         })
     );
     assert_eq!(map, before, "a failed extend changes nothing");
-    let clash_old = vec![(Range { first: 150, last: 160 }, 'z')];
+    let clash_old = vec![(
+        Range {
+            first: 150,
+            last: 160,
+        },
+        'z',
+    )];
     assert!(map.extend_sorted(clash_old).is_err());
     let bad = vec![(Range { first: 9, last: 1 }, 'z')];
     assert!(matches!(

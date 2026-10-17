@@ -79,11 +79,24 @@ fn default_name_table() {
         ),
     ];
     for (text, kind, addr) in good {
-        assert_eq!(DefaultName::parse(text), Some(DefaultName { kind, addr }), "{text}");
+        assert_eq!(
+            DefaultName::parse(text),
+            Some(DefaultName { kind, addr }),
+            "{text}"
+        );
     }
-    assert_eq!(DefaultName::new(DefaultKind::Fun, 0x40_1130).to_string(), "FUN_00401130");
-    assert_eq!(DefaultName::new(DefaultKind::Ext, 3).to_string(), "EXT_00000003");
-    assert_eq!(DefaultName::new(DefaultKind::Ext, 3).addr, Address::external(3));
+    assert_eq!(
+        DefaultName::new(DefaultKind::Fun, 0x40_1130).to_string(),
+        "FUN_00401130"
+    );
+    assert_eq!(
+        DefaultName::new(DefaultKind::Ext, 3).to_string(),
+        "EXT_00000003"
+    );
+    assert_eq!(
+        DefaultName::new(DefaultKind::Ext, 3).addr,
+        Address::external(3)
+    );
     assert_eq!(
         DefaultName::new(DefaultKind::Dat, 0x1_4000_1000).to_string(),
         "DAT_140001000"

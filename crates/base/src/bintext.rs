@@ -22,6 +22,8 @@
 //!
 //! The text cap counts characters of the escaped text. It never cuts an escape.
 
+use crate::hex;
+
 /// The value of the `src` field.
 pub const SRC: &str = "binary";
 
@@ -53,8 +55,10 @@ impl Caps {
     /// Makes caps. Each value above [`HARD_CAP`] changes to [`HARD_CAP`].
     #[must_use]
     pub fn new(text_chars: usize, hex_bytes: usize) -> Self {
-        let _ = (text_chars, hex_bytes);
-        Self::DEFAULT
+        Self {
+            text_chars: text_chars.min(HARD_CAP),
+            hex_bytes: hex_bytes.min(HARD_CAP),
+        }
     }
 }
 
@@ -119,20 +123,109 @@ impl BinText {
     /// Gives the output form with the caps `caps`.
     #[must_use]
     pub fn render(&self, caps: Caps) -> Rendered {
-        let _ = caps;
+        let (text, text_cut) = escape_capped(&self.bytes, caps.text_chars);
+        let shown = self.bytes.get(..caps.hex_bytes).unwrap_or(&self.bytes);
         Rendered {
-            text: String::new(),
-            hex: String::new(),
-            len: 0,
-            truncated: false,
+            text,
+            hex: hex::encode(shown),
+            len: self.bytes.len(),
+            truncated: text_cut || shown.len() < self.bytes.len(),
         }
     }
 
     /// Gives the one JSON shape of the text with the caps `caps`.
     #[must_use]
     pub fn to_json(&self, caps: Caps) -> String {
-        let _ = caps;
-        String::new()
+        let r = self.render(caps);
+        let mut out = String::with_capacity(r.text.len() + r.hex.len() + 64);
+        out.push_str("{\"text\":\"");
+        for c in r.text.chars() {
+            match c {
+                '"' => out.push_str("\\\""),
+                '\\' => out.push_str("\\\\"),
+                _ => out.push(c),
+            }
+        }
+        out.push_str("\",\"hex\":\"");
+        out.push_str(&r.hex);
+        out.push_str("\",\"len\":");
+        out.push_str(&r.len.to_string());
+        if r.truncated {
+            out.push_str(",\"truncated\":true");
+        }
+        out.push_str(",\"src\":\"");
+        out.push_str(SRC);
+        out.push_str("\"}");
+        out
+    }
+}
+
+/// Tells if `c` is a bidi mark that the text escapes.
+const fn is_bidi(c: char) -> bool {
+    matches!(
+        c,
+        '\u{061c}' | '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}'
+    )
+}
+
+/// Gives the escape of one character, or `None` when the character needs no escape.
+fn escape_char(c: char) -> Option<String> {
+    match c {
+        '\\' => Some("\\\\".to_string()),
+        '\u{0}'..='\u{1f}' | '\u{7f}' => Some(format!("\\x{:02x}", u32::from(c))),
+        '\u{80}'..='\u{9f}' | '\u{2028}' | '\u{2029}' => Some(format!("\\u{{{:x}}}", u32::from(c))),
+        _ if is_bidi(c) => Some(format!("\\u{{{:x}}}", u32::from(c))),
+        _ => None,
+    }
+}
+
+/// Escapes `bytes` and stops before the text passes `cap` characters.
+///
+/// Gives the text and `true` when the text does not hold all bytes.
+fn escape_capped(bytes: &[u8], cap: usize) -> (String, bool) {
+    let mut text = Capped {
+        out: String::new(),
+        chars: 0,
+        cap,
+    };
+    for chunk in bytes.utf8_chunks() {
+        for c in chunk.valid().chars() {
+            let fits = match escape_char(c) {
+                Some(esc) => text.push(&esc),
+                None => text.push(c.encode_utf8(&mut [0u8; 4])),
+            };
+            if !fits {
+                return (text.out, true);
+            }
+        }
+        for b in chunk.invalid() {
+            if !text.push(&format!("\\x{b:02x}")) {
+                return (text.out, true);
+            }
+        }
+    }
+    (text.out, false)
+}
+
+/// Text with a cap on its number of characters.
+struct Capped {
+    out: String,
+    chars: usize,
+    cap: usize,
+}
+
+impl Capped {
+    /// Adds `piece` when it fits under the cap. Gives `false` when it does not fit.
+    fn push(&mut self, piece: &str) -> bool {
+        let width = piece.chars().count();
+        match self.chars.checked_add(width) {
+            Some(total) if total <= self.cap => {
+                self.out.push_str(piece);
+                self.chars = total;
+                true
+            }
+            _ => false,
+        }
     }
 }
 

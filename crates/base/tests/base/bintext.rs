@@ -19,7 +19,10 @@ fn bintext_caps_and_escapes() {
         ("\u{9f}".as_bytes(), "\\u{9f}"),
         ("a\u{2028}b\u{2029}".as_bytes(), "a\\u{2028}b\\u{2029}"),
         ("\u{202e}evil".as_bytes(), "\\u{202e}evil"),
-        ("\u{2066}\u{2069}\u{200e}\u{200f}\u{61c}".as_bytes(), "\\u{2066}\\u{2069}\\u{200e}\\u{200f}\\u{61c}"),
+        (
+            "\u{2066}\u{2069}\u{200e}\u{200f}\u{61c}".as_bytes(),
+            "\\u{2066}\\u{2069}\\u{200e}\\u{200f}\\u{61c}",
+        ),
         ("caf\u{e9} \u{4e2d}".as_bytes(), "caf\u{e9} \u{4e2d}"),
         (b"\xff\xfe", "\\xff\\xfe"),
         (b"ok\xc3", "ok\\xc3"),
@@ -31,15 +34,19 @@ fn bintext_caps_and_escapes() {
 
     // The text cap counts characters of the escaped text and never cuts an escape.
     let long = vec![b'a'; 300];
-    let r = BinText::new(long.clone()).render(Caps::DEFAULT);
+    let r = BinText::new(long).render(Caps::DEFAULT);
     assert_eq!(r.text.chars().count(), 256);
     assert_eq!(r.len, 300);
     assert!(r.truncated);
     assert_eq!(r.hex.len(), 600, "300 bytes fit under the hex cap of 512");
-    let mut escaped = vec![b'a'; 253];
-    escaped.push(0x1b);
-    let r = BinText::new(escaped).render(Caps::DEFAULT);
-    assert_eq!(r.text, "a".repeat(253), "the escape of 4 characters does not fit");
+    let mut cut_before_escape = vec![b'a'; 253];
+    cut_before_escape.push(0x1b);
+    let r = BinText::new(cut_before_escape).render(Caps::DEFAULT);
+    assert_eq!(
+        r.text,
+        "a".repeat(253),
+        "the escape of 4 characters does not fit"
+    );
     assert!(r.truncated);
     let mut fits = vec![b'a'; 252];
     fits.push(0x1b);
@@ -55,7 +62,11 @@ fn bintext_caps_and_escapes() {
     assert!(r.truncated);
     let r = BinText::new(vec![0u8; 4096]).render(Caps::DETAILED);
     assert_eq!(r.hex.len(), 8192);
-    assert_eq!(r.text.chars().count(), 4096, "4096 characters of escapes, cut at whole escapes");
+    assert_eq!(
+        r.text.chars().count(),
+        4096,
+        "4096 characters of escapes, cut at whole escapes"
+    );
     assert!(r.truncated);
 
     let exact = BinText::new(b"hi".to_vec()).render(Caps::new(2, 2));
@@ -69,7 +80,13 @@ fn bintext_caps_and_escapes() {
         }
     );
     assert_eq!(Caps::new(1 << 20, 1 << 20), Caps::DETAILED);
-    assert_eq!(Caps::new(10, 20), Caps { text_chars: 10, hex_bytes: 20 });
+    assert_eq!(
+        Caps::new(10, 20),
+        Caps {
+            text_chars: 10,
+            hex_bytes: 20
+        }
+    );
     assert_eq!(Caps::default(), Caps::DEFAULT);
     assert_eq!(HARD_CAP, 4096);
 }

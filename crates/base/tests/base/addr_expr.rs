@@ -31,6 +31,7 @@ fn digits(decimal: Option<u64>, hex: Option<u64>) -> Readings {
 }
 
 #[test]
+#[expect(clippy::too_many_lines, reason = "one table of syntax cases")]
 fn ac_046a_address_syntax() {
     let main_plus = NameExpr {
         split: Some(offset(AddrExpr::Name(name("main")), false, 0x10)),
@@ -48,7 +49,10 @@ fn ac_046a_address_syntax() {
             AddrExpr::Id(Id::Func(FuncId(Address::ram(0x40_1130)))),
         ),
         ("ext:0x3", AddrExpr::Id(Id::External(3))),
-        ("imp:puts", AddrExpr::Id(Id::Import(ImportId::elf("puts").unwrap()))),
+        (
+            "imp:puts",
+            AddrExpr::Id(Id::Import(ImportId::elf("puts").unwrap())),
+        ),
         (
             "sym:puts@GLIBC_2.2.5",
             AddrExpr::Id(Id::Sym(SymId::new("puts@GLIBC_2.2.5").unwrap())),
@@ -206,7 +210,10 @@ fn ac_046b_digits_only() {
         negative: true,
         offset: OffsetValue::Digits(digits(Some(8), Some(8))),
     };
-    assert_eq!(addr_expr::parse("0x401000-8"), Ok(AddrExpr::Offset(hex_term)));
+    assert_eq!(
+        addr_expr::parse("0x401000-8"),
+        Ok(AddrExpr::Offset(hex_term))
+    );
 }
 
 #[test]

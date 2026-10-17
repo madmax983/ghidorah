@@ -31,7 +31,8 @@ use std::fmt;
 
 use crate::catalog::ErrorCode;
 use crate::default_name::DefaultName;
-use crate::id::{Id, IdError, MAX_ID_TEXT};
+use crate::hex;
+use crate::id::{Id, IdError, IdKind, MAX_ID_TEXT};
 
 /// The smallest JSON integer that is not a valid address input: 2^53.
 pub const JSON_INT_LIMIT: u64 = 1 << 53;
@@ -141,8 +142,10 @@ impl AddrExprError {
     /// A JSON integer of 2^53 or more gives its `0x` hex text.
     #[must_use]
     pub fn repair_text(&self) -> Option<String> {
-        let _ = self;
-        None
+        match self {
+            Self::IntegerTooLarge(v) => Some(hex::u64_text(*v)),
+            Self::Empty | Self::TooLong { .. } | Self::BadHex | Self::BadId(_) => None,
+        }
     }
 }
 
@@ -173,8 +176,37 @@ impl std::error::Error for AddrExprError {}
 /// Returns [`AddrExprError`] for empty text, text above [`MAX_EXPR_LEN`] bytes, bad hex after
 /// `0x` and a bad ID after a registered prefix.
 pub fn parse(text: &str) -> Result<AddrExpr, AddrExprError> {
-    let _ = (text, DefaultName::parse);
-    Err(AddrExprError::Empty)
+    let text = text.trim_matches(|c: char| c.is_ascii_whitespace());
+    if text.is_empty() {
+        return Err(AddrExprError::Empty);
+    }
+    if text.len() > MAX_EXPR_LEN {
+        return Err(AddrExprError::TooLong { len: text.len() });
+    }
+    if text.starts_with("0x") {
+        if let Some(v) = hex::parse_u64(text) {
+            return Ok(AddrExpr::Hex(v));
+        }
+        return split_offset(text)
+            .map(AddrExpr::Offset)
+            .ok_or(AddrExprError::BadHex);
+    }
+    if IdKind::of_text(text).is_some() {
+        return match Id::parse(text) {
+            Ok(id) => Ok(AddrExpr::Id(id)),
+            Err(e) if text.starts_with(IdKind::Sym.prefix()) => Err(AddrExprError::BadId(e)),
+            Err(e) => split_offset(text)
+                .map(AddrExpr::Offset)
+                .ok_or(AddrExprError::BadId(e)),
+        };
+    }
+    if let Some(readings) = digits(text) {
+        return Ok(AddrExpr::Digits(readings));
+    }
+    Ok(AddrExpr::Name(NameExpr {
+        split: split_offset(text),
+        ..name_term(text)
+    }))
 }
 
 /// Reads a JSON integer address input (rule 1).
@@ -182,7 +214,81 @@ pub fn parse(text: &str) -> Result<AddrExpr, AddrExprError> {
 /// # Errors
 ///
 /// Returns [`AddrExprError::IntegerTooLarge`] for a value of 2^53 or more.
-pub fn from_integer(value: u64) -> Result<AddrExpr, AddrExprError> {
-    let _ = value;
-    Err(AddrExprError::Empty)
+pub const fn from_integer(value: u64) -> Result<AddrExpr, AddrExprError> {
+    if value < JSON_INT_LIMIT {
+        Ok(AddrExpr::Integer(value))
+    } else {
+        Err(AddrExprError::IntegerTooLarge(value))
+    }
+}
+
+/// Gives the two readings of a text of digits only, or `None` for other text.
+fn digits(text: &str) -> Option<Readings> {
+    if text.is_empty() || !text.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let decimal = text.bytes().try_fold(0u64, |acc, b| {
+        acc.checked_mul(10)?.checked_add(u64::from(b - b'0'))
+    });
+    Some(Readings {
+        decimal,
+        hex: hex::parse_digits(text),
+    })
+}
+
+/// Gives the name readings of a term, without an offset split.
+fn name_term(text: &str) -> NameExpr {
+    let at = text.rsplit_once('@').and_then(|(name, addr)| {
+        let addr = hex::parse_u64(addr)?;
+        (!name.is_empty()).then(|| NameAt {
+            name: name.to_string(),
+            addr,
+        })
+    });
+    let has_letter = text.bytes().any(|b| b.is_ascii_alphabetic());
+    NameExpr {
+        text: text.to_string(),
+        default: DefaultName::parse(text),
+        at,
+        split: None,
+        bare_hex: hex::parse_digits(text).filter(|_| has_letter),
+    }
+}
+
+/// Parses a term: hex, an ID, digits or a name. A term holds no offset.
+fn term(text: &str) -> Option<AddrExpr> {
+    if text.starts_with("0x") {
+        return hex::parse_u64(text).map(AddrExpr::Hex);
+    }
+    if IdKind::of_text(text).is_some() {
+        return Id::parse(text).ok().map(AddrExpr::Id);
+    }
+    if let Some(readings) = digits(text) {
+        return Some(AddrExpr::Digits(readings));
+    }
+    Some(AddrExpr::Name(name_term(text)))
+}
+
+/// Splits `text` at its last `+` or `-` into a term and an offset (rule 8).
+///
+/// Gives `None` for text without a sign and for an empty or bad term.
+/// An offset that is not `0x` hex and not digits only also gives `None`.
+fn split_offset(text: &str) -> Option<OffsetExpr> {
+    let at = text.rfind(['+', '-'])?;
+    let (left, right) = text.split_at(at);
+    let negative = right.starts_with('-');
+    let right = right.get(1..)?;
+    if left.is_empty() {
+        return None;
+    }
+    let offset = if right.starts_with("0x") {
+        OffsetValue::Hex(hex::parse_u64(right)?)
+    } else {
+        OffsetValue::Digits(digits(right)?)
+    };
+    Some(OffsetExpr {
+        term: Box::new(term(left)?),
+        negative,
+        offset,
+    })
 }

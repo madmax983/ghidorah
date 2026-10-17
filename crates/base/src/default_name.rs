@@ -6,7 +6,8 @@
 
 use std::fmt;
 
-use crate::address::Address;
+use crate::address::{Address, SpaceId};
+use crate::hex;
 
 /// The kind of a default name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -28,8 +29,21 @@ impl DefaultKind {
     /// Gives the prefix of the kind, for example `FUN_`.
     #[must_use]
     pub const fn prefix(self) -> &'static str {
-        let _ = self;
-        ""
+        match self {
+            Self::Fun => "FUN_",
+            Self::Lab => "LAB_",
+            Self::Dat => "DAT_",
+            Self::Ext => "EXT_",
+        }
+    }
+
+    /// Gives the address space of the kind.
+    #[must_use]
+    pub const fn space(self) -> SpaceId {
+        match self {
+            Self::Ext => SpaceId::EXTERNAL,
+            Self::Fun | Self::Lab | Self::Dat => SpaceId::RAM,
+        }
     }
 }
 
@@ -50,7 +64,7 @@ impl DefaultName {
     pub const fn new(kind: DefaultKind, off: u64) -> Self {
         Self {
             kind,
-            addr: Address::ram(off),
+            addr: Address::new(kind.space(), off),
         }
     }
 
@@ -59,14 +73,15 @@ impl DefaultName {
     /// Gives `None` when the text is not a prefix and 1 to 16 hex digits.
     #[must_use]
     pub fn parse(text: &str) -> Option<Self> {
-        let _ = text;
-        None
+        DefaultKind::ALL.into_iter().find_map(|kind| {
+            let digits = text.strip_prefix(kind.prefix())?;
+            hex::parse_digits(digits).map(|off| Self::new(kind, off))
+        })
     }
 }
 
 impl fmt::Display for DefaultName {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let _ = self;
-        f.write_str("")
+        write!(f, "{}{:08x}", self.kind.prefix(), self.addr.off)
     }
 }

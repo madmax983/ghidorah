@@ -32,11 +32,11 @@ impl FixedClock {
 
 impl Clock for FixedClock {
     fn unix_ms(&self) -> u64 {
-        0
+        self.unix_ms
     }
 
     fn monotonic_ms(&self) -> u64 {
-        1
+        0
     }
 }
 
@@ -59,7 +59,9 @@ impl ManualClock {
 
     /// Moves both times forward by `ms`. A time at `u64::MAX` stays there.
     pub fn advance(&self, ms: u64) {
-        let _ = ms;
+        self.unix_ms.set(self.unix_ms.get().saturating_add(ms));
+        self.monotonic_ms
+            .set(self.monotonic_ms.get().saturating_add(ms));
     }
 }
 

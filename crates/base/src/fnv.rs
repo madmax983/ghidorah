@@ -23,12 +23,14 @@ impl Fnv1a64 {
     /// Makes a hasher in the initial state.
     #[must_use]
     pub const fn new() -> Self {
-        Self(0)
+        Self(OFFSET_BASIS)
     }
 
     /// Adds `bytes` to the hash.
     pub fn write(&mut self, bytes: &[u8]) {
-        let _ = bytes;
+        for &b in bytes {
+            self.0 = (self.0 ^ u64::from(b)).wrapping_mul(PRIME);
+        }
     }
 
     /// Adds one byte to the hash.

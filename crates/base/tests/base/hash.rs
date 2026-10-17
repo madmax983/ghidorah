@@ -31,7 +31,12 @@ const MILLION_A: &str = "cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39c
 #[test]
 fn ac_043_sha256_kat() {
     for (input, want) in NIST {
-        assert_eq!(sha256_hex(input), want, "{:?}", String::from_utf8_lossy(input));
+        assert_eq!(
+            sha256_hex(input),
+            want,
+            "{:?}",
+            String::from_utf8_lossy(input)
+        );
     }
     let mut hasher = Sha256::new();
     for _ in 0..1000 {
@@ -54,7 +59,9 @@ fn ac_043_sha256_kat() {
 
 #[test]
 fn sha256_streaming_split() {
-    let message: Vec<u8> = (0..300u32).map(|i| u8::try_from(i % 256).unwrap()).collect();
+    let message: Vec<u8> = (0..300u32)
+        .map(|i| u8::try_from(i % 256).unwrap())
+        .collect();
     let whole = sha256(&message);
     // Python hashlib gives this digest for the bytes i % 256, i in 0..300.
     assert_eq!(

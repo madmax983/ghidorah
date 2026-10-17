@@ -87,11 +87,29 @@ impl<V> IntervalMap<V> {
         self.entries.iter().map(|(r, v)| (*r, v))
     }
 
+    /// Gives the index of the entry that holds `x`.
+    fn index_of(&self, x: u64) -> Option<usize> {
+        let after = self.entries.partition_point(|(r, _)| r.first <= x);
+        let i = after.checked_sub(1)?;
+        let (r, _) = self.entries.get(i)?;
+        (r.last >= x).then_some(i)
+    }
+
+    /// Gives the index range of the entries that overlap `range`.
+    fn overlap_span(&self, range: Range) -> std::ops::Range<usize> {
+        if range.first > range.last {
+            return 0..0;
+        }
+        let start = self.entries.partition_point(|(r, _)| r.last < range.first);
+        let end = self.entries.partition_point(|(r, _)| r.first <= range.last);
+        start..end.max(start)
+    }
+
     /// Gives the range and the value that hold `x`.
     #[must_use]
     pub fn find(&self, x: u64) -> Option<(Range, &V)> {
-        let _ = x;
-        None
+        let (r, v) = self.entries.get(self.index_of(x)?)?;
+        Some((*r, v))
     }
 
     /// Gives the value of the range that holds `x`.
@@ -102,15 +120,16 @@ impl<V> IntervalMap<V> {
 
     /// Gives the value of the range that holds `x`, for a change.
     pub fn get_mut(&mut self, x: u64) -> Option<&mut V> {
-        let _ = x;
-        None
+        let i = self.index_of(x)?;
+        self.entries.get_mut(i).map(|(_, v)| v)
     }
 
     /// Gives the entries whose ranges overlap `range`, in range order.
     #[must_use]
     pub fn overlapping(&self, range: Range) -> &[(Range, V)] {
-        let _ = range;
-        &[]
+        self.entries
+            .get(self.overlap_span(range))
+            .unwrap_or_default()
     }
 
     /// Tells if no range of the map overlaps `range`.
@@ -126,14 +145,24 @@ impl<V> IntervalMap<V> {
     /// Returns [`IntervalError::InvalidRange`] when `first > last` and
     /// [`IntervalError::Overlap`] when `range` overlaps a range of the map.
     pub fn insert(&mut self, range: Range, value: V) -> Result<(), IntervalError> {
-        let _ = (range, value);
+        if range.first > range.last {
+            return Err(IntervalError::InvalidRange(range));
+        }
+        if let Some((existing, _)) = self.overlapping(range).first() {
+            return Err(IntervalError::Overlap {
+                new: range,
+                existing: *existing,
+            });
+        }
+        let at = self.entries.partition_point(|(r, _)| r.first < range.first);
+        self.entries.insert(at, (range, value));
         Ok(())
     }
 
     /// Removes the entry whose range holds `x` and gives it.
     pub fn remove_at(&mut self, x: u64) -> Option<(Range, V)> {
-        let _ = x;
-        None
+        let i = self.index_of(x)?;
+        Some(self.entries.remove(i))
     }
 
     /// Adds many entries. The method sorts them once and checks them once.
@@ -142,8 +171,44 @@ impl<V> IntervalMap<V> {
     ///
     /// Returns [`IntervalError`] when an entry is not valid or overlaps another entry.
     /// Then the map does not change.
-    pub fn extend_sorted(&mut self, items: Vec<(Range, V)>) -> Result<(), IntervalError> {
-        let _ = items;
+    pub fn extend_sorted(&mut self, mut items: Vec<(Range, V)>) -> Result<(), IntervalError> {
+        if let Some((bad, _)) = items.iter().find(|(r, _)| r.first > r.last) {
+            return Err(IntervalError::InvalidRange(*bad));
+        }
+        items.sort_by_key(|(r, _)| *r);
+        for pair in items.windows(2) {
+            if let [(a, _), (b, _)] = pair
+                && a.last >= b.first
+            {
+                return Err(IntervalError::Overlap {
+                    new: *b,
+                    existing: *a,
+                });
+            }
+        }
+        for (r, _) in &items {
+            if let Some((existing, _)) = self.overlapping(*r).first() {
+                return Err(IntervalError::Overlap {
+                    new: *r,
+                    existing: *existing,
+                });
+            }
+        }
+        let old = std::mem::take(&mut self.entries);
+        let mut merged = Vec::with_capacity(old.len().saturating_add(items.len()));
+        let mut old = old.into_iter().peekable();
+        let mut new = items.into_iter().peekable();
+        loop {
+            let take_old = match (old.peek(), new.peek()) {
+                (Some((a, _)), Some((b, _))) => a.first < b.first,
+                (Some(_), None) => true,
+                (None, Some(_)) => false,
+                (None, None) => break,
+            };
+            let next = if take_old { old.next() } else { new.next() };
+            merged.extend(next);
+        }
+        self.entries = merged;
         Ok(())
     }
 
@@ -153,8 +218,20 @@ impl<V> IntervalMap<V> {
     /// ranges wins. A tie gives the lower value.
     #[must_use]
     pub fn nearest(&self, x: u64) -> Option<u64> {
-        let _ = x;
-        None
+        if self.index_of(x).is_some() {
+            return Some(x);
+        }
+        let after = self.entries.partition_point(|(r, _)| r.first <= x);
+        let below = after
+            .checked_sub(1)
+            .and_then(|i| self.entries.get(i))
+            .map(|(r, _)| r.last);
+        let above = self.entries.get(after).map(|(r, _)| r.first);
+        match (below, above) {
+            (Some(lo), Some(hi)) if x.abs_diff(lo) <= x.abs_diff(hi) => Some(lo),
+            (_, Some(hi)) => Some(hi),
+            (lo, None) => lo,
+        }
     }
 }
 
@@ -163,7 +240,36 @@ impl<V: Clone> IntervalMap<V> {
     ///
     /// Each part that stays keeps a copy of the old value.
     pub fn clear_range(&mut self, range: Range) {
-        let _ = range;
+        let span = self.overlap_span(range);
+        if span.is_empty() {
+            return;
+        }
+        let mut keep = Vec::with_capacity(2);
+        if let Some((r, v)) = self.entries.get(span.start)
+            && r.first < range.first
+            && let Some(last) = range.first.checked_sub(1)
+        {
+            keep.push((
+                Range {
+                    first: r.first,
+                    last,
+                },
+                v.clone(),
+            ));
+        }
+        if let Some((r, v)) = span.end.checked_sub(1).and_then(|i| self.entries.get(i))
+            && r.last > range.last
+            && let Some(first) = range.last.checked_add(1)
+        {
+            keep.push((
+                Range {
+                    first,
+                    last: r.last,
+                },
+                v.clone(),
+            ));
+        }
+        self.entries.splice(span, keep);
     }
 
     /// Sets `value` on `range`. The method first removes the old values in `range`.
@@ -172,7 +278,10 @@ impl<V: Clone> IntervalMap<V> {
     ///
     /// Returns [`IntervalError::InvalidRange`] when `first > last`.
     pub fn replace(&mut self, range: Range, value: V) -> Result<(), IntervalError> {
-        let _ = (range, value);
-        Ok(())
+        if range.first > range.last {
+            return Err(IntervalError::InvalidRange(range));
+        }
+        self.clear_range(range);
+        self.insert(range, value)
     }
 }

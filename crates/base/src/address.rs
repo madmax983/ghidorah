@@ -30,14 +30,17 @@ impl SpaceId {
     /// Gives the space of a Ghidra code. A reserved code gives `None`.
     #[must_use]
     pub const fn from_code(code: u8) -> Option<Self> {
-        let _ = code;
-        None
+        match code {
+            1 => Some(Self::RAM),
+            10 => Some(Self::EXTERNAL),
+            _ => None,
+        }
     }
 
     /// Gives the Ghidra code of the space.
     #[must_use]
     pub const fn code(self) -> u8 {
-        0
+        self.0
     }
 }
 
@@ -60,25 +63,19 @@ impl Address {
     /// Makes a RAM address.
     #[must_use]
     pub const fn ram(off: u64) -> Self {
-        Self {
-            space: SpaceId::EXTERNAL,
-            off,
-        }
+        Self::new(SpaceId::RAM, off)
     }
 
     /// Makes an EXTERNAL address.
     #[must_use]
     pub const fn external(off: u64) -> Self {
-        Self {
-            space: SpaceId::RAM,
-            off,
-        }
+        Self::new(SpaceId::EXTERNAL, off)
     }
 
     /// Tells if the address is in the RAM space.
     #[must_use]
     pub fn is_ram(&self) -> bool {
-        false
+        self.space == SpaceId::RAM
     }
 
     /// Parses the text form: `0x` hex for RAM or `ext:0x` hex for EXTERNAL.
@@ -89,15 +86,24 @@ impl Address {
     ///
     /// Returns [`IdError::BadPart`] when the text is not an address.
     pub fn parse(text: &str) -> Result<Self, IdError> {
-        let _ = (text, hex::parse_u64);
-        Err(IdError::Empty)
+        let (space, hex_text) = text
+            .strip_prefix(EXTERNAL_PREFIX)
+            .map_or((SpaceId::RAM, text), |rest| (SpaceId::EXTERNAL, rest));
+        hex::parse_u64(hex_text)
+            .map(|off| Self::new(space, off))
+            .ok_or(IdError::BadPart {
+                kind: None,
+                part: "address",
+            })
     }
 }
 
 impl fmt::Display for Address {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let _ = self;
-        f.write_str("")
+        if self.space == SpaceId::EXTERNAL {
+            f.write_str(EXTERNAL_PREFIX)?;
+        }
+        write!(f, "{:#x}", self.off)
     }
 }
 

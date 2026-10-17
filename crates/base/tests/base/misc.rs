@@ -17,7 +17,11 @@ fn hex_table() {
     assert_eq!(hex::decode(""), Ok(vec![]));
     assert_eq!(hex::decode("abc"), Err(HexError::OddLength { len: 3 }));
     assert_eq!(hex::decode("0g"), Err(HexError::BadDigit { offset: 1 }));
-    assert_eq!(hex::decode("\u{e9}0"), Err(HexError::BadDigit { offset: 0 }));
+    assert_eq!(hex::decode("\u{e9}"), Err(HexError::BadDigit { offset: 0 }));
+    assert_eq!(
+        hex::decode("0\u{e9}0"),
+        Err(HexError::BadDigit { offset: 1 })
+    );
     assert!(HexError::OddLength { len: 3 }.to_string().contains('3'));
     assert!(HexError::BadDigit { offset: 1 }.to_string().contains('1'));
 
@@ -27,7 +31,17 @@ fn hex_table() {
     assert_eq!(hex::parse_u64("0x0"), Some(0));
     assert_eq!(hex::parse_u64("0xAbC"), Some(0xabc));
     assert_eq!(hex::parse_u64("0x000000000000000f"), Some(15));
-    for bad in ["", "0x", "x1", "0X1", "0x0000000000000000f", "0x+1", "0x-1", "0x 1", "1"] {
+    for bad in [
+        "",
+        "0x",
+        "x1",
+        "0X1",
+        "0x0000000000000000f",
+        "0x+1",
+        "0x-1",
+        "0x 1",
+        "1",
+    ] {
         assert_eq!(hex::parse_u64(bad), None, "{bad:?}");
     }
     assert_eq!(hex::parse_digits("ff"), Some(255));
@@ -101,17 +115,44 @@ fn fuel_take_and_tick() {
     assert!(!fuel.is_empty());
     assert_eq!(fuel.take(5), Ok(()));
     assert!(fuel.is_empty());
-    assert_eq!(fuel.tick(), Err(OutOfFuel { limit: 10, needed: 1 }));
+    assert_eq!(
+        fuel.tick(),
+        Err(OutOfFuel {
+            limit: 10,
+            needed: 1
+        })
+    );
     let mut fuel = Fuel::new(10);
-    assert_eq!(fuel.take(11), Err(OutOfFuel { limit: 10, needed: 11 }));
+    assert_eq!(
+        fuel.take(11),
+        Err(OutOfFuel {
+            limit: 10,
+            needed: 11
+        })
+    );
     assert!(fuel.is_empty(), "a failed take empties the tank");
     assert_eq!(fuel.take(0), Ok(()));
-    assert_eq!(fuel.tick(), Err(OutOfFuel { limit: 10, needed: 1 }));
+    assert_eq!(
+        fuel.tick(),
+        Err(OutOfFuel {
+            limit: 10,
+            needed: 1
+        })
+    );
     let mut big = Fuel::unlimited();
     assert_eq!(big.take(u64::MAX - 1), Ok(()));
     assert_eq!(big.tick(), Ok(()));
-    assert_eq!(big.tick(), Err(OutOfFuel { limit: u64::MAX, needed: 1 }));
-    let err = OutOfFuel { limit: 3, needed: 4 };
+    assert_eq!(
+        big.tick(),
+        Err(OutOfFuel {
+            limit: u64::MAX,
+            needed: 1
+        })
+    );
+    let err = OutOfFuel {
+        limit: 3,
+        needed: 4,
+    };
     assert_eq!(err.code().name(), "BUDGET_EXCEEDED");
     assert!(err.to_string().contains('4'));
 }
@@ -125,7 +166,10 @@ fn clocks() {
     manual.advance(10);
     assert_eq!((manual.unix_ms(), manual.monotonic_ms()), (15, 10));
     manual.advance(u64::MAX);
-    assert_eq!((manual.unix_ms(), manual.monotonic_ms()), (u64::MAX, u64::MAX));
+    assert_eq!(
+        (manual.unix_ms(), manual.monotonic_ms()),
+        (u64::MAX, u64::MAX)
+    );
     let dynamic: &dyn Clock = &fixed;
     assert_eq!(dynamic.unix_ms(), 1_700_000_000_000);
     assert_eq!(ManualClock::default().unix_ms(), 0);

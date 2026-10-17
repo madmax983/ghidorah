@@ -1,5 +1,7 @@
 //! Tests of `Glob` (design Section 10.4, AC-048).
 
+#![allow(clippy::panic, reason = "a test fails through a panic")]
+
 use ghidorah_base::glob::MAX_PATTERN_CHARS;
 use ghidorah_base::{Glob, GlobError};
 
@@ -15,7 +17,10 @@ fn ac_048_glob_linear() {
     assert!(!matched);
     let bound = 4 * (text.len() + pattern.len()) as u64;
     assert!(steps <= bound, "{steps} steps, bound {bound}");
-    assert!(steps >= text.len() as u64, "the matcher reads the text: {steps}");
+    assert!(
+        steps >= text.len() as u64,
+        "the matcher reads the text: {steps}"
+    );
 
     // Doubling the text at most doubles the work.
     let (_, steps_2x) = glob(pattern).matches_counted(&"a".repeat(20_000));
@@ -78,5 +83,9 @@ fn glob_table() {
     );
     assert!(Glob::new(&"a".repeat(MAX_PATTERN_CHARS)).is_ok());
     assert!(GlobError::TrailingEscape.to_string().ends_with('.'));
-    assert!(GlobError::TooLong { chars: 2000 }.to_string().contains("2000"));
+    assert!(
+        GlobError::TooLong { chars: 2000 }
+            .to_string()
+            .contains("2000")
+    );
 }

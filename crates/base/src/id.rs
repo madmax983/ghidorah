@@ -121,15 +121,37 @@ impl IdKind {
     /// Gives the text prefix of the kind, for example `fn:`.
     #[must_use]
     pub const fn prefix(self) -> &'static str {
-        let _ = self;
-        ""
+        match self {
+            Self::Func => "fn:",
+            Self::Block => "bb:",
+            Self::Op => "op:",
+            Self::Import => "imp:",
+            Self::Export => "exp:",
+            Self::Syscall => "sys:",
+            Self::Section => "sec:",
+            Self::Segment => "seg:",
+            Self::Str => "str:",
+            Self::JumpTable => "jt:",
+            Self::External => "ext:",
+            Self::File => "file:",
+            Self::Sym => "sym:",
+            Self::Var => "var:",
+            Self::Note => "note:",
+            Self::Set => "set:",
+            Self::Type => "t:",
+            Self::Tx => "tx:",
+            Self::Ref => "ref:",
+        }
     }
 
     /// Gives the kind whose prefix starts `text`, or `None`.
+    ///
+    /// No prefix starts another prefix, so at most one kind matches.
     #[must_use]
     pub fn of_text(text: &str) -> Option<Self> {
-        let _ = text;
-        None
+        Self::ALL
+            .into_iter()
+            .find(|kind| text.starts_with(kind.prefix()))
     }
 }
 
@@ -253,8 +275,27 @@ impl Id {
     /// Gives the kind of the ID.
     #[must_use]
     pub const fn kind(&self) -> IdKind {
-        let _ = self;
-        IdKind::Func
+        match self {
+            Self::Func(_) => IdKind::Func,
+            Self::Block(_) => IdKind::Block,
+            Self::Op(_) => IdKind::Op,
+            Self::Import(_) => IdKind::Import,
+            Self::Export(_) => IdKind::Export,
+            Self::Syscall(_) => IdKind::Syscall,
+            Self::Section(_) => IdKind::Section,
+            Self::Segment(_) => IdKind::Segment,
+            Self::Str(_) => IdKind::Str,
+            Self::JumpTable(_) => IdKind::JumpTable,
+            Self::External(_) => IdKind::External,
+            Self::File(_) => IdKind::File,
+            Self::Sym(_) => IdKind::Sym,
+            Self::Var(_) => IdKind::Var,
+            Self::Note(_) => IdKind::Note,
+            Self::Set(_) => IdKind::Set,
+            Self::Type(_) => IdKind::Type,
+            Self::Tx(_) => IdKind::Tx,
+            Self::Ref(_) => IdKind::Ref,
+        }
     }
 
     /// Parses the text form of any ID kind.
@@ -266,23 +307,103 @@ impl Id {
     /// Returns [`IdError::Empty`], [`IdError::TooLong`], [`IdError::UnknownPrefix`] or
     /// [`IdError::BadPart`].
     pub fn parse(text: &str) -> Result<Self, IdError> {
-        let _ = text;
-        Err(IdError::Empty)
+        if text.is_empty() {
+            return Err(IdError::Empty);
+        }
+        if text.len() > MAX_ID_TEXT {
+            return Err(IdError::TooLong { len: text.len() });
+        }
+        let kind = IdKind::of_text(text).ok_or(IdError::UnknownPrefix)?;
+        let body = text
+            .strip_prefix(kind.prefix())
+            .ok_or(IdError::UnknownPrefix)?;
+        Self::parse_body(kind, body)
+    }
+
+    /// Parses the text after the prefix of `kind`.
+    fn parse_body(kind: IdKind, body: &str) -> Result<Self, IdError> {
+        let address = || Address::parse(body).map_err(|_| IdError::bad(kind, "address"));
+        let hex = |part| crate::hex::parse_u64(body).ok_or_else(|| IdError::bad(kind, part));
+        let number = |part| parse_dec(body).ok_or_else(|| IdError::bad(kind, part));
+        Ok(match kind {
+            IdKind::Func => Self::Func(FuncId(address()?)),
+            IdKind::Block => Self::Block(BlockId(address()?)),
+            IdKind::Op => Self::Op(OpId::parse_body(body)?),
+            IdKind::Import => Self::Import(ImportId::parse_body(body)?),
+            IdKind::Export => Self::Export(ExportId::parse_body(body)?),
+            IdKind::Syscall => Self::Syscall(SyscallId::parse_body(body)?),
+            IdKind::Section => Self::Section(SectionId::parse_body(body)?),
+            IdKind::Segment => Self::Segment(SegmentId(
+                u16::try_from(number("index")?).map_err(|_| IdError::bad(kind, "index"))?,
+            )),
+            IdKind::Str => Self::Str(StringId(address()?)),
+            IdKind::JumpTable => Self::JumpTable(JumpTableId(address()?)),
+            IdKind::External => Self::External(hex("offset")?),
+            IdKind::File => Self::File(FileOffset(hex("offset")?)),
+            IdKind::Sym => Self::Sym(SymId::new(body)?),
+            IdKind::Var => Self::Var(VarId::parse_body(body)?),
+            IdKind::Note => Self::Note(NoteId(number("number")?)),
+            IdKind::Set => Self::Set(SetName::new(body)?),
+            IdKind::Type => Self::Type(TypeRef::parse_body(body)?),
+            IdKind::Tx => Self::Tx(TxId(number("number")?)),
+            IdKind::Ref => Self::Ref(RefId::parse_body(body)?),
+        })
     }
 
     /// Gives the address of an ID that names one address: `fn:`, `bb:`, `str:`, `jt:` and `ext:`.
     #[must_use]
-    pub fn address(&self) -> Option<Address> {
-        let _ = self;
-        None
+    pub const fn address(&self) -> Option<Address> {
+        match self {
+            Self::Func(FuncId(a))
+            | Self::Block(BlockId(a))
+            | Self::Str(StringId(a))
+            | Self::JumpTable(JumpTableId(a)) => Some(*a),
+            Self::External(off) => Some(Address::external(*off)),
+            _ => None,
+        }
     }
 }
 
 impl fmt::Display for Id {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let _ = self;
-        f.write_str("")
+        match self {
+            Self::Func(v) => v.fmt(f),
+            Self::Block(v) => v.fmt(f),
+            Self::Op(v) => v.fmt(f),
+            Self::Import(v) => v.fmt(f),
+            Self::Export(v) => v.fmt(f),
+            Self::Syscall(v) => v.fmt(f),
+            Self::Section(v) => v.fmt(f),
+            Self::Segment(v) => v.fmt(f),
+            Self::Str(v) => v.fmt(f),
+            Self::JumpTable(v) => v.fmt(f),
+            Self::External(off) => Address::external(*off).fmt(f),
+            Self::File(v) => v.fmt(f),
+            Self::Sym(v) => v.fmt(f),
+            Self::Var(v) => v.fmt(f),
+            Self::Note(v) => v.fmt(f),
+            Self::Set(v) => v.fmt(f),
+            Self::Type(v) => v.fmt(f),
+            Self::Tx(v) => v.fmt(f),
+            Self::Ref(v) => v.fmt(f),
+        }
     }
+}
+
+/// Parses 1 to 20 decimal digits into a `u64`. An overflow gives `None`.
+pub(crate) fn parse_dec(text: &str) -> Option<u64> {
+    if text.is_empty() || text.len() > 20 {
+        return None;
+    }
+    text.bytes().try_fold(0u64, |acc, b| {
+        let d = b.is_ascii_digit().then(|| u64::from(b - b'0'))?;
+        acc.checked_mul(10)?.checked_add(d)
+    })
+}
+
+/// Tells if `text` holds only ASCII digits. Empty text gives `true`.
+pub(crate) fn all_digits(text: &str) -> bool {
+    text.bytes().all(|b| b.is_ascii_digit())
 }
 
 impl FromStr for Id {

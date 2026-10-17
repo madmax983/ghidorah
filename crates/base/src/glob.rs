@@ -60,10 +60,25 @@ impl Glob {
     /// Returns [`GlobError::TooLong`] for a pattern above [`MAX_PATTERN_CHARS`] characters and
     /// [`GlobError::TrailingEscape`] for a pattern that ends with an unpaired `\`.
     pub fn new(pattern: &str) -> Result<Self, GlobError> {
-        let _ = pattern;
-        Ok(Self {
-            tokens: vec![Token::Char('\0'), Token::One, Token::Star],
-        })
+        let chars = pattern.chars().count();
+        if chars > MAX_PATTERN_CHARS {
+            return Err(GlobError::TooLong { chars });
+        }
+        let mut tokens = Vec::with_capacity(chars);
+        let mut it = pattern.chars();
+        while let Some(c) = it.next() {
+            let token = match c {
+                '*' => Token::Star,
+                '?' => Token::One,
+                '\\' => Token::Char(it.next().ok_or(GlobError::TrailingEscape)?),
+                _ => Token::Char(c),
+            };
+            // Two stars in a row match the same texts as one star.
+            if !(token == Token::Star && tokens.last() == Some(&Token::Star)) {
+                tokens.push(token);
+            }
+        }
+        Ok(Self { tokens })
     }
 
     /// Tells if the pattern matches the whole `text`.
@@ -78,13 +93,48 @@ impl Glob {
     /// the text length times the longest literal run of the pattern.
     #[must_use]
     pub fn matches_counted(&self, text: &str) -> (bool, u64) {
-        let _ = (text, &self.tokens);
-        (false, 0)
+        let text: Vec<char> = text.chars().collect();
+        let mut pi = 0usize;
+        let mut ti = 0usize;
+        // The last star: its token index and the next text index to try after it.
+        let mut star: Option<(usize, usize)> = None;
+        let mut steps = 0u64;
+        loop {
+            steps = steps.saturating_add(1);
+            match (self.tokens.get(pi), text.get(ti)) {
+                (None, None) => return (true, steps),
+                (Some(Token::Star), _) => {
+                    star = Some((pi, ti + 1));
+                    pi += 1;
+                    continue;
+                }
+                (Some(Token::One), Some(_)) => {
+                    pi += 1;
+                    ti += 1;
+                    continue;
+                }
+                (Some(Token::Char(p)), Some(t)) if p == t => {
+                    pi += 1;
+                    ti += 1;
+                    continue;
+                }
+                _ => {}
+            }
+            // A mismatch: let the last star take one more character, or fail.
+            match star {
+                Some((star_pi, next_ti)) if next_ti <= text.len() => {
+                    pi = star_pi + 1;
+                    ti = next_ti;
+                    star = Some((star_pi, next_ti + 1));
+                }
+                _ => return (false, steps),
+            }
+        }
     }
 
     /// Tells if the pattern has no `*` and no `?`.
     #[must_use]
     pub fn is_literal(&self) -> bool {
-        false
+        self.tokens.iter().all(|t| matches!(t, Token::Char(_)))
     }
 }

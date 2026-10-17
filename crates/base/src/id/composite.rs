@@ -2,13 +2,14 @@
 
 use std::fmt;
 
-use super::{FuncId, IdError, IdKind, from_str_via_id};
+use super::{FuncId, IdError, IdKind, from_str_via_id, parse_dec};
 use crate::address::Address;
+use crate::hex;
 
 /// The largest register name in bytes.
 pub const MAX_REG_NAME: usize = 16;
 
-/// The largest xref kind name in bytes.
+/// The longest kind name of an xref, in bytes.
 pub const MAX_REF_KIND: usize = 32;
 
 /// The storage of a variable.
@@ -40,8 +41,18 @@ impl RegVar {
     ///
     /// Returns [`IdError::BadPart`] when the name does not match the register name grammar.
     pub fn new(name: &str, def: u64) -> Result<Self, IdError> {
-        let _ = (name, def);
-        Err(IdError::bad(IdKind::Var, "register"))
+        let first_ok = name.bytes().next().is_some_and(|b| b.is_ascii_lowercase());
+        let rest_ok = name
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit());
+        if first_ok && rest_ok && name.len() <= MAX_REG_NAME {
+            Ok(Self {
+                name: name.to_string(),
+                def,
+            })
+        } else {
+            Err(IdError::bad(IdKind::Var, "register"))
+        }
     }
 
     /// Gives the register name.
@@ -54,6 +65,37 @@ impl RegVar {
     #[must_use]
     pub const fn def(&self) -> u64 {
         self.def
+    }
+}
+
+impl Storage {
+    /// Parses the storage part of a variable ID.
+    fn parse(text: &str) -> Result<Self, IdError> {
+        let bad = |part| IdError::bad(IdKind::Var, part);
+        if text == "ret" {
+            return Ok(Self::Ret);
+        }
+        if let Some(n) = text.strip_prefix("param:") {
+            return parse_dec(n)
+                .and_then(|n| u16::try_from(n).ok())
+                .map(Self::Param)
+                .ok_or_else(|| bad("param"));
+        }
+        if let Some(offset) = text.strip_prefix("stack:") {
+            let value = match offset.strip_prefix('-') {
+                Some(magnitude) => {
+                    hex::parse_u64(magnitude).and_then(|m| 0i64.checked_sub_unsigned(m))
+                }
+                None => hex::parse_u64(offset).and_then(|v| i64::try_from(v).ok()),
+            };
+            return value.map(Self::Stack).ok_or_else(|| bad("stack"));
+        }
+        if let Some(reg) = text.strip_prefix("reg:") {
+            let (name, def) = reg.rsplit_once('@').ok_or_else(|| bad("register"))?;
+            let def = hex::parse_u64(def).ok_or_else(|| bad("register"))?;
+            return RegVar::new(name, def).map(Self::Reg);
+        }
+        Err(bad("storage"))
     }
 }
 
@@ -70,22 +112,32 @@ pub struct VarId {
 
 impl VarId {
     pub(crate) fn parse_body(body: &str) -> Result<Self, IdError> {
-        let _ = body;
-        Err(IdError::bad(IdKind::Var, "entry"))
+        let (entry, storage) = body
+            .split_once('/')
+            .ok_or(IdError::bad(IdKind::Var, "storage"))?;
+        let entry = Address::parse(entry).map_err(|_| IdError::bad(IdKind::Var, "entry"))?;
+        Ok(Self {
+            func: FuncId(entry),
+            storage: Storage::parse(storage)?,
+        })
     }
 }
 
 impl fmt::Display for Storage {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let _ = self;
-        f.write_str("")
+        match self {
+            Self::Param(n) => write!(f, "param:{n}"),
+            Self::Stack(v) if *v < 0 => write!(f, "stack:-{:#x}", v.unsigned_abs()),
+            Self::Stack(v) => write!(f, "stack:{v:#x}"),
+            Self::Reg(reg) => write!(f, "reg:{}@{:#x}", reg.name, reg.def),
+            Self::Ret => f.write_str("ret"),
+        }
     }
 }
 
 impl fmt::Display for VarId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let _ = self;
-        f.write_str("")
+        write!(f, "var:{}/{}", self.func.0, self.storage)
     }
 }
 
@@ -107,8 +159,19 @@ impl RefId {
     ///
     /// Returns [`IdError::BadPart`] when the kind name does not match the kind name grammar.
     pub fn new(from: Address, to: Address, kind: &str) -> Result<Self, IdError> {
-        let _ = (from, to, kind);
-        Err(IdError::bad(IdKind::Ref, "kind"))
+        let first_ok = kind.bytes().next().is_some_and(|b| b.is_ascii_lowercase());
+        let rest_ok = kind
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_');
+        if first_ok && rest_ok && kind.len() <= MAX_REF_KIND {
+            Ok(Self {
+                from,
+                to,
+                kind: kind.to_string(),
+            })
+        } else {
+            Err(IdError::bad(IdKind::Ref, "kind"))
+        }
     }
 
     /// Gives the source address.
@@ -130,15 +193,18 @@ impl RefId {
     }
 
     pub(crate) fn parse_body(body: &str) -> Result<Self, IdError> {
-        let _ = body;
-        Err(IdError::bad(IdKind::Ref, "from"))
+        let bad = |part| IdError::bad(IdKind::Ref, part);
+        let (from, rest) = body.split_once('>').ok_or_else(|| bad("to"))?;
+        let (to, kind) = rest.rsplit_once(':').ok_or_else(|| bad("kind"))?;
+        let from = Address::parse(from).map_err(|_| bad("from"))?;
+        let to = Address::parse(to).map_err(|_| bad("to"))?;
+        Self::new(from, to, kind)
     }
 }
 
 impl fmt::Display for RefId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let _ = self;
-        f.write_str("")
+        write!(f, "ref:{}>{}:{}", self.from, self.to, self.kind)
     }
 }
 

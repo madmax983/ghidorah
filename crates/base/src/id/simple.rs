@@ -3,8 +3,9 @@
 use std::fmt;
 use std::str::FromStr;
 
-use super::{IdError, from_str_via_id};
+use super::{IdError, IdKind, from_str_via_id, parse_dec};
 use crate::address::Address;
+use crate::hex;
 
 /// A function, named by its entry address. Text: `fn:0x401130`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -55,6 +56,19 @@ pub struct OpId {
     pub seq: u16,
 }
 
+impl OpId {
+    pub(crate) fn parse_body(body: &str) -> Result<Self, IdError> {
+        let (addr, seq) = body
+            .rsplit_once(':')
+            .ok_or(IdError::bad(IdKind::Op, "sequence"))?;
+        let addr = hex::parse_u64(addr).ok_or(IdError::bad(IdKind::Op, "address"))?;
+        let seq = parse_dec(seq)
+            .and_then(|n| u16::try_from(n).ok())
+            .ok_or(IdError::bad(IdKind::Op, "sequence"))?;
+        Ok(Self { addr, seq })
+    }
+}
+
 /// A binary: the first 8 bytes of the SHA-256 of the file. Text: 16 lower case hex digits.
 ///
 /// Input also accepts all 64 digits of the hash.
@@ -65,8 +79,11 @@ impl BinaryId {
     /// Makes the ID of a file from the SHA-256 of the file.
     #[must_use]
     pub fn from_sha256(hash: &[u8; 32]) -> Self {
-        let _ = hash;
-        Self([0; 8])
+        let mut id = [0u8; 8];
+        for (dst, src) in id.iter_mut().zip(hash) {
+            *dst = *src;
+        }
+        Self(id)
     }
 
     /// Parses 16 or 64 hex digits in either letter case.
@@ -75,15 +92,25 @@ impl BinaryId {
     ///
     /// Returns [`IdError::BadPart`] for any other text.
     pub fn parse(text: &str) -> Result<Self, IdError> {
-        let _ = text;
-        Err(IdError::Empty)
+        let bad = IdError::BadPart {
+            kind: None,
+            part: "binary_id",
+        };
+        if text.len() != 16 && text.len() != 64 {
+            return Err(bad);
+        }
+        let bytes = hex::decode(text).map_err(|_| bad)?;
+        let mut id = [0u8; 8];
+        for (dst, src) in id.iter_mut().zip(&bytes) {
+            *dst = *src;
+        }
+        Ok(Self(id))
     }
 }
 
 impl fmt::Display for BinaryId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let _ = self;
-        f.write_str("")
+        f.write_str(&hex::encode(&self.0))
     }
 }
 
@@ -97,8 +124,7 @@ impl FromStr for BinaryId {
 
 impl fmt::Display for Rev {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let _ = self;
-        f.write_str("")
+        write!(f, "{}", self.0)
     }
 }
 
@@ -106,15 +132,20 @@ impl FromStr for Rev {
     type Err = IdError;
 
     fn from_str(text: &str) -> Result<Self, IdError> {
-        let _ = text;
-        Err(IdError::Empty)
+        parse_dec(text).map(Self).ok_or(IdError::BadPart {
+            kind: None,
+            part: "rev",
+        })
     }
 }
 
 /// Writes `prefix` and the text form of `value`.
-fn write_prefixed(f: &mut fmt::Formatter<'_>, prefix: &str, value: &dyn fmt::Display) -> fmt::Result {
-    let _ = (prefix, value);
-    f.write_str("")
+fn write_prefixed(
+    f: &mut fmt::Formatter<'_>,
+    prefix: &str,
+    value: &dyn fmt::Display,
+) -> fmt::Result {
+    write!(f, "{prefix}{value}")
 }
 
 impl fmt::Display for FuncId {
@@ -143,8 +174,7 @@ impl fmt::Display for JumpTableId {
 
 impl fmt::Display for FileOffset {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let _ = self;
-        f.write_str("")
+        write!(f, "file:{:#x}", self.0)
     }
 }
 
@@ -168,8 +198,7 @@ impl fmt::Display for TxId {
 
 impl fmt::Display for OpId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let _ = self;
-        f.write_str("")
+        write!(f, "op:{:#x}:{}", self.addr, self.seq)
     }
 }
 

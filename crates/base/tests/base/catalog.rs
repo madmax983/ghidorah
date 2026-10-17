@@ -104,7 +104,14 @@ const DIAGS: [(u16, &str); 15] = [
 fn rows(infos: &[CodeInfo], reserved: &[catalog::Reserved]) -> Vec<(u16, String, String, bool)> {
     let mut out: Vec<(u16, String, String, bool)> = infos
         .iter()
-        .map(|i| (i.num, i.name.to_string(), i.class.as_str().to_string(), i.retry))
+        .map(|i| {
+            (
+                i.num,
+                i.name.to_string(),
+                i.class.as_str().to_string(),
+                i.retry,
+            )
+        })
         .chain(
             reserved
                 .iter()
@@ -186,7 +193,10 @@ fn check_text(info: &CodeInfo, failures: &mut Vec<String>) {
             failures.push(format!("{} has an empty {what}", info.name));
         }
         if !text.ends_with('.') {
-            failures.push(format!("{} {what} does not end with a period: {text}", info.name));
+            failures.push(format!(
+                "{} {what} does not end with a period: {text}",
+                info.name
+            ));
         }
         for finding in ste::check_agent_text(text) {
             failures.push(format!("{} {what}: {finding}", info.name));
@@ -232,7 +242,10 @@ fn templates_render() {
     assert_eq!(placeholders("The {field} of {tool}."), ["field", "tool"]);
     assert_eq!(placeholders("No {} or {Bad} or {x"), Vec::<&str>::new());
     assert_eq!(
-        render("The {field} of {tool}.", &[("field", "target"), ("tool", "func_get")]),
+        render(
+            "The {field} of {tool}.",
+            &[("field", "target"), ("tool", "func_get")]
+        ),
         "The target of func_get."
     );
     assert_eq!(render("The {field}.", &[]), "The {field}.");
@@ -257,6 +270,9 @@ fn ac_026_errors_doc_golden() {
     for reserved in ErrorCode::RESERVED {
         assert!(body.contains(reserved.name), "{}", reserved.name);
     }
-    let header = Header::new("ghidorah-base::catalog::errors_markdown", ERRORS_DOC_VERSION);
+    let header = Header::new(
+        "ghidorah-base::catalog::errors_markdown",
+        ERRORS_DOC_VERSION,
+    );
     golden::assert_text(&repo_root().join(ERRORS_DOC_PATH), &header, &body);
 }

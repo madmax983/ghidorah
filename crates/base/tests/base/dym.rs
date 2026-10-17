@@ -34,7 +34,10 @@ fn ac_047_did_you_mean() {
     let mut fuel = Fuel::unlimited();
     let backward = did_you_mean("abcdef", ties.iter().rev().copied(), &mut fuel);
     assert_eq!(forward, backward);
-    assert_eq!(names(&forward), ["abcdef", "abcdeg", "abcdfe", "abdcef", "bacdef"]);
+    assert_eq!(
+        names(&forward),
+        ["abcdef", "abcdeg", "abcdfe", "abdcef", "bacdef"]
+    );
     assert_eq!(forward.len(), MAX_SUGGESTIONS);
     let distances: Vec<usize> = forward.iter().map(|s| s.distance).collect();
     assert_eq!(distances, [0, 1, 1, 1, 1]);

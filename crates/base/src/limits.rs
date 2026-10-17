@@ -46,23 +46,23 @@ pub struct Limits {
 impl Limits {
     /// The default caps of Section 4.7.
     pub const DEFAULT: Self = Self {
-        file_size: 0,
-        program_headers: 0,
-        sections: 0,
-        symbols: 0,
-        relocations: 0,
-        notes_per_segment: 0,
-        string_len: 0,
-        fdes: 0,
-        cfa_insns_per_fde: 0,
-        plt_scan_bytes: 0,
-        pe_import_dlls: 0,
-        pe_imports_per_dll: 0,
-        pe_exports: 0,
-        pe_tls_callbacks: 0,
-        pe_pdata_entries: 0,
-        pe_unwind_depth: 0,
-        pe_debug_entries: 0,
+        file_size: 1 << 30,
+        program_headers: 65_535,
+        sections: 65_535,
+        symbols: 4_194_304,
+        relocations: 16_777_216,
+        notes_per_segment: 4_096,
+        string_len: 4_096,
+        fdes: 1_048_576,
+        cfa_insns_per_fde: 4_096,
+        plt_scan_bytes: 16 << 20,
+        pe_import_dlls: 4_096,
+        pe_imports_per_dll: 65_536,
+        pe_exports: 65_536,
+        pe_tls_callbacks: 256,
+        pe_pdata_entries: 1_048_576,
+        pe_unwind_depth: 32,
+        pe_debug_entries: 64,
     };
 }
 
@@ -98,11 +98,20 @@ pub struct Bound {
 /// An `entry_size` of 0 skips the byte clamp. The result also fits in `usize`.
 #[must_use]
 pub fn bounded_count(count: u64, entry_size: u64, remaining_bytes: u64, limit: u64) -> Bound {
-    let _ = (entry_size, remaining_bytes, limit);
+    let (n, clamp) = match remaining_bytes.checked_div(entry_size) {
+        Some(fit) if count > fit => (fit, Some(Clamp::Bytes)),
+        _ => (count, None),
+    };
+    let (n, clamp) = if n > limit {
+        (limit, Some(Clamp::Limit))
+    } else {
+        (n, clamp)
+    };
+    let count_usize = usize::try_from(n).unwrap_or(usize::MAX);
     Bound {
         requested: count,
-        count: 0,
-        clamp: None,
+        count: count_usize,
+        clamp,
     }
 }
 
@@ -115,5 +124,5 @@ pub fn bounded_vec<T>(
     limit: u64,
 ) -> (Vec<T>, Bound) {
     let bound = bounded_count(count, entry_size, remaining_bytes, limit);
-    (Vec::new(), bound)
+    (Vec::with_capacity(bound.count), bound)
 }
