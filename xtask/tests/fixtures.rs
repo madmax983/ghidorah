@@ -172,15 +172,17 @@ fn fixtures_and_golden_commands() {
 }
 
 #[test]
-fn fixtures_and_golden_are_commands_of_the_binary() {
+fn fixtures_golden_and_oracle_are_commands_of_the_binary() {
     // Each row: the arguments, the exit code and a part of the error text.
-    let cases: [(&[&str], i32, &str); 6] = [
+    let cases: [(&[&str], i32, &str); 8] = [
         (&["fixtures", "check"], 0, ""),
         (&["golden", "headers"], 0, ""),
         (&["fixtures", "bogus"], 2, "cargo xtask fixtures <"),
         (&["golden"], 2, "cargo xtask golden <"),
         (&["golden", "x86", "extra"], 2, "|headers|x86>"),
-        (&["no-such-command"], 2, "|fixtures|golden>"),
+        (&["oracle"], 2, "cargo xtask oracle <"),
+        (&["oracle", "bogus"], 2, "[--check]|bash>"),
+        (&["no-such-command"], 2, "|golden|oracle>"),
     ];
     for (args, code, error) in cases {
         let out = std::process::Command::new(env!("CARGO_BIN_EXE_xtask"))
