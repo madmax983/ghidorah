@@ -8,7 +8,7 @@
 //! | a file with `R_X86_64_RELATIVE` or `R_X86_64_64` relocations | the value that such a relocation puts in its slot |
 //! | a file without such relocations | a value in a run of [`MIN_RUN`] or more code pointers |
 //!
-//! [`start_at`] tests each target. A target that passes the tests starts a function with the
+//! The analyzer tests each target. A target that passes the tests starts a function with the
 //! reason `DataPtr`, confidence [`CONFIDENCE`] and `R_DATA_CODE_PTR`. The tests are:
 //!
 //! - A padding head (`nop`, `int3` or a 0 byte) moves the target to the next other instruction.
