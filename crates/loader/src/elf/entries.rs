@@ -9,19 +9,13 @@ use std::collections::BTreeMap;
 
 use super::consts::{
     DT_FINI, DT_FINI_ARRAY, DT_FINI_ARRAYSZ, DT_INIT, DT_INIT_ARRAY, DT_INIT_ARRAYSZ,
-    DT_PREINIT_ARRAY, DT_PREINIT_ARRAYSZ, R_X86_64_RELATIVE,
+    DT_PREINIT_ARRAY, DT_PREINIT_ARRAYSZ, R_X86_64_RELATIVE, SHT_FINI_ARRAY, SHT_INIT_ARRAY,
+    SHT_PREINIT_ARRAY,
 };
 use super::dynamic::Dyn;
 use super::view::{Cx, Fields, entry, va_bytes};
 use crate::binary::{Entry, EntryKind, Reloc, RelocForm, RelocType, Section, SectionKind};
 use crate::memmap::MemoryMap;
-
-/// `SHT_INIT_ARRAY`.
-const SHT_INIT_ARRAY: u32 = 14;
-/// `SHT_FINI_ARRAY`.
-const SHT_FINI_ARRAY: u32 = 15;
-/// `SHT_PREINIT_ARRAY`.
-const SHT_PREINIT_ARRAY: u32 = 16;
 
 /// The arrays: dynamic tags, section type and entry kind.
 const ARRAYS: [(u64, u64, u32, EntryKind); 3] = [

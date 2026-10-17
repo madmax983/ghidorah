@@ -29,11 +29,6 @@ impl Dyn {
     pub(crate) fn get(&self, tag: u64) -> Option<u64> {
         self.entries.iter().find(|e| e.tag == tag).map(|e| e.val)
     }
-
-    /// Tells if the file has a dynamic table.
-    pub(crate) fn is_empty(&self) -> bool {
-        self.entries.is_empty()
-    }
 }
 
 /// Reads the dynamic entries.

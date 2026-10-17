@@ -53,21 +53,29 @@ impl Budget {
     }
 
     /// Takes `bytes` from the text cap. On `false`, the caller keeps no copy.
+    ///
+    /// After the first refusal, the cap refuses every later request.
     pub(crate) fn take_text(&mut self, bytes: u64, path: &str, diags: &mut Diags) -> bool {
+        if self.text_told {
+            return false;
+        }
         if let Some(left) = self.text_left.checked_sub(bytes) {
             self.text_left = left;
             return true;
         }
-        if !self.text_told {
-            self.text_told = true;
-            diags.push(
-                Diagnostic::new(DiagCode::Limit, path)
-                    .need(bytes)
-                    .have(self.text_left)
-                    .hint("the load keeps no more text"),
-            );
-        }
+        self.text_told = true;
+        diags.push(
+            Diagnostic::new(DiagCode::Limit, path)
+                .need(bytes)
+                .have(self.text_left)
+                .hint("the load keeps no more text"),
+        );
         false
+    }
+
+    /// Tells if the text cap refuses all requests now.
+    pub(crate) const fn text_spent(&self) -> bool {
+        self.text_told
     }
 
     /// Takes room for up to `want` relocations and gives the room that the cap allows.

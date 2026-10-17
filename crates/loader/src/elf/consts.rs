@@ -81,6 +81,12 @@ pub const SHT_NOBITS: u32 = 8;
 pub const SHT_REL: u32 = 9;
 /// Section type: dynamic symbol table.
 pub const SHT_DYNSYM: u32 = 11;
+/// Section type: init array.
+pub const SHT_INIT_ARRAY: u32 = 14;
+/// Section type: fini array.
+pub const SHT_FINI_ARRAY: u32 = 15;
+/// Section type: preinit array.
+pub const SHT_PREINIT_ARRAY: u32 = 16;
 /// Section type: extended section indexes of a symbol table.
 pub const SHT_SYMTAB_SHNDX: u32 = 18;
 /// Section type: RELR table.

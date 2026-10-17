@@ -34,12 +34,12 @@ mod view;
 
 use std::sync::Arc;
 
-use ghidorah_base::Limits;
+use ghidorah_base::{BinText, Limits};
 
-use consts::{EM_X86_64, ET_EXEC, PT_INTERP};
+use consts::{EM_X86_64, ET_EXEC, PT_INTERP, SHT_SYMTAB};
 use view::Cx;
 
-use crate::binary::{Arch, Binary, Format, Kind, SegmentKind, Sym};
+use crate::binary::{Arch, Binary, Format, Kind, SectionKind, SegmentKind, Sym};
 use crate::diag::{Diags, LoadError};
 use crate::limits::Budget;
 use crate::memmap::MemoryMap;
@@ -88,11 +88,7 @@ pub fn load(
     b.rpath = strings.rpath;
     b.runpath = strings.runpath;
 
-    let hash_count = if d.is_empty() {
-        None
-    } else {
-        hash::count(&mut cx, &map, &b.sections, &d)
-    };
+    let hash_count = hash::count(&mut cx, &map, &b.sections, &d);
     let mut syms = symbols::load(&mut cx, &map, &b.sections, &d, hash_count, &mut dynstr);
     version::apply(&mut cx, &map, &d, &mut dynstr, &mut syms.dynsym);
     b.exports = symbols::exports(&mut cx, &syms.dynsym.syms);
@@ -114,7 +110,7 @@ fn ordered(b: &Binary, syms: symbols::Symbols) -> Vec<Sym> {
     let symtab_index = b
         .sections
         .iter()
-        .find(|s| s.kind == crate::binary::SectionKind::Elf(consts::SHT_SYMTAB))
+        .find(|s| s.kind == SectionKind::Elf(SHT_SYMTAB))
         .map(|s| s.index);
     let dynsym_first = match (syms.dynsym_section, symtab_index) {
         (Some(d), Some(s)) => d < s,
@@ -130,7 +126,7 @@ fn ordered(b: &Binary, syms: symbols::Symbols) -> Vec<Sym> {
 }
 
 /// Reads the program interpreter of the first `PT_INTERP`.
-fn interp(cx: &mut Cx<'_>, b: &Binary) -> Option<ghidorah_base::BinText> {
+fn interp(cx: &mut Cx<'_>, b: &Binary) -> Option<BinText> {
     let s = b
         .segments
         .iter()

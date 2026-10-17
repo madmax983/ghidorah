@@ -129,9 +129,12 @@ impl<'a> StrTab<'a> {
     /// A string longer than the string limit gets cut with `E_LIMIT`. A start past the
     /// table or a string with no NUL byte gives `E_OOB`. The table tells each problem once.
     pub(crate) fn get(&mut self, cx: &mut Cx<'_>, off: u64) -> BinText {
+        // A spent text cap keeps no copy, so the scan of the string has no use.
+        if cx.budget.text_spent() {
+            return BinText::default();
+        }
         let raw = self.raw(cx, off);
-        let path = self.path.clone();
-        cx.text(raw, &path)
+        cx.text(raw, &self.path)
     }
 
     /// Gives the bytes of the C string at `off` without a copy.

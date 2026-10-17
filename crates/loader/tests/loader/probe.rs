@@ -150,6 +150,8 @@ fn unknown_and_short_files_are_malformed() {
     for (bytes, code) in [
         (Vec::new(), "E_OOB"),
         (vec![0x7f, b'E'], "E_OOB"),
+        (vec![0x7f, b'E', b'L', b'F'], "E_OOB"),
+        (vec![0x7f, b'E', b'L', b'F', 2, 1, 1, 0], "E_OOB"),
         (b"hello world".to_vec(), "E_BAD_MAGIC"),
         (vec![0x7f, b'E', b'L', b'F', 3, 1, 1], "E_BAD_MAGIC"),
     ] {
@@ -177,4 +179,55 @@ fn file_size_limit() {
     assert_eq!(e.code(), ErrorCode::LimitExceeded);
     assert!(e.to_string().contains("17 bytes"));
     assert!(e.diagnostic().is_none());
+}
+
+#[test]
+fn diagnostic_and_error_text() {
+    use ghidorah_base::DiagCode;
+    use ghidorah_loader::Diagnostic;
+    let full = Diagnostic::new(DiagCode::Oob, "elf.phdr")
+        .at(0x40)
+        .need(0x2d8)
+        .have(0x10)
+        .hint("cut table");
+    assert_eq!(
+        full.to_string(),
+        "E_OOB at elf.phdr, offset 0x40, need 0x2d8, have 0x10: cut table"
+    );
+    assert_eq!(
+        Diagnostic::new(DiagCode::Loop, "x").to_string(),
+        "E_LOOP at x"
+    );
+    let e = LoadError::Malformed(full.clone());
+    assert_eq!(e.diagnostic(), Some(&full));
+    assert!(e.to_string().starts_with("The file is malformed: E_OOB"));
+    let u = LoadError::UnsupportedFormat {
+        detected: "macho64".to_string(),
+        supported: SUPPORTED_FORMATS,
+    };
+    assert_eq!(u.diagnostic(), None);
+    assert_eq!(u.code(), ErrorCode::UnsupportedFormat);
+}
+
+#[test]
+fn diagnostics_above_the_cap_are_counted() {
+    use ghidorah_loader::diag::MAX_DIAGNOSTICS;
+    use ghidorah_testkit::elf::{ElfBuilder, Loc, Reloc, RelocTable, Section};
+    // Each relocation type gives one diagnostic, so 1,100 types pass the cap.
+    let mut b = ElfBuilder::dyn_object()
+        .section(Section::code(".text", &[0xc3]))
+        .section(Section::data(".data", &[0u8; 8]));
+    for kind in 0..1100u32 {
+        b = b.reloc(Reloc {
+            table: RelocTable::Rela,
+            at: Loc::section(".data", 0),
+            kind: 0x1000 + kind,
+            sym: None,
+            addend: 0,
+        });
+    }
+    let (binary, _) = crate::support::load_ok(&b.build());
+    assert_eq!(binary.diagnostics.len(), MAX_DIAGNOSTICS);
+    let kept = u64::try_from(MAX_DIAGNOSTICS).expect("cap");
+    assert_eq!(binary.diagnostics_dropped, 1100 - kept);
 }

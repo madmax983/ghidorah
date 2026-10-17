@@ -389,6 +389,91 @@ fn other_machine_loads_for_survey() {
 }
 
 #[test]
+fn raw_value_tables() {
+    use ghidorah_loader::SymKind as K;
+    let kinds: Vec<K> = (0..=11).map(K::from_raw).collect();
+    assert_eq!(
+        kinds,
+        vec![
+            K::NoType,
+            K::Object,
+            K::Func,
+            K::Section,
+            K::File,
+            K::Common,
+            K::Tls,
+            K::Other(7),
+            K::Other(8),
+            K::Other(9),
+            K::Ifunc,
+            K::Other(11),
+        ]
+    );
+    let binds: Vec<SymBind> = [0, 1, 2, 3, 10]
+        .into_iter()
+        .map(SymBind::from_raw)
+        .collect();
+    assert_eq!(
+        binds,
+        vec![
+            SymBind::Local,
+            SymBind::Global,
+            SymBind::Weak,
+            SymBind::Other(3),
+            SymBind::Unique
+        ]
+    );
+    let vis: Vec<SymVis> = (0..4).map(SymVis::from_other).collect();
+    assert_eq!(
+        vis,
+        vec![
+            SymVis::Default,
+            SymVis::Internal,
+            SymVis::Hidden,
+            SymVis::Protected
+        ]
+    );
+    assert_eq!(
+        SymVis::from_other(0xfe),
+        SymVis::Hidden,
+        "only the low 2 bits count"
+    );
+    let named: Vec<u32> = (0..=50)
+        .filter(|t| RelocType(*t).x86_64_name().is_some())
+        .collect();
+    let want: Vec<u32> = (0..=38).chain(41..=45).collect();
+    assert_eq!(named, want);
+    for t in want {
+        let name = RelocType(t).x86_64_name().expect("name");
+        assert!(name.starts_with("R_X86_64_"), "{name}");
+    }
+}
+
+#[test]
+fn pltrel_must_name_rel_or_rela() {
+    let bytes = exports_builder(HashStyle::Gnu)
+        .strip_section_headers()
+        .malformed(Malformed::Dynamic(20, 99))
+        .build();
+    let b = load_ok(&bytes).0;
+    let codes: Vec<DiagCode> = b.diagnostics.iter().map(|d| d.code).collect();
+    assert_eq!(codes, vec![DiagCode::BadEntsize]);
+    assert!(b.relocs.iter().all(|r| r.source != RelocSource::DynPlt));
+    let rel = exports_builder(HashStyle::Gnu)
+        .strip_section_headers()
+        .malformed(Malformed::Dynamic(20, 17))
+        .build();
+    let b = load_ok(&rel).0;
+    let plt: Vec<_> = b
+        .relocs
+        .iter()
+        .filter(|r| r.source == RelocSource::DynPlt)
+        .collect();
+    assert!(!plt.is_empty(), "DT_PLTREL = DT_REL reads 16-byte entries");
+    assert!(plt.iter().all(|r| r.form == RelocForm::Rel));
+}
+
+#[test]
 fn bad_section_tables_give_diagnostics() {
     let base = || {
         ElfBuilder::exec()

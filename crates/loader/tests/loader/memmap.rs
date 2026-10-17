@@ -254,6 +254,27 @@ fn memmap_map_all_sweeps_in_list_order() {
 }
 
 #[test]
+fn memmap_map_all_marks_a_region_that_starts_first() {
+    // Region 1 starts below region 0, so it is live when region 0 starts.
+    let mut map = MemoryMap::new(Arc::from(vec![0u8; 0x200]));
+    let over = map.map_all(vec![
+        region(0x100, 0x1ff, 0, 0x100),
+        region(0x50, 0x150, 0, 0x101),
+    ]);
+    assert_eq!(over, vec![1], "region 1 covers a part of region 0");
+    let vas: Vec<(u64, u64)> = map.regions().map(|r| (r.va.first, r.va.last)).collect();
+    assert_eq!(vas, vec![(0x50, 0x150), (0x151, 0x1ff)]);
+    assert_eq!(map.region_at(0x151).map(|r| r.file_off), Some(0x51));
+    assert_eq!(map.file().len(), 0x200);
+    assert_eq!(map.file_arc().len(), 0x200);
+    // Old regions of the map come first, so a new region wins over them.
+    let mut old = MemoryMap::new(Arc::from(vec![0u8; 0x200]));
+    old.map(region(0x0, 0xff, 0, 0x100));
+    assert_eq!(old.map_all(vec![region(0x80, 0x17f, 0x80, 0x100)]), vec![0]);
+    assert_eq!(old.len(), 2);
+}
+
+#[test]
 fn perms_bits_and_text() {
     assert_eq!(Perms::from_elf(4).to_string(), "r--");
     assert_eq!(Perms::from_elf(5).to_string(), "r-x");
