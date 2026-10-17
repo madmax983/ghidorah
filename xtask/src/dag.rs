@@ -38,6 +38,7 @@ pub const ALLOWED: &[(&str, &str)] = &[
     ("ghidorah-analysis", "ghidorah-kernel"),
     ("ghidorah-analysis", "ghidorah-json"),
     ("ghidorah-decomp", "ghidorah-analysis"),
+    ("ghidorah-decomp", "ghidorah-base"),
     ("ghidorah-decomp", "ghidorah-ir"),
     ("ghidorah-decomp", "ghidorah-db"),
     ("ghidorah-decomp", "ghidorah-types"),
@@ -60,7 +61,11 @@ pub const ALLOWED: &[(&str, &str)] = &[
 ];
 
 /// The allowed dev edges beyond [`ALLOWED`] and [`DEV_ANY`].
-pub const DEV_ALLOWED: &[(&str, &str)] = &[("ghidorah-loader", "ghidorah-oracle")];
+pub const DEV_ALLOWED: &[(&str, &str)] = &[
+    ("ghidorah-loader", "ghidorah-oracle"),
+    ("ghidorah-decomp", "ghidorah-json"),
+    ("ghidorah-decomp", "ghidorah-loader"),
+];
 
 /// Every package except this one can take it as a dev-dependency.
 pub const DEV_ANY: &str = "ghidorah-testkit";
