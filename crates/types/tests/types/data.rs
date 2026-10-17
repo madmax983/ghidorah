@@ -1,4 +1,4 @@
-//! Noreturn lists, the syscall table, calling conventions and data models.
+//! Noreturn lists, the syscall table, calling conventions, data models and license rows.
 
 use ghidorah_base::SyscallId;
 use ghidorah_types::noreturn::{self, NoreturnList, match_name};
@@ -7,6 +7,8 @@ use ghidorah_types::{
     CALL_CONVS, DataError, DataModel, NORETURN_BY_FORMAT, Prim, SizeAlign, call_conv, cc,
     noreturn_list,
 };
+
+use crate::support::root;
 
 #[test]
 fn elf_noreturn_list() {
@@ -196,4 +198,38 @@ fn sysv_data_model() {
     assert!(!m.is_signed(Prim::Double));
     assert!(Prim::Double.is_float() && !Prim::Double.is_integer());
     assert!(Prim::WChar.is_integer() && !Prim::Void.is_integer());
+}
+
+#[test]
+fn data_files_are_in_the_license_ledger() {
+    let read = |rel: &str| {
+        std::fs::read_to_string(root().join(rel)).unwrap_or_else(|e| panic!("{rel}: {e}"))
+    };
+    let notice = read("NOTICE");
+    let ledger = read("docs/licenses.md");
+    for (file, license) in [
+        (
+            "crates/types/data/noreturn_elf.txt",
+            "Apache License, Version 2.0",
+        ),
+        ("crates/types/data/syscalls_x86_64.txt", "Apache-2.0"),
+    ] {
+        assert!(
+            notice.contains(&format!("- {file}: ")),
+            "NOTICE lists {file}"
+        );
+        assert!(
+            ledger
+                .lines()
+                .any(|l| l.starts_with(&format!("| `{file}` ")) && l.ends_with("| WP-10 |")),
+            "docs/licenses.md has a row for {file}"
+        );
+        let header: Vec<String> = read(file)
+            .lines()
+            .take_while(|l| l.starts_with('#'))
+            .map(str::to_owned)
+            .collect();
+        assert!(header.iter().any(|l| l.starts_with("# Source: ")), "{file}");
+        assert!(header.iter().any(|l| l.contains(license)), "{file}");
+    }
 }

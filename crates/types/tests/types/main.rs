@@ -8,7 +8,7 @@
 //! | `layout` | AC-112a: SysV layouts, flexible arrays, by-value cycles |
 //! | `tier0` | AC-109: Tier-0 prototypes |
 //! | `store` | The type store, the C text and the type references |
-//! | `data` | Noreturn lists, the syscall table, calling conventions, data models |
+//! | `data` | Noreturn lists, the syscall table, calling conventions, data models, license rows |
 
 #![allow(clippy::panic, reason = "a test fails through a panic")]
 #![allow(
