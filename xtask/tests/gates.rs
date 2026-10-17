@@ -546,16 +546,19 @@ fn ac_018c_needs_order() {
 }
 
 #[test]
-fn ac_018c_pairs_follow_revision_3() {
+fn ac_018c_pairs_follow_revision_4() {
     let pairs: Vec<&str> = ac::PAIRS.iter().map(|(name, _)| *name).collect();
     let expected: Vec<String> = (1..=18).map(|n| format!("P{n}")).collect();
     assert_eq!(pairs, expected);
     let wps: usize = ac::PAIRS.iter().map(|(_, wps)| wps.len()).sum();
-    assert_eq!(wps, 34);
+    assert_eq!(wps, 35);
     assert_eq!(ac::position("18"), Some((6, 1)));
     assert_eq!(ac::position("16"), Some((7, 1)));
     assert_eq!(ac::position("20"), Some((9, 1)));
-    assert_eq!(ac::position("30"), Some((14, 1)));
+    assert_eq!(ac::position("19b"), Some((12, 0)));
+    assert_eq!(ac::position("23"), Some((12, 1)));
+    assert_eq!(ac::position("22b"), Some((13, 1)));
+    assert_eq!(ac::position("30"), Some((15, 1)));
     assert_eq!(ac::position("29"), Some((15, 0)));
     assert_eq!(ac::position("26"), Some((16, 0)));
     assert_eq!(ac::position("28"), Some((17, 1)));
