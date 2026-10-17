@@ -3,13 +3,14 @@
 //! The expression depth stays small, because safe folding limits it (the `fold` module), so
 //! these functions call themselves on the inputs of a node.
 
-use ghidorah_analysis::cc::loc_of;
-use ghidorah_base::{BinText, Caps, WarningCode};
+use std::fmt::Write as _;
+
+use ghidorah_base::{BinText, Caps};
 use ghidorah_ir::{Cc, FlagOp, Loc, OpId, Opc};
 
-use super::{Arity, Buf, CallRow, CallTarget, Printer, width_type};
-use crate::Warning;
-use crate::expr::{Call, Callee, Expr, Stmt, VarIdx};
+use super::calls::call_ret;
+use super::{Buf, Printer, width_type};
+use crate::expr::{Callee, Expr, Stmt, VarIdx};
 use crate::lattice;
 use crate::precedence::{self, ATOM, EQ, POSTFIX, TERNARY, UNARY};
 
@@ -18,9 +19,6 @@ pub const MAX_STRING: usize = 200;
 
 /// The largest number of characters of a name from the binary.
 pub const MAX_NAME: usize = 256;
-
-/// The registers of the arguments of a system call in order.
-const SYSCALL_ARGS: [&str; 6] = ["rdi", "rsi", "rdx", "r10", "r8", "r9"];
 
 /// The names of the flag operations in code order.
 const FLAG_OPS: [&str; 17] = [
@@ -71,11 +69,6 @@ pub(super) fn safe(raw: &str) -> String {
         .text
 }
 
-/// Tells if a name is a mangled C++ or Rust name.
-fn is_mangled(name: &str) -> bool {
-    name.starts_with("_Z") || name.starts_with("_R") || name.starts_with('?')
-}
-
 /// Gives a C string literal of `bytes`, at most [`MAX_STRING`] bytes, with `...` after a
 /// cut. Each byte outside the printable ASCII range prints as an escape.
 fn c_string(bytes: &[u8]) -> String {
@@ -88,7 +81,9 @@ fn c_string(bytes: &[u8]) -> String {
             b'\r' => out.push_str("\\r"),
             b'\t' => out.push_str("\\t"),
             0x20..=0x7e => out.push(char::from(b)),
-            _ => out.push_str(&format!("\\x{b:02x}")),
+            _ => {
+                let _ = write!(out, "\\x{b:02x}");
+            }
         }
     }
     out.push('"');
@@ -96,19 +91,6 @@ fn c_string(bytes: &[u8]) -> String {
         out.push_str("...");
     }
     out
-}
-
-/// Gives the variable that gets the result of a call statement: the `rax` result, or the
-/// first result of an opaque instruction.
-pub(super) fn call_ret(c: &Call) -> Option<VarIdx> {
-    c.rets
-        .iter()
-        .find(|(l, _)| *l == Loc::RAX)
-        .or_else(|| match c.callee {
-            Callee::Intrinsic(_) => c.rets.first(),
-            _ => None,
-        })
-        .map(|(_, v)| *v)
 }
 
 /// Gives the variable and the offset of an address `v` or `v + k`, with the op of the sum.
@@ -245,7 +227,7 @@ impl Printer<'_> {
     }
 
     /// Gives the text of a call of a helper: `__name(a, b)`.
-    fn helper(&mut self, name: &str, inputs: &[&Expr], buf: &mut Buf) -> (String, u8) {
+    pub(super) fn helper(&mut self, name: &str, inputs: &[&Expr], buf: &mut Buf) -> (String, u8) {
         let args: Vec<String> = inputs.iter().map(|x| self.expr(x, buf).0).collect();
         (format!("__{name}({})", args.join(", ")), POSTFIX)
     }
@@ -363,47 +345,48 @@ impl Printer<'_> {
             Expr::Ite {
                 op,
                 sub,
-                a,
-                b,
-                c,
+                a: first,
+                b: second,
+                c: third,
                 at,
                 ..
             } => {
                 buf.op(*at);
-                match op {
-                    Opc::Ite => {
-                        let (ta, pa) = self.expr(a, buf);
-                        let (tb, pb) = self.expr(b, buf);
-                        let (tc, pc) = self.expr(c, buf);
-                        (
-                            format!(
-                                "{} ? {} : {}",
-                                wrap(&ta, pa, TERNARY, true),
-                                wrap(&tb, pb, TERNARY, false),
-                                wrap(&tc, pc, TERNARY, false)
-                            ),
-                            TERNARY,
-                        )
-                    }
-                    Opc::Flags => {
-                        let name = FLAG_OPS
-                            .get(usize::from(
-                                FlagOp::from_code(*sub).map_or(255, FlagOp::code),
-                            ))
-                            .copied()
-                            .unwrap_or("op");
-                        self.helper(&format!("flags_{name}"), &[a, b, c], buf)
-                    }
-                    Opc::Insert => {
-                        let (ta, _) = self.expr(a, buf);
-                        let (tb, _) = self.expr(b, buf);
-                        let (tc, _) = self.expr(c, buf);
-                        (format!("__insert({ta}, {tb}, {tc}, {sub})"), POSTFIX)
-                    }
-                    other => self.helper(&other.name().to_ascii_lowercase(), &[a, b, c], buf),
-                }
+                self.three(*op, *sub, [first, second, third], buf)
             }
             Expr::Call(c) => (self.call_text(c, buf), POSTFIX),
+        }
+    }
+
+    /// Gives the text of a data op with three inputs: `Ite`, `Flags`, `Insert` or `FlagsSel`.
+    fn three(&mut self, op: Opc, sub: u8, inputs: [&Expr; 3], buf: &mut Buf) -> (String, u8) {
+        match op {
+            Opc::Ite => {
+                let [cond, yes, no] = inputs.map(|x| self.expr(x, buf));
+                (
+                    format!(
+                        "{} ? {} : {}",
+                        wrap(&cond.0, cond.1, TERNARY, true),
+                        wrap(&yes.0, yes.1, TERNARY, false),
+                        wrap(&no.0, no.1, TERNARY, false)
+                    ),
+                    TERNARY,
+                )
+            }
+            Opc::Flags => {
+                let name = FLAG_OPS
+                    .get(usize::from(
+                        FlagOp::from_code(sub).map_or(255, FlagOp::code),
+                    ))
+                    .copied()
+                    .unwrap_or("op");
+                self.helper(&format!("flags_{name}"), &inputs, buf)
+            }
+            Opc::Insert => {
+                let [base, part, low] = inputs.map(|x| self.expr(x, buf).0);
+                (format!("__insert({base}, {part}, {low}, {sub})"), POSTFIX)
+            }
+            other => self.helper(&other.name().to_ascii_lowercase(), &inputs, buf),
         }
     }
 
@@ -462,210 +445,56 @@ impl Printer<'_> {
     /// Gives the text of a data op with two inputs.
     fn binary(&mut self, op: Opc, w: u8, x: &Expr, y: &Expr, buf: &mut Buf) -> (String, u8) {
         if matches!(op, Opc::Xor | Opc::Sub) && x == y {
-            for e in x.preorder() {
-                if let Some(at) = e.at() {
+            for node in x.preorder() {
+                if let Some(at) = node.at() {
                     buf.op(at);
                 }
             }
             return (konst(0, w), ATOM);
         }
         if let (Opc::Add | Opc::Sub, Expr::Const { value, w: cw }) = (op, y) {
-            let v = *value & mask(*cw);
+            let bits = *value & mask(*cw);
             let top = (*cw).clamp(1, 64) - 1;
-            if v >> top & 1 == 1 && v != 1u64 << top {
+            if bits >> top & 1 == 1 && bits != 1u64 << top {
                 let flipped = if op == Opc::Add { Opc::Sub } else { Opc::Add };
                 let magnitude = Expr::Const {
-                    value: (v ^ mask(*cw)).wrapping_add(1) & mask(*cw),
+                    value: (bits ^ mask(*cw)).wrapping_add(1) & mask(*cw),
                     w: *cw,
                 };
-                if let Some(b) = precedence::binary(flipped) {
-                    return self.compare(b.text, b, w, x, &magnitude, buf);
+                if let Some(found) = precedence::binary(flipped) {
+                    return self.compare(found.text, found, w, x, &magnitude, buf);
                 }
             }
         }
-        if let Some(b) = precedence::binary(op) {
-            return self.compare(b.text, b, w, x, y, buf);
+        if let Some(found) = precedence::binary(op) {
+            return self.compare(found.text, found, w, x, y, buf);
         }
         match op {
             Opc::TestZ | Opc::TestNZ => self.test(op == Opc::TestZ, x, y, buf),
             Opc::Extract => {
-                let (t, p) = if matches!(y, Expr::Const { value: 0, .. }) {
+                let (text, prec) = if matches!(y, Expr::Const { value: 0, .. }) {
                     self.expr(x, buf)
                 } else {
-                    let (tx, px) = self.expr(x, buf);
-                    let (ty, py) = self.expr(y, buf);
-                    let s = precedence::SHIFT;
+                    let (low, low_prec) = self.expr(x, buf);
+                    let (count, count_prec) = self.expr(y, buf);
+                    let shift = precedence::SHIFT;
                     (
-                        format!("{} >> {}", wrap(&tx, px, s, false), wrap(&ty, py, s, true)),
-                        s,
+                        format!(
+                            "{} >> {}",
+                            wrap(&low, low_prec, shift, false),
+                            wrap(&count, count_prec, shift, true)
+                        ),
+                        shift,
                     )
                 };
                 (
-                    format!("({}){}", width_type(w), wrap(&t, p, UNARY, false)),
+                    format!("({}){}", width_type(w), wrap(&text, prec, UNARY, false)),
                     UNARY,
                 )
             }
             Opc::UMulHi => self.helper("mulhi_u", &[x, y], buf),
             Opc::SMulHi => self.helper("mulhi_s", &[x, y], buf),
             other => self.helper(&other.name().to_ascii_lowercase(), &[x, y], buf),
-        }
-    }
-
-    /// Gives the printed name of the callee `t` and adds a mangled-name warning at `site`.
-    fn callee_name(&mut self, t: u64, site: u64) -> String {
-        match self.env.callee_name(t) {
-            Some(raw) => {
-                if is_mangled(&raw) {
-                    self.warnings.push(Warning {
-                        code: WarningCode::NotDemangled,
-                        at: site,
-                    });
-                }
-                safe(&raw)
-            }
-            None => format!("FUN_{t:08x}"),
-        }
-    }
-
-    /// Gives the argument count of the direct callee `t`.
-    fn arity(&mut self, t: u64) -> Option<Arity> {
-        if let Some(found) = self.arity.get(&t) {
-            return *found;
-        }
-        let found = self
-            .env
-            .signature(t)
-            .map(|s| Arity {
-                named: s.params.len(),
-                variadic: s.variadic,
-            })
-            .or_else(|| {
-                self.env.param_count(t).map(|n| Arity {
-                    named: usize::from(n),
-                    variadic: false,
-                })
-            });
-        self.arity.insert(t, found);
-        found
-    }
-
-    /// Gives the count of the argument registers that the caller sets: one more than the
-    /// last one that holds a new value.
-    fn set_count(&self, c: &Call, regs: &[Loc]) -> usize {
-        regs.iter()
-            .rposition(|r| {
-                c.args
-                    .iter()
-                    .find(|(l, _)| l == r)
-                    .is_some_and(|(_, e)| !self.untouched(e, *r))
-            })
-            .map_or(0, |i| i.saturating_add(1))
-    }
-
-    /// Gives the argument texts of a call.
-    fn args(&mut self, c: &Call, regs: &[Loc], count: usize, buf: &mut Buf) -> String {
-        let mut out = Vec::new();
-        for r in regs.iter().take(count) {
-            let text = match c.args.iter().find(|(l, _)| l == r) {
-                Some((_, e)) => self.expr(e, buf).0,
-                None => "0".to_owned(),
-            };
-            out.push(text);
-        }
-        out.join(", ")
-    }
-
-    /// Gives the text of a call and adds its parts to `buf`.
-    pub(super) fn call_text(&mut self, c: &Call, buf: &mut Buf) -> String {
-        buf.op(c.at);
-        let site = c.at.addr;
-        let regs: Vec<Loc> = self
-            .env
-            .conv()
-            .int_args
-            .iter()
-            .filter_map(|n| loc_of(n))
-            .collect();
-        match &c.callee {
-            Callee::Direct(t) => {
-                let name = self.callee_name(*t, site);
-                let set = self.set_count(c, &regs);
-                let count = match self.arity(*t) {
-                    Some(a) if a.variadic => a.named.max(set),
-                    Some(a) => a.named,
-                    None => set,
-                };
-                buf.calls.push(CallRow {
-                    target: CallTarget::Addr(*t),
-                    name: name.clone(),
-                });
-                let args = self.args(c, &regs, count, buf);
-                format!("{name}({args})")
-            }
-            Callee::Indirect(target) => {
-                let targets = self.env.call_targets(site);
-                if targets.is_empty() {
-                    self.warnings.push(Warning {
-                        code: WarningCode::IndirectCallUnresolved,
-                        at: site,
-                    });
-                }
-                for t in targets {
-                    let name = self.callee_name(t, site);
-                    buf.calls.push(CallRow {
-                        target: CallTarget::Addr(t),
-                        name,
-                    });
-                }
-                let (t, p) = self.expr(target, buf);
-                let count = self.set_count(c, &regs);
-                let args = self.args(c, &regs, count, buf);
-                format!("(*{})({args})", wrap(&t, p, UNARY, true))
-            }
-            Callee::Syscall => {
-                let regs: Vec<Loc> = SYSCALL_ARGS.iter().filter_map(|n| loc_of(n)).collect();
-                let nr = c.args.iter().find_map(|(l, e)| match (l, e) {
-                    (&Loc::RAX, Expr::Const { value, .. }) => Some(*value),
-                    _ => None,
-                });
-                let count = self.set_count(c, &regs);
-                let args = self.args(c, &regs, count, buf);
-                match nr {
-                    Some(nr) => {
-                        let id = self
-                            .env
-                            .syscall_name(nr)
-                            .map_or_else(|| nr.to_string(), str::to_owned);
-                        let name = format!("sys_{id}");
-                        buf.calls.push(CallRow {
-                            target: CallTarget::Syscall(format!("sys:{id}")),
-                            name: name.clone(),
-                        });
-                        format!("{name}({args})")
-                    }
-                    None => {
-                        let rax = c
-                            .args
-                            .iter()
-                            .find(|(l, _)| *l == Loc::RAX)
-                            .map_or_else(|| "0".to_owned(), |(_, e)| self.expr(e, buf).0);
-                        let sep = if args.is_empty() { "" } else { ", " };
-                        format!("syscall({rax}{sep}{args})")
-                    }
-                }
-            }
-            Callee::Intrinsic(id) => {
-                let name = self
-                    .names
-                    .name(*id)
-                    .map_or_else(|| format!("intrinsic_{}", id.0), str::to_owned);
-                let mut inputs: Vec<&Expr> = c.args.iter().map(|(_, e)| e).collect();
-                if let Some(m) = &c.mem {
-                    inputs.push(m);
-                }
-                self.helper(&name, &inputs, buf).0
-            }
-            Callee::Unimpl => "__unimpl()".to_owned(),
         }
     }
 }

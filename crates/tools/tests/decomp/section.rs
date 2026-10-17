@@ -186,7 +186,7 @@ fn a_small_budget_cuts_the_window() {
     let longest = p
         .funcs()
         .iter()
-        .map(|f| f.id())
+        .map(ghidorah_db::FuncView::id)
         .max_by_key(|f| {
             ghidorah_decomp::render(
                 p,

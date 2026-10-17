@@ -71,8 +71,8 @@ pub struct Binary {
 }
 
 /// Gives a binary operator.
-const fn op(text: &'static str, prec: u8, signed: bool) -> Option<Binary> {
-    Some(Binary { text, prec, signed })
+const fn op(text: &'static str, prec: u8, signed: bool) -> Binary {
+    Binary { text, prec, signed }
 }
 
 /// Gives the C operator of a binary L1 opcode. An opcode that prints as a call, for example
@@ -80,25 +80,25 @@ const fn op(text: &'static str, prec: u8, signed: bool) -> Option<Binary> {
 #[must_use]
 pub const fn binary(opc: Opc) -> Option<Binary> {
     match opc {
-        Opc::Mul => op("*", MUL, false),
-        Opc::UDiv => op("/", MUL, false),
-        Opc::SDiv => op("/", MUL, true),
-        Opc::URem => op("%", MUL, false),
-        Opc::SRem => op("%", MUL, true),
-        Opc::Add => op("+", ADD, false),
-        Opc::Sub => op("-", ADD, false),
-        Opc::Shl => op("<<", SHIFT, false),
-        Opc::LShr => op(">>", SHIFT, false),
-        Opc::AShr => op(">>", SHIFT, true),
-        Opc::ULt => op("<", REL, false),
-        Opc::ULe => op("<=", REL, false),
-        Opc::SLt => op("<", REL, true),
-        Opc::SLe => op("<=", REL, true),
-        Opc::Eq => op("==", EQ, false),
-        Opc::Ne => op("!=", EQ, false),
-        Opc::And => op("&", BIT_AND, false),
-        Opc::Xor => op("^", BIT_XOR, false),
-        Opc::Or => op("|", BIT_OR, false),
+        Opc::Mul => Some(op("*", MUL, false)),
+        Opc::UDiv => Some(op("/", MUL, false)),
+        Opc::SDiv => Some(op("/", MUL, true)),
+        Opc::URem => Some(op("%", MUL, false)),
+        Opc::SRem => Some(op("%", MUL, true)),
+        Opc::Add => Some(op("+", ADD, false)),
+        Opc::Sub => Some(op("-", ADD, false)),
+        Opc::Shl => Some(op("<<", SHIFT, false)),
+        Opc::LShr => Some(op(">>", SHIFT, false)),
+        Opc::AShr => Some(op(">>", SHIFT, true)),
+        Opc::ULt => Some(op("<", REL, false)),
+        Opc::ULe => Some(op("<=", REL, false)),
+        Opc::SLt => Some(op("<", REL, true)),
+        Opc::SLe => Some(op("<=", REL, true)),
+        Opc::Eq => Some(op("==", EQ, false)),
+        Opc::Ne => Some(op("!=", EQ, false)),
+        Opc::And => Some(op("&", BIT_AND, false)),
+        Opc::Xor => Some(op("^", BIT_XOR, false)),
+        Opc::Or => Some(op("|", BIT_OR, false)),
         _ => None,
     }
 }
@@ -116,9 +116,10 @@ pub const fn negated(op: Opc) -> Option<&'static str> {
     }
 }
 
-/// Tells if a child with the number `child` needs parentheses under an operator with the
-/// number `parent`. `right` is true for the right operand of a binary operator and for the
-/// operand of a prefix operator.
+/// Tells if a child with the number `child` needs parentheses under the number `parent`.
+///
+/// `right` is true for the right operand of a binary operator and for the operand of a prefix
+/// operator.
 #[must_use]
 pub const fn parens(child: u8, parent: u8, right: bool) -> bool {
     child < parent || (right && child == parent)

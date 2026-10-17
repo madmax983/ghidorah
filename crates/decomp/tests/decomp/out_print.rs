@@ -204,7 +204,7 @@ pub fn decomp(specs: Vec<Spec>, vars: Vec<Var>, tree: Tree) -> Decomp {
     }
 }
 
-/// Gives the text lines of a print with NoEnv.
+/// Gives the text lines of a print with `NoEnv`.
 pub fn text_of(d: &Decomp) -> Vec<String> {
     print::print(d, &NoEnv, &NoNames, "f")
         .lines

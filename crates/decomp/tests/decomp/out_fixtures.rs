@@ -347,18 +347,18 @@ fn output_json(out: &Output) -> String {
 #[test]
 fn ac_104a_decomp_determinism() {
     for name in ["hello.gcc-O2", "switch.gcc-O0", "socket_client.clang-O2"] {
-        let (a, b) = (fresh(name), fresh(name));
+        let (one, two) = (fresh(name), fresh(name));
         let mut count = 0;
-        for f in a.funcs() {
+        for f in one.funcs() {
             let id = f.id();
             let render = |p: &Program| {
                 ghidorah_decomp::render(p, id, &Opts::default(), &NoNames, &mut Fuel::unlimited())
                     .expect("the render")
             };
-            let (x, y, z) = (render(&a), render(&b), render(&a));
-            assert!(!x.lines.is_empty(), "{name} {id}");
-            assert_eq!(output_json(&x), output_json(&y), "{name} {id}");
-            assert_eq!(output_json(&x), output_json(&z), "{name} {id}");
+            let (first, other, again) = (render(&one), render(&two), render(&one));
+            assert!(!first.lines.is_empty(), "{name} {id}");
+            assert_eq!(output_json(&first), output_json(&other), "{name} {id}");
+            assert_eq!(output_json(&first), output_json(&again), "{name} {id}");
             count += 1;
         }
         assert!(count > 5, "{name}: {count}");
@@ -383,78 +383,46 @@ fn type_where(p: &Program, pick: impl Fn(&Type) -> bool) -> TypeId {
         .expect("the store holds the type")
 }
 
-#[test]
-fn ac_104b_cache_invalidation() {
-    let mut p = program("hello.gcc-O0").clone();
-    let (run, finish) = (entry_of(&p, "run"), entry_of(&p, "finish"));
-    let opts = Opts::default();
-    let mut cache = Cache::new(8);
-    let mut look = |p: &Program| {
-        cache
-            .render(p, fid(run), &opts, &NoNames, &mut Fuel::unlimited())
-            .map(|(out, hit)| (out, hit))
-            .expect("the render")
+/// Makes the edit of one step of the cache test.
+type Make = Box<dyn Fn(&ghidorah_db::Tx<'_>) -> Edit>;
+
+/// Gives the edits of the cache test: renames, a retype, a signature and a comment.
+fn cache_steps(p: &Program, run: u64, finish: u64, var: &VarId) -> Vec<(&'static str, Make)> {
+    let int = type_where(p, |t| *t == Type::Prim(Prim::Int));
+    let sig = type_where(p, |t| matches!(t, Type::Func(_)));
+    let rename = |addr: u64, name: &'static str| -> Make {
+        Box::new(move |tx| Edit::SetName {
+            addr: Address::ram(addr),
+            key: None,
+            kind: SymKind::Function,
+            primary: true,
+            name: Some(tx.fact(name.to_owned())),
+            evidence: Vec::new(),
+        })
     };
-    let (first, hit) = look(&p);
-    assert!(!hit, "the first lookup misses");
-    assert!(look(&p).1, "the second lookup hits");
-    let var = first
-        .vars
-        .first()
-        .map(|v| v.id.clone())
-        .expect("run has a variable");
-    let steps: [(&str, Box<dyn Fn(&ghidorah_db::Tx<'_>) -> Edit>); 6] = [
-        (
-            "rename of the function",
-            Box::new(move |tx| Edit::SetName {
-                addr: Address::ram(run),
-                key: None,
-                kind: SymKind::Function,
-                primary: true,
-                name: Some(tx.fact("run_renamed".to_owned())),
-                evidence: Vec::new(),
-            }),
-        ),
-        (
-            "rename of a callee",
-            Box::new(move |tx| Edit::SetName {
-                addr: Address::ram(finish),
-                key: None,
-                kind: SymKind::Function,
-                primary: true,
-                name: Some(tx.fact("finish_renamed".to_owned())),
-                evidence: Vec::new(),
-            }),
-        ),
+    let (named, typed) = (var.clone(), var.clone());
+    vec![
+        ("rename of the function", rename(run, "run_renamed")),
+        ("rename of a callee", rename(finish, "finish_renamed")),
         (
             "rename of a variable",
-            Box::new({
-                let var = var.clone();
-                move |tx| Edit::SetVarFact {
-                    var: var.clone(),
-                    field: VarField::Name(Some(tx.fact("count".to_owned()))),
-                }
+            Box::new(move |tx| Edit::SetVarFact {
+                var: named.clone(),
+                field: VarField::Name(Some(tx.fact("count".to_owned()))),
             }),
         ),
         (
             "retype of a variable",
-            Box::new({
-                let var = var.clone();
-                let int = type_where(&p, |t| *t == Type::Prim(Prim::Int));
-                move |tx| Edit::SetVarFact {
-                    var: var.clone(),
-                    field: VarField::Type(Some(tx.fact(int))),
-                }
+            Box::new(move |tx| Edit::SetVarFact {
+                var: typed.clone(),
+                field: VarField::Type(Some(tx.fact(int))),
             }),
         ),
         (
             "signature of a callee",
-            Box::new({
-                let sig = type_where(&p, |t| matches!(t, Type::Func(_)));
-                move |tx| Edit::SetSignature {
-                    id: fid(finish),
-                    sig: Some(tx.fact(sig)),
-                }
+            Box::new(move |tx| Edit::SetSignature {
+                id: fid(finish),
+                sig: Some(tx.fact(sig)),
             }),
         ),
         (
@@ -465,7 +433,29 @@ fn ac_104b_cache_invalidation() {
                 text: Some(tx.fact("entry".to_owned())),
             }),
         ),
-    ];
+    ]
+}
+
+#[test]
+fn ac_104b_cache_invalidation() {
+    let mut p = program("hello.gcc-O0").clone();
+    let (run, finish) = (entry_of(&p, "run"), entry_of(&p, "finish"));
+    let opts = Opts::default();
+    let mut cache = Cache::new(8);
+    let mut look = |p: &Program| {
+        cache
+            .render(p, fid(run), &opts, &NoNames, &mut Fuel::unlimited())
+            .expect("the render")
+    };
+    let (first, hit) = look(&p);
+    assert!(!hit, "the first lookup misses");
+    assert!(look(&p).1, "the second lookup hits");
+    let var = first
+        .vars
+        .first()
+        .map(|v| v.id.clone())
+        .expect("run has a variable");
+    let steps = cache_steps(&p, run, finish, &var);
     let mut last = first;
     for (what, make) in steps {
         commit(&mut p, |tx| make(tx));

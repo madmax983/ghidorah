@@ -176,13 +176,14 @@ pub fn infer(view: &View, env: &dyn PrintEnv, stores: &Stores<'_>) -> Vec<Option
     };
     let program = stores.program.is_some();
     for (i, v) in view.vars.iter().enumerate() {
-        if program && let Some(id) = env.var_type(&v.id) {
-            if let Some(slot) = seeds.fixed.get_mut(i) {
-                *slot = Some(Ty {
-                    store: Store::Program,
-                    id,
-                });
-            }
+        if program
+            && let Some(id) = env.var_type(&v.id)
+            && let Some(slot) = seeds.fixed.get_mut(i)
+        {
+            *slot = Some(Ty {
+                store: Store::Program,
+                id,
+            });
         }
     }
     if let Some(sig) = env.signature(view.entry) {

@@ -68,6 +68,29 @@ fn comment_lines(text: &str, kind: CommentKind, addr: u64, len: u64, depth: u16)
         .collect()
 }
 
+impl Places {
+    /// Puts the comment lines of `text` before (or after) the line `at`.
+    fn put(
+        &mut self,
+        lines: &[Line],
+        at: usize,
+        after: bool,
+        c: (u64, CommentKind, &str),
+        len: u64,
+    ) {
+        let (addr, kind, text) = c;
+        let new = comment_lines(text, kind, addr, len, depth_at(lines, at));
+        let side = if after {
+            &mut self.after
+        } else {
+            &mut self.before
+        };
+        if let Some(slot) = side.get_mut(at) {
+            slot.extend(new);
+        }
+    }
+}
+
 /// Puts the comments of `comments` into `lines`.
 pub(super) fn insert(
     mut lines: Vec<Line>,
@@ -82,55 +105,37 @@ pub(super) fn insert(
         after: vec![Vec::new(); lines.len()],
     };
     for (addr, kind, text) in comments {
-        let addr = *addr;
+        let (addr, kind) = (*addr, *kind);
         let len = view.insn_len(addr).map_or(1, u64::from);
         let first = lines.iter().position(|l| holds(l, addr));
         match kind {
             CommentKind::Plate if addr == view.entry => {
                 if let Some(slot) = places.before.get_mut(0) {
-                    slot.extend(comment_lines(text, *kind, addr, len, 0));
+                    slot.extend(comment_lines(text, kind, addr, len, 0));
                 }
             }
             CommentKind::Plate | CommentKind::Pre => {
                 let at = first.unwrap_or_else(|| fallback(&lines, addr));
-                let new = comment_lines(text, *kind, addr, len, depth_at(&lines, at));
-                if let Some(slot) = places.before.get_mut(at) {
-                    slot.extend(new);
-                }
+                places.put(&lines, at, false, (addr, kind, text), len);
             }
             CommentKind::Post => {
-                let last = lines.iter().rposition(|l| holds(l, addr));
-                match last {
-                    Some(at) => {
-                        let new = comment_lines(text, *kind, addr, len, depth_at(&lines, at));
-                        if let Some(slot) = places.after.get_mut(at) {
-                            slot.extend(new);
-                        }
-                    }
-                    None => {
-                        let at = fallback(&lines, addr);
-                        let new = comment_lines(text, *kind, addr, len, depth_at(&lines, at));
-                        if let Some(slot) = places.before.get_mut(at) {
-                            slot.extend(new);
-                        }
-                    }
+                if let Some(at) = lines.iter().rposition(|l| holds(l, addr)) {
+                    places.put(&lines, at, true, (addr, kind, text), len);
+                } else {
+                    let at = fallback(&lines, addr);
+                    places.put(&lines, at, false, (addr, kind, text), len);
                 }
             }
             CommentKind::Eol => {
                 let joined: Vec<String> = text.lines().map(clean).collect();
                 let joined = joined.join(" ");
-                match first.and_then(|i| lines.get_mut(i)) {
-                    Some(line) => {
-                        line.text.push_str(&format!(" // {joined}"));
-                        line.comment = Some(CommentKind::Eol);
-                    }
-                    None => {
-                        let at = fallback(&lines, addr);
-                        let new = comment_lines(&joined, *kind, addr, len, depth_at(&lines, at));
-                        if let Some(slot) = places.before.get_mut(at) {
-                            slot.extend(new);
-                        }
-                    }
+                if let Some(line) = first.and_then(|i| lines.get_mut(i)) {
+                    line.text.push_str(" // ");
+                    line.text.push_str(&joined);
+                    line.comment = Some(CommentKind::Eol);
+                } else {
+                    let at = fallback(&lines, addr);
+                    places.put(&lines, at, false, (addr, kind, &joined), len);
                 }
             }
             CommentKind::Repeatable => {}

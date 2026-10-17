@@ -71,6 +71,10 @@ fn ac_235_window_paging() {
     let names = t2_fixtures();
     assert!(names.len() >= 4, "{names:?}");
     let checked: Vec<(usize, usize)> = std::thread::scope(|scope| {
+        #[expect(
+            clippy::needless_collect,
+            reason = "every thread starts before the first join"
+        )]
         let handles: Vec<_> = names
             .iter()
             .map(|name| {
@@ -80,7 +84,7 @@ fn ac_235_window_paging() {
                         .funcs()
                         .iter()
                         .filter(|f| !f.func.flags.thunk)
-                        .map(|f| f.id())
+                        .map(ghidorah_db::FuncView::id)
                         .collect();
                     let mut multi = 0;
                     for func in &funcs {

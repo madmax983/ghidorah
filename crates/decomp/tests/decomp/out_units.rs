@@ -178,7 +178,7 @@ fn line_rows_and_cover_reasons() {
         (0x100c, 4),
         (0x1020, 4),
     ];
-    let flow: BTreeSet<u64> = [0x100c].into_iter().collect();
+    let flow = BTreeSet::from([0x100c]);
     let body = [
         (0x1000, 4),
         (0x1004, 4),

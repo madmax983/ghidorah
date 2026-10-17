@@ -84,19 +84,19 @@ fn ac_113b_callers_decompile() {
     let text = std::fs::read_to_string(root().join("tests/golden/decomp/callers.json"))
         .expect("the golden file");
     let spec = json(&text);
-    let s_ = |v: &Value, k: &str| text_at(v, &format!("/{k}"));
-    let fixture_name: &'static str = Box::leak(s_(&spec, "fixture").into_boxed_str());
+    let field = |v: &Value, k: &str| text_at(v, &format!("/{k}"));
+    let fixture_name: &'static str = Box::leak(field(&spec, "fixture").into_boxed_str());
     let (mut s, id) = fixture(fixture_name);
-    let callee = entry_of(program(&s, id), &s_(&spec, "callee"));
+    let edited = entry_of(program(&s, id), &field(&spec, "callee"));
     let rows = spec
         .get("callers")
         .and_then(Value::as_array)
         .expect("callers");
     assert!(!rows.is_empty());
     for row in rows {
-        let caller = format!("{:#x}", entry_of(program(&s, id), &s_(row, "caller")));
+        let caller = format!("{:#x}", entry_of(program(&s, id), &field(row, "caller")));
         let before = text_of(&decomp(&mut s, &caller, "{}"));
-        assert!(before.contains(&s_(row, "before")), "{before}");
+        assert!(before.contains(&field(row, "before")), "{before}");
     }
     let sig = type_where(
         &s,
@@ -104,14 +104,14 @@ fn ac_113b_callers_decompile() {
         |t| matches!(t, Type::Func(sig) if sig.params.len() == 1),
     );
     commit(&mut s, id, |tx| Edit::SetSignature {
-        id: ghidorah_base::FuncId(Address::ram(callee)),
+        id: ghidorah_base::FuncId(Address::ram(edited)),
         sig: Some(tx.fact(sig)),
     });
     for row in rows {
-        let caller = format!("{:#x}", entry_of(program(&s, id), &s_(row, "caller")));
+        let caller = format!("{:#x}", entry_of(program(&s, id), &field(row, "caller")));
         let after = text_of(&decomp(&mut s, &caller, "{}"));
-        let snippet = s_(row, "snippet");
+        let snippet = field(row, "snippet");
         assert!(after.contains(&snippet), "no `{snippet}` in\n{after}");
-        assert!(!after.contains(&s_(row, "before")), "{after}");
+        assert!(!after.contains(&field(row, "before")), "{after}");
     }
 }
