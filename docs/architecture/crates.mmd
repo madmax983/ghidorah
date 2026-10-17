@@ -40,6 +40,7 @@ graph TD
   analysis --> kernel
   analysis --> json
   decomp --> analysis
+  decomp --> base
   decomp --> ir
   decomp --> db
   decomp --> types
@@ -60,4 +61,6 @@ graph TD
   xtask --> base
   xtask --> testkit
   loader -. dev .-> oracle
+  decomp -. dev .-> json
+  decomp -. dev .-> loader
   %% Every package except testkit can take it as a dev-dependency.
