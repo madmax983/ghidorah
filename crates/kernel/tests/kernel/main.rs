@@ -5,6 +5,7 @@
 
 mod ac_006b_loop_invariant_builds;
 mod budget;
+mod flags;
 mod proofs;
 mod range;
 mod rangeset;
