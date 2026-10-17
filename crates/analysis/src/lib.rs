@@ -10,7 +10,7 @@
 //! | [`ctx`] | [`AnalysisCtx`]: each insert function takes a required [`Why`] | Section 7.2 |
 //! | [`sched`] | [`Scheduler`]: pending sets, the queue, fuel slices, committed and shadow runs | Sections 3.9, 7.2, ADR-0016 |
 //! | [`publish`] | The analysis set of the work state and its `ReplaceAnalysis` commit | Section 3.9 |
-//! | [`cfg`] | The CFG of a function and its invariant check | Section 7.4 |
+//! | [`mod@cfg`] | The CFG of a function and its invariant check | Section 7.4 |
 //! | [`callgraph`] | The call graph of the published facts | Section 7.11 |
 //! | [`inputs`] | `analysis_inputs_hash` | Section 3.9 |
 //! | [`analyzers`] | The discovery analyzers of bands 100 to 440 | Sections 7.3, 7.7 |
