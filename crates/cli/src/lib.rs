@@ -4,7 +4,6 @@
 //! |---|---|---|
 //! | [`argv`] | The command-line parser and the usage text | Section 10.14 |
 //! | [`backend`] | The [`Backend`] trait and the session [`Options`] | Section 10.14 |
-//! | [`bare`] | [`bare::Bare`], a backend with no session state | Section 10.14 |
 //! | [`shipped`] | [`Shipped`], the backend of the `ghidorah` binary | Section 10.14 |
 //! | [`config`] | [`RunConfig`], [`Env`] and [`SystemClock`] | Section 10.11, ADR-0012 |
 //! | [`exit`] | The exit codes 0, 1 and 2 | Section 10.14 |
@@ -24,7 +23,6 @@
 
 pub mod argv;
 pub mod backend;
-pub mod bare;
 pub mod call;
 pub mod catalog;
 pub mod config;
@@ -40,7 +38,7 @@ use std::io::{self, BufRead, Write};
 use std::thread;
 
 pub use argv::{Command, UsageError};
-pub use backend::{Backend, OpenError, Options, Source};
+pub use backend::{Backend, LabelRule, OpenError, Options, Source};
 pub use config::{Env, EnvError, RunConfig, SystemClock};
 pub use exit::Exit;
 pub use shipped::Shipped;
@@ -105,7 +103,8 @@ pub fn main_with<B: Backend>(args: &[String], env: &Env, mut streams: Streams) -
         Command::Help => print(&mut streams, argv::USAGE.trim_end()),
         Command::Version => print(&mut streams, &format!("ghidorah {VERSION}")),
         Command::Mcp(args) => {
-            let options = Options::with_flags(&env, &args.session, MCP_SESSION);
+            let mut options = Options::with_flags(&env, &args.session, MCP_SESSION);
+            options.labels = LabelRule::Mcp;
             let serve = mcp::ServeOptions {
                 content: args.content,
                 record: args.record.map(|path| env.cwd.join(path)),

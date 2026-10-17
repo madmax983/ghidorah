@@ -26,9 +26,16 @@ pub fn names<B: Backend>(backend: &B) -> Vec<&'static str> {
         .collect()
 }
 
-/// Gives the `tools/list` result `{ tools }` of `backend`.
+/// Gives the `tools/list` result `{ tools }` of `backend`: [`Backend::tools_list`].
 #[must_use]
 pub fn tools_list<B: Backend>(backend: &B) -> Value {
+    backend.tools_list()
+}
+
+/// Gives the `tools/list` result `{ tools }` from the registry entries of the tools in the
+/// profile of `backend`. The entries keep the annotations of the registry.
+#[must_use]
+pub fn registry_list<B: Backend>(backend: &B) -> Value {
     let tools = B::registry()
         .tools()
         .iter()

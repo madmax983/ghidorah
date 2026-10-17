@@ -8,6 +8,9 @@ use std::collections::BTreeSet;
 use std::fmt;
 use std::path::PathBuf;
 
+use ghidorah_json::Value;
+pub use ghidorah_tools::profiles::parse_profile;
+pub use ghidorah_tools::session::LabelRule;
 use ghidorah_tools::{Host, Profile};
 
 use crate::argv::SessionFlags;
@@ -44,18 +47,14 @@ impl Source {
     }
 }
 
-/// Parses a profile name: `full`, `readonly` or `mini`.
-#[must_use]
-pub fn parse_profile(text: &str) -> Option<Profile> {
-    Profile::ALL.into_iter().find(|p| p.as_str() == text)
-}
-
 /// The session settings of one command.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Options {
     /// The projects root, or `None` when the environment gives no default.
     pub project_root: Option<PathBuf>,
-    /// The roots that `binary_load { path }` can read under.
+    /// The current directory. A relative root starts here.
+    pub cwd: PathBuf,
+    /// The roots that `binary_load { path }` can read under, as the flags give them.
     pub roots: Vec<PathBuf>,
     /// The active profile.
     pub profile: Profile,
@@ -71,18 +70,21 @@ pub struct Options {
     pub source: Source,
     /// The session label of calls that name no session.
     pub session: String,
+    /// The rule of the default session label of a new binary.
+    pub labels: LabelRule,
     /// The run configuration.
     pub run: RunConfig,
 }
 
 impl Options {
-    /// Makes the default options of `env`: the current directory as the one root, the
-    /// default projects root, profile `full` and session label `session`.
+    /// Makes the default options of `env`: the current directory `.` as the one root, the
+    /// default projects root, profile `full` and the fixed session label `session`.
     #[must_use]
     pub fn new(env: &Env, session: &str) -> Self {
         Self {
             project_root: env.projects_root(),
-            roots: vec![env.cwd.clone()],
+            cwd: env.cwd.clone(),
+            roots: vec![PathBuf::from(".")],
             profile: Profile::Full,
             tools: None,
             read_only: false,
@@ -90,14 +92,15 @@ impl Options {
             break_lock: false,
             source: Source::Agent,
             session: session.to_owned(),
+            labels: LabelRule::Fixed(session.to_owned()),
             run: env.run,
         }
     }
 
     /// Makes the options of the session flags `flags` in `env`.
     ///
-    /// The session label is `--session`, else `session`. Relative paths start at the
-    /// current directory of `env`.
+    /// The session label is `--session`, else `session`. A relative projects root starts at
+    /// the current directory of `env`. The roots stay as the flags give them.
     #[must_use]
     pub fn with_flags(env: &Env, flags: &SessionFlags, session: &str) -> Self {
         let mut options = Self::new(env, flags.session.as_deref().unwrap_or(session));
@@ -105,7 +108,7 @@ impl Options {
             options.project_root = Some(env.cwd.join(root));
         }
         if !flags.roots.is_empty() {
-            options.roots = flags.roots.iter().map(|r| env.cwd.join(r)).collect();
+            options.roots.clone_from(&flags.roots);
         }
         if let Some(profile) = flags.profile {
             options.profile = profile;
@@ -166,4 +169,11 @@ pub trait Backend: Host {
 
     /// Gives the server instructions of the active profile (design Section 10.15).
     fn instructions(&self) -> String;
+
+    /// Gives the `tools/list` result `{ tools }` of the active profile (design Section 10.3).
+    ///
+    /// The default gives the registry entry of each tool of the profile, in registry order.
+    fn tools_list(&self) -> Value {
+        crate::catalog::registry_list(self)
+    }
 }

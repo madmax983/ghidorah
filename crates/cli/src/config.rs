@@ -2,6 +2,7 @@
 //!
 //! The binary reads each `GHIDORAH_*` variable once into [`RunConfig`]. Other code gets
 //! [`RunConfig`] and a [`Clock`] as arguments. No code changes the process environment.
+//! The session of the tools crate gets the same values as a [`ghidorah_tools::RunConfig`].
 //!
 //! | Variable | Field | Values |
 //! |---|---|---|
@@ -77,6 +78,15 @@ impl RunConfig {
             ("fixed_time", Value::from(self.fixed_time)),
             ("eval_mode", Value::Bool(self.eval_mode)),
         ])
+    }
+}
+
+impl From<RunConfig> for ghidorah_tools::RunConfig {
+    fn from(run: RunConfig) -> Self {
+        Self {
+            fixed_time: run.fixed_time,
+            eval_mode: run.eval_mode,
+        }
     }
 }
 

@@ -131,7 +131,8 @@ fn surfaces<B: Backend>(name: &str, goldens: bool) -> usize {
 #[test]
 fn ac_149a_surface_equivalence() {
     assert_eq!(surfaces::<TestHost>("surface_test", true), 4);
-    let _ = surfaces::<Shipped>("surface_shipped", false);
+    let shipped = surfaces::<Shipped>("surface_shipped", false);
+    assert!(shipped >= 12, "{shipped} shipped examples");
 }
 
 fn tools_json<B: Backend>(profile: Profile) -> Value {
