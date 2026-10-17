@@ -12,10 +12,14 @@
 //! function: `{"fn":"gcd","args":["0x..","0x.."],"ret":"0x.."}`. Each value is the bit pattern
 //! at the width of its type.
 
+use std::collections::BTreeMap;
 use std::fmt;
 use std::path::Path;
 
+use ghidorah_testkit::golden;
+
 use super::manifest::Manifest;
+use crate::json::{self, Value};
 use crate::{Error, Finding};
 
 /// The number of driver calls per leaf function.
@@ -61,25 +65,30 @@ impl IntType {
     /// Gives the type of a C type name.
     #[must_use]
     pub fn from_c(name: &str) -> Option<Self> {
-        TYPES.iter().find(|t| t.0 == name && false).map(|t| t.2)
+        TYPES.iter().find(|t| t.0 == name).map(|t| t.2)
     }
 
     /// Gives the C type name, for example `uint64_t`.
     #[must_use]
     pub fn c_name(self) -> &'static str {
-        ""
+        TYPES.iter().find(|t| t.2 == self).map_or("", |t| t.0)
     }
 
     /// Gives the short name, for example `u64`.
     #[must_use]
     pub fn short(self) -> &'static str {
-        ""
+        TYPES.iter().find(|t| t.2 == self).map_or("", |t| t.1)
     }
 
     /// Gives the width in bits.
     #[must_use]
     pub const fn bits(self) -> u32 {
-        0
+        match self {
+            Self::U8 | Self::I8 => 8,
+            Self::U16 | Self::I16 => 16,
+            Self::U32 | Self::I32 => 32,
+            Self::U64 | Self::I64 => 64,
+        }
     }
 }
 
@@ -98,13 +107,16 @@ impl LeafFn {
     /// Gives the signature text, for example `u64(u64,u64)`.
     #[must_use]
     pub fn sig(&self) -> String {
-        String::new()
+        let args: Vec<&str> = self.args.iter().map(|a| a.short()).collect();
+        format!("{}({})", self.ret.short(), args.join(","))
     }
 
     /// Gives the `leaf_list.h` line of the function.
     #[must_use]
     pub fn list_line(&self) -> String {
-        String::new()
+        let mut parts = vec![self.name.clone(), self.ret.c_name().to_owned()];
+        parts.extend(self.args.iter().map(|a| a.c_name().to_owned()));
+        format!("LEAF{}({})", self.args.len(), parts.join(", "))
     }
 }
 
@@ -154,23 +166,35 @@ fn parse_line(text: &str) -> Result<LeafFn, String> {
 ///
 /// Returns a [`LeafError`] for a `LEAF` line with an unknown type or a bad shape.
 pub fn parse_source(text: &str) -> Result<Vec<LeafFn>, LeafError> {
-    Ok(text
-        .lines()
-        .take(0)
-        .filter_map(|l| parse_line(l).ok())
-        .collect())
+    let mut out = Vec::new();
+    for (i, line) in text.lines().enumerate() {
+        if line.starts_with("LEAF ") {
+            out.push(parse_line(line).map_err(|message| LeafError {
+                line: i + 1,
+                message,
+            })?);
+        }
+    }
+    Ok(out)
 }
 
 /// Gives the text of `leaf_list.h` for the driver.
 #[must_use]
 pub fn list_header(fns: &[LeafFn]) -> String {
-    fns.iter().take(0).map(LeafFn::list_line).collect()
+    fns.iter().map(|f| f.list_line() + "\n").collect()
 }
 
 /// Gives the golden path of the vectors of a build, relative to the workspace root.
 #[must_use]
 pub fn vector_path(build: &str) -> String {
-    build.get(..0).unwrap_or_default().to_owned()
+    format!("{VECTOR_DIR}/{build}.jsonl")
+}
+
+fn hex_bits(value: &Value, bits: u32) -> bool {
+    let Some(text) = value.as_str().and_then(|t| t.strip_prefix("0x")) else {
+        return false;
+    };
+    u64::from_str_radix(text, 16).is_ok_and(|v| bits == 64 || v >> bits == 0)
 }
 
 /// Checks the vector lines of one build against its leaf functions.
@@ -178,9 +202,52 @@ pub fn vector_path(build: &str) -> String {
 /// Each function needs exactly [`CASES`] lines with the right argument count and widths.
 #[must_use]
 pub fn check_lines(rel: &str, body: &str, fns: &[LeafFn]) -> Vec<Finding> {
-    body.lines()
-        .take(0)
-        .map(|_| Finding::new("WP-06", rel, fns.len(), ""))
+    let bad = |line: usize, detail: String| Finding::new("WP-06", rel, line, detail);
+    let mut found = Vec::new();
+    let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
+    for (i, line) in body.lines().enumerate() {
+        let n = i + 2;
+        let Ok(value) = json::parse(line) else {
+            found.push(bad(n, "the line is not JSON".to_owned()));
+            continue;
+        };
+        let name = value.get("fn").and_then(Value::as_str).unwrap_or("");
+        let Some(f) = fns.iter().find(|f| f.name == name) else {
+            found.push(bad(n, format!("unknown leaf function `{name}`")));
+            continue;
+        };
+        let args = value.get("args").and_then(Value::as_array).unwrap_or(&[]);
+        let widths_ok = args.len() == f.args.len()
+            && args.iter().zip(&f.args).all(|(v, t)| hex_bits(v, t.bits()));
+        let ret_ok = value.get("ret").is_some_and(|v| hex_bits(v, f.ret.bits()));
+        if !widths_ok || !ret_ok {
+            found.push(bad(n, format!("bad arguments or result for `{name}`")));
+        }
+        *counts.entry(f.name.as_str()).or_default() += 1;
+    }
+    for f in fns {
+        let count = counts.get(f.name.as_str()).copied().unwrap_or(0);
+        if count != CASES {
+            found.push(bad(
+                0,
+                format!("`{}` has {count} vectors, not {CASES}", f.name),
+            ));
+        }
+    }
+    found
+}
+
+/// Gives the leaf functions that a truth file lists: name and signature.
+fn truth_leafs(truth: &Value) -> Vec<(String, String)> {
+    truth
+        .get("leaf_functions")
+        .and_then(Value::as_array)
+        .unwrap_or(&[])
+        .iter()
+        .map(|v| {
+            let text = |k| v.get(k).and_then(Value::as_str).unwrap_or("").to_owned();
+            (text("name"), text("sig"))
+        })
         .collect()
 }
 
@@ -193,6 +260,50 @@ pub fn check_lines(rel: &str, body: &str, fns: &[LeafFn]) -> Vec<Finding> {
 ///
 /// Returns an error when a source or a truth file does not read or parse.
 pub fn check_vectors(root: &Path, manifest: &Manifest) -> Result<Vec<Finding>, Error> {
-    let _ = (root, manifest);
-    Err(Error::data(VECTOR_DIR, "no leaf vectors yet"))
+    let mut found = Vec::new();
+    let mut builds = Vec::new();
+    for fixture in super::spec::fixtures() {
+        if fixture.variant.is_none() && fixture.build.leaf_vectors {
+            builds.push(fixture);
+        }
+    }
+    for fixture in builds {
+        let mut fns = Vec::new();
+        for src in fixture.program.sources {
+            let rel = format!("{}/{src}", super::SRC_DIR);
+            let text = std::fs::read_to_string(root.join(&rel)).map_err(|e| Error::io(&rel, e))?;
+            fns.extend(parse_source(&text).map_err(|e| Error::data(&rel, e.to_string()))?);
+        }
+        if fns.is_empty() {
+            continue;
+        }
+        let name = fixture.truth_name();
+        let truth = super::truth::read(root, &name)?;
+        let want: Vec<(String, String)> = fns.iter().map(|f| (f.name.clone(), f.sig())).collect();
+        if truth_leafs(&truth) != want {
+            found.push(Finding::new(
+                "WP-06",
+                super::truth::path(&name),
+                0,
+                "`leaf_functions` differs from the LEAF lines of the sources",
+            ));
+        }
+        let rel = vector_path(&name);
+        match golden::read(&root.join(&rel)) {
+            Ok((header, body)) => {
+                if manifest.entry(&name).is_none() || header.field("fixture") != Some(name.as_str())
+                {
+                    found.push(Finding::new(
+                        "WP-06",
+                        &rel,
+                        1,
+                        "the header names another fixture",
+                    ));
+                }
+                found.extend(check_lines(&rel, &body, &fns));
+            }
+            Err(e) => found.push(Finding::new("WP-06", &rel, 0, e.to_string())),
+        }
+    }
+    Ok(found)
 }

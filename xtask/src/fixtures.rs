@@ -23,7 +23,9 @@
 //! Each golden starts with a header line that names [`GENERATOR`], [`VERSION`], the fixture and
 //! its sha256 (`testkit::golden`). `cargo test` reads only these checked-in files.
 
+pub mod assemble;
 pub mod build;
+pub mod checks;
 pub mod elfinfo;
 pub mod facts;
 pub mod jumptab;

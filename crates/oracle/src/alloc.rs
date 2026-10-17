@@ -39,6 +39,10 @@ fn local(update: impl FnOnce(&mut Local)) {
     });
 }
 
+fn read_local() -> Local {
+    LOCAL.try_with(Cell::get).unwrap_or_default()
+}
+
 /// The heap use of one measured closure, on the calling thread.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Stats {
@@ -72,37 +76,39 @@ impl CountingAlloc {
     /// Gives the live heap bytes of the process.
     #[must_use]
     pub fn live(&self) -> usize {
-        0
+        self.live.load(Ordering::Relaxed)
     }
 
     /// Gives the peak live heap bytes of the process since the start or the last reset.
     #[must_use]
     pub fn peak(&self) -> usize {
-        0
+        self.peak.load(Ordering::Relaxed)
     }
 
     /// Gives the number of allocations of the process.
     #[must_use]
     pub fn allocations(&self) -> u64 {
-        0
+        self.count.load(Ordering::Relaxed)
     }
 
     /// Sets the process peak to the live bytes.
     pub fn reset_peak(&self) {
-        let _ = self;
+        self.peak.store(self.live(), Ordering::Relaxed);
     }
 
     /// Runs `f` and gives its result and the heap use of the calling thread during `f`.
     pub fn measure<R>(&self, f: impl FnOnce() -> R) -> (R, Stats) {
-        let _ = self;
-        (
-            f(),
-            Stats {
-                peak_bytes: 0,
-                allocations: 0,
-                allocated_bytes: 0,
-            },
-        )
+        let mut start = read_local();
+        local(|l| l.peak = l.live);
+        start.peak = start.live;
+        let result = f();
+        let end = read_local();
+        let stats = Stats {
+            peak_bytes: end.peak.saturating_sub(start.live),
+            allocations: end.count.saturating_sub(start.count),
+            allocated_bytes: end.bytes.saturating_sub(start.bytes),
+        };
+        (result, stats)
     }
 
     fn grow(&self, size: usize) {
