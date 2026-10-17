@@ -2877,7 +2877,7 @@ Rules for this section:
 | AC-018a | `xtask ac` finds at least one evidence item for every MVP AC: every row that is not moved to stretch or removed, the rows of Sections 15.20 and 15.22 included. | `xtask:ac#/missing == []` | 28 | 27 |
 | AC-018b | Every T1 and T2 evidence item passes, and every record item matches its input hash. | `xtask:ac#/failed == []` | 28 | 27 |
 | AC-018c | `xtask ac` fails when an AC closes in a WP that comes before a WP of its Needs column. | `test:xtask::ac_018c_needs_order@T1` | 01 | - |
-| AC-019 | `ci.yml` has a tier-1 job and a tier-2 job and uses no action other than `actions/checkout`. | `test:xtask::ac_019_ci_workflow@T1` | 01 | - |
+| AC-019 | `ci.yml` has a tier-1 job and a tier-2 job and uses no action other than `actions/checkout` and `actions/cache`. | `test:xtask::ac_019_ci_workflow@T1` | 01 | - |
 | AC-020 | Test binaries pass with `PATH` reduced to the toolchain directory and an empty `HOME`. | `xtask:ci#/steps/test_hermetic/ok == true` | 27 | - |
 | AC-021 | Tier 1 finishes in at most 120 s on the 4-core build host. | `xtask:ci#/steps/tier1/seconds <= 120` | 27 | - |
 | AC-022 | Each fixture sha256 equals `fixtures/manifest.json`, and each golden header names the current fixture sha256 and generator version. | `test:xtask::ac_022_fixture_manifest@T1` | 06 | - |
