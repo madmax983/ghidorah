@@ -173,23 +173,28 @@ fn broken() -> crate::Program {
     let mut p = seeded();
     let a = Origin::analysis();
     let agent = origin(Source::Agent, 1, "mcp-1");
-    // Rule 2: a base reference from an address without a code unit.
+    // Rule 2: an analysis reference from an address without a code unit. The same
+    // reference of the base layer is an orphan, not a violation.
     let bad_ref = RefKey {
         from: ram(0x1082),
         op_index: 0,
         to: ram(0x1080),
         kind: RefType::Read,
     };
+    let bad = Ref {
+        key: bad_ref,
+        primary: true,
+    };
     p.layer_mut(Source::Agent)
         .unwrap()
         .refs
-        .add(
-            Ref {
-                key: bad_ref,
-                primary: true,
-            },
-            &agent,
-        )
+        .add(bad, &agent)
+        .unwrap();
+    let layer = p.layer_mut(Source::Analysis).unwrap();
+    layer.refs.add(bad, &a).unwrap();
+    layer
+        .why
+        .insert(FactKey::Ref(bad_ref), why("R_TEST_REF", Vec::new()))
         .unwrap();
     // Rule 6: an analysis code unit without a why-record, and a premise that does not exist.
     let layer = p.layer_mut(Source::Analysis).unwrap();
@@ -271,7 +276,7 @@ fn each_rule_finds_its_violation() {
     let found = broken().check_invariants();
     let want = [
         Violation::RefFrom {
-            layer: Layer::Base,
+            layer: Layer::Analysis,
             from: ram(0x1082),
         },
         Violation::NoWhy {
