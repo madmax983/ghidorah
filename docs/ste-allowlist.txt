@@ -1,0 +1,38 @@
+# Reviewed STE findings of warn mode (ADR-0019, AC-025).
+# Format: <path> <rule> <fragment>. The fragment is the first 8 words of the sentence.
+# This is a temporary copy from WP-02, so the AC-025 test passes on the WP-02 branch.
+# WP-01 owns this file. After the merge, run
+#   cargo test -p ghidorah-testkit --test ac_025_ste_docs
+# and copy the `allow:` lines that the test prints for any new finding.
+docs/adr/0003-std-threads-session-worker.md STE-4 Parallel analysis is deferred.
+docs/adr/0008-stable-id-grammar.md STE-4 ELF imports do not bind a library without
+docs/adr/0009-two-level-ir-lazy-flags.md STE-4 Measured: 86-91% of eager x86 flag bits are
+docs/adr/0009-two-level-ir-lazy-flags.md STE-4 Memory SSA and alias-aware forwarding are deferred.
+docs/adr/0014-composition-batch-run.md STE-4 Steps outside `return` are not trimmed.
+docs/adr/0015-offline-eval-harness.md STE-4 Choice codes are never resolved by the repair
+docs/adr/0019-lint-policy-and-ste.md STE-3 Rules: STE-1 a procedural sentence (its first word
+docs/adr/0019-lint-policy-and-ste.md STE-4 The copyrighted STE dictionary is never shipped.
+docs/adr/0020-test-tiers-fixtures-oracles.md STE-4 Mutation testing is deferred.
+docs/design.md STE-3 Section 1 gives the scope and the line
+docs/design.md STE-3 ELF64 little-endian (ET_EXEC, ET_DYN).
+docs/design.md STE-3 L0 lifted IR with a lazy flag thunk.
+docs/design.md STE-3 A fuel-sliced deterministic scheduler with a committed set
+docs/design.md STE-3 Type core.
+docs/design.md STE-3 Address model.
+docs/design.md STE-3 Project directory outside the working tree.
+docs/design.md STE-4 Derived data (decoded instructions, L0, CFG, the IR
+docs/design.md STE-4 Derived data (decoded instructions, L0, CFG, IR views,
+docs/design.md STE-4 The builder seals all blocks first, because the
+docs/design.md STE-4 The MS x64 table is data only and
+docs/design.md STE-3 Printer: precedence climbing with Ghidra's numbers.
+docs/design.md STE-4 `binary_survey.languages` reports C++ (`_Z` symbols, `__cxa_*` imports), Rust
+docs/design.md STE-8 Load an ELF file, a raw blob, the
+docs/design.md STE-1 Search names, strings, bytes, comments, notes, types, imports,
+docs/design.md STE-3 `search { kind | ids, query?, match?: substr|glob|exact
+docs/design.md STE-4 A string of digits only is never guessed.
+docs/design.md STE-2 It escapes C0 and C1 controls, DEL, U+2028,
+docs/design.md STE-4 the noreturn flag is set
+docs/design.md STE-4 `xtask verify` (WP-03) runs Verus when `VERUS` and
+docs/design.md STE-2 Parser targets, each owned by its parser WP:
+docs/design.md STE-4 Every xref `from` is an instruction or data-slot
+docs/design.md STE-8 Write and read paths: `func_edit` has `set_call_targets`, `add_ref`

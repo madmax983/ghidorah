@@ -6,8 +6,8 @@
 //! A `.json` or `.jsonl` golden has the header `{"golden":"generator=G version=V"}`.
 //! The body follows the header line.
 //!
-//! A golden matches when the header and the body are equal. When
-//! `GHIDORAH_BLESS=1` is set, a mismatch rewrites the file.
+//! A golden matches when the header and the body are equal. With
+//! `GHIDORAH_BLESS=1`, a mismatch rewrites the file.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -263,7 +263,7 @@ fn io_error(path: &Path, e: &std::io::Error) -> GoldenError {
 ///
 /// # Errors
 ///
-/// Returns [`GoldenError`] when the file is missing, cannot be read or has no header.
+/// Returns [`GoldenError`] when the file is missing, has no header or fails to read.
 pub fn read(path: &Path) -> Result<(Header, String), GoldenError> {
     let text = match std::fs::read_to_string(path) {
         Ok(text) => text,

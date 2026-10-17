@@ -75,7 +75,7 @@ pub(crate) const fn has_sysv(b: &ElfBuilder) -> bool {
 
 /// Builds the dynamic symbol table: imports first, then exports.
 ///
-/// With a GNU hash table the exports are sorted by bucket, as that table needs.
+/// A GNU hash table needs the exports in bucket order, so the function sorts them.
 pub(crate) fn tables(b: &ElfBuilder) -> DynTables {
     let mut strtab = StrTab::new();
     let needed = b.needed.iter().map(|n| strtab.add(n)).collect();
@@ -181,7 +181,7 @@ pub(crate) fn gnu_hash_bytes(t: &DynTables) -> Vec<u8> {
     out
 }
 
-/// Writes `.hash`. All dynamic symbols are hashed.
+/// Writes `.hash`. The table holds every dynamic symbol.
 pub(crate) fn sysv_hash_bytes(t: &DynTables) -> Vec<u8> {
     let nchain = t.syms.len() + 1;
     let nbucket = (nchain / 2).max(1);

@@ -30,10 +30,20 @@
 //!
 //! Ban list format (`docs/ste-banlist.txt`): one word per line. Lines that start with `#` are comments.
 
-use std::collections::BTreeSet;
+mod allow;
+mod blocks;
+mod lex;
+mod lexicon;
+mod rules;
+mod rustsrc;
+mod scan;
+mod words;
+
 use std::fmt;
-use std::io;
-use std::path::Path;
+
+pub use allow::{AllowEntry, Allowlist, AllowlistError};
+pub use lexicon::Lexicon;
+pub use scan::{FileFinding, ScanReport, repo_allowlist, repo_files, repo_lexicon, scan_repo};
 
 /// The paths that the checker never reads. A path that ends with `/` is a directory.
 pub const EXEMPT_PATHS: [&str; 2] = ["docs/research.md", "docs/planning/"];
@@ -145,8 +155,14 @@ impl TextKind {
     /// Returns the kind for a file path: `.md` gives Markdown and `.rs` gives Rust comments.
     #[must_use]
     pub fn of_path(path: &str) -> Option<Self> {
-        let _ = path;
-        None
+        let extension = std::path::Path::new(path).extension()?;
+        if extension.eq_ignore_ascii_case("md") {
+            Some(Self::Markdown)
+        } else if extension.eq_ignore_ascii_case("rs") {
+            Some(Self::RustComments)
+        } else {
+            None
+        }
     }
 }
 
@@ -173,49 +189,6 @@ impl fmt::Display for Finding {
     }
 }
 
-/// The word lists of the checker.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Lexicon {
-    imperatives: BTreeSet<String>,
-    banned: BTreeSet<String>,
-}
-
-impl Lexicon {
-    /// Returns the built-in lexicon: the imperative verbs and the ban list of ADR-0019.
-    #[must_use]
-    pub fn builtin() -> Self {
-        Self {
-            imperatives: BTreeSet::new(),
-            banned: BTreeSet::new(),
-        }
-    }
-
-    /// Adds the words of a ban list file.
-    pub fn add_banlist(&mut self, text: &str) {
-        let _ = text;
-    }
-
-    /// Adds the verbs of a glossary file.
-    ///
-    /// A verb is a table row whose second cell is `verb`, or a list item
-    /// `- word (verb)`. The first cell or the item word is the verb.
-    pub fn add_glossary(&mut self, text: &str) {
-        let _ = text;
-    }
-
-    /// Returns `true` when `word` is an imperative verb, in any letter case.
-    #[must_use]
-    pub fn is_imperative(&self, word: &str) -> bool {
-        self.imperatives.contains(word)
-    }
-
-    /// Returns `true` when `word` or its base form is on the ban list, in any letter case.
-    #[must_use]
-    pub fn is_banned(&self, word: &str) -> bool {
-        self.banned.contains(word)
-    }
-}
-
 /// The checker.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Checker {
@@ -238,8 +211,18 @@ impl Checker {
     /// Checks `text` of `kind` and returns the findings in line order.
     #[must_use]
     pub fn check(&self, text: &str, kind: TextKind) -> Vec<Finding> {
-        let _ = (text, kind);
-        Vec::new()
+        let paragraphs = match kind {
+            TextKind::Plain => blocks::plain(text),
+            TextKind::Markdown => blocks::markdown(text),
+            TextKind::RustComments => rustsrc::paragraphs(text),
+        };
+        let mut out = Vec::new();
+        for paragraph in &paragraphs {
+            let sentences = lex::lex(&paragraph.text, paragraph.line);
+            out.extend(rules::check_paragraph(&self.lexicon, &sentences));
+        }
+        out.sort();
+        out
     }
 }
 
@@ -251,176 +234,14 @@ pub fn check_agent_text(text: &str) -> Vec<Finding> {
     Checker::new(Lexicon::builtin()).check(text, TextKind::Plain)
 }
 
-/// One allowlist entry.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct AllowEntry {
-    /// The repository path with `/` separators.
-    pub path: String,
-    /// The allowed rule.
-    pub rule: Rule,
-    /// A text that the sentence contains.
-    pub fragment: String,
-}
-
-impl AllowEntry {
-    /// Makes the entry that allows `finding` in `path`.
-    ///
-    /// The fragment is the first 8 words of the sentence.
-    #[must_use]
-    pub fn for_finding(path: &str, finding: &Finding) -> Self {
-        Self {
-            path: path.to_string(),
-            rule: finding.rule,
-            fragment: String::new(),
-        }
-    }
-
-    /// Returns `true` when the entry allows `finding` in `path`.
-    #[must_use]
-    pub fn allows(&self, path: &str, finding: &Finding) -> bool {
-        let _ = (path, finding);
-        false
-    }
-}
-
-impl fmt::Display for AllowEntry {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} {} {}", self.path, self.rule, self.fragment)
-    }
-}
-
-/// An allowlist line that does not parse.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AllowlistError {
-    /// The 1-based line.
-    pub line: usize,
-    /// What is wrong with the line.
-    pub message: String,
-}
-
-impl fmt::Display for AllowlistError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "allowlist line {}: {}", self.line, self.message)
-    }
-}
-
-impl std::error::Error for AllowlistError {}
-
-/// The reviewed allowlist of warn mode.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct Allowlist {
-    entries: Vec<AllowEntry>,
-}
-
-impl Allowlist {
-    /// Parses the allowlist format of this module.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`AllowlistError`] for a line with no path, an unknown rule or no fragment.
-    pub fn parse(text: &str) -> Result<Self, AllowlistError> {
-        let _ = text;
-        Ok(Self::default())
-    }
-
-    /// Returns the entries in file order.
-    #[must_use]
-    pub fn entries(&self) -> &[AllowEntry] {
-        &self.entries
-    }
-
-    /// Returns `true` when an entry allows `finding` in `path`.
-    #[must_use]
-    pub fn allows(&self, path: &str, finding: &Finding) -> bool {
-        self.entries.iter().any(|e| e.allows(path, finding))
-    }
-}
-
-/// A finding in one repository file.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct FileFinding {
-    /// The repository path with `/` separators.
-    pub path: String,
-    /// The finding.
-    pub finding: Finding,
-}
-
-impl fmt::Display for FileFinding {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}: {}", self.path, self.finding)
-    }
-}
-
-/// The result of a repository scan.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct ScanReport {
-    /// The number of files that the scan read.
-    pub files: usize,
-    /// The findings that no allowlist entry allows, in path and line order.
-    pub findings: Vec<FileFinding>,
-    /// The number of findings that the allowlist allows.
-    pub allowed: usize,
-    /// The allowlist entries that allow no finding.
-    pub unused: Vec<AllowEntry>,
-}
-
-impl ScanReport {
-    /// Returns `true` when the scan has no finding.
-    #[must_use]
-    pub fn ok(&self) -> bool {
-        self.findings.is_empty()
-    }
-}
-
 /// Returns `true` when the checker never reads `path`.
 #[must_use]
 pub fn is_exempt(path: &str) -> bool {
-    let _ = path;
-    false
-}
-
-/// Returns the sorted repository paths of the Markdown and Rust files under `root`.
-///
-/// The walk skips directories whose name starts with `.`, `target` directories and exempt paths.
-///
-/// # Errors
-///
-/// Returns the I/O error of a directory that cannot be read.
-pub fn repo_files(root: &Path) -> io::Result<Vec<String>> {
-    let _ = root;
-    Ok(Vec::new())
-}
-
-/// Returns the built-in lexicon plus the ban list and the glossary of `root`, when they exist.
-#[must_use]
-pub fn repo_lexicon(root: &Path) -> Lexicon {
-    let _ = root;
-    Lexicon::builtin()
-}
-
-/// Reads the allowlist of `root`. A missing file gives an empty allowlist.
-///
-/// # Errors
-///
-/// Returns [`AllowlistError`] when a line does not parse. A read error has line 0.
-pub fn repo_allowlist(root: &Path) -> Result<Allowlist, AllowlistError> {
-    let _ = root;
-    Ok(Allowlist::default())
-}
-
-/// Checks every docs and comments file under `root`.
-///
-/// In [`Mode::Warn`] the allowlist applies. In [`Mode::Deny`] it does not.
-///
-/// # Errors
-///
-/// Returns the I/O error of a file or directory that cannot be read.
-pub fn scan_repo(
-    root: &Path,
-    checker: &Checker,
-    mode: Mode,
-    allowlist: &Allowlist,
-) -> io::Result<ScanReport> {
-    let _ = (root, checker, mode, allowlist);
-    Ok(ScanReport::default())
+    EXEMPT_PATHS.iter().any(|exempt| {
+        if exempt.ends_with('/') {
+            path.starts_with(exempt)
+        } else {
+            path == *exempt
+        }
+    })
 }

@@ -349,7 +349,7 @@ fn regress_files(dir: &Path) -> Result<Vec<PathBuf>, FuzzError> {
 ///
 /// # Errors
 ///
-/// Returns [`FuzzError`] when the directory or a file cannot be read.
+/// Returns [`FuzzError`] when the function cannot read the directory or a file.
 pub fn replay_regress<F>(dir: &Path, target: F) -> Result<Report, FuzzError>
 where
     F: Fn(&[u8]) -> Outcome + Sync,

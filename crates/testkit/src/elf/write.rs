@@ -51,13 +51,13 @@ pub(crate) fn p64(buf: &mut Vec<u8>, value: u64) {
     buf.extend_from_slice(&value.to_le_bytes());
 }
 
-/// Returns the 32-bit displacement from `next_ip` to `target`. The high bits are dropped.
+/// Returns the 32-bit displacement from `next_ip` to `target`. The function drops the high bits.
 pub(crate) fn rel32(target: u64, next_ip: u64) -> i32 {
     let diff = target.wrapping_sub(next_ip) & 0xffff_ffff;
     i32::from_le_bytes(u32_of(diff).to_le_bytes())
 }
 
-/// Writes `bytes` at `offset`. Bytes past the end of `buf` are dropped.
+/// Writes `bytes` at `offset`. The function drops bytes past the end of `buf`.
 pub(crate) fn put(buf: &mut [u8], offset: u64, bytes: &[u8]) {
     let start = usize_of(offset);
     let Some(end) = start.checked_add(bytes.len()) else {

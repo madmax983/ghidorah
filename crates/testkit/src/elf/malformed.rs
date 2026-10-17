@@ -97,7 +97,7 @@ pub enum Malformed {
     EscapeCounts,
     /// Clears the end bit of the last `.gnu.hash` chain value, so the chain has no end.
     GnuHashOpenChain,
-    /// Writes bytes at a file offset. Bytes past the end of the file are dropped.
+    /// Writes bytes at a file offset. The builder drops bytes past the end of the file.
     Patch(u64, Vec<u8>),
 }
 

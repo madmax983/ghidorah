@@ -345,7 +345,7 @@ pub struct PlacedSection {
     pub name: String,
     /// The section header index.
     pub index: u16,
-    /// The virtual address, or 0 for a section that is not allocated.
+    /// The virtual address. A section with no memory has address 0.
     pub addr: u64,
     /// The file offset.
     pub offset: u64,
