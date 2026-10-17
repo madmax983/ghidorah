@@ -294,14 +294,13 @@ impl<'t, 's> Parser<'t, 's> {
         match t.tok {
             Tok::Hash => Fail::new(DiagCode::Unsupported, t.byte, t.len).hint(PRAGMA),
             Tok::Punct("[[") => Fail::new(DiagCode::Unsupported, t.byte, t.len).hint(C23_ATTRIBUTE),
-            Tok::Ident if unsupported(self.word(t)).is_some() => {
-                let hint = unsupported(self.word(t)).unwrap_or_default();
-                Fail::new(DiagCode::Unsupported, t.byte, t.len).hint(hint)
-            }
             Tok::Bad => Fail::new(DiagCode::Syntax, t.byte, t.len)
                 .expected(expected)
                 .hint("The character starts no C token here."),
-            _ => Fail::new(DiagCode::Syntax, t.byte, t.len).expected(expected),
+            _ => match unsupported(self.word(t)).filter(|_| t.tok == Tok::Ident) {
+                Some(hint) => Fail::new(DiagCode::Unsupported, t.byte, t.len).hint(hint),
+                None => Fail::new(DiagCode::Syntax, t.byte, t.len).expected(expected),
+            },
         }
     }
 

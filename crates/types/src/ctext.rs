@@ -249,7 +249,8 @@ impl TypeStore {
     /// Finds the type of a reference.
     ///
     /// A name finds a typedef first, then a tag, then a primitive type. A hash finds the
-    /// first type in ID order whose canonical text has that hash.
+    /// first type in ID order whose canonical text has that hash. The hash search renders
+    /// each type, so its time grows with the store size.
     #[must_use]
     pub fn by_ref(&self, reference: &TypeRef) -> Option<TypeId> {
         if let Some(name) = reference.name() {
