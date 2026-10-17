@@ -111,7 +111,7 @@ pub struct ArgSpec {
     pub doc: &'static str,
     /// Other names that the parser accepts with `W_COERCED`. The schema shows none of them.
     pub aliases: &'static [&'static str],
-    /// The argument is required when the selector argument has one of these values.
+    /// The call must give the argument when the selector argument has one of these values.
     ///
     /// Each pair is `(selector name, value)`.
     pub required_when: &'static [(&'static str, &'static str)],

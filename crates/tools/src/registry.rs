@@ -10,8 +10,8 @@
 //! |---|---|---|
 //! | [`LintRule::Name`] | The name matches `^[a-z][a-z0-9_]{0,40}$` and is unique. | AC-129a |
 //! | [`LintRule::SchemaRoot`] | The schema root is an object with `additionalProperties: false` and no combinator. | AC-129b |
-//! | [`LintRule::Annotations`] | All four annotations are set, `openWorldHint` is false, and they agree with `mutating`. | AC-129c |
-//! | [`LintRule::Description`] | The description has at most 1,000 characters, and the title is set. | AC-129d |
+//! | [`LintRule::Annotations`] | The tool has all four annotations, `openWorldHint` is false, and they agree with `mutating`. | AC-129c |
+//! | [`LintRule::Description`] | The description has at most 1,000 characters, and the tool has a title. | AC-129d |
 //! | [`LintRule::FirstSentence`] | The summary is the first sentence, and it holds the resource word of the name. | AC-129e |
 //! | [`LintRule::Actions`] | Each action has one line and one example, and the actions match the selector. | AC-129f |
 //! | [`LintRule::Vocabulary`] | A role has its fixed name, and one kind and role has one name in all tools. | AC-222 |

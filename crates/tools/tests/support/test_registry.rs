@@ -1,8 +1,8 @@
 //! The test registry of WP-13a and its host.
 //!
-//! The registry holds five test tools. Together they use every argument kind, every global
-//! argument, a selector tool with actions, a list tool, a tool with fuel and a tool with no
-//! binary. Registry-wide tests run over this registry and over the shipped registry.
+//! The registry holds five test tools. They use every argument kind and every global argument.
+//! One tool is a selector tool, one is a list tool, one has fuel and one has no binary.
+//! Registry-wide tests run over this registry and over the shipped registry.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -42,7 +42,7 @@ pub struct TestHost {
     pub profile: Option<BTreeSet<&'static str>>,
     /// The panics that the host saw.
     pub panics: Vec<Crash>,
-    /// `true` when the host coerces numeric strings to integers.
+    /// `true` when the host gives an integer for a string of digits.
     pub lenient: bool,
     /// The names of the test items that `item_edit` changed, by address.
     pub names: BTreeMap<u64, String>,

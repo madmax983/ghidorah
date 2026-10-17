@@ -97,8 +97,8 @@ fn near<'n>(key: &str, names: &[&'n str]) -> Vec<(usize, &'n str)> {
         .collect()
 }
 
-/// Finds the spec of `key` in `specs` and `extra`. An alias counts only when `aliases` is set
-/// and its canonical name is free. The flag tells if the key is an alias.
+/// Finds the spec of `key` in `specs` and `extra`. An alias counts only with `aliases` and a
+/// free canonical name. The flag tells if the key is an alias.
 fn find<'s>(
     specs: &'s [ArgSpec],
     extra: &'s [ArgSpec],

@@ -2,7 +2,7 @@
 //!
 //! One call runs these steps in order:
 //!
-//! 1. Find the tool (`UNKNOWN_TOOL`) and check the profile (`TOOL_NOT_IN_PROFILE`).
+//! 1. Find the tool (`UNKNOWN_TOOL`). Check the profile (`TOOL_NOT_IN_PROFILE`).
 //! 2. Parse the arguments ([`crate::args::parse`]).
 //! 3. Open the frame through the host: binary, rev, session label and analysis state.
 //! 4. Check `expected_rev` of a mutating tool (`CONFLICT`).

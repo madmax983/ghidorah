@@ -1,8 +1,8 @@
 //! Executable hints: `next` calls and warning remedies (design Section 10.6, AC-143).
 //!
-//! A hint is a complete call. The pipeline keeps a hint only when it names a tool of the
-//! registry and the active profile, and when its arguments pass the strict parser of that
-//! tool. A result keeps at most [`MAX_NEXT`] hints. Hint arguments carry IDs and addresses
+//! A hint is a complete call. The pipeline keeps a hint only when two rules hold. The hint
+//! names a tool of the registry and the active profile. Its arguments pass the strict parser
+//! of that tool. A result keeps at most [`MAX_NEXT`] hints. Hint arguments carry IDs and addresses
 //! only, never binary text (ADR-0022).
 
 use std::fmt;

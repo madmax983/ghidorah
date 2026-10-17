@@ -25,7 +25,7 @@ use crate::spec::{ArgKind, ToolSpec};
 pub struct Progress {
     /// The progress value. It increases strictly within one request.
     pub progress: u64,
-    /// The total, when it is known.
+    /// The total, or `None` when the host has no total.
     pub total: Option<u64>,
     /// One STE sentence about the work.
     pub message: String,
