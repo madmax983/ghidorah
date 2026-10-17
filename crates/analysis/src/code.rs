@@ -2,7 +2,7 @@
 //!
 //! An instruction never crosses the end of its region. The decoder reads at most 15 bytes.
 
-use ghidorah_base::{Address, ImportId, Limits, Range};
+use ghidorah_base::{Limits, Range};
 use ghidorah_db::{FlowKind, Program};
 use ghidorah_kernel::RangeSet;
 use ghidorah_loader::{Perms, stubs};
@@ -87,15 +87,4 @@ pub fn plt_area(program: &Program) -> RangeSet {
         out.insert(Range::single(stub.addr));
     }
     out
-}
-
-/// Gives the import whose slot is `slot`, with its EXTERNAL address.
-#[must_use]
-pub fn slot_import(program: &Program, slot: u64) -> Option<(&ImportId, Address)> {
-    let slot = Address::ram(slot);
-    program
-        .imports()
-        .values()
-        .find(|row| row.slot == Some(slot))
-        .map(|row| (&row.id, row.ext))
 }

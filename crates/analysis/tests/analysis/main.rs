@@ -12,6 +12,7 @@ mod blobs;
 mod callgraph;
 mod cfg;
 mod discovery;
+mod errors;
 mod noreturn;
 mod publish;
 mod raw;

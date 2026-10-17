@@ -3,7 +3,8 @@
 use std::collections::BTreeSet;
 
 use ghidorah_analysis::cfg::{self, Block, CfgViolation, Edge, EdgeKind, FuncCfg};
-use ghidorah_base::{Address, FuncId};
+use ghidorah_base::{Address, FuncId, JumpTableId};
+use ghidorah_db::{Edit, JtMethod, JumpTable, SessionLabel, Source};
 
 use crate::blobs::{BASE, Blob};
 use crate::support::{all_t1, analyze};
@@ -143,4 +144,48 @@ fn check_finds_each_violation() {
     }));
     assert!(found.contains(&CfgViolation::Unreachable { block: 0x110 }));
     assert_eq!(g.blocks[0].end(), 0x104);
+    let empty = Block {
+        start: 0x200,
+        insns: Vec::new(),
+    };
+    assert_eq!(empty.end(), 0x200);
+}
+
+#[test]
+fn jump_table_cases_are_switch_edges() {
+    // 0x0: je 0x20; jmp rax (at 0x6).  0x20: ret.  0x30 is a case outside the body.
+    let blob = Blob::new().je(0x20).jmp_rax().at(0x20).ret().at(0x30).ret();
+    let mut p = blob.load(Some(0));
+    let _ = analyze(&mut p);
+    let label = SessionLabel::new("test").expect("a label");
+    let mut tx = p
+        .begin("test", Source::Agent, label)
+        .expect("a transaction");
+    let table = JumpTable {
+        base: None,
+        entry_size: 0,
+        count: 2,
+        targets: vec![Address::ram(BASE + 0x20), Address::ram(BASE + 0x30)],
+        method: JtMethod::Agent,
+        resolved: true,
+    };
+    let fact = tx.fact(table);
+    tx.apply(Edit::SetJumpTable {
+        id: JumpTableId(Address::ram(BASE + 6)),
+        table: Some(fact),
+    })
+    .expect("the table applies");
+    tx.commit().expect("a commit");
+    let g = cfg::build(&p, FuncId(Address::ram(BASE))).expect("a CFG");
+    assert!(cfg::check(&g).is_empty(), "{:?}", cfg::check(&g));
+    assert_eq!(
+        kinds(&g),
+        [
+            (0x0, Some(0x20), EdgeKind::CondTrue),
+            (0x0, Some(0x6), EdgeKind::CondFalse),
+            (0x6, Some(0x20), EdgeKind::SwitchCase(0)),
+            (0x6, Some(0x30), EdgeKind::TailCall),
+        ]
+    );
+    assert_eq!(EdgeKind::CondFalse.to_string(), "cond_false");
 }

@@ -176,16 +176,6 @@ impl<'a> AnalysisCtx<'a> {
         self.work.funcs.keys().copied().collect()
     }
 
-    /// Gives the start reasons of the function `entry` in the order of design Section 7.3.
-    #[must_use]
-    pub fn reasons(&self, entry: u64) -> Vec<StartReason> {
-        self.work
-            .funcs
-            .get(&entry)
-            .map(|f| f.reasons.keys().copied().collect())
-            .unwrap_or_default()
-    }
-
     /// Adds or replaces the start reason `reason` of the function `entry` with its confidence
     /// and its why-record. A new entry makes a new function. Gives `true` for a change.
     pub fn add_reason(
