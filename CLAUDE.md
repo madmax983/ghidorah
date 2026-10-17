@@ -32,7 +32,7 @@ Revision 3 decisions of the owner apply over the design text. SSA and the decomp
 - Each xtask command prints one JSON object on stdout. The exit code is 0 for `ok: true`, 1 for `ok: false` and 2 for an error.
 - Set `GHIDORAH_VERUS_OPTIONAL=1` to get `status: skipped` from `xtask verify` when Verus is missing.
 - Set `CARGO_BUILD_JOBS=2` when other agents share the CPUs.
-- Cargo prints `profile package spec .. did not match any packages` until `ghidorah-x86`, `ghidorah-ir`, `ghidorah-analysis` and `ghidorah-decomp` exist. This warning does no harm. Keep the profile entries.
+- Cargo prints `profile package spec .. did not match any packages` until `ghidorah-analysis` and `ghidorah-decomp` exist. This warning does no harm. Keep the profile entries.
 
 ## Gates
 
