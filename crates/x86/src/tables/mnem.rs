@@ -306,7 +306,7 @@ mnemonics! {
     Erets = "erets",
     Eretu = "eretu",
     Lkgs = "lkgs",
-    // VIA PadLock. The names follow GNU objdump.
+    // The Centaur padlock forms. The names follow GNU objdump.
     XstoreRng = "xstore-rng",
     XcryptEcb = "xcrypt-ecb",
     XcryptCbc = "xcrypt-cbc",

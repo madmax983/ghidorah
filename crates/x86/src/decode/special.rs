@@ -204,7 +204,7 @@ fn group7(lay: &Layout) -> Result<Resolved, DecodeError> {
     }))
 }
 
-/// `0F A6` and `0F A7`: the VIA padlock forms. Each form has one exact `ModRM` byte.
+/// `0F A6` and `0F A7`: the Centaur padlock forms. Each form has one exact `ModRM` byte.
 const fn padlock(lay: &Layout) -> Entry {
     let m = match (lay.opcode, lay.modrm) {
         (0xa6, Some(0xc0)) => Montmul,

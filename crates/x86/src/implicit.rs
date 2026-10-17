@@ -56,7 +56,7 @@ fn implicit(insn: &Insn) -> (RegSet, RegSet) {
         | M::Iretq
         | M::Erets
         | M::Eretu => (set(&[RSP]), set(&[RSP])),
-        // The VIA PadLock register use, from the VIA PadLock programming guide.
+        // The padlock register use, from the Centaur padlock programming guide.
         M::XstoreRng => counted(&[RDX, RDI], &[RAX, RDI]),
         M::XcryptEcb | M::XcryptCbc | M::XcryptCtr | M::XcryptCfb | M::XcryptOfb => {
             counted(&[RAX, RBX, RDX, RSI, RDI], &[RAX, RSI, RDI])
