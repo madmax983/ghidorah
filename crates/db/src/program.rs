@@ -46,6 +46,7 @@ use crate::refs::Refs;
 use crate::source::Source;
 use crate::strings::Strings;
 use crate::symbols::Symbols;
+use crate::tx::Changes;
 use crate::typesglue::Types;
 use crate::vars::Vars;
 use crate::why::WhyStore;
@@ -210,6 +211,7 @@ pub struct Program {
     notes: Notes,
     progress: Progress,
     rev: Rev,
+    changes: Changes,
 }
 
 impl Program {
@@ -337,5 +339,15 @@ impl Program {
     /// Sets the revision.
     pub(crate) const fn set_rev(&mut self, rev: Rev) {
         self.rev = rev;
+    }
+
+    /// Gives the transaction counter, the event ring and the table epochs.
+    pub(crate) const fn changes(&self) -> &Changes {
+        &self.changes
+    }
+
+    /// Gives the transaction counter, the event ring and the table epochs for a change.
+    pub(crate) const fn changes_mut(&mut self) -> &mut Changes {
+        &mut self.changes
     }
 }

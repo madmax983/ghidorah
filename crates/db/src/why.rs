@@ -13,7 +13,7 @@ mod tests;
 use std::collections::BTreeMap;
 use std::fmt;
 
-use ghidorah_base::{Address, ExportId, FuncId, ImportId, JumpTableId, StringId, VarId};
+use ghidorah_base::{Address, ExportId, FuncId, ImportId, JumpTableId, NoteId, StringId, VarId};
 
 use crate::comments::CommentKind;
 use crate::fact::Invalid;
@@ -102,6 +102,8 @@ pub enum FactKey {
     Reloc(u64),
     /// The FDE whose PC range starts at a RAM offset.
     Fde(u64),
+    /// A note.
+    Note(NoteId),
 }
 
 /// The reason of a fact.
@@ -170,5 +172,39 @@ impl WhyStore {
     /// Removes the record of a fact and gives it.
     pub(crate) fn remove(&mut self, key: &FactKey) -> Option<Why> {
         self.map.remove(key).map(|(_, w)| w)
+    }
+
+    /// Gives the creation order of the next new record.
+    #[must_use]
+    pub const fn next_order(&self) -> u64 {
+        self.next
+    }
+
+    /// Sets the record of a fact with its creation order. Gives the old record.
+    ///
+    /// The next order stays above `order`. The JSON codec uses this function for an exact copy.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Invalid::TooMany`] above [`MAX_PREMISES`] premises.
+    pub(crate) fn insert_at(
+        &mut self,
+        key: FactKey,
+        order: u64,
+        why: Why,
+    ) -> Result<Option<Why>, Invalid> {
+        if why.premises.len() > MAX_PREMISES {
+            return Err(Invalid::TooMany {
+                count: why.premises.len(),
+                max: MAX_PREMISES,
+            });
+        }
+        self.next = self.next.max(order.saturating_add(1));
+        Ok(self.map.insert(key, (order, why)).map(|(_, w)| w))
+    }
+
+    /// Sets the creation order of the next new record. The order never goes below a stored order.
+    pub(crate) fn set_next(&mut self, next: u64) {
+        self.next = self.next.max(next);
     }
 }

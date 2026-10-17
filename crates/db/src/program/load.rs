@@ -24,6 +24,7 @@ use crate::fact::Origin;
 use crate::notes::Notes;
 use crate::progress::Progress;
 use crate::symbols::SymKind;
+use crate::tx::Changes;
 use crate::typesglue::Types;
 
 /// One symbol before the sort. The field order is the sort order.
@@ -229,5 +230,6 @@ pub(super) fn from_binary(
         notes: Notes::default(),
         progress: Progress::default(),
         rev: Rev(0),
+        changes: Changes::default(),
     })
 }
