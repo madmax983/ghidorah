@@ -112,6 +112,14 @@ impl Verdict {
 /// Gives the verdict of a write with the source `new` over a fact with the source `old`.
 #[must_use]
 pub fn write_rule(old: Source, new: Source, force: bool) -> Verdict {
-    let _ = (old, new, force);
-    Verdict::Allowed
+    let agent_over_imported = old == Source::Imported && new == Source::Agent;
+    if !ghidorah_kernel::may_overwrite(old.rank(), new.rank(), force) {
+        Verdict::Blocked {
+            force_applies: agent_over_imported,
+        }
+    } else if new.rank() >= old.rank() {
+        Verdict::Allowed
+    } else {
+        Verdict::Forced
+    }
 }

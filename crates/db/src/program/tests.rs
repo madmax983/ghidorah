@@ -326,20 +326,29 @@ fn merged_functions_take_the_body_from_analysis_and_the_source_from_base() {
     assert_eq!(p.owner_of(Address::external(0x1084)), None);
 }
 
-#[test]
-fn merged_symbols_refs_and_single_facts() {
+/// The keys of the analysis facts of [`seeded`].
+struct Seed {
+    a: Address,
+    k: RefKey,
+    k2: RefKey,
+    jt: JumpTableId,
+    table: JumpTable,
+    v: VarId,
+    why: Why,
+}
+
+fn insn(len: u8, flow: FlowKind) -> CodeUnit {
+    CodeUnit::Insn {
+        len,
+        flow,
+        flags: 0,
+    }
+}
+
+/// Gives a program with one analysis fact in each table.
+fn seeded() -> (Program, Seed) {
     let mut p = program("hello.gcc-O2.stripped");
     let a = ram(0x1080);
-    let analysis = p.layer_mut(Source::Analysis).unwrap();
-    analysis
-        .symbols
-        .add(
-            a,
-            "main".to_string(),
-            SymKind::Function,
-            &Origin::analysis(),
-        )
-        .unwrap();
     let k = RefKey {
         from: a,
         op_index: 0,
@@ -352,36 +361,6 @@ fn merged_symbols_refs_and_single_facts() {
         to: ram(0x2004),
         kind: RefType::Data,
     };
-    analysis
-        .refs
-        .add(
-            Ref {
-                key: k,
-                primary: true,
-            },
-            &Origin::analysis(),
-        )
-        .unwrap();
-    analysis
-        .refs
-        .add(
-            Ref {
-                key: k2,
-                primary: false,
-            },
-            &Origin::analysis(),
-        )
-        .unwrap();
-    analysis
-        .comments
-        .set(
-            a,
-            CommentKind::Eol,
-            Some("auto".to_string()),
-            &Origin::analysis(),
-        )
-        .unwrap();
-    let jt = JumpTableId(ram(0x1088));
     let table = JumpTable {
         base: None,
         entry_size: 4,
@@ -390,111 +369,144 @@ fn merged_symbols_refs_and_single_facts() {
         method: JtMethod::A,
         resolved: false,
     };
-    analysis
-        .jumptables
-        .set(jt, Some(table.clone()), &Origin::analysis())
+    let seed = Seed {
+        a,
+        k,
+        k2,
+        jt: JumpTableId(ram(0x1088)),
+        table,
+        v: VarId {
+            func: FuncId(a),
+            storage: Storage::Ret,
+        },
+        why: Why {
+            rule: RuleCode::new("R_CALL_TARGET").unwrap(),
+            premises: Vec::new(),
+        },
+    };
+    let origin = Origin::analysis();
+    let layer = p.layer_mut(Source::Analysis).unwrap();
+    layer
+        .symbols
+        .add(a, "main".to_string(), SymKind::Function, &origin)
         .unwrap();
-    analysis
-        .listing
-        .insert_unit(
-            0x1080,
-            CodeUnit::Insn {
-                len: 4,
-                flow: FlowKind::Seq,
-                flags: 0,
+    layer
+        .refs
+        .add(
+            Ref {
+                key: k,
+                primary: true,
             },
+            &origin,
         )
         .unwrap();
-    analysis.strings.insert(0x2004, info());
-    let v = VarId {
-        func: FuncId(a),
-        storage: Storage::Ret,
-    };
-    analysis
-        .vars
-        .set_name(&v, Some("rv".to_string()), &Origin::analysis())
+    layer
+        .refs
+        .add(
+            Ref {
+                key: k2,
+                primary: false,
+            },
+            &origin,
+        )
         .unwrap();
-    analysis
-        .vars
-        .set_type(&v, Some(TypeId::from_index(2)), &Origin::analysis())
+    layer
+        .comments
+        .set(a, CommentKind::Eol, Some("auto".to_string()), &origin)
         .unwrap();
-    let why = Why {
-        rule: RuleCode::new("R_CALL_TARGET").unwrap(),
-        premises: Vec::new(),
-    };
-    analysis
+    layer
+        .jumptables
+        .set(seed.jt, Some(seed.table.clone()), &origin)
+        .unwrap();
+    layer
+        .listing
+        .insert_unit(0x1080, insn(4, FlowKind::Seq))
+        .unwrap();
+    layer.strings.insert(0x2004, info());
+    layer
+        .vars
+        .set_name(&seed.v, Some("rv".to_string()), &origin)
+        .unwrap();
+    layer
+        .vars
+        .set_type(&seed.v, Some(TypeId::from_index(2)), &origin)
+        .unwrap();
+    layer
         .why
-        .insert(FactKey::Func(FuncId(a)), why.clone())
+        .insert(FactKey::Func(FuncId(a)), seed.why.clone())
         .unwrap();
+    (p, seed)
+}
 
+#[test]
+fn merged_reads_see_analysis_facts() {
+    let (p, s) = seeded();
+    let a = s.a;
     assert_eq!(text(&p, a), Some(("main".to_string(), Source::Analysis)));
     assert_eq!(p.symbols_at(a).len(), 1);
     assert_eq!(p.addrs_named("main"), [a]);
     assert_eq!(p.refs_from(a).len(), 2);
     assert_eq!(p.refs_to(ram(0x2004)).len(), 2);
     assert_eq!(p.comment(a, CommentKind::Eol).unwrap().value, "auto");
-    assert_eq!(p.jump_table(jt).unwrap().value, table);
+    assert_eq!(p.jump_table(s.jt).unwrap().value, s.table);
     assert_eq!(p.code_unit(0x1080).map(CodeUnit::len), Some(4));
     assert_eq!(p.string(0x2004), Some(&info()));
-    assert_eq!(p.var(&v).name.unwrap().value, "rv");
-    assert_eq!(p.why(&FactKey::Func(FuncId(a))), Some(&why));
+    assert_eq!(p.var(&s.v).name.unwrap().value, "rv");
+    assert_eq!(p.why(&FactKey::Func(FuncId(a))), Some(&s.why));
     assert!(p.data_def(0x10a0).is_none());
     assert!(p.flow_override(a).is_none());
+    assert!(p.why(&FactKey::Entry(1)).is_none());
+}
 
-    let base = p.layer_mut(Source::Agent).unwrap();
-    base.symbols
-        .set_name(
-            a,
-            Some("parse_cfg".to_string()),
-            SymKind::Function,
-            &agent(),
-        )
-        .unwrap();
-    base.refs
-        .add(
-            Ref {
-                key: k,
-                primary: false,
-            },
-            &agent(),
-        )
-        .unwrap();
-    base.comments
-        .set(a, CommentKind::Eol, Some("mine".to_string()), &agent())
-        .unwrap();
-    let mut agent_table = table;
+#[test]
+fn merged_reads_prefer_the_base_layer() {
+    let (mut p, s) = seeded();
+    let a = s.a;
+    let mut agent_table = s.table.clone();
     agent_table.method = JtMethod::Agent;
     agent_table.targets = vec![ram(0x1084)];
-    base.jumptables
-        .set(jt, Some(agent_table.clone()), &agent())
+    let origin = agent();
+    let layer = p.layer_mut(Source::Agent).unwrap();
+    layer
+        .symbols
+        .set_name(a, Some("parse_cfg".to_string()), SymKind::Function, &origin)
         .unwrap();
-    base.overrides
-        .set(a, Some(FlowOverride::CallAsJump), &agent())
-        .unwrap();
-    base.listing
-        .set_data(
-            0x10a0,
-            Some(DataDef {
-                ty: TypeId::from_index(1),
-                len: 1,
-            }),
-            &agent(),
-        )
-        .unwrap();
-    base.vars
-        .set_name(&v, Some("result".to_string()), &agent())
-        .unwrap();
-    base.listing
-        .insert_unit(
-            0x10a0,
-            CodeUnit::Insn {
-                len: 1,
-                flow: FlowKind::Ret,
-                flags: 0,
+    layer
+        .refs
+        .add(
+            Ref {
+                key: s.k,
+                primary: false,
             },
+            &origin,
         )
         .unwrap();
-    base.strings.insert(0x2010, info());
+    layer
+        .comments
+        .set(a, CommentKind::Eol, Some("mine".to_string()), &origin)
+        .unwrap();
+    layer
+        .jumptables
+        .set(s.jt, Some(agent_table.clone()), &origin)
+        .unwrap();
+    layer
+        .overrides
+        .set(a, Some(FlowOverride::CallAsJump), &origin)
+        .unwrap();
+    let def = DataDef {
+        ty: TypeId::from_index(1),
+        len: 1,
+    };
+    layer.listing.set_data(0x10a0, Some(def), &origin).unwrap();
+    layer
+        .vars
+        .set_name(&s.v, Some("result".to_string()), &origin)
+        .unwrap();
+    layer
+        .listing
+        .insert_unit(0x10a0, insn(1, FlowKind::Ret))
+        .unwrap();
+    layer.strings.insert(0x2010, info());
 
     assert_eq!(text(&p, a), Some(("parse_cfg".to_string(), Source::Agent)));
     assert_eq!(
@@ -504,26 +516,19 @@ fn merged_symbols_refs_and_single_facts() {
     );
     assert_eq!(p.primary_symbol(a).unwrap().name.source, Source::Agent);
     assert_eq!(p.addrs_named("main"), [a]);
-    let from: Vec<(RefKey, Source)> = p
-        .refs_from(a)
-        .iter()
-        .map(|f| (f.value.key, f.source))
-        .collect();
-    assert_eq!(from, [(k, Source::Agent), (k2, Source::Analysis)]);
-    let to: Vec<(RefKey, Source)> = p
-        .refs_to(ram(0x2004))
-        .iter()
-        .map(|f| (f.value.key, f.source))
-        .collect();
-    assert_eq!(to, [(k, Source::Agent), (k2, Source::Analysis)]);
+    let pairs = |refs: Vec<&crate::fact::Fact<Ref>>| -> Vec<(RefKey, Source)> {
+        refs.iter().map(|f| (f.value.key, f.source)).collect()
+    };
+    let want = [(s.k, Source::Agent), (s.k2, Source::Analysis)];
+    assert_eq!(pairs(p.refs_from(a)), want);
+    assert_eq!(pairs(p.refs_to(ram(0x2004))), want);
     assert_eq!(p.comment(a, CommentKind::Eol).unwrap().value, "mine");
-    assert_eq!(p.jump_table(jt).unwrap().value, agent_table);
+    assert_eq!(p.jump_table(s.jt).unwrap().value, agent_table);
     assert_eq!(p.flow_override(a).unwrap().value, FlowOverride::CallAsJump);
     assert_eq!(p.data_def(0x10a0).unwrap().source, Source::Agent);
-    let view = p.var(&v);
+    let view = p.var(&s.v);
     assert_eq!(view.name.unwrap().value, "result");
     assert_eq!(view.ty.unwrap().source, Source::Analysis);
     assert_eq!(p.code_unit(0x10a0).map(CodeUnit::len), Some(1));
     assert_eq!(p.string(0x2010), Some(&info()));
-    assert!(p.why(&FactKey::Entry(1)).is_none());
 }

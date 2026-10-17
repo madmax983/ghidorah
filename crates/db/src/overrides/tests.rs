@@ -16,7 +16,7 @@ fn agent() -> Origin {
 #[test]
 fn targets_sort_and_dedup() {
     let mut o = FlowOverrides::default();
-    let at = Address::ram(0x401000);
+    let at = Address::ram(0x40_1000);
     let targets = vec![
         Address::ram(3),
         Address::ram(1),

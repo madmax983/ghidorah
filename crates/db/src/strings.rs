@@ -11,6 +11,8 @@ use std::fmt;
 
 use ghidorah_base::Range;
 
+use crate::listing::starts_in;
+
 /// The encoding of a string.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Encoding {
@@ -78,8 +80,7 @@ impl Strings {
 
     /// Gives the strings that start in `range`, in address order.
     pub fn in_range(&self, range: Range) -> impl Iterator<Item = (u64, &StrInfo)> {
-        let _ = range;
-        std::iter::empty()
+        starts_in(&self.map, range)
     }
 
     /// Gives all strings in address order.
@@ -89,8 +90,7 @@ impl Strings {
 
     /// Sets the string at `off`. Gives the old record.
     pub(crate) fn insert(&mut self, off: u64, info: StrInfo) -> Option<StrInfo> {
-        let _ = (off, info);
-        None
+        self.map.insert(off, info)
     }
 
     /// Removes the string at `off` and gives it.

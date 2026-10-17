@@ -16,7 +16,7 @@ fn agent() -> Origin {
 #[test]
 fn set_get_and_remove() {
     let mut c = Comments::default();
-    let a = Address::ram(0x401000);
+    let a = Address::ram(0x40_1000);
     assert_eq!(
         c.set(a, CommentKind::Pre, Some("entry".to_string()), &agent())
             .unwrap(),
@@ -25,7 +25,7 @@ fn set_get_and_remove() {
     c.set(a, CommentKind::Eol, Some("x".to_string()), &agent())
         .unwrap();
     c.set(
-        Address::ram(0x401001),
+        Address::ram(0x40_1001),
         CommentKind::Eol,
         Some("y".to_string()),
         &agent(),

@@ -13,7 +13,7 @@ fn note(id: u64, kind: NoteKind) -> Note {
         id: NoteId(id),
         kind,
         text: "text".to_string(),
-        at: Some(Address::ram(0x401000)),
+        at: Some(Address::ram(0x40_1000)),
         func: None,
         status: NoteStatus::Open,
         tags: vec!["parser".to_string()],

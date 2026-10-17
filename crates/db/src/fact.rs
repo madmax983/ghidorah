@@ -1,8 +1,8 @@
 //! Provenance facts, session labels and write errors (design Section 3.6).
 //!
 //! A [`Fact`] is a value with its [`Origin`]: the source, the transaction, the session label
-//! and the force flag. Each manager write goes through [`put`] or [`put_slot`].
-//! These functions apply the write rule of [`write_rule`](crate::source::write_rule).
+//! and the force flag. Each manager write goes through the crate functions `put` or
+//! `put_slot`. These functions apply the write rule of [`write_rule`].
 //! A refused write gives [`Blocked`] with the current fact, so the caller can report it.
 
 #[cfg(test)]
@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 use ghidorah_base::{Address, ErrorCode, FuncId, NoteId, Range, TxId};
 
-use crate::source::{Source, Verdict, write_rule};
+use crate::source::{Source, write_rule};
 
 /// The longest session label in bytes.
 pub const MAX_LABEL: usize = 64;
@@ -39,8 +39,11 @@ impl SessionLabel {
     /// Returns [`Invalid::BadLabel`] for an empty label, a label above [`MAX_LABEL`] bytes or
     /// a byte outside `[A-Za-z0-9._-]`.
     pub fn new(text: &str) -> Result<Self, Invalid> {
-        let _ = text;
-        Err(Invalid::BadLabel)
+        let byte_ok = |b: u8| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-');
+        if text.is_empty() || text.len() > MAX_LABEL || !text.bytes().all(byte_ok) {
+            return Err(Invalid::BadLabel);
+        }
+        Ok(Self(Arc::from(text)))
     }
 
     /// Gives the label text.
@@ -159,7 +162,7 @@ impl<T> Blocked<T> {
     /// Tells if the same write with `force: true` succeeds. Then `next[0]` repeats it so.
     #[must_use]
     pub fn force_applies(&self) -> bool {
-        false
+        write_rule(self.current.source, self.attempted, true).is_allowed()
     }
 
     /// Gives the error code.
@@ -338,12 +341,19 @@ pub(crate) fn check<T: Clone>(
     current: Option<&Fact<T>>,
     origin: &Origin,
 ) -> Result<(), WriteError<T>> {
-    let _ = (
-        current,
-        origin,
-        write_rule as fn(Source, Source, bool) -> Verdict,
-    );
-    Ok(())
+    if origin.source == Source::Default {
+        return Err(Invalid::DefaultSource.into());
+    }
+    match current {
+        Some(cur) if !write_rule(cur.source, origin.source, origin.force).is_allowed() => {
+            Err(WriteError::Blocked(Box::new(Blocked {
+                current: cur.clone(),
+                attempted: origin.source,
+                force: origin.force,
+            })))
+        }
+        _ => Ok(()),
+    }
 }
 
 /// Writes `value` into `slot` by the write rule. `None` removes the fact. Gives the old fact.
@@ -356,8 +366,8 @@ pub(crate) fn put_slot<T: Clone>(
     value: Option<T>,
     origin: &Origin,
 ) -> Result<Option<Fact<T>>, WriteError<T>> {
-    let _ = (slot, value, origin);
-    Ok(None)
+    check(slot.as_ref(), origin)?;
+    Ok(std::mem::replace(slot, value.map(|v| origin.fact(v))))
 }
 
 /// Writes `value` at `key` of `map` by the write rule. `None` removes the fact.
@@ -372,13 +382,19 @@ pub(crate) fn put<K: Ord, T: Clone>(
     value: Option<T>,
     origin: &Origin,
 ) -> Result<Option<Fact<T>>, WriteError<T>> {
-    let _ = (map, key, value, origin);
-    Ok(None)
+    check(map.get(&key), origin)?;
+    Ok(match value {
+        Some(v) => map.insert(key, origin.fact(v)),
+        None => map.remove(&key),
+    })
 }
 
 /// Gives the fact of the higher rank. A tie gives `a`.
 #[must_use]
 pub fn higher<'a, T>(a: Option<&'a Fact<T>>, b: Option<&'a Fact<T>>) -> Option<&'a Fact<T>> {
-    let _ = b;
-    a
+    match (a, b) {
+        (Some(x), Some(y)) if y.source > x.source => Some(y),
+        (Some(x), _) => Some(x),
+        (None, y) => y,
+    }
 }

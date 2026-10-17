@@ -93,7 +93,21 @@ impl FlowOverrides {
         flow: Option<FlowOverride>,
         origin: &Origin,
     ) -> Result<Option<Fact<FlowOverride>>, WriteError<FlowOverride>> {
-        let _ = (at, flow, origin, put::<Address, FlowOverride>);
-        Err(Invalid::DefaultSource.into())
+        let flow = match flow {
+            Some(FlowOverride::IndirectTargets(mut targets)) => {
+                targets.sort_unstable();
+                targets.dedup();
+                if targets.len() > MAX_TARGETS {
+                    return Err(Invalid::TooMany {
+                        count: targets.len(),
+                        max: MAX_TARGETS,
+                    }
+                    .into());
+                }
+                Some(FlowOverride::IndirectTargets(targets))
+            }
+            other => other,
+        };
+        put(&mut self.map, at, flow, origin)
     }
 }

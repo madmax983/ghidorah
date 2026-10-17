@@ -35,7 +35,7 @@ impl Types {
     /// Returns the [`PreludeError`] of the prelude install.
     pub fn for_format(format: Format) -> Result<Self, PreludeError> {
         Ok(Self {
-            store: TypeStore::new(),
+            store: TypeStore::with_prelude()?,
             model: model_for(format),
         })
     }
@@ -55,8 +55,10 @@ impl Types {
     /// Gives the signature of a function type. Another type gives `None`.
     #[must_use]
     pub fn sig(&self, id: TypeId) -> Option<&Sig> {
-        let _ = (id, Type::Prim);
-        None
+        match self.store.get(id)? {
+            Type::Func(sig) => Some(sig),
+            _ => None,
+        }
     }
 
     /// Gives the `t:` reference of a type.
@@ -77,8 +79,7 @@ impl Types {
     /// Gives the Tier-0 prototype of a linked name. A version suffix after `@` does not count.
     #[must_use]
     pub fn prototype(name: &str) -> Option<&'static Proto> {
-        let _ = name;
-        None
+        ghidorah_types::proto::builtin().ok()?.get(name)
     }
 
     /// Gives the store for a change.

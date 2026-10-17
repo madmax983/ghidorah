@@ -307,14 +307,16 @@ impl Program {
     ///
     /// Returns [`Invalid::DefaultSource`] for `Default`. The DB never stores a default.
     pub(crate) fn layer_mut(&mut self, source: Source) -> Result<&mut Tables, Invalid> {
-        let _ = source;
-        Err(Invalid::DefaultSource)
+        match source {
+            Source::Default => Err(Invalid::DefaultSource),
+            Source::Analysis => Ok(&mut self.analysis),
+            Source::Agent | Source::Imported | Source::User => Ok(&mut self.base),
+        }
     }
 
     /// Puts `set` in place of the analysis layer and gives the old layer.
     pub(crate) fn swap_analysis(&mut self, set: Box<AnalysisSet>) -> Box<AnalysisSet> {
-        let _ = set;
-        Box::default()
+        std::mem::replace(&mut self.analysis, set)
     }
 
     /// Gives the notes for a change.

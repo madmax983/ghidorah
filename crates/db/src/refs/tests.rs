@@ -137,7 +137,7 @@ fn add_and_remove_follow_the_write_rule() {
 #[test]
 fn external_targets_and_negative_operands_sort_by_key() {
     let mut refs = Refs::default();
-    let from = Address::ram(0x401000);
+    let from = Address::ram(0x40_1000);
     let ext = Address::external(1);
     let keys = [
         RefKey {
@@ -149,7 +149,7 @@ fn external_targets_and_negative_operands_sort_by_key() {
         RefKey {
             from,
             op_index: 0,
-            to: Address::ram(0x402000),
+            to: Address::ram(0x40_2000),
             kind: RefType::Read,
         },
         RefKey {
@@ -172,7 +172,7 @@ fn external_targets_and_negative_operands_sort_by_key() {
     let got: Vec<RefKey> = refs.from(from).map(|f| f.value.key).collect();
     assert_eq!(got, keys);
     assert_eq!(refs.to(ext).count(), 2);
-    assert_eq!(refs.from(Address::ram(0x401001)).count(), 0);
+    assert_eq!(refs.from(Address::ram(0x40_1001)).count(), 0);
     assert_eq!(refs.to(Address::ram(u64::MAX)).count(), 0);
 }
 
@@ -220,6 +220,6 @@ fn ref_types_keep_the_ghidra_codes_and_names() {
 
 #[test]
 fn ref_ids_use_the_type_name() {
-    let k = key(0x401136, 1, 0x402010, RefType::Read);
+    let k = key(0x40_1136, 1, 0x40_2010, RefType::Read);
     assert_eq!(k.id().unwrap().to_string(), "ref:0x401136>0x402010:read");
 }

@@ -141,6 +141,6 @@ fn stripped_and_unstripped_twins_share_imports() {
     assert_eq!(ids(&full), ids(&stripped));
     assert!(!full.imports().is_empty());
     assert!(full.base().symbols().len() > stripped.base().symbols().len());
-    assert!(full.addrs_named("main").len() == 1);
+    assert_eq!(full.addrs_named("main").len(), 1);
     assert!(stripped.addrs_named("main").is_empty());
 }

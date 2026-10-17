@@ -38,8 +38,18 @@ impl RuleCode {
     /// Returns [`Invalid::EmptyName`] when the text is not `R_` and 1 or more upper case
     /// letters, digits and `_`, and [`Invalid::TooLong`] above [`MAX_RULE`] bytes.
     pub fn new(text: &str) -> Result<Self, Invalid> {
-        let _ = text;
-        Err(Invalid::EmptyName)
+        let body_ok = |b: u8| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'_';
+        match text.strip_prefix("R_") {
+            Some(body) if !body.is_empty() && body.bytes().all(body_ok) => {}
+            _ => return Err(Invalid::EmptyName),
+        }
+        if text.len() > MAX_RULE {
+            return Err(Invalid::TooLong {
+                len: text.len(),
+                max: MAX_RULE,
+            });
+        }
+        Ok(Self(text.to_string()))
     }
 
     /// Gives the code text.
@@ -146,8 +156,15 @@ impl WhyStore {
     ///
     /// Returns [`Invalid::TooMany`] above [`MAX_PREMISES`] premises.
     pub(crate) fn insert(&mut self, key: FactKey, why: Why) -> Result<Option<Why>, Invalid> {
-        let _ = (key, why);
-        Ok(None)
+        if why.premises.len() > MAX_PREMISES {
+            return Err(Invalid::TooMany {
+                count: why.premises.len(),
+                max: MAX_PREMISES,
+            });
+        }
+        let order = self.next;
+        self.next = self.next.saturating_add(1);
+        Ok(self.map.insert(key, (order, why)).map(|(_, w)| w))
     }
 
     /// Removes the record of a fact and gives it.

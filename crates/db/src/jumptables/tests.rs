@@ -19,7 +19,7 @@ fn table(n: usize, method: JtMethod) -> JumpTable {
 #[test]
 fn set_get_and_caps() {
     let mut j = JumpTables::default();
-    let id = JumpTableId(Address::ram(0x401200));
+    let id = JumpTableId(Address::ram(0x40_1200));
     let agent = Origin::new(
         Source::Agent,
         TxId(1),

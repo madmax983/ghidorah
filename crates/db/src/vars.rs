@@ -9,7 +9,7 @@ mod tests;
 use std::collections::BTreeMap;
 
 use ghidorah_base::id::MAX_NAME_LEN;
-use ghidorah_base::{FuncId, VarId};
+use ghidorah_base::{FuncId, Storage, VarId};
 use ghidorah_types::TypeId;
 
 use crate::fact::{Fact, Invalid, Origin, WriteError, put_slot};
@@ -50,8 +50,27 @@ impl Vars {
 
     /// Gives the variables of a function in storage order.
     pub fn of_func(&self, func: FuncId) -> impl Iterator<Item = (&VarId, &VarFact)> {
-        let _ = func;
-        std::iter::empty()
+        let first = VarId {
+            func,
+            storage: Storage::Param(0),
+        };
+        self.map
+            .range(first..)
+            .take_while(move |(id, _)| id.func == func)
+    }
+
+    /// Writes one fact of `var` with `write`. A variable with no fact left loses its entry.
+    fn change<T>(
+        &mut self,
+        var: &VarId,
+        write: impl FnOnce(&mut VarFact) -> Result<Option<Fact<T>>, WriteError<T>>,
+    ) -> Result<Option<Fact<T>>, WriteError<T>> {
+        let mut facts = self.map.remove(var).unwrap_or_default();
+        let result = write(&mut facts);
+        if facts.name.is_some() || facts.ty.is_some() {
+            self.map.insert(var.clone(), facts);
+        }
+        result
     }
 
     /// Gives all variables in ID order.
@@ -70,8 +89,19 @@ impl Vars {
         name: Option<String>,
         origin: &Origin,
     ) -> Result<Option<Fact<String>>, WriteError<String>> {
-        let _ = (var, name, origin, MAX_NAME_LEN, put_slot::<String>);
-        Err(Invalid::DefaultSource.into())
+        if let Some(n) = &name {
+            if n.is_empty() {
+                return Err(Invalid::EmptyName.into());
+            }
+            if n.len() > MAX_NAME_LEN {
+                return Err(Invalid::TooLong {
+                    len: n.len(),
+                    max: MAX_NAME_LEN,
+                }
+                .into());
+            }
+        }
+        self.change(var, |f| put_slot(&mut f.name, name, origin))
     }
 
     /// Sets the type fact by the write rule. `None` removes it. Gives the old fact.
@@ -85,7 +115,6 @@ impl Vars {
         ty: Option<TypeId>,
         origin: &Origin,
     ) -> Result<Option<Fact<TypeId>>, WriteError<TypeId>> {
-        let _ = (var, ty, origin);
-        Err(Invalid::DefaultSource.into())
+        self.change(var, |f| put_slot(&mut f.ty, ty, origin))
     }
 }

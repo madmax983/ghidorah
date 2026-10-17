@@ -12,7 +12,7 @@ use std::fmt;
 
 use ghidorah_base::{Address, IdError, RefId};
 
-use crate::fact::{Fact, Origin, WriteError};
+use crate::fact::{Fact, Origin, WriteError, check};
 
 /// The type of a reference. The codes are the Ghidra `RefType` bytes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -169,6 +169,9 @@ pub struct Ref {
     pub primary: bool,
 }
 
+/// The lowest address. The constructors of [`Address`] give no address below it.
+const MIN_ADDR: Address = Address::ram(0);
+
 /// The order of the to-index.
 type ToKey = (Address, Address, i8, RefType);
 
@@ -205,14 +208,31 @@ impl Refs {
 
     /// Gives the references from `from` in key order.
     pub fn from(&self, from: Address) -> impl Iterator<Item = &Fact<Ref>> {
-        let _ = from;
-        std::iter::empty()
+        let first = RefKey {
+            from,
+            op_index: i8::MIN,
+            to: MIN_ADDR,
+            kind: RefType::FallThrough,
+        };
+        self.from
+            .range(first..)
+            .take_while(move |(k, _)| k.from == from)
+            .map(|(_, r)| r)
     }
 
     /// Gives the references to `to` in the order of the to-index.
     pub fn to(&self, to: Address) -> impl Iterator<Item = &Fact<Ref>> {
-        let _ = (to, to_key as fn(&RefKey) -> ToKey);
-        std::iter::empty()
+        self.to
+            .range((to, MIN_ADDR, i8::MIN, RefType::FallThrough)..)
+            .take_while(move |k| k.0 == to)
+            .filter_map(|&(to, from, op_index, kind)| {
+                self.from.get(&RefKey {
+                    from,
+                    op_index,
+                    to,
+                    kind,
+                })
+            })
     }
 
     /// Gives all references in key order.
@@ -241,8 +261,9 @@ impl Refs {
         r: Ref,
         origin: &Origin,
     ) -> Result<Option<Fact<Ref>>, WriteError<Ref>> {
-        let _ = (r, origin);
-        Ok(None)
+        check(self.from.get(&r.key), origin)?;
+        self.to.insert(to_key(&r.key));
+        Ok(self.from.insert(r.key, origin.fact(r)))
     }
 
     /// Removes a reference by the write rule. Gives the old fact, or `None` for no reference.
@@ -255,7 +276,8 @@ impl Refs {
         key: &RefKey,
         origin: &Origin,
     ) -> Result<Option<Fact<Ref>>, WriteError<Ref>> {
-        let _ = (key, origin);
-        Ok(None)
+        check(self.from.get(key), origin)?;
+        self.to.remove(&to_key(key));
+        Ok(self.from.remove(key))
     }
 }

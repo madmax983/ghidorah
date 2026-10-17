@@ -33,8 +33,8 @@ fn rule_codes_obey_the_grammar() {
 #[test]
 fn records_get_increasing_creation_orders() {
     let mut store = WhyStore::default();
-    let f = FactKey::Func(FuncId(Address::ram(0x401000)));
-    let entry = FactKey::Entry(0x401000);
+    let f = FactKey::Func(FuncId(Address::ram(0x40_1000)));
+    let entry = FactKey::Entry(0x40_1000);
     assert_eq!(
         store
             .insert(entry.clone(), why("R_INPUT", Vec::new()))
@@ -48,7 +48,10 @@ fn records_get_increasing_creation_orders() {
         None
     );
     assert!(store.order(&entry) < store.order(&f));
-    assert_eq!(store.get(&f).unwrap().premises, [entry.clone()]);
+    assert_eq!(
+        store.get(&f).unwrap().premises,
+        std::slice::from_ref(&entry)
+    );
     let old = store
         .insert(entry.clone(), why("R_AGAIN", Vec::new()))
         .unwrap()

@@ -14,7 +14,7 @@ use std::fmt;
 use ghidorah_base::Range;
 use ghidorah_types::TypeId;
 
-use crate::fact::{Fact, Invalid, Origin, WriteError};
+use crate::fact::{Fact, Invalid, Origin, WriteError, put};
 
 /// The control flow kind of an instruction. The names follow `ghidorah-x86`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -92,8 +92,7 @@ impl CodeUnit {
     /// Gives the addresses of the unit at `at`, or `None` when the end passes `u64::MAX`.
     #[must_use]
     pub fn range(&self, at: u64) -> Option<Range> {
-        let _ = at;
-        None
+        Range::with_len(at, u64::from(self.len()))
     }
 }
 
@@ -110,8 +109,7 @@ impl DataDef {
     /// Gives the addresses of the definition at `at`, or `None` for a bad length.
     #[must_use]
     pub fn range(&self, at: u64) -> Option<Range> {
-        let _ = at;
-        None
+        Range::with_len(at, u64::from(self.len))
     }
 }
 
@@ -128,8 +126,35 @@ fn containing<V>(
     off: u64,
     range: impl Fn(u64, &V) -> Option<Range>,
 ) -> Option<(u64, &V)> {
-    let _ = (map, off, range);
-    None
+    let (start, value) = map.range(..=off).next_back()?;
+    range(*start, value)?
+        .contains(off)
+        .then_some((*start, value))
+}
+
+/// Gives the range of an entry of `map` that overlaps `new`. The entry at `skip` does not count.
+fn overlap<V>(
+    map: &BTreeMap<u64, V>,
+    new: Range,
+    skip: Option<u64>,
+    range: impl Fn(u64, &V) -> Option<Range>,
+) -> Option<Range> {
+    let before = containing(map, new.first, &range).filter(|(at, _)| Some(*at) != skip);
+    let inside = || starts_in(map, new).find(|(at, _)| Some(*at) != skip);
+    let (at, value) = before.or_else(inside)?;
+    range(at, value)
+}
+
+/// Gives the entries of `map` that start in `range`, in key order.
+///
+/// A range with `first > last` is empty.
+pub(crate) fn starts_in<V>(
+    map: &BTreeMap<u64, V>,
+    range: Range,
+) -> impl Iterator<Item = (u64, &V)> {
+    map.range(range.first..=range.last.max(range.first))
+        .filter(move |(at, _)| **at <= range.last)
+        .map(|(at, v)| (*at, v))
 }
 
 impl Listing {
@@ -153,8 +178,7 @@ impl Listing {
 
     /// Gives the code units that start in `range`, in address order.
     pub fn units_in(&self, range: Range) -> impl Iterator<Item = (u64, &CodeUnit)> {
-        let _ = range;
-        std::iter::empty()
+        starts_in(&self.units, range)
     }
 
     /// Gives the number of data definitions.
@@ -187,7 +211,13 @@ impl Listing {
     /// Returns [`Invalid::BadLength`] for a length of 0 or an end past `u64::MAX`, and
     /// [`Invalid::Overlap`] when the bytes overlap another code unit.
     pub(crate) fn insert_unit(&mut self, off: u64, unit: CodeUnit) -> Result<(), Invalid> {
-        let _ = (off, unit);
+        let new = unit
+            .range(off)
+            .ok_or_else(|| Invalid::BadLength(u64::from(unit.len())))?;
+        if let Some(existing) = overlap(&self.units, new, None, |at, u| u.range(at)) {
+            return Err(Invalid::Overlap { new, existing });
+        }
+        self.units.insert(off, unit);
         Ok(())
     }
 
@@ -209,7 +239,14 @@ impl Listing {
         def: Option<DataDef>,
         origin: &Origin,
     ) -> Result<Option<Fact<DataDef>>, WriteError<DataDef>> {
-        let _ = (off, def, origin);
-        Ok(None)
+        if let Some(d) = def {
+            let new = d
+                .range(off)
+                .ok_or_else(|| Invalid::BadLength(u64::from(d.len)))?;
+            if let Some(existing) = overlap(&self.data, new, Some(off), |at, f| f.value.range(at)) {
+                return Err(Invalid::Overlap { new, existing }.into());
+            }
+        }
+        put(&mut self.data, off, def, origin)
     }
 }

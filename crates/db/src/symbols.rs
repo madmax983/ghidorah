@@ -16,11 +16,13 @@ mod tests;
 
 use std::collections::BTreeMap;
 use std::fmt;
+use std::ops::RangeInclusive;
 
 use ghidorah_base::Address;
 use ghidorah_base::id::MAX_NAME_LEN;
 
-use crate::fact::{Fact, Invalid, Origin, WriteError};
+use crate::fact::{Fact, Invalid, Origin, WriteError, check};
+use crate::source::Source;
 
 /// The kind of a symbol. The codes are the Ghidra codes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -123,6 +125,11 @@ fn check_name(name: &str) -> Result<(), Invalid> {
     }
 }
 
+/// Gives the key range of the symbols of `addr`.
+const fn span(addr: Address) -> RangeInclusive<(Address, SymKey)> {
+    (addr, SymKey(0))..=(addr, SymKey(u16::MAX))
+}
+
 impl Symbols {
     /// Gives the number of symbols.
     #[must_use]
@@ -144,8 +151,7 @@ impl Symbols {
 
     /// Gives the symbols of an address in key order.
     pub fn at(&self, addr: Address) -> impl Iterator<Item = &Symbol> {
-        let _ = addr;
-        std::iter::empty()
+        self.table.range(span(addr)).map(|(_, s)| s)
     }
 
     /// Gives the primary symbol of an address.
@@ -170,14 +176,34 @@ impl Symbols {
         self.by_name.iter().map(|(n, a)| (n.as_str(), a.as_slice()))
     }
 
+    /// Adds `addr` to the index entry of `name`.
+    fn index_add(&mut self, name: &str, addr: Address) {
+        let list = self.by_name.entry(name.to_string()).or_default();
+        if let Err(at) = list.binary_search(&addr) {
+            list.insert(at, addr);
+        }
+    }
+
+    /// Removes `addr` from the index entry of `name`. An empty entry goes.
+    fn index_remove(&mut self, name: &str, addr: Address) {
+        if let Some(list) = self.by_name.get_mut(name) {
+            if let Ok(at) = list.binary_search(&addr) {
+                list.remove(at);
+            }
+            if list.is_empty() {
+                self.by_name.remove(name);
+            }
+        }
+    }
+
     /// Adds a symbol. The first symbol of an address is primary.
     ///
     /// A symbol with the same name at the address gives its key and no change.
     ///
     /// # Errors
     ///
-    /// Returns [`Invalid::EmptyName`], [`Invalid::TooLong`] or [`Invalid::TooMany`] for an
-    /// address that holds `u16::MAX` keys.
+    /// Returns [`Invalid::DefaultSource`], [`Invalid::EmptyName`], [`Invalid::TooLong`] or
+    /// [`Invalid::TooMany`] for an address whose last key is `u16::MAX`.
     pub(crate) fn add(
         &mut self,
         addr: Address,
@@ -185,20 +211,37 @@ impl Symbols {
         kind: SymKind,
         origin: &Origin,
     ) -> Result<SymKey, Invalid> {
-        let _ = (
+        if origin.source == Source::Default {
+            return Err(Invalid::DefaultSource);
+        }
+        check_name(&name)?;
+        if let Some(same) = self.at(addr).find(|s| s.name.value == name) {
+            return Ok(same.key);
+        }
+        let last = self.at(addr).last().map(|s| s.key.0);
+        let key = match last {
+            None => SymKey(0),
+            Some(k) => SymKey(k.checked_add(1).ok_or_else(|| Invalid::TooMany {
+                count: usize::from(u16::MAX) + 1,
+                max: usize::from(u16::MAX),
+            })?),
+        };
+        self.index_add(&name, addr);
+        let symbol = Symbol {
             addr,
-            name,
+            key,
+            name: origin.fact(name),
             kind,
-            origin,
-            check_name as fn(&str) -> Result<(), Invalid>,
-        );
-        Ok(SymKey(0))
+            primary: last.is_none(),
+        };
+        self.table.insert((addr, key), symbol);
+        Ok(key)
     }
 
     /// Sets the name of the primary symbol of `addr` by the write rule. `None` removes it.
     ///
-    /// Without a primary symbol, a name makes a new primary symbol of `kind`. Gives the old
-    /// name fact.
+    /// Without a primary symbol, a name makes a new primary symbol of `kind`. A rename keeps
+    /// the kind and the key. Gives the old name fact.
     ///
     /// # Errors
     ///
@@ -211,21 +254,53 @@ impl Symbols {
         kind: SymKind,
         origin: &Origin,
     ) -> Result<Option<Fact<String>>, WriteError<String>> {
-        let _ = (addr, name, kind, origin);
-        Ok(None)
+        let current = self.primary(addr).map(|s| (s.key, s.name.clone()));
+        let Some((key, current)) = current else {
+            check::<String>(None, origin)?;
+            if let Some(name) = name {
+                self.add(addr, name, kind, origin)?;
+            }
+            return Ok(None);
+        };
+        check(Some(&current), origin)?;
+        let Some(name) = name else {
+            return Ok(self.remove(addr, key).map(|s| s.name));
+        };
+        check_name(&name)?;
+        if name != current.value && self.at(addr).any(|s| s.name.value == name) {
+            return Err(Invalid::DuplicateName(name).into());
+        }
+        self.index_remove(&current.value, addr);
+        self.index_add(&name, addr);
+        Ok(self
+            .table
+            .get_mut(&(addr, key))
+            .map(|s| std::mem::replace(&mut s.name, origin.fact(name))))
     }
 
     /// Makes the symbol with `key` primary. Gives the key of the old primary symbol.
     ///
     /// An unknown key gives `None` and no change.
     pub(crate) fn set_primary(&mut self, addr: Address, key: SymKey) -> Option<SymKey> {
-        let _ = (addr, key);
-        None
+        if !self.table.contains_key(&(addr, key)) {
+            return None;
+        }
+        let old = self.primary(addr).map(|s| s.key);
+        for s in self.table.range_mut(span(addr)).map(|(_, s)| s) {
+            s.primary = s.key == key;
+        }
+        old
     }
 
     /// Removes a symbol and gives it. A removed primary passes the flag on.
     pub(crate) fn remove(&mut self, addr: Address, key: SymKey) -> Option<Symbol> {
-        let _ = (addr, key);
-        None
+        let symbol = self.table.remove(&(addr, key))?;
+        self.index_remove(&symbol.name.value, addr);
+        if symbol.primary
+            && let Some((_, next)) = self.table.range_mut(span(addr)).next()
+        {
+            next.primary = true;
+        }
+        Some(symbol)
     }
 }

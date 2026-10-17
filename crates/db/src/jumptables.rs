@@ -102,7 +102,15 @@ impl JumpTables {
         table: Option<JumpTable>,
         origin: &Origin,
     ) -> Result<Option<Fact<JumpTable>>, WriteError<JumpTable>> {
-        let _ = (id, table, origin, put::<Address, JumpTable>);
-        Err(Invalid::DefaultSource.into())
+        if let Some(t) = &table
+            && t.targets.len() > MAX_ENTRIES
+        {
+            return Err(Invalid::TooMany {
+                count: t.targets.len(),
+                max: MAX_ENTRIES,
+            }
+            .into());
+        }
+        put(&mut self.map, id.0, table, origin)
     }
 }

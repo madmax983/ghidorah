@@ -71,7 +71,14 @@ impl Progress {
     /// Gives the counts of the rows.
     #[must_use]
     pub fn counts(&self) -> ProgressCounts {
-        ProgressCounts::default()
+        let mut c = ProgressCounts::default();
+        for p in self.funcs.values() {
+            c.visited = c.visited.saturating_add(u64::from(p.visited));
+            c.named = c.named.saturating_add(u64::from(p.named));
+            c.typed = c.typed.saturating_add(u64::from(p.typed));
+            c.commented = c.commented.saturating_add(u64::from(p.commented));
+        }
+        c
     }
 
     /// Gives the mark of a session.
@@ -87,13 +94,16 @@ impl Progress {
 
     /// Sets the row of a function. A default row removes the row. Gives the old row.
     pub(crate) fn set(&mut self, func: FuncId, row: FuncProgress) -> FuncProgress {
-        let _ = (func, row);
-        FuncProgress::default()
+        let old = if row == FuncProgress::default() {
+            self.funcs.remove(&func)
+        } else {
+            self.funcs.insert(func, row)
+        };
+        old.unwrap_or_default()
     }
 
     /// Sets the mark of a session. Gives the old mark.
     pub(crate) fn set_mark(&mut self, session: SessionLabel, mark: Mark) -> Option<Mark> {
-        let _ = (session, mark);
-        None
+        self.marks.insert(session, mark)
     }
 }

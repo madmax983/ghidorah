@@ -100,8 +100,9 @@ impl Comments {
 
     /// Gives the comments at `addr` in kind order.
     pub fn at(&self, addr: Address) -> impl Iterator<Item = (CommentKind, &Fact<String>)> {
-        let _ = addr;
-        std::iter::empty()
+        self.map
+            .range((addr, CommentKind::Eol)..=(addr, CommentKind::Repeatable))
+            .map(|((_, k), f)| (*k, f))
     }
 
     /// Gives all comments in address order, then kind order.
@@ -122,13 +123,17 @@ impl Comments {
         text: Option<String>,
         origin: &Origin,
     ) -> Result<Option<Fact<String>>, WriteError<String>> {
-        let _ = (
-            addr,
-            kind,
-            text,
-            origin,
-            put::<(Address, CommentKind), String>,
-        );
-        Err(Invalid::DefaultSource.into())
+        let text = text.filter(|t| !t.is_empty());
+        if let Some(t) = &text {
+            let len = t.chars().count();
+            if len > MAX_COMMENT {
+                return Err(Invalid::TooLong {
+                    len,
+                    max: MAX_COMMENT,
+                }
+                .into());
+            }
+        }
+        put(&mut self.map, (addr, kind), text, origin)
     }
 }

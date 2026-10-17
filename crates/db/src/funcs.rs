@@ -8,14 +8,14 @@
 #[cfg(test)]
 mod tests;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
-use ghidorah_base::{Address, FuncId, IntervalMap, Range, WarningCode};
+use ghidorah_base::{Address, FuncId, IntervalError, IntervalMap, Range, WarningCode};
 use ghidorah_kernel::RangeSet;
 use ghidorah_types::TypeId;
 
-use crate::fact::{Fact, Invalid, Origin, WriteError};
+use crate::fact::{Fact, Invalid, Origin, WriteError, put_slot};
 use crate::source::Source;
 
 /// The kind of a function part.
@@ -181,7 +181,7 @@ impl Function {
     /// Gives the number of bytes of the body. A full body holds 2^64 bytes, so the type is `u128`.
     #[must_use]
     pub fn size(&self) -> u128 {
-        0
+        self.body.ranges().iter().map(Range::len).sum()
     }
 }
 
@@ -219,15 +219,13 @@ impl Funcs {
     /// Gives the function that owns the RAM offset `off`.
     #[must_use]
     pub fn owner_of(&self, off: u64) -> Option<FuncId> {
-        let _ = off;
-        None
+        self.owner.get(off).copied()
     }
 
     /// Gives the body range that holds `off` and its owner.
     #[must_use]
     pub fn owner_range(&self, off: u64) -> Option<(Range, FuncId)> {
-        let _ = off;
-        None
+        self.owner.find(off).map(|(r, id)| (r, *id))
     }
 
     /// Gives the ownership map: each body range with its owner, in address order.
@@ -236,12 +234,50 @@ impl Funcs {
         self.owner.as_slice()
     }
 
-    /// Gives the owners of the ranges that overlap `range`, in address order. A function with
+    /// Gives the owners of the ranges that overlap `range`, in entry order. A function with
     /// two such ranges comes once.
     #[must_use]
     pub fn owners_in(&self, range: Range) -> Vec<FuncId> {
-        let _ = range;
-        Vec::new()
+        let owners: BTreeSet<FuncId> = self
+            .owner
+            .overlapping(range)
+            .iter()
+            .map(|(_, id)| *id)
+            .collect();
+        owners.into_iter().collect()
+    }
+
+    /// Checks a body for the function `id` at `entry`. Ranges of `id` itself do not count.
+    fn check_body(&self, id: FuncId, body: &RangeSet) -> Result<(), Invalid> {
+        if !body.contains(id.0.off) {
+            return Err(Invalid::EntryOutsideBody(id.0));
+        }
+        for new in body.ranges() {
+            if let Some((existing, _)) = self.owner.overlapping(*new).iter().find(|(_, o)| *o != id)
+            {
+                return Err(Invalid::Overlap {
+                    new: *new,
+                    existing: *existing,
+                });
+            }
+        }
+        Ok(())
+    }
+
+    /// Adds the ranges of `body` to the ownership map. The caller checks them first.
+    fn own(&mut self, id: FuncId, body: &RangeSet) -> Result<(), Invalid> {
+        let items = body.ranges().iter().map(|r| (*r, id)).collect();
+        self.owner.extend_sorted(items).map_err(|e| match e {
+            IntervalError::Overlap { new, existing } => Invalid::Overlap { new, existing },
+            IntervalError::InvalidRange(r) => Invalid::BadLength(r.first),
+        })
+    }
+
+    /// Removes the ranges of `body` from the ownership map.
+    fn disown(&mut self, body: &RangeSet) {
+        for r in body.ranges() {
+            self.owner.clear_range(*r);
+        }
     }
 
     /// Adds a function and its body ranges to the ownership map.
@@ -252,14 +288,24 @@ impl Funcs {
     /// [`Invalid::Overlap`] with the first range of another body that the body overlaps.
     /// Then the layer does not change.
     pub(crate) fn insert(&mut self, func: Function) -> Result<(), Invalid> {
-        let _ = func;
+        let id = func.id();
+        if !id.0.is_ram() {
+            return Err(Invalid::NotRam(id.0));
+        }
+        if self.by_entry.contains_key(&id.0) {
+            return Err(Invalid::FuncExists(id));
+        }
+        self.check_body(id, &func.body)?;
+        self.own(id, &func.body)?;
+        self.by_entry.insert(id.0, func);
         Ok(())
     }
 
     /// Removes a function and its ownership ranges. Gives the function.
     pub(crate) fn remove(&mut self, id: FuncId) -> Option<Function> {
-        let _ = id;
-        None
+        let func = self.by_entry.remove(&id.0)?;
+        self.disown(&func.body);
+        Some(func)
     }
 
     /// Sets the body of a function. Gives the old body.
@@ -269,8 +315,14 @@ impl Funcs {
     /// Returns [`Invalid::NoFunc`], [`Invalid::EntryOutsideBody`] or [`Invalid::Overlap`].
     /// Then the layer does not change.
     pub(crate) fn set_body(&mut self, id: FuncId, body: RangeSet) -> Result<RangeSet, Invalid> {
-        let _ = (id, body);
-        Ok(RangeSet::new())
+        let old = self.get(id).ok_or(Invalid::NoFunc(id))?.body.clone();
+        self.check_body(id, &body)?;
+        self.disown(&old);
+        self.own(id, &body)?;
+        if let Some(func) = self.by_entry.get_mut(&id.0) {
+            func.body = body;
+        }
+        Ok(old)
     }
 
     /// Sets the signature fact by the write rule. `None` removes it. Gives the old fact.
@@ -284,8 +336,8 @@ impl Funcs {
         sig: Option<TypeId>,
         origin: &Origin,
     ) -> Result<Option<Fact<TypeId>>, WriteError<TypeId>> {
-        let _ = (id, sig, origin);
-        Ok(None)
+        let func = self.by_entry.get_mut(&id.0).ok_or(Invalid::NoFunc(id))?;
+        put_slot(&mut func.sig, sig, origin)
     }
 
     /// Sets the noreturn fact by the write rule. `None` removes it. Gives the old fact.
@@ -299,7 +351,7 @@ impl Funcs {
         noreturn: Option<bool>,
         origin: &Origin,
     ) -> Result<Option<Fact<bool>>, WriteError<bool>> {
-        let _ = (id, noreturn, origin);
-        Ok(None)
+        let func = self.by_entry.get_mut(&id.0).ok_or(Invalid::NoFunc(id))?;
+        put_slot(&mut func.flags.noreturn, noreturn, origin)
     }
 }

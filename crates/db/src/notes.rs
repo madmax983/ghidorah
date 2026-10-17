@@ -14,10 +14,10 @@
 #[cfg(test)]
 mod tests;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
-use ghidorah_base::{Address, FuncId, NoteId, Rev, SetName};
+use ghidorah_base::{Address, FuncId, Id, NoteId, Range, Rev, SetName};
 use ghidorah_kernel::RangeSet;
 
 use crate::fact::{Invalid, SessionLabel};
@@ -161,14 +161,19 @@ pub enum SetOp {
 impl SetMembers {
     /// Makes an ID set: sorted, without duplicates.
     #[must_use]
-    pub fn ids(ids: Vec<String>) -> Self {
+    pub fn ids(mut ids: Vec<String>) -> Self {
+        ids.sort_unstable();
+        ids.dedup();
         Self::Ids(ids)
     }
 
     /// Gives the number of members: addresses or IDs. An address set can hold 2^64 values.
     #[must_use]
     pub fn count(&self) -> u128 {
-        0
+        match self {
+            Self::Addrs(set) => set.ranges().iter().map(Range::len).sum(),
+            Self::Ids(ids) => u128::try_from(ids.len()).unwrap_or(u128::MAX),
+        }
     }
 
     /// Applies `op` with the members `other`. Gives the new members.
@@ -178,8 +183,27 @@ impl SetMembers {
     /// Returns [`Invalid::SetKinds`] when one set holds addresses and the other holds IDs,
     /// unless `op` is `Replace`.
     pub fn apply(&self, op: SetOp, other: &Self) -> Result<Self, Invalid> {
-        let _ = (op, other);
-        Ok(self.clone())
+        if op == SetOp::Replace {
+            return Ok(other.clone());
+        }
+        match (self, other) {
+            (Self::Addrs(a), Self::Addrs(b)) => Ok(Self::Addrs(match op {
+                SetOp::Union => a.union(b),
+                SetOp::Intersect => a.intersect(b),
+                SetOp::Replace | SetOp::Subtract => a.subtract(b),
+            })),
+            (Self::Ids(a), Self::Ids(b)) => {
+                let a: BTreeSet<&String> = a.iter().collect();
+                let b: BTreeSet<&String> = b.iter().collect();
+                let out: Vec<&String> = match op {
+                    SetOp::Union => a.union(&b).copied().collect(),
+                    SetOp::Intersect => a.intersection(&b).copied().collect(),
+                    SetOp::Replace | SetOp::Subtract => a.difference(&b).copied().collect(),
+                };
+                Ok(Self::Ids(out.into_iter().cloned().collect()))
+            }
+            _ => Err(Invalid::SetKinds),
+        }
     }
 }
 
@@ -258,8 +282,7 @@ impl Notes {
     /// Gives the note that owns the set `name`.
     #[must_use]
     pub fn set(&self, name: &SetName) -> Option<&Note> {
-        let _ = name;
-        None
+        self.sets.get(name).and_then(|id| self.map.get(id))
     }
 
     /// Gives the set names in name order with their notes.
@@ -270,7 +293,57 @@ impl Notes {
     /// Gives the ID of the next new note. IDs start at 1 and never come back.
     #[must_use]
     pub fn next_id(&self) -> NoteId {
-        NoteId(self.next)
+        NoteId(self.next.max(1))
+    }
+
+    /// Checks the rules of the module doc for `note`.
+    fn check(&self, note: &Note) -> Result<(), Invalid> {
+        if !matches!(note.src, Source::Agent | Source::User) {
+            return Err(Invalid::BadSource(note.src));
+        }
+        let len = note.text.chars().count();
+        if len > MAX_TEXT {
+            return Err(Invalid::TooLong { len, max: MAX_TEXT });
+        }
+        for count in [note.tags.len(), note.evidence.len(), note.claims.len()] {
+            if count > MAX_ITEMS {
+                return Err(Invalid::TooMany {
+                    count,
+                    max: MAX_ITEMS,
+                });
+            }
+        }
+        check_ids(&note.evidence)?;
+        if note.set.is_some() != (note.kind == NoteKind::Set) {
+            return Err(Invalid::SetMismatch);
+        }
+        if let Some(set) = &note.set {
+            if let SetMembers::Ids(ids) = &set.members {
+                if ids.len() > MAX_MEMBERS {
+                    return Err(Invalid::TooMany {
+                        count: ids.len(),
+                        max: MAX_MEMBERS,
+                    });
+                }
+                check_ids(ids)?;
+            }
+            if let Some(owner) = self.sets.get(&set.name)
+                && *owner != note.id
+            {
+                return Err(Invalid::SetNameTaken {
+                    name: set.name.as_str().to_string(),
+                    owner: *owner,
+                });
+            }
+        }
+        Ok(())
+    }
+
+    /// Removes the set name of `note` from the index.
+    fn unlink(&mut self, note: &Note) {
+        if let Some(set) = &note.set {
+            self.sets.remove(&set.name);
+        }
     }
 
     /// Writes a note: a new note or a change of the note with its ID. Gives the old note.
@@ -283,13 +356,48 @@ impl Notes {
     /// set rules, an evidence entry that does not parse or a source other than `Agent` and
     /// `User`. Then the store does not change.
     pub(crate) fn write(&mut self, note: Note) -> Result<Option<Note>, Invalid> {
-        let _ = note;
-        Ok(None)
+        self.check(&note)?;
+        let mut note = note;
+        if let Some(NoteSet {
+            members: SetMembers::Ids(ids),
+            ..
+        }) = &mut note.set
+        {
+            ids.sort_unstable();
+            ids.dedup();
+        }
+        let id = note.id;
+        if let Some(set) = &note.set {
+            self.sets.insert(set.name.clone(), id);
+        }
+        let old = self.map.insert(id, note);
+        if let Some(old_set) = old.as_ref().and_then(|n| n.set.as_ref())
+            && self.sets.get(&old_set.name) == Some(&id)
+            && self
+                .map
+                .get(&id)
+                .and_then(|n| n.set.as_ref())
+                .map(|s| &s.name)
+                != Some(&old_set.name)
+        {
+            self.sets.remove(&old_set.name);
+        }
+        self.next = self.next.max(id.0.saturating_add(1));
+        Ok(old)
     }
 
     /// Removes a note and its set name. Gives the note.
     pub(crate) fn delete(&mut self, id: NoteId) -> Option<Note> {
-        let _ = id;
-        None
+        let note = self.map.remove(&id)?;
+        self.unlink(&note);
+        Some(note)
+    }
+}
+
+/// Checks that each text parses as an ID.
+fn check_ids(items: &[String]) -> Result<(), Invalid> {
+    match items.iter().find(|t| Id::parse(t).is_err()) {
+        Some(bad) => Err(Invalid::BadEvidence(bad.clone())),
+        None => Ok(()),
     }
 }
