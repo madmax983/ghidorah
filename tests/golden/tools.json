@@ -130,6 +130,90 @@
     }
   },
   {
+    "name": "analysis_run",
+    "title": "Run the analysis",
+    "description": "Run or resume the analysis of a binary within a fuel budget. The run stops at a fixpoint or after max_steps work units. The state complete means that no analyzer has work. The state budget_stopped means that reads see a partial set, so call analysis_run again while resume is true. The state stale means that a re-analysis runs, and reads see the old set. The result lists each analyzer with its priority band, its pending ranges and its runs, and the changed facts of the call.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "until": {
+          "type": "string",
+          "enum": [
+            "triage",
+            "full"
+          ],
+          "description": "How far the analysis runs. The value triage stops after band 700.",
+          "default": "full"
+        },
+        "binary_id": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "The ID of the target binary. Leave it out when exactly one binary is open."
+        },
+        "format": {
+          "type": "string",
+          "enum": [
+            "concise",
+            "detailed"
+          ],
+          "description": "The detail level. The detailed form adds provenance, coercion details and sizes.",
+          "default": "concise"
+        },
+        "fields": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 256,
+            "description": "A JSON pointer."
+          },
+          "maxItems": 32,
+          "description": "JSON pointers into data. The result keeps only these fields."
+        },
+        "max_chars": {
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 60000,
+          "description": "The largest result in characters. The count includes every copy of the result."
+        },
+        "session": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "The session label for provenance, filters and the undo scope."
+        },
+        "expected_rev": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "The rev that the call expects. Another rev gives CONFLICT."
+        },
+        "dry_run": {
+          "type": "boolean",
+          "description": "Return the planned edit list with no commit."
+        },
+        "max_steps": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000000000,
+          "description": "The fuel of the call in work units."
+        },
+        "max_ms": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3600000,
+          "description": "A wall-clock guard in milliseconds. Fuel stays the main stop rule."
+        }
+      },
+      "additionalProperties": false
+    },
+    "annotations": {
+      "title": "Run the analysis",
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
     "name": "calc",
     "title": "Calculate values",
     "description": "Calculate numbers and addresses: bases, widths, signedness and file offsets. The expression takes the operators + - * / % << >> & | ^ ~ and parentheses. A term is a 0x hex number, a symbol, a section name, a default name such as FUN_00401000 or an ID such as fn:0x401000. A term of digits only is an error, because the server does not guess the base. The arithmetic uses 64 bits and wraps, and division is unsigned. With an open binary, the result also tells the region, the file offset and the function at the value.",

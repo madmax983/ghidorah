@@ -4,6 +4,7 @@
 //! [`crate::registry`] names each `SPEC` in the fixed `tools/list` order. This module is a
 //! plain list of the handler files.
 
+pub mod analysis_run;
 pub mod calc;
 pub mod history_list;
 pub mod history_undo;

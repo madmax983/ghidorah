@@ -93,6 +93,7 @@ impl<S: 'static> Registry<S> {
 /// Each handler WP adds its `SPEC` items at their catalog positions: one line per tool.
 static SHIPPED: &[&ToolSpec<Session>] = &[
     &crate::handlers::load::SPEC,
+    &crate::handlers::analysis_run::SPEC,
     &crate::handlers::calc::SPEC,
     &crate::handlers::tool_search::SPEC,
 ];

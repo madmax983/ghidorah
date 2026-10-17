@@ -13,6 +13,7 @@
     reason = "test handlers have the handler type, which returns a Result"
 )]
 
+mod analysis_run;
 mod calc;
 mod coerce;
 mod cursor;

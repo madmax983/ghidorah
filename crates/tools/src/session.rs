@@ -175,6 +175,13 @@ pub trait AnalysisEngine: Send {
         fuel: &mut Fuel,
     ) -> Result<RunReport, ToolError>;
 
+    /// Gives the analyzer rows of the open binary `id` in registry order: the name, the
+    /// priority band, the pending ranges and the runs. An engine with no table gives none.
+    fn analyzers(&self, id: BinaryId) -> Vec<ghidorah_analysis::AnalyzerRow> {
+        let _ = id;
+        Vec::new()
+    }
+
     /// Gives the analyzer versions and the analysis config for the analysis inputs hash
     /// (design Section 3.9). The default is `null`.
     fn inputs_tag(&self) -> Value {
@@ -321,6 +328,22 @@ impl Session {
         let report = engine.run(binary, until, fuel)?;
         self.finish_run(id, before, report)?;
         Ok(Some(report))
+    }
+
+    /// Gives the analyzer rows of the engine for the open binary `id`. A session with no
+    /// engine gives none.
+    #[must_use]
+    pub fn analyzer_rows(&self, id: BinaryId) -> Vec<ghidorah_analysis::AnalyzerRow> {
+        self.engine
+            .as_ref()
+            .map(|e| e.analyzers(id))
+            .unwrap_or_default()
+    }
+
+    /// Tells if the session has an analysis engine.
+    #[must_use]
+    pub fn has_engine(&self) -> bool {
+        self.engine.is_some()
     }
 
     /// Gives the default label of a new binary.

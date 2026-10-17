@@ -30,7 +30,7 @@
     "returned": 2,
     "total": 3,
     "truncated": true,
-    "next_cursor": "010200f744652ad9b175db00000000000000000000010001000000000000006a4e42ab",
+    "next_cursor": "010300f744652ad9b175db0000000000000000000001000100000000000000a2c6d18b",
     "hint": "Add words to query, or send level names for shorter items."
   }
 }

@@ -93,6 +93,7 @@ fn agent_text_is_ste() {
     }
     let handler_texts = handlers::load::TEXTS
         .iter()
+        .chain(handlers::analysis_run::TEXTS)
         .chain(handlers::calc::TEXTS)
         .chain(handlers::tool_search::TEXTS);
     for text in handler_texts {

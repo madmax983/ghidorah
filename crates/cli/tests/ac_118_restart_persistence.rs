@@ -38,19 +38,26 @@ fn ac_118_restart_persistence() {
     let root_arg = projects.to_string_lossy().into_owned();
     let args = ["--project-root", root_arg.as_str()];
 
+    // The golden project has no analysis run. So the reopen runs the analysis, and its publish
+    // commit comes after the four edit revisions.
     let mut first = Server::spawn(&args);
     let opened = first.call("binary_load", demo_args());
-    assert_eq!(rev_of(&opened), Some(4), "{opened}");
+    assert_eq!(rev_of(&opened), Some(5), "{opened}");
+    assert_eq!(
+        opened.pointer("/analysis/state").and_then(Value::as_str),
+        Some("complete"),
+        "{opened}"
+    );
     let expected = if first.tools().iter().any(|t| t == "history_undo") {
         let all = Value::object([("session", Value::from("*"))]);
         let undo = first.call("history_undo", all);
-        assert_eq!(rev_of(&undo), Some(5), "{undo}");
+        assert_eq!(rev_of(&undo), Some(6), "{undo}");
         let redo = Value::object([("session", Value::from("*")), ("redo", Value::Bool(true))]);
         let redone = first.call("history_undo", redo);
-        assert_eq!(rev_of(&redone), Some(6), "{redone}");
-        6
+        assert_eq!(rev_of(&redone), Some(7), "{redone}");
+        7
     } else {
-        4
+        5
     };
     first.kill();
     assert!(
@@ -75,6 +82,11 @@ fn ac_118_restart_persistence() {
     let mut third = Server::spawn(&["--project-root", root_arg.as_str(), "--break-lock"]);
     let again = third.call("binary_load", demo_args());
     assert_eq!(rev_of(&again), Some(expected), "{again}");
+    assert_eq!(
+        again.pointer("/data/analysis/steps_used"),
+        Some(&Value::from(0u64)),
+        "the analysis of the project is current, so no run: {again}"
+    );
     third.close();
 
     // The facts survive: a session in this process reads the project again.

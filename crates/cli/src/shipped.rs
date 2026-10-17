@@ -101,6 +101,7 @@ impl Backend for Session {
     fn open(options: &Options) -> Result<Self, OpenError> {
         let config = session_config(options)?;
         let mut session = Self::new(config, options.run.clock());
+        ghidorah_tools::handlers::analysis_run::install(&mut session);
         open_projects(&mut session, &options.open)?;
         Ok(session)
     }

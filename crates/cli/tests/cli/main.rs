@@ -16,6 +16,7 @@
 #[path = "../common/mod.rs"]
 mod common;
 
+mod analysis_run;
 mod argv;
 mod cancel;
 mod config;
