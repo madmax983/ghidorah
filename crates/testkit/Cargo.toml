@@ -1,6 +1,6 @@
 [package]
 name = "ghidorah-testkit"
-version = "0.1.0"
+version.workspace = true
 description = "Std-only test kit: PRNG, property tests, fuzz harness, golden files, model checks, benchmarks, fixture cache, STE checker and ElfBuilder."
 edition.workspace = true
 license.workspace = true

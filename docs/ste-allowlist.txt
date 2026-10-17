@@ -1,38 +1,82 @@
 # Reviewed STE findings of warn mode (ADR-0019, AC-025).
-# Format: <path> <rule> <fragment>. The fragment is the first 8 words of the sentence.
-# This is a temporary copy from WP-02, so the AC-025 test passes on the WP-02 branch.
-# WP-01 owns this file. After the merge, run
-#   cargo test -p ghidorah-testkit --test ac_025_ste_docs
-# and copy the `allow:` lines that the test prints for any new finding.
+# Format: <path> <rule> <fragment>. The entry allows a finding of <rule> in <path>
+# when the sentence contains <fragment>. A new entry holds the first 8 words of the sentence.
+# `cargo xtask ste` lists each new finding with its `allow` line, and each unused entry.
+# Add a line only after a review of the sentence. Remove an entry when `unused` lists it.
 docs/adr/0003-std-threads-session-worker.md STE-4 Parallel analysis is deferred.
 docs/adr/0008-stable-id-grammar.md STE-4 ELF imports do not bind a library without
 docs/adr/0009-two-level-ir-lazy-flags.md STE-4 Measured: 86-91% of eager x86 flag bits are
 docs/adr/0009-two-level-ir-lazy-flags.md STE-4 Memory SSA and alias-aware forwarding are deferred.
 docs/adr/0014-composition-batch-run.md STE-4 Steps outside `return` are not trimmed.
 docs/adr/0015-offline-eval-harness.md STE-4 Choice codes are never resolved by the repair
+docs/adr/0018-mvp-scope-and-loc-rule.md STE-6 Rejected by the owner in revision 3: the
+docs/adr/0018-mvp-scope-and-loc-rule.md STE-4 The line ledger, the measured triggers, the Y1
 docs/adr/0019-lint-policy-and-ste.md STE-3 Rules: STE-1 a procedural sentence (its first word
 docs/adr/0019-lint-policy-and-ste.md STE-4 The copyrighted STE dictionary is never shipped.
 docs/adr/0020-test-tiers-fixtures-oracles.md STE-4 Mutation testing is deferred.
+docs/adr/0020-test-tiers-fixtures-oracles.md STE-4 `xtask loc` is removed (ADR-0018).
+docs/adr/0027-coverage-measurement.md STE-4 `docs/budget.json` is removed (ADR-0018).
+docs/adr/0029-pe32plus-in-the-mvp.md STE-4 The fixture recipe with `clang --target=x86_64-pc-windows-msvc` and `/nodefaultlib`
+docs/adr/0029-pe32plus-in-the-mvp.md STE-5 Hostile PE files have known traps: relocation blocks
+docs/adr/0029-pe32plus-in-the-mvp.md STE-2 WP-30 adds a `pe` module to `ghidorah-loader` for
 docs/design.md STE-3 Section 1 gives the scope and the line
 docs/design.md STE-3 ELF64 little-endian (ET_EXEC, ET_DYN).
 docs/design.md STE-3 L0 lifted IR with a lazy flag thunk.
 docs/design.md STE-3 A fuel-sliced deterministic scheduler with a committed set
+docs/design.md STE-2 Expression view over L1, safe folding, out-of-SSA variables,
 docs/design.md STE-3 Type core.
 docs/design.md STE-3 Address model.
 docs/design.md STE-3 Project directory outside the working tree.
+docs/design.md STE-4 The gate is gone.
+docs/design.md STE-2 L0 op arena, locations, flag semantics, fusion through
+docs/design.md STE-2 Scheduler and analyzers, L0 and L1 function IR
+docs/design.md STE-2 WP-30 puts the PE parser in `loader` (`pe/`),
 docs/design.md STE-4 Derived data (decoded instructions, L0, CFG, the IR
+docs/design.md STE-2 Caches are LRU maps with a size bound
 docs/design.md STE-4 Derived data (decoded instructions, L0, CFG, IR views,
+docs/design.md STE-4 Resource, LoadConfig, BoundImport, IAT (12) and CLR are
+docs/design.md STE-4 An overflow gives `E_OVERFLOW`, and the item is
+docs/design.md STE-4 The COFF symbol table and long section names
+docs/design.md STE-4 ABSOLUTE (0) is padding and is skipped.
+docs/design.md STE-4 Other debug types are skipped.
+docs/design.md STE-4 The fixture build was measured on the build
+docs/design.md STE-2 Truth (`fixtures/truth/pe/<name>.json`) comes from the C sources, the
+docs/design.md STE-2 `PeBuilder` (`crates/testkit/src/pe.rs`) writes minimal PE32+ files and malformed
 docs/design.md STE-4 The builder seals all blocks first, because the
-docs/design.md STE-4 The MS x64 table is data only and
+docs/design.md STE-3 MS x64: the first four arguments are positional.
+docs/design.md STE-4 `Nop` ops are skipped.
+docs/design.md STE-2 When at least one proposal exists and the
 docs/design.md STE-3 Printer: precedence climbing with Ghidra's numbers.
+docs/design.md STE-3 Layout is a function of `(record, DataModel)`.
+docs/design.md STE-4 MSVC packing (`#pragma pack`, `__declspec(align)`) and bit-fields are
+docs/design.md STE-2 They are the signature and parameter names in
 docs/design.md STE-4 `binary_survey.languages` reports C++ (`_Z` symbols, `__cxa_*` imports), Rust
-docs/design.md STE-8 Load an ELF file, a raw blob, the
+docs/design.md STE-8 Load an ELF or PE file, a raw
 docs/design.md STE-1 Search names, strings, bytes, comments, notes, types, imports,
+docs/design.md STE-3 `binary_survey { include?: [identity, protections, segments, sections, imports,
 docs/design.md STE-3 `search { kind | ids, query?, match?: substr|glob|exact
 docs/design.md STE-4 A string of digits only is never guessed.
+docs/design.md STE-2 the call and jump sites of the stub
 docs/design.md STE-2 It escapes C0 and C1 controls, DEL, U+2028,
 docs/design.md STE-4 the noreturn flag is set
 docs/design.md STE-4 `xtask verify` (WP-03) runs Verus when `VERUS` and
 docs/design.md STE-2 Parser targets, each owned by its parser WP:
+docs/design.md STE-2 `xtask ac` finds at least one evidence item
+docs/design.md STE-4 `xtask ac` finds at least one evidence item
 docs/design.md STE-4 Every xref `from` is an instruction or data-slot
+docs/design.md STE-2 On the stripped twin of each T2 fixture,
+docs/design.md STE-2 Every `top_features` entry of every match names a
+docs/design.md STE-2 The `next` batch of a `func_similar` call with
+docs/design.md STE-2 A function with no decodable instruction, a one-block
+docs/design.md STE-2 A query set of 2,000 functions over the
+docs/design.md STE-2 The `.pdata` function starts equal the `RUNTIME_FUNCTION` table
+docs/design.md STE-2 Each `jmp [rip+IAT]` thunk is a thunk function
+docs/design.md STE-2 TLS callbacks equal the `llvm-readobj --coff-tls-directory` golden and
+docs/design.md STE-2 The `pe_load` fuzz target passes 10,000 fixed-seed cases
+docs/design.md STE-2 On the `pe_cc` fixture, MS x64 parameter counts
+docs/design.md STE-3 D1, SSA and decompiler in the MVP: the
+docs/design.md STE-4 D1, SSA and decompiler in the MVP: the
+docs/design.md STE-4 `xtask loc`, `docs/budget.json` and the LOC lines of
+docs/design.md STE-4 Stretch S23 left the list, and AC-096 is
+docs/design.md STE-3 D4, PE32+ x86-64: WP-30 adds Sections 4.9 to
 docs/design.md STE-8 Write and read paths: `func_edit` has `set_call_targets`, `add_ref`
