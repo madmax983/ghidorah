@@ -22,6 +22,13 @@
 //! | [`progress`] | Progress rows and last-brief marks | Section 3.4 |
 //! | [`overrides`] | Flow overrides | Section 7.5 |
 //! | [`typesglue`] | The type store and the data model of a program | Section 9 |
+//! | [`edit`] | The closed [`Edit`] enum, its exact inverses and [`EditError`] | Section 3.7 |
+//! | [`tx`] | [`Program::begin`], the [`Tx`] guard, nested scopes and [`Commit`] | Section 3.7 |
+//! | [`events`] | The bounded [`Events`] ring | Section 3.8 |
+//! | [`epochs`] | Table epochs and [`Program::func_epoch`] | Section 3.8 |
+//! | [`invariants`] | [`Program::check_invariants`] and [`Violation`] | Section 3.11 |
+//! | [`hash`] | [`Program::state_hash`] and [`StateHash`] | Section 3.12 |
+//! | [`codec`] | The JSON codec of every table and edit | Sections 3.7, 3.10 |
 //!
 //! The crate reads no file. The persistence modules get file access through the `Fs` seam.
 
@@ -35,9 +42,15 @@
     )
 )]
 
+pub mod codec;
 pub mod comments;
+pub mod edit;
+pub mod epochs;
+pub mod events;
 pub mod fact;
 pub mod funcs;
+pub mod hash;
+pub mod invariants;
 pub mod jumptables;
 pub mod listing;
 pub mod notes;
@@ -48,13 +61,23 @@ pub mod refs;
 pub mod source;
 pub mod strings;
 pub mod symbols;
+pub mod tx;
 pub mod typesglue;
 pub mod vars;
 pub mod why;
 
+#[cfg(test)]
+mod test_support;
+
+pub use codec::{CodecError, Reason};
 pub use comments::{CommentKind, Comments};
+pub use edit::{BlockedEdit, Edit, EditError, EditKind, FuncRecord, Layer, Slot, VarField};
+pub use epochs::{Epochs, Table};
+pub use events::{EVENT_RING, Event, Events};
 pub use fact::{Blocked, Fact, Invalid, Origin, SessionLabel, WriteError, higher};
 pub use funcs::{Caveat, FuncFlags, Funcs, Function, Part, PartKind, StartReason};
+pub use hash::StateHash;
+pub use invariants::Violation;
 pub use jumptables::{JtMethod, JumpTable, JumpTables};
 pub use listing::{CodeUnit, DataDef, FlowKind, Listing};
 pub use notes::{Claim, Note, NoteKind, NoteSet, NoteStatus, Notes, SetMembers, SetOp};
@@ -68,6 +91,7 @@ pub use refs::{Ref, RefKey, RefType, Refs};
 pub use source::{Source, Verdict, write_rule};
 pub use strings::{Encoding, StrInfo, Strings};
 pub use symbols::{SymKey, SymKind, Symbol, Symbols};
+pub use tx::{Applied, Commit, Nested, Tx, TxError, TxLabel};
 pub use typesglue::Types;
 pub use vars::{VarFact, Vars};
 pub use why::{FactKey, RuleCode, Why, WhyStore};

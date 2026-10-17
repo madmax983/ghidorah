@@ -383,6 +383,17 @@ impl Notes {
         self.unlink(&note);
         Some(note)
     }
+
+    /// Gives the raw counter of the next note ID. A new store has 0.
+    #[must_use]
+    pub const fn next_raw(&self) -> u64 {
+        self.next
+    }
+
+    /// Sets the counter of the next note ID. The counter never goes down.
+    pub(crate) fn set_next(&mut self, next: u64) {
+        self.next = self.next.max(next);
+    }
 }
 
 /// Checks that each text parses as an ID.

@@ -303,6 +303,82 @@ impl Symbols {
         old
     }
 
+    /// Gives the key of the next new symbol of `addr`: one above the last key, or 0.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Invalid::TooMany`] when the last key of the address is `u16::MAX`.
+    pub(crate) fn next_key(&self, addr: Address) -> Result<SymKey, Invalid> {
+        match self.table.range(span(addr)).next_back() {
+            None => Ok(SymKey(0)),
+            Some((_, s)) => s.key.0.checked_add(1).map(SymKey).ok_or(Invalid::TooMany {
+                count: usize::from(u16::MAX) + 1,
+                max: usize::from(u16::MAX),
+            }),
+        }
+    }
+
+    /// Puts a symbol with its exact key, name fact and kind. Gives the old symbol of the key.
+    ///
+    /// A primary symbol takes the flag from the other symbols of the address. A symbol
+    /// becomes primary when no other symbol of the address is primary.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Invalid::DefaultSource`], the errors of a bad name, or
+    /// [`Invalid::DuplicateName`] when a symbol with another key at the address has the name.
+    pub(crate) fn put_exact(&mut self, mut symbol: Symbol) -> Result<Option<Symbol>, Invalid> {
+        if symbol.name.source == Source::Default {
+            return Err(Invalid::DefaultSource);
+        }
+        check_name(&symbol.name.value)?;
+        let (addr, key) = (symbol.addr, symbol.key);
+        if self
+            .at(addr)
+            .any(|s| s.key != key && s.name.value == symbol.name.value)
+        {
+            return Err(Invalid::DuplicateName(symbol.name.value));
+        }
+        let old = self.table.remove(&(addr, key));
+        if let Some(o) = &old {
+            self.index_remove(&o.name.value, addr);
+        }
+        let other_primary = self.at(addr).any(|s| s.primary);
+        if symbol.primary {
+            for s in self.table.range_mut(span(addr)).map(|(_, s)| s) {
+                s.primary = false;
+            }
+        } else if !other_primary {
+            symbol.primary = true;
+        }
+        self.index_add(&symbol.name.value, addr);
+        self.table.insert((addr, key), symbol);
+        Ok(old)
+    }
+
+    /// Sets the name fact of the symbol with `key` with no write rule. Gives the old fact.
+    ///
+    /// An unknown key gives `None` and no change.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Invalid::DefaultSource`], the errors of a bad name, or
+    /// [`Invalid::DuplicateName`] when another symbol at the address has the name.
+    pub(crate) fn rename_exact(
+        &mut self,
+        addr: Address,
+        key: SymKey,
+        name: Fact<String>,
+    ) -> Result<Option<Fact<String>>, Invalid> {
+        let Some(current) = self.get(addr, key) else {
+            return Ok(None);
+        };
+        let mut symbol = current.clone();
+        let old = std::mem::replace(&mut symbol.name, name);
+        self.put_exact(symbol)?;
+        Ok(Some(old))
+    }
+
     /// Removes a symbol and gives it. A removed primary passes the flag on.
     pub(crate) fn remove(&mut self, addr: Address, key: SymKey) -> Option<Symbol> {
         let symbol = self.table.remove(&(addr, key))?;
