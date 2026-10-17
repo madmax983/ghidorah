@@ -5,9 +5,13 @@
 //!
 //! - [`alloc::CountingAlloc`]: a global allocator that counts the heap bytes of each thread,
 //!   for the bounded-allocation gate of the loader (AC-055).
+//! - [`native`]: the native semantic oracle of the x86 lifter. It runs instruction forms on
+//!   the host CPU, only from `xtask oracle semantics` (design Section 13.8).
 #![expect(
     unsafe_code,
-    reason = "a global allocator needs `unsafe impl GlobalAlloc` (ADR-0025)"
+    reason = "a global allocator and the native oracle need unsafe code (ADR-0025)"
 )]
 
 pub mod alloc;
+#[cfg(target_arch = "x86_64")]
+pub mod native;

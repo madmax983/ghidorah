@@ -80,6 +80,8 @@ dependencies = [
 name = "ghidorah-x86"
 version = "0.1.0"
 dependencies = [
+ "ghidorah-base",
+ "ghidorah-ir",
  "ghidorah-testkit",
 ]
 

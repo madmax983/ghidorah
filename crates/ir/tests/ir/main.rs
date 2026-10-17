@@ -11,6 +11,7 @@ mod interp;
 mod l1;
 mod ops;
 mod passes;
+mod print;
 mod random;
 mod sem;
 mod size;
