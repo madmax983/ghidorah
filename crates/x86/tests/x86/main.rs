@@ -8,6 +8,7 @@ mod common;
 mod fixtures;
 mod model;
 mod oracle;
+mod oracle_random;
 mod print;
 mod props;
 mod spec;

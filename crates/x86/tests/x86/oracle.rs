@@ -10,10 +10,10 @@ use ghidorah_x86::{NoSymbols, print};
 use crate::common::{dec, hex, normalize_objdump, normalize_printer, root, spec_lines};
 
 /// The distance between two candidates in the probe file.
-const STRIDE: usize = 32;
+pub const STRIDE: usize = 32;
 
 /// Finds `llvm-objdump` in the active toolchain.
-fn llvm_objdump() -> PathBuf {
+pub fn llvm_objdump() -> PathBuf {
     let sysroot = Command::new("rustc")
         .args(["--print", "sysroot"])
         .output()
@@ -33,7 +33,7 @@ fn llvm_objdump() -> PathBuf {
 }
 
 /// Assembles the candidates at a fixed stride into an object file and gives its path.
-fn object(dir: &Path, name: &str, cands: &[Vec<u8>]) -> PathBuf {
+pub fn object(dir: &Path, name: &str, cands: &[Vec<u8>]) -> PathBuf {
     let src = dir.join(format!("{name}.s"));
     let obj = dir.join(format!("{name}.o"));
     let mut text = String::new();
@@ -55,7 +55,7 @@ fn object(dir: &Path, name: &str, cands: &[Vec<u8>]) -> PathBuf {
 }
 
 /// Parses a disassembly into `(address, text)` lines.
-fn lines(out: &[u8]) -> Vec<(u64, String)> {
+pub fn lines(out: &[u8]) -> Vec<(u64, String)> {
     String::from_utf8_lossy(out)
         .lines()
         .filter_map(|l| {
@@ -72,14 +72,14 @@ fn lines(out: &[u8]) -> Vec<(u64, String)> {
         .collect()
 }
 
-fn scratch() -> PathBuf {
+pub fn scratch() -> PathBuf {
     let dir = root().join("target/x86-oracle");
     std::fs::create_dir_all(&dir).expect("make the scratch directory");
     dir
 }
 
 /// Gives the length of each candidate: the distance to the next decoded address.
-fn lengths(listing: &[(u64, String)], count: usize) -> Vec<Option<(u64, String)>> {
+pub fn lengths(listing: &[(u64, String)], count: usize) -> Vec<Option<(u64, String)>> {
     let mut out = vec![None; count];
     for (i, (addr, text)) in listing.iter().enumerate() {
         let a = usize::try_from(*addr).expect("address");

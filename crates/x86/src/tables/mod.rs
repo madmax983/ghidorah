@@ -89,7 +89,7 @@ pub(crate) mod s {
     pub(crate) const G9: u8 = 17;
     /// A valid form outside the tables.
     pub(crate) const UNSUP: u8 = 18;
-    /// `0F A6` and `0F A7`: VIA PadLock.
+    /// `0F A6` and `0F A7`: the VIA padlock forms.
     pub(crate) const PADLOCK: u8 = 19;
     /// `F2 0F 00`: `lkgs` or group 6.
     pub(crate) const LKGS: u8 = 20;
