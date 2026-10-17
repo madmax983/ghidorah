@@ -214,7 +214,7 @@ fn calc_names_on_demo() {
     let envelope = calc(&mut s, "fn:0x1080+0x4");
     assert_eq!(text_at(data(&envelope), "/value"), "0x1084");
 
-    let envelope = calc(&mut s, "0x10");
+    let envelope = calc(&mut s, "0x100000");
     let got = data(&envelope);
     assert_eq!(got.pointer("/address/mapped"), Some(&Value::Bool(false)));
     assert_eq!(got.pointer("/address/region"), Some(&Value::Null));

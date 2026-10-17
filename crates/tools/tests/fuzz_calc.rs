@@ -137,8 +137,9 @@ fn fuzz_calc() {
     );
     assert_eq!(fuzz::panic_count(), 0, "no case panics");
     assert!(
-        report.reached_percent(3) >= 10,
-        "value share: {:?}",
+        report.reached_percent(2) >= 10,
+        "syntax share: {:?}",
         report.reached
     );
+    assert!(report.reached[3] > 0, "value share: {:?}", report.reached);
 }

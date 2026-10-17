@@ -1,0 +1,82 @@
+{"golden":"generator=tools_examples version=1 fixture=crackme.gcc-O2 fixture_sha256=467a43b75d95c826daba8cb216d01d7fd386aa96c5ef5a95c2effffe1780de8f"}
+{
+  "ok": true,
+  "rev": 0,
+  "session": "cli",
+  "partial": false,
+  "data": {
+    "items": [
+      {
+        "name": "calc",
+        "summary": "Calculate numbers and addresses: bases, widths, signedness and file offsets.",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "expr": {
+              "type": "string",
+              "maxLength": 1024,
+              "description": "The expression, for example main+0x10 or (0x401000 & ~0xfff) >> 0x4."
+            },
+            "binary_id": {
+              "type": "string",
+              "maxLength": 64,
+              "description": "The ID of the target binary. Leave it out when exactly one binary is open."
+            },
+            "format": {
+              "type": "string",
+              "enum": [
+                "concise",
+                "detailed"
+              ],
+              "description": "The detail level. The detailed form adds provenance, coercion details and sizes.",
+              "default": "concise"
+            },
+            "fields": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "maxLength": 256,
+                "description": "A JSON pointer."
+              },
+              "maxItems": 32,
+              "description": "JSON pointers into data. The result keeps only these fields."
+            },
+            "max_chars": {
+              "type": "integer",
+              "minimum": 1000,
+              "maximum": 60000,
+              "description": "The largest result in characters. The count includes every copy of the result."
+            },
+            "session": {
+              "type": "string",
+              "maxLength": 64,
+              "description": "The session label for provenance, filters and the undo scope."
+            }
+          },
+          "required": [
+            "expr"
+          ],
+          "additionalProperties": false
+        },
+        "examples": [
+          {
+            "args": {
+              "expr": "main+0x10"
+            }
+          }
+        ],
+        "annotations": {
+          "readOnlyHint": true,
+          "destructiveHint": false,
+          "idempotentHint": true,
+          "openWorldHint": false
+        }
+      }
+    ]
+  },
+  "page": {
+    "returned": 1,
+    "total": 1,
+    "truncated": false
+  }
+}

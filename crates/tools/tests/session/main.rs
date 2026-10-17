@@ -7,6 +7,11 @@
     clippy::expect_used,
     reason = "test helpers outside test functions use expect"
 )]
+#![allow(clippy::panic, reason = "a test fails through a panic")]
+#![allow(
+    clippy::unnecessary_wraps,
+    reason = "test handlers have the handler type, which returns a Result"
+)]
 
 mod calc;
 mod coerce;

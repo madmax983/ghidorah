@@ -5,6 +5,8 @@
 //! takes the format names from [`ghidorah_loader::SUPPORTED_FORMATS`], so a new loader changes
 //! no line of this module. The text is at most [`MAX_CHARS`] characters.
 
+use ghidorah_loader::SUPPORTED_FORMATS;
+
 use crate::profiles::ProfileSet;
 use crate::registry::Registry;
 
@@ -55,7 +57,7 @@ pub const LINES: &[Line] = &[
         tools: &[],
     },
     Line {
-        text: "Lists are bounded. When page.truncated is true, send page.next_cursor as cursor, or narrow the filter.",
+        text: "List results come in pages. When page.truncated is true, send page.next_cursor as cursor, or narrow the filter.",
         tools: &[],
     },
     Line {
@@ -92,13 +94,45 @@ pub const LINES: &[Line] = &[
 /// [`OFFLINE`].
 #[must_use]
 pub fn first_line() -> String {
-    String::new()
+    let mut kinds: Vec<&str> = Vec::new();
+    let mut raw = false;
+    for format in SUPPORTED_FORMATS {
+        match *format {
+            "raw" => raw = true,
+            other => kinds.push(format_name(other)),
+        }
+    }
+    let binaries = match kinds.as_slice() {
+        [] => String::new(),
+        [one] => format!("{one} binaries"),
+        [rest @ .., last] => format!("{} and {last} binaries", rest.join(", ")),
+    };
+    let what = match (binaries.is_empty(), raw) {
+        (false, true) => format!("{binaries} and raw code blobs"),
+        (false, false) => binaries,
+        (true, _) => "raw code blobs".to_owned(),
+    };
+    format!("ghidorah analyzes x86-64 {what} for reverse engineering. {OFFLINE}")
+}
+
+/// Gives the short name of a format of [`SUPPORTED_FORMATS`], for example `ELF`.
+fn format_name(format: &str) -> &str {
+    match format.split(['+', '-']).next() {
+        Some("elf64") => "ELF",
+        Some("pe32") => "PE",
+        _ => format,
+    }
 }
 
 /// Gives the instructions text for the active tools of `registry`: one line per kept line,
 /// joined with a newline.
 #[must_use]
 pub fn generate<S: 'static>(registry: &Registry<S>, profile: &ProfileSet) -> String {
-    let _ = (registry, profile);
-    String::new()
+    let mut lines = vec![first_line()];
+    for line in LINES {
+        if line.tools.iter().all(|tool| profile.holds(registry, tool)) {
+            lines.push(line.text.to_owned());
+        }
+    }
+    lines.join("\n")
 }

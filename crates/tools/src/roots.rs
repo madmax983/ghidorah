@@ -12,8 +12,10 @@
 //! or does not read gives `FILE_UNREADABLE`.
 
 use std::fmt;
-use std::path::{Path, PathBuf};
+use std::io::Read;
+use std::path::{Component, Path, PathBuf};
 
+use ghidorah_base::ErrorCode;
 use ghidorah_json::Value;
 
 use crate::errors::ToolError;
@@ -90,8 +92,34 @@ impl Roots {
     /// Returns [`RootError`] for an empty list, too many roots or a root that is not a
     /// directory.
     pub fn new(base: &Path, dirs: &[PathBuf]) -> Result<Self, RootError> {
-        let _ = (base, dirs);
-        Err(RootError::Empty)
+        if dirs.is_empty() {
+            return Err(RootError::Empty);
+        }
+        if dirs.len() > MAX_ROOTS {
+            return Err(RootError::TooMany { count: dirs.len() });
+        }
+        let mut roots = Vec::with_capacity(dirs.len());
+        for dir in dirs {
+            let joined = if dir.is_absolute() {
+                dir.clone()
+            } else {
+                base.join(dir)
+            };
+            let path = std::fs::canonicalize(&joined)
+                .ok()
+                .filter(|p| p.is_dir())
+                .ok_or_else(|| RootError::NotADirectory {
+                    root: dir.display().to_string(),
+                })?;
+            let name = if dir.is_absolute() {
+                path.file_name()
+                    .map_or_else(|| "/".to_owned(), |n| n.to_string_lossy().into_owned())
+            } else {
+                dir.display().to_string()
+            };
+            roots.push(Root { name, path });
+        }
+        Ok(Self { roots })
     }
 
     /// Gives the roots in order.
@@ -103,7 +131,22 @@ impl Roots {
     /// Gives the relative names of the roots as a JSON array for `details.roots`.
     #[must_use]
     pub fn names(&self) -> Value {
-        Value::Array(Vec::new())
+        Value::Array(
+            self.roots
+                .iter()
+                .map(|r| Value::from(r.name.as_str()))
+                .collect(),
+        )
+    }
+
+    /// Tells if `path` is a root or a path under a root.
+    fn holds(&self, path: &Path) -> bool {
+        self.roots.iter().any(|r| path.starts_with(&r.path))
+    }
+
+    /// Gives the `PATH_OUTSIDE_ROOT` error with the root names.
+    fn outside(&self) -> ToolError {
+        ToolError::new(ErrorCode::PathOutsideRoot).detail("roots", self.names())
     }
 
     /// Gives the canonical path of `path` when the path stays under a root.
@@ -113,8 +156,23 @@ impl Roots {
     /// Returns `PATH_OUTSIDE_ROOT` when the path leaves the roots and `FILE_UNREADABLE` when
     /// `canonicalize` fails.
     pub fn check(&self, path: &str) -> Result<PathBuf, ToolError> {
-        let _ = path;
-        Err(ToolError::new(ghidorah_base::ErrorCode::InternalError))
+        let first = self.roots.first().ok_or_else(|| self.outside())?;
+        let raw = Path::new(path);
+        let joined = if raw.is_absolute() {
+            raw.to_path_buf()
+        } else {
+            first.path.join(raw)
+        };
+        if !self.holds(&lexical(&joined)) {
+            return Err(self.outside());
+        }
+        let canonical = std::fs::canonicalize(&joined)
+            .map_err(|_| ToolError::new(ErrorCode::FileUnreadable))?;
+        if self.holds(&canonical) {
+            Ok(canonical)
+        } else {
+            Err(self.outside())
+        }
     }
 
     /// Reads the file at `path` with the checks of the module docs.
@@ -124,7 +182,52 @@ impl Roots {
     /// Returns `PATH_OUTSIDE_ROOT`, `FILE_UNREADABLE` for a missing, unreadable or special
     /// file, and `LIMIT_EXCEEDED` for a file above `max_bytes` bytes.
     pub fn read(&self, path: &str, max_bytes: u64) -> Result<ReadFile, ToolError> {
-        let _ = (path, max_bytes);
-        Err(ToolError::new(ghidorah_base::ErrorCode::InternalError))
+        let canonical = self.check(path)?;
+        let unreadable = |_| ToolError::new(ErrorCode::FileUnreadable);
+        let file = std::fs::File::open(&canonical).map_err(unreadable)?;
+        let meta = file.metadata().map_err(unreadable)?;
+        if !meta.is_file() {
+            return Err(ToolError::new(ErrorCode::FileUnreadable));
+        }
+        let too_large = |size: u64| {
+            ToolError::new(ErrorCode::LimitExceeded)
+                .detail("size", Value::from(size))
+                .detail("limit", Value::from(max_bytes))
+        };
+        if meta.len() > max_bytes {
+            return Err(too_large(meta.len()));
+        }
+        let mut bytes = Vec::new();
+        file.take(max_bytes.saturating_add(1))
+            .read_to_end(&mut bytes)
+            .map_err(unreadable)?;
+        let size = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
+        if size > max_bytes {
+            return Err(too_large(size));
+        }
+        let file_name = canonical
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        Ok(ReadFile { file_name, bytes })
     }
+}
+
+/// Gives the lexical form of `path`: `.` parts go, and each `..` drops the part before it.
+///
+/// A `..` at the top stays at the top, as the file system does.
+fn lexical(path: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for part in path.components() {
+        match part {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                let _ = out.pop();
+            }
+            Component::Prefix(_) | Component::RootDir | Component::Normal(_) => {
+                out.push(part.as_os_str());
+            }
+        }
+    }
+    out
 }

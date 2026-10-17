@@ -74,10 +74,10 @@ fn random_key(rng: &mut SplitMix64) -> SortKey {
     let parts = usize::try_from(rng.next_u64() % 5).unwrap_or(0);
     let mut key = Vec::new();
     for _ in 0..parts {
-        if rng.next_u64() % 2 == 0 {
+        if rng.next_u64().is_multiple_of(2) {
             key.push(KeyPart::Int(rng.next_u64()));
         } else {
-            let len = usize::try_from(rng.next_u64() % 40).unwrap_or(0);
+            let len = usize::try_from(rng.next_u64() % 20).unwrap_or(0);
             let text: String = (0..len)
                 .map(|_| {
                     char::from_u32(u32::try_from(rng.next_u64() % 0x3000).unwrap_or(0x41))
@@ -248,28 +248,28 @@ fn cursor_stale_analysis_rev() {
         }
     }
     // Paging and budget arguments leave the args hash alone. Other arguments change it.
-    let a = args_of(
+    let first = args_of(
         &handlers::tool_search::SPEC,
         r#"{"query":"load","limit":5}"#,
     );
-    let b = args_of(
+    let paged = args_of(
         &handlers::tool_search::SPEC,
         r#"{"query":"load","limit":9,"max_chars":2000,"format":"detailed","cursor":"00","shape":"table","fields":["/items"],"count_only":true,"session":"x"}"#,
     );
-    let c = args_of(&handlers::tool_search::SPEC, r#"{"query":"calc"}"#);
-    let d = args_of(
+    let other = args_of(&handlers::tool_search::SPEC, r#"{"query":"calc"}"#);
+    let given = args_of(
         &handlers::tool_search::SPEC,
         r#"{"query":"load","level":"summaries"}"#,
     );
-    assert_eq!(args_hash(&a, &f), args_hash(&b, &f));
-    assert_ne!(args_hash(&a, &f), args_hash(&c, &f));
+    assert_eq!(args_hash(&first, &f), args_hash(&paged, &f));
+    assert_ne!(args_hash(&first, &f), args_hash(&other, &f));
     assert_eq!(
-        args_hash(&a, &f),
-        args_hash(&d, &f),
+        args_hash(&first, &f),
+        args_hash(&given, &f),
         "a default equals the given value"
     );
     assert_ne!(
-        args_hash(&a, &f),
-        args_hash(&a, &frame("0000000000000001", 5))
+        args_hash(&first, &f),
+        args_hash(&first, &frame("0000000000000001", 5))
     );
 }

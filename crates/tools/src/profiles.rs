@@ -15,6 +15,7 @@ use std::collections::BTreeSet;
 use ghidorah_json::Value;
 
 use crate::registry::Registry;
+use crate::schema::input_schema;
 use crate::spec::{Profile, ToolSpec};
 
 /// The largest number of tools in the `full` profile (AC-130a).
@@ -45,8 +46,7 @@ impl Default for ProfileSet {
 /// Parses a profile name: `full`, `readonly` or `mini`.
 #[must_use]
 pub fn parse_profile(text: &str) -> Option<Profile> {
-    let _ = text;
-    None
+    Profile::ALL.into_iter().find(|p| p.as_str() == text)
 }
 
 impl ProfileSet {
@@ -74,44 +74,75 @@ impl ProfileSet {
     /// Tells if the active tools hold the tool `name` of `registry`.
     #[must_use]
     pub fn holds<S: 'static>(&self, registry: &Registry<S>, name: &str) -> bool {
-        let _ = (registry, name);
-        false
+        registry
+            .get(name)
+            .is_some_and(|(_, tool)| self.holds_tool(tool))
+    }
+
+    /// Tells if the active tools hold `tool`.
+    fn holds_tool<S: 'static>(&self, tool: &ToolSpec<S>) -> bool {
+        tool.profiles.contains(&self.profile)
+            && self.allow.as_ref().is_none_or(|a| a.contains(tool.name))
     }
 
     /// Gives the active tools of `registry` in registry order.
     #[must_use]
     pub fn tools<S: 'static>(&self, registry: &Registry<S>) -> Vec<&'static ToolSpec<S>> {
-        let _ = registry;
-        Vec::new()
+        registry
+            .tools()
+            .iter()
+            .copied()
+            .filter(|tool| self.holds_tool(tool))
+            .collect()
     }
 
     /// Gives the allowlist names that name no tool of `registry`, in name order.
     #[must_use]
     pub fn unknown<S: 'static>(&self, registry: &Registry<S>) -> Vec<String> {
-        let _ = registry;
-        Vec::new()
+        self.allow
+            .iter()
+            .flatten()
+            .filter(|name| registry.get(name).is_none())
+            .cloned()
+            .collect()
     }
 
     /// Gives the MCP annotations of `tool` in this profile:
     /// `{ title, readOnlyHint, destructiveHint, idempotentHint, openWorldHint }`.
     #[must_use]
     pub fn annotations<S: 'static>(&self, tool: &ToolSpec<S>) -> Value {
-        let _ = tool;
-        Value::Null
+        let a = tool.annotations;
+        let readonly = self.profile == Profile::Readonly;
+        Value::object([
+            ("title", Value::from(tool.title)),
+            ("readOnlyHint", Value::Bool(a.read_only || readonly)),
+            ("destructiveHint", Value::Bool(a.destructive && !readonly)),
+            ("idempotentHint", Value::Bool(a.idempotent)),
+            ("openWorldHint", Value::Bool(a.open_world)),
+        ])
     }
 
     /// Gives the `tools/list` entry of `tool` in this profile:
     /// `{ name, title, description, inputSchema, annotations }`.
     #[must_use]
     pub fn entry<S: 'static>(&self, tool: &ToolSpec<S>) -> Value {
-        let _ = tool;
-        Value::Null
+        Value::object([
+            ("name", Value::from(tool.name)),
+            ("title", Value::from(tool.title)),
+            ("description", Value::from(tool.description)),
+            ("inputSchema", input_schema(tool)),
+            ("annotations", self.annotations(tool)),
+        ])
     }
 
     /// Gives the `tools` array of `tools/list`: one entry per active tool in registry order.
     #[must_use]
     pub fn tools_list<S: 'static>(&self, registry: &Registry<S>) -> Value {
-        let _ = registry;
-        Value::Array(Vec::new())
+        Value::Array(
+            self.tools(registry)
+                .into_iter()
+                .map(|tool| self.entry(tool))
+                .collect(),
+        )
     }
 }

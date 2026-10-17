@@ -10,19 +10,28 @@
 //! Send at most one of `query`, `name` and `topic`. `level` sets the detail of a tool item:
 //! `names`, `summaries` (the default) or `full`. The ranking is the same at each level.
 
+use ghidorah_base::{ErrorCode, Fuel, did_you_mean};
+use ghidorah_json::Value;
+
 use crate::args::Args;
-use crate::dispatch::{Ctx, Payload};
-use crate::errors::ToolError;
+use crate::dispatch::{Ctx, Item, KeyPart, ListPayload, Payload, SortKey};
+use crate::errors::{Candidate, ToolError};
 use crate::outshape::{Field, OutputShape};
 use crate::session::Session;
 use crate::spec::{ArgKind, ArgSpec, BinaryArg, Example, ListSpec, Profile, Role, ToolSpec};
-use crate::tool_search::TOPIC_NAMES;
+use crate::tool_search::{Level, TOPIC_NAMES, item, rank, topic};
 
 /// The default page size of `tool_search`.
 pub const DEFAULT_LIMIT: u32 = 50;
 
+/// The fuel of the did-you-mean scan of a tool name.
+const DYM_FUEL: u64 = 100_000;
+
+/// The page hint of a long result.
+pub const HINT_NARROW: &str = "Add words to query, or send level names for shorter items.";
+
 /// Every fixed text of the handler that an agent reads.
-pub const TEXTS: &[&str] = &[];
+pub const TEXTS: &[&str] = &[HINT_NARROW];
 
 const ARGS: &[ArgSpec] = &[
     ArgSpec::new(
@@ -122,7 +131,74 @@ pub const SPEC: ToolSpec<Session> = ToolSpec {
     ..ToolSpec::base("tool_search", run)
 };
 
-fn run(session: &mut Session, args: &Args, ctx: &mut Ctx) -> Result<Payload, ToolError> {
-    let _ = (session, args, ctx);
-    Err(ToolError::new(ghidorah_base::ErrorCode::InternalError))
+/// Gives the list item at rank position `pos`.
+fn ranked(pos: usize, value: Value) -> Item {
+    let pos = u64::try_from(pos).unwrap_or(u64::MAX);
+    Item {
+        key: SortKey(vec![KeyPart::Int(pos)]),
+        value,
+    }
+}
+
+/// Gives the `NOT_FOUND` error of an unknown tool name with the nearest active names.
+fn unknown_tool(name: &str, tools: &[&'static ToolSpec<Session>]) -> ToolError {
+    let mut fuel = Fuel::new(DYM_FUEL);
+    let names = tools.iter().map(|t| t.name);
+    let candidates = did_you_mean(name, names, &mut fuel)
+        .into_iter()
+        .map(|s| Candidate::text(&s.name, "tool"))
+        .collect();
+    ToolError::new(ErrorCode::NotFound)
+        .var("kind", "tool")
+        .path("/name")
+        .detail("kind", Value::from("tool"))
+        .candidates(candidates)
+}
+
+fn run(session: &mut Session, args: &Args, _ctx: &mut Ctx) -> Result<Payload, ToolError> {
+    let given: Vec<&str> = ["query", "name", "topic"]
+        .into_iter()
+        .filter(|n| args.given(n))
+        .collect();
+    if let [_, second, ..] = given.as_slice() {
+        return Err(ToolError::new(ErrorCode::InvalidArgument)
+            .var("field", second)
+            .path(&format!("/{second}"))
+            .detail(
+                "expected",
+                Value::from("at most one of query, name and topic"),
+            ));
+    }
+    if let Some(name) = args.str("topic") {
+        let text = topic(name).map_or("", |t| t.text);
+        let value = Value::object([("topic", Value::from(name)), ("text", Value::from(text))]);
+        return Ok(Payload::List(ListPayload::new(vec![ranked(0, value)])));
+    }
+    let level = args
+        .str("level")
+        .and_then(Level::parse)
+        .unwrap_or(Level::Summaries);
+    let tools = session.active_tools();
+    let order: Vec<usize> = match args.str("name") {
+        Some(name) => vec![
+            tools
+                .iter()
+                .position(|t| t.name == name)
+                .ok_or_else(|| unknown_tool(name, &tools))?,
+        ],
+        None => rank(&tools, args.str("query").unwrap_or_default())
+            .into_iter()
+            .map(|(i, _)| i)
+            .collect(),
+    };
+    let profile = &session.config().profile;
+    let items = order
+        .iter()
+        .filter_map(|i| tools.get(*i))
+        .enumerate()
+        .map(|(pos, tool)| ranked(pos, item(tool, level, profile)))
+        .collect();
+    let mut list = ListPayload::new(items);
+    list.narrow = Some(HINT_NARROW.to_owned());
+    Ok(Payload::List(list))
 }

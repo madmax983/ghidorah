@@ -20,6 +20,5 @@ pub static BYTES: &[u8] = include_bytes!("../data/demo.elf");
 /// Gives the file name and the bytes of the built-in binary `name`, or `None`.
 #[must_use]
 pub fn builtin(name: &str) -> Option<(&'static str, &'static [u8])> {
-    let _ = name;
-    None
+    (name == "demo").then_some((FILE_NAME, BYTES))
 }

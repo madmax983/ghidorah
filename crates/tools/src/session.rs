@@ -18,11 +18,11 @@
 //! the bound binary. A binary gets its label from the [`LabelRule`] when it opens.
 
 use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
-use ghidorah_base::{BinaryId, Clock, ErrorCode, FixedClock, Fuel, Limits};
-use ghidorah_db::Program;
+use ghidorah_base::{BinaryId, Clock, ErrorCode, FixedClock, Fuel, Limits, SetName, did_you_mean};
+use ghidorah_db::{Program, SetMembers};
 use ghidorah_json::Value;
 
 use crate::api::Host;
@@ -30,14 +30,17 @@ use crate::args::Globals;
 use crate::cursor::Spill;
 use crate::dispatch::{Crash, CursorCall, Members, SortKey};
 use crate::envelope::{AnalysisInfo, AnalysisState, Frame};
-use crate::errors::ToolError;
+use crate::errors::{Candidate, ToolError};
 use crate::profiles::ProfileSet;
 use crate::registry::Registry;
 use crate::roots::Roots;
-use crate::spec::{ArgKind, ToolSpec};
+use crate::spec::{ArgKind, BinaryArg, ToolSpec};
 
 /// The largest number of crash records that a session keeps.
 pub const MAX_CRASHES: usize = 64;
+
+/// The fuel of the did-you-mean scan of a set name.
+const DYM_FUEL: u64 = 100_000;
 
 /// The run settings that the `cli` crate reads once from the environment (ADR-0012).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -61,8 +64,10 @@ impl LabelRule {
     /// Gives the label of a binary whose journal holds `known` distinct `mcp-` labels.
     #[must_use]
     pub fn label(&self, known: u64) -> String {
-        let _ = known;
-        String::new()
+        match self {
+            Self::Fixed(text) => text.clone(),
+            Self::Mcp => format!("mcp-{}", known.saturating_add(1)),
+        }
     }
 }
 
@@ -250,19 +255,83 @@ impl Session {
         until: Until,
         fuel: &mut Fuel,
     ) -> Result<Option<RunReport>, ToolError> {
-        let _ = (id, until, fuel);
-        Ok(None)
+        let (Some(engine), Some(binary)) = (self.engine.as_mut(), self.binaries.get_mut(&id))
+        else {
+            return Ok(None);
+        };
+        let report = engine.run(binary, until, fuel)?;
+        binary.analysis = Some(AnalysisInfo {
+            state: report.state,
+            rev: binary.program.rev().0,
+        });
+        Ok(Some(report))
     }
 
     /// Gives the default label of a new binary.
     #[must_use]
     pub fn new_label(&self) -> String {
-        String::new()
+        self.config.labels.label(0)
     }
 
     /// Adds an open binary and makes it the most recent one. A binary with the same ID goes.
     pub fn open(&mut self, binary: OpenBinary) {
-        let _ = binary;
+        let id = binary.id;
+        self.binaries.insert(id, binary);
+        self.touch(id);
+    }
+
+    /// Makes `id` the most recent binary.
+    fn touch(&mut self, id: BinaryId) {
+        self.recent.retain(|r| *r != id);
+        self.recent.push(id);
+    }
+
+    /// Gives the open binaries as candidates, the most recent first.
+    fn candidates(&self) -> Vec<Candidate> {
+        self.recent
+            .iter()
+            .rev()
+            .filter_map(|id| self.binaries.get(id))
+            .map(|b| {
+                let mut c = Candidate::text(&b.id.to_string(), &b.file_name);
+                c.kind = Some("binary".to_owned());
+                c
+            })
+            .collect()
+    }
+
+    /// Gives the `UNKNOWN_BINARY` error of `text`.
+    fn unknown_binary(&self) -> ToolError {
+        ToolError::new(ErrorCode::UnknownBinary)
+            .path("/binary_id")
+            .candidates(self.candidates())
+    }
+
+    /// Gives the `BINARY_REQUIRED` error with `details.binary_id` of the most recent binary.
+    #[must_use]
+    pub fn binary_required(&self) -> ToolError {
+        let mut error = ToolError::new(ErrorCode::BinaryRequired).candidates(self.candidates());
+        if let Some(id) = self.recent() {
+            error = error.detail("binary_id", Value::from(id.to_string()));
+        }
+        error
+    }
+
+    /// Gives the binary that a call binds, or `None` for a call with no binary.
+    fn bind(&self, given: Option<&str>, mode: BinaryArg) -> Result<Option<BinaryId>, ToolError> {
+        if let Some(text) = given {
+            return BinaryId::parse(text)
+                .ok()
+                .filter(|id| self.binaries.contains_key(id))
+                .map(Some)
+                .ok_or_else(|| self.unknown_binary());
+        }
+        match (self.binaries.len(), mode) {
+            (1, _) => Ok(self.binaries.keys().next().copied()),
+            (_, BinaryArg::Optional | BinaryArg::None) => Ok(None),
+            (0, BinaryArg::Bound) => Err(ToolError::new(ErrorCode::NoBinaryOpen)),
+            (_, BinaryArg::Bound) => Err(self.binary_required()),
+        }
     }
 
     /// Gives the open binary `id`.
@@ -285,17 +354,27 @@ impl Session {
     /// Gives the most recent open binary.
     #[must_use]
     pub fn recent(&self) -> Option<BinaryId> {
-        None
+        self.recent.last().copied()
     }
 
     /// Gives the open binary of a call frame.
     ///
     /// # Errors
     ///
-    /// Returns `NO_BINARY_OPEN` when the frame binds no binary.
+    /// Returns `NO_BINARY_OPEN` when the frame binds no binary and the session has none,
+    /// `BINARY_REQUIRED` when it binds none and the session has several, and
+    /// `UNKNOWN_BINARY` when the bound binary is not open.
     pub fn bound(&self, frame: &Frame) -> Result<&OpenBinary, ToolError> {
-        let _ = frame;
-        Err(ToolError::new(ErrorCode::InternalError))
+        let Some(text) = &frame.binary_id else {
+            return Err(match self.binaries.len() {
+                0 => ToolError::new(ErrorCode::NoBinaryOpen),
+                _ => self.binary_required(),
+            });
+        };
+        BinaryId::parse(text)
+            .ok()
+            .and_then(|id| self.binaries.get(&id))
+            .ok_or_else(|| self.unknown_binary())
     }
 
     /// Gives the crash records of the handler panics, oldest first.
@@ -320,8 +399,26 @@ impl Host for Session {
         globals: &Globals,
         request_session: Option<&str>,
     ) -> Result<Frame, ToolError> {
-        let _ = (tool, globals, request_session);
-        Err(ToolError::new(ErrorCode::InternalError))
+        let bound = match tool.binary {
+            BinaryArg::None => None,
+            mode => self.bind(globals.binary_id.as_deref(), mode)?,
+        };
+        if let Some(id) = bound {
+            self.touch(id);
+        }
+        let binary = bound.and_then(|id| self.binaries.get(&id));
+        let session = globals
+            .session
+            .clone()
+            .or_else(|| request_session.map(str::to_owned))
+            .or_else(|| binary.map(|b| b.label.clone()))
+            .unwrap_or_else(|| self.new_label());
+        Ok(Frame {
+            binary_id: binary.map(|b| b.id.to_string()),
+            rev: binary.map_or(0, |b| b.program.rev().0),
+            session,
+            analysis: binary.and_then(|b| b.analysis),
+        })
     }
 
     fn coerce(&self, kind: &ArgKind, value: &Value) -> Option<Value> {
@@ -329,8 +426,43 @@ impl Host for Session {
     }
 
     fn members(&self, frame: &Frame, set: &str) -> Result<Members, ToolError> {
-        let _ = (frame, set);
-        Err(ToolError::new(ErrorCode::InternalError))
+        let binary = self.bound(frame)?;
+        let notes = binary.program.notes();
+        let name = set.strip_prefix("set:").unwrap_or(set);
+        let found = SetName::new(name)
+            .ok()
+            .and_then(|n| notes.set(&n))
+            .and_then(|note| note.set.as_ref());
+        let Some(found) = found else {
+            let names: Vec<String> = notes
+                .sets()
+                .map(|(n, _)| format!("set:{}", n.as_str()))
+                .collect();
+            let mut fuel = Fuel::new(DYM_FUEL);
+            let candidates = did_you_mean(set, names.iter().map(String::as_str), &mut fuel)
+                .into_iter()
+                .map(|s| Candidate::text(&s.name, "set"))
+                .collect();
+            return Err(ToolError::new(ErrorCode::NotFound)
+                .var("kind", "set")
+                .path("/in")
+                .detail("kind", Value::from("set"))
+                .candidates(candidates));
+        };
+        Ok(match &found.members {
+            SetMembers::Ids(ids) => Members {
+                ids: ids.iter().cloned().collect(),
+                ranges: Vec::new(),
+            },
+            SetMembers::Addrs(set) => Members {
+                ids: BTreeSet::new(),
+                ranges: set
+                    .ranges()
+                    .iter()
+                    .map(|r| (r.first, r.last.saturating_add(1)))
+                    .collect(),
+            },
+        })
     }
 
     fn encode_cursor(&self, call: &CursorCall<'_>, key: &SortKey) -> String {
@@ -342,6 +474,9 @@ impl Host for Session {
     }
 
     fn on_panic(&mut self, crash: &Crash) {
-        let _ = crash;
+        self.crashes.push(crash.clone());
+        if self.crashes.len() > MAX_CRASHES {
+            self.crashes.remove(0);
+        }
     }
 }

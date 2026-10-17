@@ -115,7 +115,7 @@ fn binary_load_demo() {
     let raw = call(
         &mut s,
         "binary_load",
-        r#"{"path":"fixtures/bin/hello.gcc-O2","format":"raw","base":"0x400000","entry":"0x401040","analysis":"none"}"#,
+        r#"{"path":"fixtures/bin/hello.gcc-O2","file_format":"raw","base":"0x400000","entry":"0x401040","analysis":"none"}"#,
     );
     let got = data(&raw);
     assert_eq!(text_at(got, "/format"), "raw");
@@ -209,11 +209,11 @@ fn binary_load_errors() {
         (r#"{"builtin":"nope"}"#, "INVALID_ARGUMENT"),
         (r#"{"path":"Cargo.toml"}"#, "FORMAT_MALFORMED"),
         (
-            r#"{"path":"Cargo.toml","format":"elf"}"#,
+            r#"{"path":"Cargo.toml","file_format":"elf"}"#,
             "FORMAT_MALFORMED",
         ),
         (
-            r#"{"path":"crates/tools/data/demo.elf","format":"raw"}"#,
+            r#"{"path":"crates/tools/data/demo.elf","file_format":"raw"}"#,
             "MISSING_ARGUMENT",
         ),
         (r#"{"builtin":"demo","base":"0x1000"}"#, "INVALID_ARGUMENT"),
@@ -241,7 +241,7 @@ fn binary_load_errors() {
     let envelope = call(
         &mut s,
         "binary_load",
-        r#"{"path":"crates/tools/data/demo.elf","format":"raw"}"#,
+        r#"{"path":"crates/tools/data/demo.elf","file_format":"raw"}"#,
     );
     assert_eq!(
         text_at(&envelope, "/error/field_path"),
@@ -422,7 +422,7 @@ fn binary_required_and_unknown_binary() {
         .iter()
         .map(|c| text_at(c, "/value"))
         .collect();
-    assert_eq!(values.len(), 2, "{envelope}");
+    assert_eq!(values, [helpers.clone(), DEMO_ID.to_owned()], "{envelope}");
 
     let envelope = call(&mut s, "calc", r#"{"expr":"main"}"#);
     assert_eq!(code(&envelope), "BINARY_REQUIRED", "{envelope}");
@@ -473,6 +473,6 @@ fn binary_required_and_unknown_binary() {
     let frame = ghidorah_tools::Frame::default();
     assert_eq!(
         s.bound(&frame).err().map(|e| e.code),
-        Some(ErrorCode::NoBinaryOpen)
+        Some(ErrorCode::BinaryRequired)
     );
 }

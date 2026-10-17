@@ -25,10 +25,12 @@
 //!
 //! The [`table`] module maps the result to the addresses of each tool family.
 
+mod errors;
+mod rules;
 pub mod table;
 
 use ghidorah_base::{
-    Address, ExportId, FuncId, IdKind, ImportId, JumpTableId, StringId, SyscallId,
+    Address, ExportId, FuncId, IdKind, ImportId, JumpTableId, StringId, SyscallId, addr_expr,
 };
 use ghidorah_db::Program;
 use ghidorah_json::Value;
@@ -129,7 +131,10 @@ impl Resolved {
     /// Gives `resolved_from: { rule, matched }` as JSON.
     #[must_use]
     pub fn resolved_from(&self) -> Value {
-        Value::Null
+        Value::object([
+            ("rule", Value::from(self.rule.name())),
+            ("matched", Value::from(self.matched.as_str())),
+        ])
     }
 }
 
@@ -157,8 +162,25 @@ impl std::fmt::Debug for Site<'_> {
 ///
 /// Returns the errors of the module docs, and `INVALID_ARGUMENT` for another JSON type.
 pub fn resolve(program: &Program, input: &Value, site: &Site<'_>) -> Result<Resolved, ToolError> {
-    let _ = (program, input, site);
-    Err(ToolError::new(ghidorah_base::ErrorCode::InternalError))
+    match input {
+        Value::Number(n) => {
+            let value = if n.is_integer() { n.as_u64() } else { None };
+            match value.map(addr_expr::from_integer) {
+                Some(Ok(_)) => Ok(Resolved {
+                    named: Named::Addr(Address::ram(value.unwrap_or_default())),
+                    rule: Rule::Integer,
+                    matched: n.as_str().to_owned(),
+                }),
+                Some(Err(e)) => Err(errors::address_invalid(site, e.repair_text())),
+                None => Err(errors::address_invalid(site, None)),
+            }
+        }
+        Value::String(text) => resolve_text(program, text, site),
+        _ => Err(errors::invalid(
+            "an address: a 0x hex string, a name, an ID or an integer below 2^53",
+            site,
+        )),
+    }
 }
 
 /// Resolves one address text.
@@ -167,6 +189,8 @@ pub fn resolve(program: &Program, input: &Value, site: &Site<'_>) -> Result<Reso
 ///
 /// Returns the errors of the module docs.
 pub fn resolve_text(program: &Program, text: &str, site: &Site<'_>) -> Result<Resolved, ToolError> {
-    let _ = (program, text, site);
-    Err(ToolError::new(ghidorah_base::ErrorCode::InternalError))
+    let expr =
+        addr_expr::parse(text).map_err(|e| errors::address_invalid(site, e.repair_text()))?;
+    let trimmed = text.trim_matches(|c: char| c.is_ascii_whitespace());
+    rules::expr(program, &expr, trimmed, site)
 }
