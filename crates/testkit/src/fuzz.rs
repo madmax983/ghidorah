@@ -9,10 +9,31 @@
 //! cases per stage. A panic hook counts every panic in the test binary, also
 //! the panics that a target catches. Put each fuzz target in its own test binary.
 
-use std::fmt;
-use std::path::{Path, PathBuf};
+mod havoc;
 
-use crate::rng::Xoshiro256ss;
+use std::cell::Cell;
+use std::fmt;
+use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::path::{Path, PathBuf};
+use std::sync::Once;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+use crate::pbt::panic_text;
+use crate::rng::{Xoshiro256ss, below, fnv1a64};
+
+/// The number of case panics that the hook prints with the previous hook.
+const PRINTED_PANICS: u64 = 8;
+
+thread_local! {
+    /// `true` while this thread runs a fuzz case.
+    static IN_CASE: Cell<bool> = const { Cell::new(false) };
+}
+
+/// The panic count since [`install_panic_counter`].
+static PANICS: AtomicU64 = AtomicU64::new(0);
+
+/// Guards the one-time hook install.
+static HOOK: Once = Once::new();
 
 /// The file name of the input of the running case.
 pub const PENDING_FILE: &str = "pending.bin";
@@ -53,7 +74,7 @@ impl Config {
         Self {
             target: target.to_string(),
             cases,
-            seed: 0,
+            seed: fnv1a64(target.as_bytes()),
             max_len: DEFAULT_MAX_LEN,
             stack_size: DEFAULT_STACK,
             pending_dir: None,
@@ -124,14 +145,38 @@ impl Report {
     /// Returns `true` when no case panicked and no case gave a violation.
     #[must_use]
     pub const fn ok(&self) -> bool {
-        false
+        self.panics == 0 && self.violations == 0
     }
 
     /// Returns the share of cases that reached `stage`, in percent (0 to 100).
     #[must_use]
     pub fn reached_percent(&self, stage: usize) -> u64 {
-        let _ = stage;
-        0
+        if self.cases == 0 {
+            return 0;
+        }
+        let reached = self.reached.get(stage).copied().unwrap_or(0);
+        reached.saturating_mul(100) / u64::from(self.cases)
+    }
+
+    /// Counts a case whose deepest stage is `stage`.
+    fn count_stage(&mut self, stage: usize) {
+        if self.reached.len() <= stage {
+            self.reached.resize(stage + 1, 0);
+        }
+        for slot in self.reached.iter_mut().take(stage + 1) {
+            *slot += 1;
+        }
+    }
+
+    /// Keeps a failed case while the report has room.
+    fn keep(&mut self, max: usize, case: u32, input: &[u8], message: String) {
+        if self.crashes.len() < max {
+            self.crashes.push(Crash {
+                case,
+                input: input.to_vec(),
+                message,
+            });
+        }
     }
 }
 
@@ -165,8 +210,71 @@ impl std::error::Error for FuzzError {}
 /// The steps are: bit flip, random byte, interesting value, add or subtract
 /// 1 to 35, delete block and insert byte. The result has at most `max_len` bytes.
 pub fn mutate(rng: &mut Xoshiro256ss, input: &[u8], max_len: usize) -> Vec<u8> {
-    let _ = (rng, max_len);
-    input.to_vec()
+    havoc::mutate(rng, input, max_len)
+}
+
+fn io_error(path: &Path, e: &std::io::Error) -> FuzzError {
+    FuzzError::Io {
+        path: path.display().to_string(),
+        message: e.to_string(),
+    }
+}
+
+/// Runs one case and adds its result to `report`.
+fn run_case<F>(
+    pending: Option<&Path>,
+    case: u32,
+    input: &[u8],
+    target: &F,
+    report: &mut Report,
+    max_crashes: usize,
+) -> Result<(), FuzzError>
+where
+    F: Fn(&[u8]) -> Outcome,
+{
+    if let Some(path) = pending {
+        std::fs::write(path, input).map_err(|e| io_error(path, &e))?;
+    }
+    IN_CASE.with(|c| c.set(true));
+    let result = catch_unwind(AssertUnwindSafe(|| target(input)));
+    IN_CASE.with(|c| c.set(false));
+    report.cases += 1;
+    match result {
+        Ok(outcome) => {
+            report.count_stage(outcome.stage);
+            if let Some(message) = outcome.violation {
+                report.violations += 1;
+                report.keep(max_crashes, case, input, message);
+            }
+        }
+        Err(payload) => {
+            report.panics += 1;
+            let message = format!("panic: {}", panic_text(payload.as_ref()));
+            report.keep(max_crashes, case, input, message);
+        }
+    }
+    if let Some(path) = pending {
+        std::fs::remove_file(path).map_err(|e| io_error(path, &e))?;
+    }
+    Ok(())
+}
+
+/// Runs `body` in a named thread with `stack_size` bytes of stack.
+fn in_thread<T, B>(name: &str, stack_size: usize, body: B) -> Result<T, FuzzError>
+where
+    T: Send,
+    B: FnOnce() -> Result<T, FuzzError> + Send,
+{
+    std::thread::scope(|scope| {
+        let handle = std::thread::Builder::new()
+            .name(format!("fuzz-{name}"))
+            .stack_size(stack_size)
+            .spawn_scoped(scope, body)
+            .map_err(|e| FuzzError::Thread(e.to_string()))?;
+        handle
+            .join()
+            .map_err(|_| FuzzError::Thread("the case thread stopped with a panic".to_string()))?
+    })
 }
 
 /// Runs the cases of `config` against `target`.
@@ -180,11 +288,59 @@ pub fn run<F>(config: &Config, corpus: &[Vec<u8>], target: F) -> Result<Report, 
 where
     F: Fn(&[u8]) -> Outcome + Sync,
 {
-    let _ = (corpus, target);
-    Ok(Report {
-        target: config.target.clone(),
-        ..Report::default()
+    install_panic_counter();
+    let pending = match &config.pending_dir {
+        Some(dir) => {
+            std::fs::create_dir_all(dir).map_err(|e| io_error(dir, &e))?;
+            Some(dir.join(PENDING_FILE))
+        }
+        None => None,
+    };
+    in_thread(&config.target, config.stack_size, || {
+        let mut rng = Xoshiro256ss::seed_from_u64(config.seed);
+        let mut report = Report {
+            target: config.target.clone(),
+            reached: vec![0; config.stages.len()],
+            ..Report::default()
+        };
+        let count = u64::try_from(corpus.len()).unwrap_or(u64::MAX);
+        for case in 0..config.cases {
+            let seed: &[u8] = if count == 0 {
+                &[]
+            } else {
+                let i = usize::try_from(below(&mut rng, count)).unwrap_or(0);
+                corpus.get(i).map_or(&[], Vec::as_slice)
+            };
+            let input = mutate(&mut rng, seed, config.max_len);
+            run_case(
+                pending.as_deref(),
+                case,
+                &input,
+                &target,
+                &mut report,
+                config.max_crashes,
+            )?;
+        }
+        Ok(report)
     })
+}
+
+/// Returns the sorted `*.bin` files of `dir`. A missing directory gives no files.
+fn regress_files(dir: &Path) -> Result<Vec<PathBuf>, FuzzError> {
+    let entries = match std::fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(io_error(dir, &e)),
+    };
+    let mut files = Vec::new();
+    for entry in entries {
+        let path = entry.map_err(|e| io_error(dir, &e))?.path();
+        if path.is_file() && path.extension().is_some_and(|x| x == "bin") {
+            files.push(path);
+        }
+    }
+    files.sort();
+    Ok(files)
 }
 
 /// Runs `target` on each `*.bin` file of `dir` in name order.
@@ -198,17 +354,43 @@ pub fn replay_regress<F>(dir: &Path, target: F) -> Result<Report, FuzzError>
 where
     F: Fn(&[u8]) -> Outcome + Sync,
 {
-    let _ = (dir, target);
-    Ok(Report::default())
+    install_panic_counter();
+    let files = regress_files(dir)?;
+    let name = dir.display().to_string();
+    in_thread("replay", DEFAULT_STACK, || {
+        let mut report = Report {
+            target: name.clone(),
+            ..Report::default()
+        };
+        for (i, path) in files.iter().enumerate() {
+            let input = std::fs::read(path).map_err(|e| io_error(path, &e))?;
+            let case = u32::try_from(i).unwrap_or(u32::MAX);
+            run_case(None, case, &input, &target, &mut report, usize::MAX)?;
+        }
+        Ok(report)
+    })
 }
 
 /// Installs a panic hook that counts each panic and then calls the previous hook.
 ///
-/// A second call has no effect.
-pub fn install_panic_counter() {}
+/// The hook prints each panic through the previous hook, except panics in fuzz
+/// cases after the first 8. So a long fuzz run stays quiet, and a test failure
+/// still shows its message. A second call has no effect.
+pub fn install_panic_counter() {
+    HOOK.call_once(|| {
+        let previous = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            let seen = PANICS.fetch_add(1, Ordering::SeqCst);
+            let quiet = IN_CASE.with(Cell::get) && seen >= PRINTED_PANICS;
+            if !quiet {
+                previous(info);
+            }
+        }));
+    });
+}
 
 /// Returns the number of panics since [`install_panic_counter`].
 #[must_use]
 pub fn panic_count() -> u64 {
-    0
+    PANICS.load(Ordering::SeqCst)
 }

@@ -74,9 +74,20 @@ fn fuzz_finds_tlv_bug() {
             "each crash reproduces: {crash:?}"
         );
     }
-    assert!(report.reached_percent(0) >= 10, "{report:?}");
-    assert!(report.reached_percent(1) >= 10, "{report:?}");
-    assert!(report.reached_percent(2) >= 10, "{report:?}");
+    // Each case counts for its deepest stage and every stage before it.
+    assert_eq!(report.reached.len(), 3);
+    assert!(report.reached_percent(0) >= 90, "{:?}", report.reached);
+    assert!(
+        report.reached[0] >= report.reached[1],
+        "{:?}",
+        report.reached
+    );
+    assert!(
+        report.reached[1] >= report.reached[2],
+        "{:?}",
+        report.reached
+    );
+    assert!(report.reached[2] > 0, "{:?}", report.reached);
 
     // The same seed gives the same report.
     let again = fuzz::run(&config, &corpus, parse_tlv);
