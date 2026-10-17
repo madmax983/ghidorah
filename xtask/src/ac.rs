@@ -21,7 +21,7 @@ pub const DESIGN_PATH: &str = "docs/design.md";
 /// The pair order of the work packages (design Section 14.3, revision 3).
 ///
 /// Pairs merge in this order. Inside a pair, the first WP merges first and the second WP rebases.
-/// WP-29 and WP-30 come after the Increment D pairs and before the hardening pair.
+/// A pair with one WP has no partner.
 pub const PAIRS: &[(&str, &[&str])] = &[
     ("P1", &["01", "02"]),
     ("P2", &["03", "04"]),
@@ -29,18 +29,18 @@ pub const PAIRS: &[(&str, &[&str])] = &[
     ("P4", &["07", "08"]),
     ("P5", &["09", "10"]),
     ("P6", &["11a", "12"]),
-    ("P7", &["11b", "13a"]),
-    ("P8", &["13b", "14"]),
-    ("P9", &["15", "16"]),
-    ("P10", &["17a", "20"]),
-    ("P11", &["17b", "19"]),
-    ("P12", &["22a", "22b"]),
-    ("P13", &["24", "25"]),
-    ("P14", &["26", "18"]),
-    ("PD1", &["21"]),
-    ("PD2", &["23"]),
-    ("PX", &["29", "30"]),
-    ("P15", &["27", "28"]),
+    ("P7", &["11b", "18"]),
+    ("P8", &["13a", "16"]),
+    ("P9", &["13b", "14"]),
+    ("P10", &["15", "20"]),
+    ("P11", &["17a", "19"]),
+    ("P12", &["17b", "21"]),
+    ("P13", &["22a", "22b"]),
+    ("P14", &["24", "25"]),
+    ("P15", &["23", "30"]),
+    ("P16", &["29"]),
+    ("P17", &["26"]),
+    ("P18", &["27", "28"]),
 ];
 
 /// The test tier of an evidence item.
@@ -139,12 +139,22 @@ pub struct AcRow {
     pub line: usize,
     /// True for a row that moved to the stretch list.
     pub stretch: bool,
+    /// True for a row that revision 3 removed.
+    pub removed: bool,
     /// The evidence items.
     pub evidence: Vec<Evidence>,
     /// The WPs of the Closes column, for example `["13a", "25"]`.
     pub closes: Vec<String>,
     /// The WPs of the Needs column.
     pub needs: Vec<String>,
+}
+
+impl AcRow {
+    /// Tells if the row is an MVP gate: it is not on the stretch list, and revision 3 did not remove it.
+    #[must_use]
+    pub const fn is_gate(&self) -> bool {
+        !self.stretch && !self.removed
+    }
 }
 
 fn is_name(text: &str) -> bool {
@@ -331,6 +341,7 @@ pub fn parse_rows(text: &str) -> (Vec<AcRow>, Vec<Finding>) {
             id: (*id).to_owned(),
             line: number,
             stretch: statement.starts_with("Moved to stretch"),
+            removed: statement.starts_with("Removed in revision"),
             evidence: items,
             closes: wp_list(closes, '/'),
             needs: wp_list(needs, ','),
@@ -356,7 +367,7 @@ pub fn position(wp: &str) -> Option<(usize, usize)> {
 #[must_use]
 pub fn needs_order(rows: &[AcRow]) -> Vec<Finding> {
     let mut found = Vec::new();
-    for row in rows.iter().filter(|r| !r.stretch) {
+    for row in rows.iter().filter(|r| r.is_gate()) {
         let finding = |detail: String| {
             Finding::new(
                 "AC-018c",
@@ -389,7 +400,7 @@ pub fn needs_order(rows: &[AcRow]) -> Vec<Finding> {
 #[must_use]
 pub fn missing(rows: &[AcRow]) -> Vec<String> {
     rows.iter()
-        .filter(|r| !r.stretch && r.evidence.is_empty())
+        .filter(|r| r.is_gate() && r.evidence.is_empty())
         .map(|r| r.id.clone())
         .collect()
 }

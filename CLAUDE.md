@@ -33,7 +33,7 @@ A WP is complete when all of these pass:
 2. `cargo clippy --workspace --all-targets -- -D warnings`.
 3. `cargo test --workspace`.
 4. `cargo xtask gates`.
-5. `cargo xtask cov`. Line coverage is at least 85% for the workspace, 90% for each core crate and 95% for `kernel`. The core crates are `json`, `loader`, `x86`, `ir`, `db`, `analysis` and `tools`. The gate applies from the first WP that adds code to a crate.
+5. `cargo xtask cov`. Line coverage is at least 85% for the workspace, 90% for each core crate and 95% for `kernel`. The core crates are `json`, `loader`, `x86`, `ir`, `db`, `analysis`, `decomp` and `tools`. The gate applies from the first WP that adds code to a crate.
 6. `cargo xtask ste` with no new finding (after WP-02 merges).
 7. `cargo xtask ac` with an empty `grammar`, `order` and `missing` list.
 

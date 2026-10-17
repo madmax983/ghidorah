@@ -425,6 +425,7 @@ fn ac_013_coverage_gate() {
     );
     assert_eq!(cov::min_percent("kernel"), Some(95));
     assert_eq!(cov::min_percent("json"), Some(90));
+    assert_eq!(cov::min_percent("decomp"), Some(90));
     assert_eq!(cov::min_percent("base"), None);
     let one = |dir: &str, lines: u64, covered: u64| {
         let counts = Counts {
@@ -516,6 +517,7 @@ fn row(id: &str, closes: &[&str], needs: &[&str]) -> AcRow {
         id: id.to_owned(),
         line: 1,
         stretch: false,
+        removed: false,
         evidence: Vec::new(),
         closes: closes.iter().map(|s| (*s).to_owned()).collect(),
         needs: needs.iter().map(|s| (*s).to_owned()).collect(),
@@ -528,11 +530,45 @@ fn ac_018c_needs_order() {
     assert_eq!(ac::position("01"), Some((0, 0)));
     assert_eq!(ac::position("WP-02"), Some((0, 1)));
     assert_eq!(ac::needs_order(&[row("AC-1", &["07"], &["17b"])]).len(), 1);
-    assert!(ac::needs_order(&[row("AC-2", &["19"], &["17b"])]).is_empty());
-    assert_eq!(ac::needs_order(&[row("AC-3", &["17b"], &["19"])]).len(), 1);
+    assert!(ac::needs_order(&[row("AC-2", &["17b"], &["19"])]).is_empty());
+    assert_eq!(ac::needs_order(&[row("AC-3", &["19"], &["17b"])]).len(), 1);
     assert!(ac::needs_order(&[row("AC-4", &["13a", "25"], &["24"])]).is_empty());
     assert_eq!(ac::needs_order(&[row("AC-5", &["13a"], &["24"])]).len(), 1);
     assert_eq!(ac::needs_order(&[row("AC-6", &["99"], &[])]).len(), 1);
+    assert!(ac::needs_order(&[row("AC-7", &["30"], &["23"])]).is_empty());
+    assert_eq!(ac::needs_order(&[row("AC-8", &["23"], &["30"])]).len(), 1);
+    assert!(ac::needs_order(&[row("AC-9", &["29"], &["25", "21"])]).is_empty());
+    let removed = AcRow {
+        removed: true,
+        ..row("AC-10", &["01"], &["28"])
+    };
+    assert!(ac::needs_order(&[removed]).is_empty());
+}
+
+#[test]
+fn ac_018c_pairs_follow_revision_3() {
+    let pairs: Vec<&str> = ac::PAIRS.iter().map(|(name, _)| *name).collect();
+    let expected: Vec<String> = (1..=18).map(|n| format!("P{n}")).collect();
+    assert_eq!(pairs, expected);
+    let wps: usize = ac::PAIRS.iter().map(|(_, wps)| wps.len()).sum();
+    assert_eq!(wps, 34);
+    assert_eq!(ac::position("18"), Some((6, 1)));
+    assert_eq!(ac::position("16"), Some((7, 1)));
+    assert_eq!(ac::position("20"), Some((9, 1)));
+    assert_eq!(ac::position("30"), Some((14, 1)));
+    assert_eq!(ac::position("29"), Some((15, 0)));
+    assert_eq!(ac::position("26"), Some((16, 0)));
+    assert_eq!(ac::position("28"), Some((17, 1)));
+    let design = repo().read(ac::DESIGN_PATH).expect("design reads");
+    let headings: Vec<&str> = design
+        .lines()
+        .filter_map(|l| l.strip_prefix("#### WP-"))
+        .filter_map(|l| l.split_whitespace().next())
+        .collect();
+    assert_eq!(headings.len(), wps);
+    for wp in headings {
+        assert!(ac::position(wp).is_some(), "WP-{wp} is in no pair");
+    }
 }
 
 #[test]

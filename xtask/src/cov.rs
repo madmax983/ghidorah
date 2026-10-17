@@ -23,7 +23,9 @@ pub const CORE_MIN: u64 = 90;
 pub const KERNEL_MIN: u64 = 95;
 
 /// The core crates of AC-013, as directory names under `crates/`.
-pub const CORE: &[&str] = &["json", "loader", "x86", "ir", "db", "analysis", "tools"];
+pub const CORE: &[&str] = &[
+    "json", "loader", "x86", "ir", "db", "analysis", "decomp", "tools",
+];
 
 /// The dev crates that the measurement leaves out, as directory names under `crates/`.
 pub const DEV_DIRS: &[&str] = &["testkit", "oracle", "eval"];

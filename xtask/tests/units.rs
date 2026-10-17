@@ -301,9 +301,13 @@ fn ac_rows_parse() {
 | AC-063b | Moved to stretch S10 (`insn_fields`). | - | - | - |
 | AC-099 | No evidence. | - | 05 | - |
 | AC-100 | Bad. | `test:nope` | 05 | - |
+| AC-015a | Removed in revision 3 (line counts are information only, ADR-0018). | - | - | - |
 ";
     let (rows, findings) = ac::parse_rows(text);
-    assert_eq!(rows.len(), 5);
+    assert_eq!(rows.len(), 6);
+    assert!(rows[5].removed && !rows[5].stretch && !rows[5].is_gate());
+    assert!(rows[2].stretch && !rows[2].removed && !rows[2].is_gate());
+    assert!(rows[0].is_gate());
     assert_eq!(rows[1].evidence.len(), 2);
     assert_eq!(rows[1].closes, ["13a", "25"]);
     assert_eq!(rows[1].needs, ["24"]);
