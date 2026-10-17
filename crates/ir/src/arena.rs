@@ -215,8 +215,41 @@ impl Arena {
     ///
     /// Returns [`BuildError::Full`] when the arena is full, and [`BuildError::BadWidth`]
     /// for a bad width.
-    pub fn push_op(&mut self, op: Op) -> Result<(u32, Option<Val>), BuildError> {
-        Err(BuildError::BadWidth { opc: op.opc, w: 0 })
+    pub fn push_op(&mut self, mut op: Op) -> Result<(u32, Option<Val>), BuildError> {
+        check_width(op.opc, op.w)?;
+        let index = u32::try_from(self.ops.len()).map_err(|_| BuildError::Full)?;
+        op.out = if op.opc.has_out() {
+            Some(self.alloc_val(index)?)
+        } else {
+            None
+        };
+        self.ops.push(op);
+        Ok((index, op.out))
+    }
+
+    /// Makes a new value with its def at op `index`.
+    fn alloc_val(&mut self, index: u32) -> Result<Val, BuildError> {
+        let val = u32::try_from(self.defs.len()).map_err(|_| BuildError::Full)?;
+        self.defs.push(index);
+        Ok(Val(val))
+    }
+
+    /// Adds an effect to the side table. Gives its index.
+    fn push_effect(&mut self, effect: Effect) -> u64 {
+        let index = u64::try_from(self.effects.len()).unwrap_or(u64::MAX);
+        self.effects.push(effect);
+        index
+    }
+}
+
+/// Checks the width of an op: 1 to 128 bits for an op with an output, `Put` and `Store`,
+/// and at most 128 bits for the others.
+const fn check_width(opc: Opc, w: u8) -> Result<(), BuildError> {
+    let needs_bits = opc.has_out() || matches!(opc, Opc::Put | Opc::Store);
+    if w > MAX_WIDTH || (needs_bits && w == 0) {
+        Err(BuildError::BadWidth { opc, w })
+    } else {
+        Ok(())
     }
 }
 
@@ -224,7 +257,6 @@ impl Arena {
 #[derive(Debug, Default)]
 pub struct Builder {
     arena: Arena,
-    open: Option<InsnSpan>,
 }
 
 impl Builder {
@@ -241,12 +273,28 @@ impl Builder {
     /// Returns [`BuildError::OutOfOrder`] when `addr` is not above the address before it,
     /// and [`BuildError::ZeroLength`] when `len` is 0.
     pub fn begin(&mut self, addr: u64, len: u8) -> Result<(), BuildError> {
-        Err(BuildError::ZeroLength {
-            addr: addr ^ u64::from(len),
-        })
+        if len == 0 {
+            return Err(BuildError::ZeroLength { addr });
+        }
+        if self
+            .arena
+            .insns
+            .last()
+            .is_some_and(|last| addr <= last.addr)
+        {
+            return Err(BuildError::OutOfOrder { addr });
+        }
+        let first = u32::try_from(self.arena.ops.len()).map_err(|_| BuildError::Full)?;
+        self.arena.insns.push(InsnSpan {
+            addr,
+            len,
+            first,
+            count: 0,
+        });
+        Ok(())
     }
 
-    /// Adds an op to the open instruction. Gives the output value of an opcode with an output.
+    /// Adds an op to the last instruction. Gives the output value of an opcode with an output.
     ///
     /// # Errors
     ///
@@ -260,8 +308,27 @@ impl Builder {
         sub: u8,
         a: [Arg; 3],
     ) -> Result<Option<Val>, BuildError> {
-        let _unused = (opc, w, sub, a, &mut self.open);
-        Err(BuildError::NoInsn)
+        let span = *self.arena.insns.last().ok_or(BuildError::NoInsn)?;
+        let seq = u16::try_from(span.count)
+            .ok()
+            .filter(|&seq| seq <= MAX_LIFT_SEQ)
+            .ok_or(BuildError::TooManyOps { addr: span.addr })?;
+        let op = Op {
+            id: OpId {
+                addr: span.addr,
+                seq,
+            },
+            opc,
+            w,
+            sub,
+            out: None,
+            a,
+        };
+        let (_, out) = self.arena.push_op(op)?;
+        if let Some(last) = self.arena.insns.last_mut() {
+            last.count = span.count.saturating_add(1);
+        }
+        Ok(out)
     }
 
     /// Adds an op that has an output, and gives the output value.
@@ -403,18 +470,22 @@ impl Builder {
     ///
     /// Returns the errors of [`Builder::push`].
     pub fn effect_op(&mut self, opc: Opc, effect: Effect, addr: Arg) -> Result<(), BuildError> {
-        let _unused = (opc, effect, addr);
-        Err(BuildError::Full)
+        if self.arena.insns.is_empty() {
+            return Err(BuildError::NoInsn);
+        }
+        let index = self.arena.push_effect(effect);
+        self.push(opc, 64, 0, [Arg::k(index), addr, Arg::Nil])
+            .map(|_| ())
     }
 
-    /// Closes the open instruction and gives the arena.
+    /// Gives the arena.
     #[must_use]
     pub fn finish(self) -> Arena {
         self.arena
     }
 }
 
-/// Makes an op with the default id, for tests and passes that set the id later.
+/// Makes an op with no output value. [`Arena::push_op`] gives the output value.
 #[must_use]
 pub const fn op_at(id: OpId, opc: Opc, w: u8, sub: u8, a: [Arg; 3]) -> Op {
     Op {

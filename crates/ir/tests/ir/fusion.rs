@@ -165,7 +165,7 @@ fn pred_opc_is_total() {
 
 /// Draws an operand with many edge values.
 fn operand(rng: &mut Xoshiro256ss, g: &mut Gen) -> u64 {
-    if rng.next_u64() % 2 == 0 {
+    if rng.next_u64().is_multiple_of(2) {
         g.u64()
     } else {
         let shift = rng.next_u64() % 64;
@@ -178,21 +178,21 @@ fn operand(rng: &mut Xoshiro256ss, g: &mut Gen) -> u64 {
 #[test]
 fn ac_068b_pred_opc_all_widths() {
     let mut rng = Xoshiro256ss::seed_from_u64(0x068b);
-    let mut g = Gen::random(0x068b);
+    let mut draw = Gen::random(0x068b);
     for p in PREDS {
         for w in [8u8, 16, 32, 64] {
             let arena = program(|b| {
                 b.begin(0x1000, 4)?;
-                let x = b.get(Loc::RDI)?;
-                let y = b.get(Loc::RSI)?;
-                let (opc, l, r) = pred_opc(p, x.into(), y.into());
-                let c = b.binary(opc, w, l, r)?;
-                let z = b.extend(false, 64, 1, c.into())?;
-                b.put(Loc::RAX, z.into())?;
+                let lhs = b.get(Loc::RDI)?;
+                let rhs = b.get(Loc::RSI)?;
+                let (opc, left, right) = pred_opc(p, lhs.into(), rhs.into());
+                let bit = b.binary(opc, w, left, right)?;
+                let wide = b.extend(false, 64, 1, bit.into())?;
+                b.put(Loc::RAX, wide.into())?;
                 b.flow(Opc::Ret, Arg::Nil, Arg::Nil)
             });
             for _ in 0..10_000 {
-                let (a, bv) = (operand(&mut rng, &mut g), operand(&mut rng, &mut g));
+                let (a, bv) = (operand(&mut rng, &mut draw), operand(&mut rng, &mut draw));
                 let setup = [
                     (Loc::RDI, u128::from(a)),
                     (Loc::RSI, u128::from(bv)),

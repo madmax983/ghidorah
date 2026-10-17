@@ -160,22 +160,22 @@ fn flow_and_partial_writes() {
     // 0x1008: rax = 1; 0x100c: ret.  0x1010: rax = 2; jump *rdx.  0x1020: ret.
     let arena = program(|b| {
         b.begin(0x1000, 8)?;
-        let a = b.get(Loc::RAX)?;
-        let r = b.insert(64, a.into(), Arg::k(0xff), 8, 8)?;
-        b.put(Loc::RAX, r.into())?;
-        let c = b.get(Loc::RCX)?;
-        let f = b.flags(FlagOp::X86Sub, 64, r.into(), c.into(), NIL)?;
-        b.put(Loc::Flags, f.into())?;
-        let e = b.cond(Cc::x86(4).expect("e"), f.into())?;
-        b.flow(Opc::CJump, e.into(), Arg::k(0x1010))?;
+        let old = b.get(Loc::RAX)?;
+        let new = b.insert(64, old.into(), Arg::k(0xff), 8, 8)?;
+        b.put(Loc::RAX, new.into())?;
+        let other = b.get(Loc::RCX)?;
+        let flags = b.flags(FlagOp::X86Sub, 64, new.into(), other.into(), NIL)?;
+        b.put(Loc::Flags, flags.into())?;
+        let equal = b.cond(Cc::x86(4).expect("e"), flags.into())?;
+        b.flow(Opc::CJump, equal.into(), Arg::k(0x1010))?;
         b.begin(0x1008, 4)?;
         b.put(Loc::RBX, Arg::k(1))?;
         b.begin(0x100c, 1)?;
         b.flow(Opc::Ret, NIL, NIL)?;
         b.begin(0x1010, 4)?;
         b.put(Loc::RBX, Arg::k(2))?;
-        let t = b.get(Loc::RDX)?;
-        b.flow(Opc::JumpInd, t.into(), NIL)?;
+        let target = b.get(Loc::RDX)?;
+        b.flow(Opc::JumpInd, target.into(), NIL)?;
         b.begin(0x1020, 1)?;
         b.flow(Opc::Ret, NIL, NIL)
     });

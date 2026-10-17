@@ -26,7 +26,7 @@ mod lemmas;
 #[verus_verify]
 pub const CF: u16 = 0x0001;
 
-/// The parity flag (bit 2). It is set when the low byte has an even count of 1 bits.
+/// The parity flag (bit 2). It is 1 when the low byte has an even count of 1 bits.
 #[verus_verify]
 pub const PF: u16 = 0x0004;
 
@@ -372,22 +372,20 @@ const fn parity(r: u64) -> bool {
 #[must_use]
 #[verus_spec(r => ensures r == spec_sub_flags(a, b, w))]
 pub fn x86_sub_flags(a: u64, b: u64, w: u32) -> u16 {
-    let m = mask(w);
-    let s = sign(w);
-    let x = a & m;
-    let y = b & m;
-    let d = x.wrapping_sub(y);
+    let (low, top) = (mask(w), sign(w));
+    let (lhs, rhs) = (a & low, b & low);
+    let diff = lhs.wrapping_sub(rhs);
     proof! {
-        lemmas::lemma_wrapping_sub(x, y);
+        lemmas::lemma_wrapping_sub(lhs, rhs);
     }
-    let r = d & m;
+    let res = diff & low;
     pack(
-        x > y,
-        parity(r),
-        (x ^ y ^ r) & 0x10 != 0,
-        r == 0,
-        r & s != 0,
-        (x ^ y) & (x ^ r) & s != 0,
+        lhs < rhs,
+        parity(res),
+        (lhs ^ rhs ^ res) & 0x10 != 0,
+        res == 0,
+        res & top != 0,
+        (lhs ^ rhs) & (lhs ^ res) & top != 0,
     )
 }
 
@@ -395,22 +393,20 @@ pub fn x86_sub_flags(a: u64, b: u64, w: u32) -> u16 {
 #[must_use]
 #[verus_spec(r => ensures r == spec_add_flags(a, b, w))]
 pub fn x86_add_flags(a: u64, b: u64, w: u32) -> u16 {
-    let m = mask(w);
-    let s = sign(w);
-    let x = a & m;
-    let y = b & m;
-    let d = x.wrapping_add(y);
+    let (low, top) = (mask(w), sign(w));
+    let (lhs, rhs) = (a & low, b & low);
+    let sum = lhs.wrapping_add(rhs);
     proof! {
-        lemmas::lemma_wrapping_add(x, y);
+        lemmas::lemma_wrapping_add(lhs, rhs);
     }
-    let r = d & m;
+    let res = sum & low;
     pack(
-        false,
-        parity(r),
-        (x ^ y ^ r) & 0x10 != 0,
-        r == 0,
-        r & s != 0,
-        false,
+        res < lhs,
+        parity(res),
+        (lhs ^ rhs ^ res) & 0x10 != 0,
+        res == 0,
+        res & top != 0,
+        (lhs ^ res) & (rhs ^ res) & top != 0,
     )
 }
 
@@ -418,8 +414,15 @@ pub fn x86_add_flags(a: u64, b: u64, w: u32) -> u16 {
 #[must_use]
 #[verus_spec(r => ensures r == spec_logic_flags(a, b, w))]
 pub fn x86_logic_flags(a: u64, b: u64, w: u32) -> u16 {
-    let r = a & b & mask(w);
-    pack(false, parity(r), false, r != 0, r & sign(w) != 0, false)
+    let res = a & b & mask(w);
+    pack(
+        false,
+        parity(res),
+        false,
+        res == 0,
+        res & sign(w) != 0,
+        false,
+    )
 }
 
 /// Gives the flags of `op` on `a` and `b` at width `w`.
@@ -466,7 +469,7 @@ pub const fn x86_cond(cc: u8, flags: u16) -> bool {
 
 /// Gives the compare that `Cond(cc, Flags(op, a, b))` fuses into, or `None`.
 ///
-/// The compare takes `a` and [`fused_rhs`]`(op, b, w)`. Verus proves the K5 property
+/// The compare takes `a` and the [`fused_rhs`] of `(op, b, w)`. Verus proves the K5 property
 /// for every `a`, `b` and `w`: the compare equals [`x86_cond`] on [`flags_of`].
 #[must_use]
 #[verus_spec(r =>
@@ -480,8 +483,32 @@ pub fn fused_pred(op: FuseOp, cc: u8) -> Option<Pred> {
             lemmas::lemma_fuses(op, cc, a, b, w);
         }
     }
-    let _unused = (op, cc);
-    None
+    let k = cc & 0xf;
+    match op {
+        FuseOp::Sub => match k {
+            2 => Some(Pred::ULt),
+            3 => Some(Pred::UGe),
+            4 => Some(Pred::Eq),
+            5 => Some(Pred::Ne),
+            6 => Some(Pred::ULe),
+            7 => Some(Pred::UGt),
+            12 => Some(Pred::SLt),
+            13 => Some(Pred::SGe),
+            14 => Some(Pred::SLe),
+            15 => Some(Pred::SGt),
+            _ => None,
+        },
+        FuseOp::Add => match k {
+            4 => Some(Pred::Eq),
+            5 => Some(Pred::Ne),
+            _ => None,
+        },
+        FuseOp::Logic => match k {
+            4 | 6 => Some(Pred::TestZ),
+            5 | 7 => Some(Pred::TestNZ),
+            _ => None,
+        },
+    }
 }
 
 /// Gives the right operand of the fused compare: `-b` at width `w` for `Add`, else `b`.
@@ -490,13 +517,13 @@ pub fn fused_pred(op: FuseOp, cc: u8) -> Option<Pred> {
 pub fn fused_rhs(op: FuseOp, b: u64, w: u32) -> u64 {
     match op {
         FuseOp::Add => {
-            let m = mask(w);
-            let y = b & m;
-            let n = 0u64.wrapping_sub(y);
+            let low = mask(w);
+            let rhs = b & low;
+            let neg = 0u64.wrapping_sub(rhs);
             proof! {
-                lemmas::lemma_wrapping_sub(0, y);
+                lemmas::lemma_wrapping_sub(0, rhs);
             }
-            n & m
+            neg & low
         }
         FuseOp::Sub | FuseOp::Logic => b,
     }
@@ -509,8 +536,20 @@ pub fn fused_rhs(op: FuseOp, b: u64, w: u32) -> u64 {
 #[must_use]
 #[verus_spec(r => ensures r == spec_eval_pred(p, a, b, w))]
 pub fn eval_pred(p: Pred, a: u64, b: u64, w: u32) -> bool {
-    let m = mask(w);
-    let s = sign(w);
-    let _unused = (p, a & m, b & s);
-    false
+    let (low, top) = (mask(w), sign(w));
+    let (lhs, rhs) = (a & low, b & low);
+    match p {
+        Pred::Eq => lhs == rhs,
+        Pred::Ne => lhs != rhs,
+        Pred::ULt => lhs < rhs,
+        Pred::ULe => lhs <= rhs,
+        Pred::UGt => lhs > rhs,
+        Pred::UGe => lhs >= rhs,
+        Pred::SLt => (lhs ^ top) < (rhs ^ top),
+        Pred::SLe => (lhs ^ top) <= (rhs ^ top),
+        Pred::SGt => (lhs ^ top) > (rhs ^ top),
+        Pred::SGe => (lhs ^ top) >= (rhs ^ top),
+        Pred::TestZ => lhs & rhs == 0,
+        Pred::TestNZ => lhs & rhs != 0,
+    }
 }

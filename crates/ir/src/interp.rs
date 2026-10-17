@@ -14,16 +14,20 @@ use std::fmt;
 
 use ghidorah_base::Fuel;
 
-use crate::arena::Arena;
+use crate::arena::{Arena, InsnSpan};
 use crate::loc::Loc;
-use crate::op::{OpId, Opc, Val};
+use crate::op::{Arg, Op, OpId, Opc, Val};
+
+mod eval;
+
+use eval::{low64, mask};
 
 /// The default cap on written bytes (16 MiB).
 pub const DEFAULT_MEM_CAP: u64 = 16 << 20;
 
 /// The memory image of a run: the bytes of the binary and the writable regions.
 pub trait Image {
-    /// Reads the byte at `addr`, or `None` when no byte is mapped there.
+    /// Reads the byte at `addr`. It gives `None` when the image has no byte there.
     fn read(&self, addr: u64) -> Option<u8>;
     /// Tells if a run can write the byte at `addr`.
     fn writable(&self, addr: u64) -> bool;
@@ -171,8 +175,17 @@ impl std::error::Error for EvalError {}
 /// Returns [`EvalError::NotData`] for another op, [`EvalError::DivZero`] for a zero
 /// divisor and [`EvalError::BadWidth`] for a bad width.
 pub fn eval(opc: Opc, w: u8, sub: u8, x: u128, y: u128, z: u128) -> Result<u128, EvalError> {
-    let _unused = (opc, w, sub, x, y, z);
-    Err(EvalError::NotData)
+    eval::eval(opc, w, sub, x, y, z)
+}
+
+/// The effect of one op on the flow of a run.
+enum Flow {
+    /// Go to the next op.
+    Next,
+    /// Go to the instruction at this address.
+    Goto(u64),
+    /// Stop the run.
+    Stop(StopReason),
 }
 
 /// The interpreter state of one program.
@@ -203,14 +216,14 @@ impl<'a> Interp<'a> {
             image,
             config,
             locs: BTreeMap::new(),
-            vals: Vec::new(),
+            vals: vec![None; arena.val_count()],
             writes: BTreeMap::new(),
         }
     }
 
     /// Sets a location. The value keeps the low bits of the location width.
     pub fn set_loc(&mut self, loc: Loc, value: u128) {
-        let _unused = (loc, value, &self.config);
+        self.locs.insert(loc, value & mask(loc.width()));
     }
 
     /// Gives a location. A location that the run did not write is 0.
@@ -244,15 +257,198 @@ impl<'a> Interp<'a> {
     }
 
     /// Runs the program from the instruction at `entry` until a stop.
+    ///
+    /// Each op takes one unit of `fuel` before it runs, and an instruction with no op takes
+    /// one unit. [`Stop::steps`] is the count of units that the run took.
     pub fn run(&mut self, entry: u64, fuel: &mut Fuel) -> Stop {
-        let _unused = (fuel.remaining(), self.arena.insns().len());
-        Stop {
-            reason: StopReason::BadIr,
-            at: OpId {
-                addr: entry,
-                seq: 0,
-            },
-            steps: 0,
+        let mut steps = 0u64;
+        let mut at = OpId {
+            addr: entry,
+            seq: 0,
+        };
+        let mut target = entry;
+        loop {
+            let Some(span) = self.span_at(target) else {
+                return stop(StopReason::NoCode(target), at, steps);
+            };
+            let ops = self.arena.span_ops(&span).unwrap_or_default();
+            if ops.is_empty() {
+                at = OpId {
+                    addr: span.addr,
+                    seq: 0,
+                };
+                if fuel.tick().is_err() {
+                    return stop(StopReason::FuelExhausted, at, steps);
+                }
+                steps += 1;
+            }
+            let mut jump = None;
+            for op in ops {
+                at = op.id;
+                if fuel.tick().is_err() {
+                    return stop(StopReason::FuelExhausted, at, steps);
+                }
+                steps += 1;
+                match self.step(op) {
+                    Flow::Next => {}
+                    Flow::Goto(addr) => {
+                        jump = Some(addr);
+                        break;
+                    }
+                    Flow::Stop(reason) => return stop(reason, at, steps),
+                }
+            }
+            target = match jump.or_else(|| span.next_addr()) {
+                Some(addr) => addr,
+                None => return stop(StopReason::NoCode(0), at, steps),
+            };
         }
     }
+
+    /// Gives the instruction that starts at `addr`.
+    fn span_at(&self, addr: u64) -> Option<InsnSpan> {
+        let index = self.arena.insn_index(addr)?;
+        self.arena.insns().get(index).copied()
+    }
+
+    /// Gives the value of an argument. `Nil` is 0. A location or a value with no def gives
+    /// `None`.
+    fn arg(&self, arg: Arg) -> Option<u128> {
+        match arg {
+            Arg::Nil => Some(0),
+            Arg::K(imm) => Some(u128::from(imm.get())),
+            Arg::V(val) => self.val(val),
+            Arg::L(_) => None,
+        }
+    }
+
+    /// Gives the values of the three arguments of an op.
+    fn args(&self, op: &Op) -> Option<(u128, u128, u128)> {
+        let [a, b, c] = op.a;
+        Some((self.arg(a)?, self.arg(b)?, self.arg(c)?))
+    }
+
+    /// Records the output value of an op.
+    fn def(&mut self, op: &Op, value: u128) -> Flow {
+        let Some(out) = op.out else {
+            return Flow::Next;
+        };
+        match usize::try_from(out.0)
+            .ok()
+            .and_then(|i| self.vals.get_mut(i))
+        {
+            Some(slot) => {
+                *slot = Some(value);
+                Flow::Next
+            }
+            None => Flow::Stop(StopReason::BadIr),
+        }
+    }
+
+    /// Runs one op.
+    fn step(&mut self, op: &Op) -> Flow {
+        let Some((x, y, z)) = self.args(op) else {
+            return self.step_loc(op);
+        };
+        match op.opc {
+            Opc::Load => self.load(op, low64(x)),
+            Opc::Store => self.store(op, low64(x), y),
+            Opc::Jump | Opc::JumpInd => Flow::Goto(low64(x)),
+            Opc::CJump if x != 0 => Flow::Goto(low64(y)),
+            Opc::CJump | Opc::Nop => Flow::Next,
+            Opc::Call | Opc::CallInd => {
+                let t = low64(x);
+                Flow::Stop(if self.config.externals.contains(&t) {
+                    StopReason::CallExternal(t)
+                } else {
+                    StopReason::CallUnresolved(t)
+                })
+            }
+            Opc::Ret => Flow::Stop(StopReason::Returned),
+            Opc::Syscall => Flow::Stop(StopReason::Syscall),
+            Opc::Intrinsic => Flow::Stop(StopReason::Intrinsic),
+            Opc::Unimpl => Flow::Stop(StopReason::Unimpl),
+            Opc::Get | Opc::Put | Opc::Phi => Flow::Stop(StopReason::BadIr),
+            _ => match eval(op.opc, op.w, op.sub, x, y, z) {
+                Ok(value) => self.def(op, value),
+                Err(EvalError::DivZero) => Flow::Stop(StopReason::DivZero),
+                Err(EvalError::NotData | EvalError::BadWidth) => Flow::Stop(StopReason::BadIr),
+            },
+        }
+    }
+
+    /// Runs `Get` and `Put`, the ops with a location argument.
+    fn step_loc(&mut self, op: &Op) -> Flow {
+        match (op.opc, op.a[0].as_loc()) {
+            (Opc::Get, Some(loc)) => {
+                let value = self.loc(loc) & mask(op.w);
+                self.def(op, value)
+            }
+            (Opc::Put, Some(loc)) => match self.arg(op.a[1]) {
+                Some(value) => {
+                    self.set_loc(loc, value & mask(op.w));
+                    Flow::Next
+                }
+                None => Flow::Stop(StopReason::BadIr),
+            },
+            _ => Flow::Stop(StopReason::BadIr),
+        }
+    }
+
+    /// Gives the count of bytes of an access of `w` bits, or `None` for a bad width.
+    fn access_len(w: u8) -> Option<u8> {
+        (w != 0 && w.is_multiple_of(8) && w <= 128).then_some(w / 8)
+    }
+
+    /// Runs a `Load` of `op.w` bits at `addr` (little-endian).
+    fn load(&mut self, op: &Op, addr: u64) -> Flow {
+        let Some(len) = Self::access_len(op.w) else {
+            return Flow::Stop(StopReason::BadIr);
+        };
+        let mut value = 0u128;
+        for i in 0..len {
+            let at = addr.wrapping_add(u64::from(i));
+            let Some(byte) = self.read(at) else {
+                return Flow::Stop(StopReason::UnmappedRead(at));
+            };
+            value |= u128::from(byte) << (8 * u32::from(i));
+        }
+        self.def(op, value)
+    }
+
+    /// Runs a `Store` of `op.w` bits of `value` at `addr` (little-endian).
+    ///
+    /// The store writes no byte when one byte is not writable or when the cap stops it.
+    fn store(&mut self, op: &Op, addr: u64, value: u128) -> Flow {
+        let Some(len) = Self::access_len(op.w) else {
+            return Flow::Stop(StopReason::BadIr);
+        };
+        let mut new = 0u64;
+        for i in 0..len {
+            let at = addr.wrapping_add(u64::from(i));
+            if !self.image.writable(at) {
+                return Flow::Stop(StopReason::UnmappedWrite(at));
+            }
+            new += u64::from(!self.writes.contains_key(&at));
+        }
+        let total = u64::try_from(self.writes.len()).unwrap_or(u64::MAX);
+        if total.saturating_add(new) > self.config.mem_cap {
+            return Flow::Stop(StopReason::MemCap);
+        }
+        for (i, byte) in value
+            .to_le_bytes()
+            .iter()
+            .take(usize::from(len))
+            .enumerate()
+        {
+            let off = u64::try_from(i).unwrap_or(u64::MAX);
+            self.writes.insert(addr.wrapping_add(off), *byte);
+        }
+        Flow::Next
+    }
+}
+
+/// Makes a stop.
+const fn stop(reason: StopReason, at: OpId, steps: u64) -> Stop {
+    Stop { reason, at, steps }
 }

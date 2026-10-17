@@ -66,6 +66,10 @@ impl Imm {
     /// Makes a constant.
     #[must_use]
     pub const fn new(value: u64) -> Self {
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "each half keeps 32 bits of the value on purpose"
+        )]
         Self {
             hi: (value >> 32) as u32,
             lo: value as u32,

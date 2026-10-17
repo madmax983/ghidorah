@@ -191,7 +191,7 @@ fn verify_negative_patches_apply() {
 #[test]
 fn verify_kernel_table() {
     let names: Vec<&str> = KERNELS.iter().map(|k| k.name).collect();
-    assert_eq!(names, ["K1", "K2", "K3", "K6", "K7"]);
+    assert_eq!(names, ["K1", "K2", "K3", "K5", "K6", "K7"]);
     for kernel in KERNELS {
         assert_eq!(
             kernel.file(),

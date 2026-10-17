@@ -1,6 +1,11 @@
 //! K5 tier-1 tests: the flags, the conditions and the fusion table against a `u128` model
 //! (AC-031, design Section 13.1).
 
+#![allow(
+    clippy::expect_used,
+    reason = "test helpers fail the test with a message"
+)]
+
 use ghidorah_kernel::flags::{
     AF, CF, FuseOp, OF, PF, Pred, SF, ZF, eval_pred, flags_of, fused_pred, fused_rhs,
     x86_add_flags, x86_cond, x86_logic_flags, x86_sub_flags,
@@ -31,39 +36,39 @@ fn model_signed(x: u128, w: u32) -> i128 {
 
 /// The `u128` model of the flags of `op`.
 fn model_flags(op: FuseOp, a: u64, b: u64, w: u32) -> u16 {
-    let m = model_mask(w);
-    let (x, y) = (u128::from(a) & m, u128::from(b) & m);
-    let (sx, sy) = (model_signed(x, w), model_signed(y, w));
-    let lo = -(1i128 << (w - 1));
-    let hi = (1i128 << (w - 1)) - 1;
-    let (r, cf, of, af) = match op {
+    let low = model_mask(w);
+    let (lhs, rhs) = (u128::from(a) & low, u128::from(b) & low);
+    let (slhs, srhs) = (model_signed(lhs, w), model_signed(rhs, w));
+    let min = -(1i128 << (w - 1));
+    let max = (1i128 << (w - 1)) - 1;
+    let (res, cf, of, af) = match op {
         FuseOp::Sub => {
-            let s = sx - sy;
+            let exact = slhs - srhs;
             (
-                x.wrapping_sub(y) & m,
-                x < y,
-                s < lo || s > hi,
-                (x & 0xf) < (y & 0xf),
+                lhs.wrapping_sub(rhs) & low,
+                lhs < rhs,
+                exact < min || exact > max,
+                (lhs & 0xf) < (rhs & 0xf),
             )
         }
         FuseOp::Add => {
-            let s = sx + sy;
+            let exact = slhs + srhs;
             (
-                (x + y) & m,
-                x + y > m,
-                s < lo || s > hi,
-                (x & 0xf) + (y & 0xf) > 0xf,
+                (lhs + rhs) & low,
+                lhs + rhs > low,
+                exact < min || exact > max,
+                (lhs & 0xf) + (rhs & 0xf) > 0xf,
             )
         }
-        FuseOp::Logic => (x & y, false, false, false),
+        FuseOp::Logic => (lhs & rhs, false, false, false),
     };
     let mut f = 0;
     for (set, bit) in [
         (cf, CF),
-        ((r & 0xff).count_ones() % 2 == 0, PF),
+        ((res & 0xff).count_ones().is_multiple_of(2), PF),
         (af, AF),
-        (r == 0, ZF),
-        (r >> (w - 1) & 1 == 1, SF),
+        (res == 0, ZF),
+        (res >> (w - 1) & 1 == 1, SF),
         (of, OF),
     ] {
         if set {
@@ -97,22 +102,22 @@ fn model_cond(cc: u8, f: u16) -> bool {
 
 /// The model of a compare on the low `w` bits.
 fn model_pred(p: Pred, a: u64, b: u64, w: u32) -> bool {
-    let m = model_mask(w);
-    let (x, y) = (u128::from(a) & m, u128::from(b) & m);
-    let (sx, sy) = (model_signed(x, w), model_signed(y, w));
+    let low = model_mask(w);
+    let (lhs, rhs) = (u128::from(a) & low, u128::from(b) & low);
+    let (slhs, srhs) = (model_signed(lhs, w), model_signed(rhs, w));
     match p {
-        Pred::Eq => x == y,
-        Pred::Ne => x != y,
-        Pred::ULt => x < y,
-        Pred::ULe => x <= y,
-        Pred::UGt => x > y,
-        Pred::UGe => x >= y,
-        Pred::SLt => sx < sy,
-        Pred::SLe => sx <= sy,
-        Pred::SGt => sx > sy,
-        Pred::SGe => sx >= sy,
-        Pred::TestZ => x & y == 0,
-        Pred::TestNZ => x & y != 0,
+        Pred::Eq => lhs == rhs,
+        Pred::Ne => lhs != rhs,
+        Pred::ULt => lhs < rhs,
+        Pred::ULe => lhs <= rhs,
+        Pred::UGt => lhs > rhs,
+        Pred::UGe => lhs >= rhs,
+        Pred::SLt => slhs < srhs,
+        Pred::SLe => slhs <= srhs,
+        Pred::SGt => slhs > srhs,
+        Pred::SGe => slhs >= srhs,
+        Pred::TestZ => lhs & rhs == 0,
+        Pred::TestNZ => lhs & rhs != 0,
     }
 }
 
