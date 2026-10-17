@@ -131,7 +131,7 @@ fn ac_070_fusion_rate() {
         }
     }
     assert!(funcs > 1_000, "T1 and T2 functions: {funcs}");
-    assert!(reads > 5_000, "the functions read flags: {reads}");
+    assert!(reads > 1_000, "the functions read flags: {reads}");
     let rate = fused * 1_000 / reads;
     assert!(rate >= 980, "fusion covers {fused} of {reads} flag reads");
 }

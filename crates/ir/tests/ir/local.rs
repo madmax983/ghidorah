@@ -106,14 +106,14 @@ fn local_addresses_and_loads() {
         b.begin(0x10, 4)?;
         b.put(Loc::RSI, Arg::k(0x2004))?;
         b.begin(0x14, 4)?;
-        let p = b.get(Loc::RSI)?;
-        let x = b.load(32, p.into())?;
-        let z = b.extend(false, 64, 32, x.into())?;
-        b.put(Loc::RAX, z.into())?;
+        let ptr = b.get(Loc::RSI)?;
+        let word = b.load(32, ptr.into())?;
+        let wide = b.extend(false, 64, 32, word.into())?;
+        b.put(Loc::RAX, wide.into())?;
         b.begin(0x18, 4)?;
-        let q = b.get(Loc::RSI)?;
-        let y = b.load(32, q.into())?;
-        b.put(Loc::RCX, y.into())?;
+        let ptr2 = b.get(Loc::RSI)?;
+        let word2 = b.load(32, ptr2.into())?;
+        b.put(Loc::RCX, word2.into())?;
         b.begin(0x1c, 1)?;
         b.flow(Opc::Ret, NIL, NIL)
     });
@@ -311,27 +311,27 @@ fn local_pin_emulates_a_table() {
     // rdx = 0x2000; rax = sext32 load [rdx + rdi*4]; rax = rax + rdx; jmp rax.
     let arena = program(|b| {
         b.begin(0x10, 4)?;
-        let i = b.get(Loc::RDI)?;
-        let c = b.binary(Opc::ULt, 64, Arg::k(2), i.into())?;
-        b.flow(Opc::CJump, c.into(), Arg::k(0x40))?;
+        let index = b.get(Loc::RDI)?;
+        let above = b.binary(Opc::ULt, 64, Arg::k(2), index.into())?;
+        b.flow(Opc::CJump, above.into(), Arg::k(0x40))?;
         b.begin(0x14, 4)?;
         b.put(Loc::RDX, Arg::k(0x2000))?;
         b.begin(0x18, 4)?;
-        let d = b.get(Loc::RDX)?;
-        let i = b.get(Loc::RDI)?;
-        let s = b.binary(Opc::Shl, 64, i.into(), Arg::k(2))?;
-        let a = b.binary(Opc::Add, 64, d.into(), s.into())?;
-        let x = b.load(32, a.into())?;
-        let e = b.extend(true, 64, 32, x.into())?;
-        b.put(Loc::RAX, e.into())?;
+        let base = b.get(Loc::RDX)?;
+        let index = b.get(Loc::RDI)?;
+        let scaled = b.binary(Opc::Shl, 64, index.into(), Arg::k(2))?;
+        let addr = b.binary(Opc::Add, 64, base.into(), scaled.into())?;
+        let word = b.load(32, addr.into())?;
+        let wide = b.extend(true, 64, 32, word.into())?;
+        b.put(Loc::RAX, wide.into())?;
         b.begin(0x1c, 4)?;
-        let d = b.get(Loc::RDX)?;
-        let r = b.get(Loc::RAX)?;
-        let t = b.binary(Opc::Add, 64, r.into(), d.into())?;
-        b.put(Loc::RAX, t.into())?;
+        let base = b.get(Loc::RDX)?;
+        let rel = b.get(Loc::RAX)?;
+        let sum = b.binary(Opc::Add, 64, rel.into(), base.into())?;
+        b.put(Loc::RAX, sum.into())?;
         b.begin(0x20, 2)?;
-        let t = b.get(Loc::RAX)?;
-        b.flow(Opc::JumpInd, t.into(), NIL)?;
+        let target = b.get(Loc::RAX)?;
+        b.flow(Opc::JumpInd, target.into(), NIL)?;
         b.begin(0x40, 1)?;
         b.flow(Opc::Ret, NIL, NIL)
     });

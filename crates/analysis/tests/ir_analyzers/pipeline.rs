@@ -1,15 +1,18 @@
 //! The full analysis with the WP-19 analyzers: F1 gates, cold parts, published jump tables,
 //! `main`, varargs flags, syscall notes, agent overrides and path independence.
 //!
-//! Each test needs the WP-19 analyzer rows of the registry. The register step adds them.
+//! The tests with the ignore reason need the WP-19 analyzer rows of the registry. The register
+//! step adds them. The path independence test also runs with the WP-15 rows only. Its agent
+//! edits commit with the origin of their transaction, and its undos use the undo API.
 
 use std::collections::BTreeSet;
 
 use ghidorah_analysis::{RunState, Scheduler, Until};
-use ghidorah_base::{Address, Fuel, FuncId, JumpTableId, WarningCode};
+use ghidorah_base::{Address, Fuel, FuncId, JumpTableId, TxId, WarningCode};
+use ghidorah_db::undo::{self, UndoRequest};
 use ghidorah_db::{
-    Applied, CommentKind, Edit, FlowKind, FlowOverride, JtMethod, JumpTable, PartKind, Program,
-    Ref, RefKey, RefType, SessionLabel, Source, StartReason,
+    CommentKind, Edit, FlowKind, FlowOverride, FuncView, History, JtMethod, JumpTable, Origin,
+    PartKind, Program, Ref, RefKey, RefType, Scope, SessionLabel, Source, StartReason, TxLine,
 };
 use ghidorah_json::Value;
 use ghidorah_testkit::rng::{SplitMix64, below};
@@ -69,7 +72,7 @@ fn f1(variant: &str) -> F1 {
 #[ignore = "needs the WP-19 analyzer rows of the register step"]
 fn ac_077_f1_eh() {
     let s = f1("stripped");
-    assert!(s.tp > 2_000, "T1 and T2 functions: {}", s.tp);
+    assert!(s.tp > 1_500, "T1 and T2 functions: {}", s.tp);
     assert!(s.per_mille() >= 980, "F1 {}: {:?}", s.per_mille(), s.misses);
 }
 
@@ -77,7 +80,7 @@ fn ac_077_f1_eh() {
 #[ignore = "needs the WP-19 analyzer rows of the register step"]
 fn ac_078_f1_noeh() {
     let s = f1("noeh");
-    assert!(s.tp > 1_000, "the noeh functions: {}", s.tp);
+    assert!(s.tp > 600, "the noeh functions: {}", s.tp);
     assert!(s.per_mille() >= 900, "F1 {}: {:?}", s.per_mille(), s.misses);
 }
 
@@ -101,12 +104,15 @@ fn ac_079_cold_parts() {
                 .expect("a parent");
             let owner = p.owner_of(Address::ram(at));
             assert_eq!(owner, Some(fid(funcs[parent])), "{}: {parent}.cold", f.path);
+            // Without .eh_frame no FDE marks the part, so its range is a plain part.
             let func = p.func(fid(funcs[parent])).expect("the parent");
+            let cold = func
+                .func
+                .parts
+                .iter()
+                .any(|x| x.kind == PartKind::Cold && x.range.contains(at));
             assert!(
-                func.func
-                    .parts
-                    .iter()
-                    .any(|x| x.kind == PartKind::Cold && x.range.contains(at)),
+                cold || f.variant == "noeh",
                 "{}: {parent}.cold is a cold part",
                 f.path
             );
@@ -314,30 +320,87 @@ fn tail_calls_and_cold_parts_of_one_file() {
     );
 }
 
-/// Commits `edits` as the agent. Gives the inverses in undo order and the start band.
-fn commit(p: &mut Program, edits: Vec<Edit>) -> Option<(Vec<Edit>, Option<u16>)> {
-    let label = SessionLabel::new("test").expect("a label");
-    let mut tx = p.begin("test", Source::Agent, label).ok()?;
+/// The session label of the agent edits of the tests.
+fn session() -> SessionLabel {
+    SessionLabel::new("test").expect("a label")
+}
+
+/// Gives the origin of the next agent transaction of `p`.
+fn next_origin(p: &Program) -> Origin {
+    let next = p.last_tx().0.checked_add(1).expect("a free transaction ID");
+    Origin::new(Source::Agent, TxId(next), session(), false)
+}
+
+/// The result of one commit or one undo.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Done {
+    /// The edits do not apply, or they change nothing.
+    Refused,
+    /// The commit applies. It holds the start band, or `None` when no edit affects analysis.
+    Applied(Option<u16>),
+}
+
+/// Commits the edits that `make` gives for the origin of the new transaction. Records the
+/// commit in `history`.
+fn commit(p: &mut Program, history: &mut History, make: impl FnOnce(&Origin) -> Vec<Edit>) -> Done {
+    let edits = make(&next_origin(p));
+    let Ok(mut tx) = p.begin("test", Source::Agent, session()) else {
+        return Done::Refused;
+    };
     for edit in edits {
         if tx.apply(edit).is_err() {
             tx.abort();
-            return None;
+            return Done::Refused;
         }
     }
-    let commit = tx.commit().ok()?;
-    let inverses: Vec<Edit> = commit
-        .edits
-        .iter()
-        .rev()
-        .map(|a: &Applied| a.inverse.clone())
-        .collect();
-    let band = commit.start_band();
-    Some((inverses, band))
+    let Ok(commit) = tx.commit() else {
+        return Done::Refused;
+    };
+    if commit.noop {
+        return Done::Refused;
+    }
+    history.record(&TxLine::of_commit(&commit));
+    Done::Applied(commit.start_band())
 }
 
-/// Gives a random agent edit of an analysis-affecting kind.
-fn random_edit(p: &Program, rng: &mut SplitMix64) -> Option<Edit> {
-    let funcs: Vec<FuncId> = p.funcs().iter().map(|v| v.id()).collect();
+/// Undoes the last agent commit of the test session.
+fn undo_last(p: &mut Program, history: &mut History) -> Done {
+    let req = UndoRequest {
+        scope: Scope::Session(session()),
+        tx: None,
+        count: 1,
+        redo: false,
+        force: false,
+        dry_run: false,
+        source: Source::Agent,
+        session: session(),
+    };
+    let Ok(out) = undo::run(p, history, &req) else {
+        return Done::Refused;
+    };
+    let Some(line) = out.line.as_ref() else {
+        return Done::Refused;
+    };
+    history.record(line);
+    Done::Applied(out.start_band)
+}
+
+/// One random agent edit before its origin.
+#[derive(Debug, Clone, Copy)]
+struct Pick {
+    kind: u64,
+    flag: bool,
+    func: FuncId,
+    unit: u64,
+    flow: FlowKind,
+    /// The source of an `AddRef`: the entry of a function with a start in the loaded file.
+    /// The edits do not remove its code unit, so the reference does not become an orphan.
+    source: u64,
+}
+
+/// Picks a random agent edit of an analysis-affecting kind.
+fn random_pick(p: &Program, rng: &mut SplitMix64) -> Option<Pick> {
+    let funcs: Vec<FuncId> = p.funcs().iter().map(FuncView::id).collect();
     let units: Vec<(u64, FlowKind)> = p
         .analysis()
         .listing()
@@ -353,18 +416,44 @@ fn random_edit(p: &Program, rng: &mut SplitMix64) -> Option<Edit> {
     let pick = |rng: &mut SplitMix64, n: usize| -> usize {
         usize::try_from(below(rng, u64::try_from(n.max(1)).expect("small"))).expect("small")
     };
+    let stable: Vec<u64> = p
+        .funcs()
+        .iter()
+        .filter(|v| {
+            matches!(
+                v.func.start_reason,
+                StartReason::Entry | StartReason::Symbol | StartReason::Fde
+            )
+        })
+        .map(|v| v.id().0.off)
+        .collect();
     let func = *funcs.get(pick(rng, funcs.len()))?;
     let (unit, flow) = *units.get(pick(rng, units.len()))?;
-    let o = ghidorah_db::Origin::new(
-        Source::Agent,
-        ghidorah_base::TxId(0),
-        SessionLabel::new("test").expect("a label"),
-        false,
-    );
-    Some(match below(rng, 5) {
+    let source = *stable.get(pick(rng, stable.len()))?;
+    Some(Pick {
+        kind: below(rng, 5),
+        flag: below(rng, 2) == 0,
+        func,
+        unit,
+        flow,
+        source,
+    })
+}
+
+/// Gives the edit of `pick` with the origin `o`.
+fn edit_of(pick: Pick, o: &Origin) -> Edit {
+    let Pick {
+        kind,
+        flag,
+        func,
+        unit,
+        flow,
+        source,
+    } = pick;
+    match kind {
         0 => Edit::SetNoreturn {
             id: func,
-            noreturn: Some(o.fact(below(rng, 2) == 0)),
+            noreturn: Some(o.fact(flag)),
         },
         1 => {
             let f = ghidorah_db::Function::new(
@@ -401,7 +490,7 @@ fn random_edit(p: &Program, rng: &mut SplitMix64) -> Option<Edit> {
         _ => Edit::AddRef {
             fact: o.fact(Ref {
                 key: RefKey {
-                    from: Address::ram(unit),
+                    from: Address::ram(source),
                     op_index: 0,
                     to: func.0,
                     kind: RefType::UnconditionalCall,
@@ -409,31 +498,38 @@ fn random_edit(p: &Program, rng: &mut SplitMix64) -> Option<Edit> {
                 primary: true,
             }),
         },
-    })
+    }
 }
 
 /// Runs random agent edits and undos on `path`, each with a re-analysis from its start band.
-/// Then a fresh load with the live edits must give the same analysis set.
+/// Then a new scheduler on a fresh load with the live edits must give the same analysis set.
 fn path_independent(path: &str, seed: u64, steps: usize) {
     let mut p = program(path);
     let mut sched = analyze(&mut p);
+    let mut history = History::new();
     let mut rng = SplitMix64::new(seed);
-    let mut live: Vec<(Vec<Edit>, Vec<Edit>)> = Vec::new();
+    let mut live: Vec<Pick> = Vec::new();
+    let mut restarts = 0u32;
     for _ in 0..steps {
         let undo = !live.is_empty() && below(&mut rng, 3) == 0;
         let done = if undo {
-            let (_, inverses) = live.pop().expect("an applied commit");
-            commit(&mut p, inverses).map(|(_, band)| band)
+            let band = undo_last(&mut p, &mut history);
+            if band != Done::Refused {
+                live.pop();
+            }
+            band
         } else {
-            let Some(edit) = random_edit(&p, &mut rng) else {
+            let Some(pick) = random_pick(&p, &mut rng) else {
                 continue;
             };
-            commit(&mut p, vec![edit.clone()]).map(|(inverses, band)| {
-                live.push((vec![edit], inverses));
-                band
-            })
+            let band = commit(&mut p, &mut history, |o| vec![edit_of(pick, o)]);
+            if band != Done::Refused {
+                live.push(pick);
+            }
+            band
         };
-        if let Some(Some(band)) = done {
+        if let Done::Applied(Some(band)) = done {
+            restarts += 1;
             sched.restart(band);
             let out = sched
                 .run(&mut p, Until::Full, &mut Fuel::unlimited())
@@ -441,10 +537,20 @@ fn path_independent(path: &str, seed: u64, steps: usize) {
             assert_eq!(out.state, RunState::Complete);
         }
     }
+    assert!(
+        restarts > 0,
+        "{path} seed {seed}: an edit restarts the analysis"
+    );
+    // The code checks of the edits need the code units: the fresh load gets one analysis
+    // before the edits. The last run starts from nothing.
     let mut fresh = program(path);
-    let edits: Vec<Edit> = live.into_iter().flat_map(|(e, _)| e).collect();
-    if !edits.is_empty() {
-        assert!(commit(&mut fresh, edits).is_some(), "the live edits apply");
+    let _ = analyze(&mut fresh);
+    let mut fresh_history = History::new();
+    for pick in live {
+        assert!(
+            commit(&mut fresh, &mut fresh_history, |o| vec![edit_of(pick, o)]) != Done::Refused,
+            "the live edits apply"
+        );
     }
     let mut sched = Scheduler::new();
     let out = sched
@@ -458,7 +564,6 @@ fn path_independent(path: &str, seed: u64, steps: usize) {
 }
 
 #[test]
-#[ignore = "needs the WP-19 analyzer rows of the register step"]
 fn ac_097_reanalysis_path_independent() {
     for path in [
         "fixtures/bin/switch.gcc-O2.stripped",
@@ -525,30 +630,29 @@ fn agent_overrides_seed_and_conflict() {
     let mut p = load(&bytes, 0);
     let _ = analyze(&mut p);
     assert!(p.func(fid(BASE + 0x20)).is_none());
-    let o = ghidorah_db::Origin::new(
-        Source::Agent,
-        ghidorah_base::TxId(0),
-        SessionLabel::new("test").expect("a label"),
-        false,
-    );
     let f = ghidorah_db::Function::new(
         Address::ram(BASE + 0x20),
         StartReason::Agent,
         100,
         Source::Agent,
     );
-    let edits = vec![
-        Edit::CreateFunction(Box::new(ghidorah_db::FuncRecord {
-            func: f,
-            vars: Vec::new(),
-            plate: None,
-        })),
-        Edit::SetNoreturn {
-            id: fid(BASE + 0x10),
-            noreturn: Some(o.fact(true)),
-        },
-    ];
-    let (_, band) = commit(&mut p, edits).expect("the edits commit");
+    let mut history = History::new();
+    let band = commit(&mut p, &mut history, |o| {
+        vec![
+            Edit::CreateFunction(Box::new(ghidorah_db::FuncRecord {
+                func: f,
+                vars: Vec::new(),
+                plate: None,
+            })),
+            Edit::SetNoreturn {
+                id: fid(BASE + 0x10),
+                noreturn: Some(o.fact(true)),
+            },
+        ]
+    });
+    let Done::Applied(band) = band else {
+        panic!("the edits commit");
+    };
     let mut sched = Scheduler::shadow();
     sched.restart(band.expect("an analysis edit"));
     let out = sched

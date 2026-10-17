@@ -23,6 +23,7 @@ use ghidorah_x86::{Flow, Insn};
 
 use crate::code::{decode_at, flow_kind, is_exec, is_mapped, slot_of};
 use crate::ctx::{AnalysisCtx, Body, UNIT_NORETURN_ASSUMED, UNIT_NORETURN_CALL, UnitRec};
+use crate::overrides::SiteFlow;
 use crate::registry::AnalyzerId;
 use crate::spec::{AnalyzerSpec, Grain, Opt, Step, Trigger};
 use crate::why::{Rule, Why};
@@ -182,8 +183,42 @@ impl<'c, 'a> Walk<'c, 'a> {
         }
     }
 
-    /// Handles the flow of the decoded instruction `insn` at `at`. Gives the site flags.
+    /// Handles the flow of the decoded instruction `insn` at `at` with the flow that a fact
+    /// sets for the site (design Section 7.8). Gives the site flags.
     fn flow(&mut self, at: u64, next: u64, insn: &Insn) -> u8 {
+        match crate::overrides::site_flow(self.ctx, at, insn.flow()) {
+            Some(SiteFlow::Fallthrough(t)) => self.plain(at, t, insn),
+            Some(SiteFlow::Cases(targets)) => {
+                for t in targets {
+                    self.reference(at, Address::ram(t), RefType::ComputedJump);
+                    self.follow(t);
+                }
+                0
+            }
+            Some(SiteFlow::Calls(targets)) => {
+                for t in targets {
+                    self.reference(at, Address::ram(t), RefType::ComputedCall);
+                }
+                self.follow(next);
+                0
+            }
+            Some(SiteFlow::CallAsJump) => {
+                match insn.target() {
+                    Some(t) => {
+                        self.reference(at, Address::ram(t), RefType::UnconditionalJump);
+                        self.follow(t);
+                    }
+                    None => self.body.summary.unknown = true,
+                }
+                0
+            }
+            Some(SiteFlow::JumpAsCall) => self.call(at, next, insn.target()),
+            None => self.plain(at, next, insn),
+        }
+    }
+
+    /// Handles the decoder flow of the instruction `insn` at `at`. Gives the site flags.
+    fn plain(&mut self, at: u64, next: u64, insn: &Insn) -> u8 {
         match insn.flow() {
             Flow::Seq => self.follow(next),
             Flow::Jmp | Flow::Jcc => {

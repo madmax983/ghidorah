@@ -16,15 +16,16 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use ghidorah_base::{Address, FuncId, JumpTableId, WarningCode};
+use ghidorah_base::{Address, Fuel, FuncId, JumpTableId, WarningCode};
 use ghidorah_db::codec::edit_to_json;
 use ghidorah_db::{
-    Caveat, CommentKind, Edit, FactKey, Function, JumpTable, Origin, PartKind, Program, SymKey,
-    SymKind,
+    Caveat, CommentKind, Edit, FactKey, FlowKind, Function, JumpTable, Origin, PartKind, Program,
+    SymKey, SymKind,
 };
 use ghidorah_json::Value;
 
 use crate::ctx::AnalysisCtx;
+use crate::fir::{self, FirError, FuncIr, Input, Opts, Unit};
 use crate::why::Why;
 use crate::work::Work;
 
@@ -96,6 +97,69 @@ impl AnalysisCtx<'_> {
         self.mark_changed();
         &mut self.work.ir
     }
+
+    /// Gives the code units of the function `entry` in the work state.
+    pub(crate) fn units_of(&self, entry: u64) -> BTreeMap<u64, Unit> {
+        let Some(f) = self.work.funcs.get(&entry) else {
+            return BTreeMap::new();
+        };
+        f.units
+            .iter()
+            .filter_map(|at| {
+                let u = self.work.units.get(at)?;
+                Some((
+                    *at,
+                    Unit {
+                        len: u.len,
+                        flow: u.flow,
+                        flags: u.flags,
+                    },
+                ))
+            })
+            .collect()
+    }
+}
+
+/// Builds the L0 IR of the function `entry` from the work state. The build uses its code
+/// units, the cases of [`crate::overrides::cases`] and the noreturn flags of the context.
+///
+/// # Errors
+///
+/// Returns the [`FirError`] of the build.
+pub(crate) fn work_ir(
+    ctx: &AnalysisCtx<'_>,
+    entry: u64,
+    fuel: &mut Fuel,
+) -> Result<FuncIr, FirError> {
+    work_ir_at(ctx, entry, entry, fuel)
+}
+
+/// Builds the L0 IR of the code units of the function `owner` with the entry `root`. The
+/// blocks that `root` does not reach stay out of the CFG.
+///
+/// # Errors
+///
+/// Returns the [`FirError`] of the build.
+pub(crate) fn work_ir_at(
+    ctx: &AnalysisCtx<'_>,
+    owner: u64,
+    root: u64,
+    fuel: &mut Fuel,
+) -> Result<FuncIr, FirError> {
+    let units = ctx.units_of(owner);
+    let cases: BTreeMap<u64, Vec<u64>> = units
+        .iter()
+        .filter(|(_, u)| u.flow == FlowKind::IJmp)
+        .filter_map(|(at, _)| Some((*at, crate::overrides::cases(ctx, *at)?)))
+        .collect();
+    let noreturn = |t: u64| ctx.noreturn(t);
+    let input = Input {
+        entry: root,
+        units,
+        cases,
+        noreturn: &noreturn,
+    };
+    fir::build_units(ctx.program(), input, &Opts::DEFAULT, fuel)
 }
 
 /// The rows of the IR facts for the analysis set.
@@ -190,7 +254,7 @@ impl Rows {
 }
 
 /// Gives the analysis value of the noreturn flag of `entry` when it disagrees with the agent
-/// fact `agent`: the flow returns while the agent says noreturn, or the reverse.
+/// fact `agent`. For example, the flow returns while the agent says noreturn.
 fn noreturn_conflict(work: &Work, entry: u64, agent: bool) -> Option<bool> {
     let returns = work
         .funcs

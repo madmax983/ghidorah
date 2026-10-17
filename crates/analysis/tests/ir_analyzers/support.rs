@@ -148,6 +148,5 @@ pub fn named(program: &Program, name: &str) -> u64 {
     program
         .addrs_named(name)
         .first()
-        .map(|a| a.off)
-        .unwrap_or_else(|| panic!("the program names {name}"))
+        .map_or_else(|| panic!("the program names {name}"), |a| a.off)
 }
