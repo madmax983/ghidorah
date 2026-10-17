@@ -31,6 +31,8 @@ jobs:
           RUSTDOCFLAGS: -Dwarnings
       - name: Static gates
         run: cargo xtask gates
+      - name: STE check of docs and comments
+        run: cargo xtask ste
       - name: Coverage gate (llvm-tools)
         run: cargo xtask cov
 

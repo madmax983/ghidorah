@@ -18,6 +18,7 @@ Revision 3 decisions of the owner apply over the design text. SSA and the decomp
 | Crate graph | `cargo xtask deps` |
 | Coverage gate | `cargo xtask cov` |
 | CI steps and test times | `cargo xtask ci [--tier2] [--steps fmt,clippy,doc,offline_build,tier1,tier2,test_times]` |
+| STE check of docs and comments | `cargo xtask ste` |
 | AC table check | `cargo xtask ac` |
 | AC evidence run | `cargo xtask ac --run [--tier2] [AC-nnn ..]` |
 
@@ -34,7 +35,7 @@ A WP is complete when all of these pass:
 3. `cargo test --workspace`.
 4. `cargo xtask gates`.
 5. `cargo xtask cov`. Line coverage is at least 85% for the workspace, 90% for each core crate and 95% for `kernel`. The core crates are `json`, `loader`, `x86`, `ir`, `db`, `analysis`, `decomp` and `tools`. The gate applies from the first WP that adds code to a crate.
-6. `cargo xtask ste` with no new finding (after WP-02 merges).
+6. `cargo xtask ste` with no new finding.
 7. `cargo xtask ac` with an empty `grammar`, `order` and `missing` list.
 
 CI (`.github/workflows/ci.yml`) runs three jobs: `tier1`, `tier2` and `verus`.

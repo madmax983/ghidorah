@@ -12,6 +12,7 @@
 //! | `xtask ci` | [`ci`] | Runs the CI steps and records the time of each test. |
 //! | `xtask cov` | [`cov`] | Measures line coverage with `llvm-tools` (ADR-0027). |
 //! | `xtask ac` | [`ac`] | Checks the AC table of the design and runs its evidence. |
+//! | `xtask ste` | [`ste`] | Checks the docs and comments with the STE checker of `testkit` (AC-025). |
 
 pub mod ac;
 pub mod acrun;
@@ -26,6 +27,7 @@ pub mod manifest;
 pub mod proc;
 pub mod rustsrc;
 pub mod scan;
+pub mod ste;
 pub mod workflow;
 pub mod workspace;
 
