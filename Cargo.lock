@@ -26,6 +26,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "ghidorah-loader"
+version = "0.1.0"
+dependencies = [
+ "ghidorah-base",
+ "ghidorah-kernel",
+ "ghidorah-oracle",
+ "ghidorah-testkit",
+]
+
+[[package]]
 name = "ghidorah-oracle"
 version = "0.1.0"
 
