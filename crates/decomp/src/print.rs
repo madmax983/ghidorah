@@ -8,7 +8,7 @@
 //! |---|---|
 //! | `Block(n)` | one line for each statement of `n` |
 //! | `If` | `if (c) {`, the branch, `} else {`, the other branch, `}` |
-//! | `Loop` | `while (c) {`, `do {` .. `} while (c);` or `while (true) {` |
+//! | `Loop` | `while (c) {`, `for (init; c; step) {`, `do {` .. `} while (c);` or `while (true) {` |
 //! | `Switch` | `switch (x) {`, `case i:` lines, each arm with `break;` |
 //! | `Goto(n)`, `Label(n)` | `goto L_<addr>;` and `L_<addr>:` |
 //! | `Break`, `Continue` | `break;` and `continue;` |
@@ -18,6 +18,8 @@
 //! - Expressions use precedence climbing with the numbers of [`crate::precedence`].
 //! - A negated condition flips its compare operator: `!(a < b)` prints as `a >= b`.
 //! - A cast shows only where a width changes or an operand needs a signed type.
+//! - A `while` loop prints as `for` only when its init, condition and step on one variable
+//!   are adjacent, and no `continue` goes to its head.
 //! - A string literal prints inline as escaped C text. A name from the binary prints with
 //!   the escapes of `BinText`.
 //! - Call names come from symbols, stub names and `sys:` IDs. The argument count comes from
@@ -245,6 +247,7 @@ pub(crate) struct Printer<'a> {
     used: BTreeSet<VarIdx>,
     refs: BTreeMap<VarIdx, u32>,
     call_defs: Vec<(usize, VarIdx)>,
+    skip: BTreeSet<(Node, usize)>,
     clobbers: BTreeSet<VarIdx>,
     arity: BTreeMap<u64, Option<Arity>>,
     void_ret: bool,
@@ -288,6 +291,7 @@ impl<'a> Printer<'a> {
             used: BTreeSet::new(),
             refs: BTreeMap::new(),
             call_defs: Vec::new(),
+            skip: BTreeSet::new(),
             clobbers,
             arity: BTreeMap::new(),
             void_ret,
@@ -341,7 +345,10 @@ impl<'a> Printer<'a> {
         let Some(nv) = self.view().node(n) else {
             return;
         };
-        for s in &nv.stmts {
+        for (i, s) in nv.stmts.iter().enumerate() {
+            if self.skip.contains(&(n, i)) {
+                continue;
+            }
             let mut buf = Buf::default();
             let text = self.stmt(s, &mut buf);
             let def = match s {

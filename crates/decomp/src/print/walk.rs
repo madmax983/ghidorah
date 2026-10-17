@@ -6,6 +6,7 @@
 use ghidorah_ir::Node;
 
 use super::{Buf, LineKind, Printer, expr};
+use crate::expr::Stmt;
 use crate::tree::{Arm, Cond, LoopKind, Tree};
 use crate::view::View;
 
@@ -26,6 +27,15 @@ enum Task<'t> {
     Arm(&'t Arm, u16),
     /// Print `break;` at a depth.
     Break(u16),
+    /// Print a `while` loop as `for (init; c; step) {` at a depth.
+    For(&'t Tree, &'t Stmt, &'t Stmt, u16),
+}
+
+/// The parts of a `for` loop: the init and step statements and their places in the nodes.
+struct ForParts<'t> {
+    init: &'t Stmt,
+    step: &'t Stmt,
+    at: [(Node, usize); 2],
 }
 
 /// Gives the label of a shape node: `L_<addr>`.
@@ -77,6 +87,75 @@ fn else_if(t: &Tree) -> Option<&Tree> {
 }
 
 impl<'a> Printer<'a> {
+    /// Gives the init and the step of a `for` loop: `block` ends with `v = init`, `lp` is a
+    /// `while` loop whose pure condition reads `v`, and its body ends with `v = step(v)`. A
+    /// `continue` to the loop head keeps the `while` form, because a `for` would run the
+    /// step first.
+    fn for_parts(&self, block: &'a Tree, lp: &'a Tree) -> Option<ForParts<'a>> {
+        let view = self.view();
+        let Tree::Block(a) = block else {
+            return None;
+        };
+        let Tree::Loop {
+            kind: LoopKind::While,
+            cond:
+                Some(Cond::Leaf {
+                    node: test,
+                    exec: false,
+                    ..
+                }),
+            body,
+            head,
+            ..
+        } = lp
+        else {
+            return None;
+        };
+        let firsts = &view.node(*a)?.stmts;
+        let init = firsts.last()?;
+        let Stmt::Assign { var, .. } = init else {
+            return None;
+        };
+        let pure = view.shape.node(*test).is_some_and(|s| s.pure);
+        let reads = view
+            .node(*test)?
+            .cond
+            .as_ref()
+            .is_some_and(|c| c.vars().contains(var));
+        if !pure || !reads {
+            return None;
+        }
+        let last = match body.as_ref() {
+            Tree::Seq(items) => items.last()?,
+            other => other,
+        };
+        let Tree::Block(z) = last else {
+            return None;
+        };
+        let lasts = &view.node(*z)?.stmts;
+        let step = lasts.last()?;
+        let Stmt::Assign {
+            var: stepped,
+            value,
+            ..
+        } = step
+        else {
+            return None;
+        };
+        let continues = body
+            .preorder()
+            .into_iter()
+            .any(|t| matches!(t, Tree::Continue(n) if n == head));
+        (stepped == var && value.vars().contains(var) && !continues).then(|| ForParts {
+            init,
+            step,
+            at: [
+                (*a, firsts.len().saturating_sub(1)),
+                (*z, lasts.len().saturating_sub(1)),
+            ],
+        })
+    }
+
     /// Gives the text of a condition and adds its parts to `buf`.
     fn cond(&mut self, c: &Cond, buf: &mut Buf) -> (String, u8) {
         use crate::precedence::{LOG_AND, LOG_OR};
@@ -141,7 +220,25 @@ impl<'a> Printer<'a> {
         let inner = depth.saturating_add(1);
         match t {
             Tree::Block(n) => self.block(*n, depth),
-            Tree::Seq(items) => work.extend(items.iter().rev().map(|i| Task::Tree(i, depth))),
+            Tree::Seq(items) => {
+                let mut tasks = Vec::with_capacity(items.len());
+                let mut i = 0usize;
+                while let Some(cur) = items.get(i) {
+                    let next = items.get(i.saturating_add(1));
+                    if let Some(lp) = next
+                        && let Some(parts) = self.for_parts(cur, lp)
+                    {
+                        self.skip.extend(parts.at);
+                        tasks.push(Task::Tree(cur, depth));
+                        tasks.push(Task::For(lp, parts.init, parts.step, depth));
+                        i = i.saturating_add(2);
+                        continue;
+                    }
+                    tasks.push(Task::Tree(cur, depth));
+                    i = i.saturating_add(1);
+                }
+                work.extend(tasks.into_iter().rev());
+            }
             Tree::If { cond, then, els } => {
                 let empty = matches!(then.as_ref(), Tree::Seq(v) if v.is_empty());
                 match els {
@@ -247,6 +344,27 @@ impl<'a> Printer<'a> {
                 work.push(Task::Tree(&arm.body, inner));
             }
             Task::Break(depth) => self.push("break;", LineKind::Jump, depth, Buf::default()),
+            Task::For(lp, init, step, depth) => {
+                if let Tree::Loop {
+                    cond: Some(c),
+                    body,
+                    ..
+                } = lp
+                {
+                    let mut buf = Buf::default();
+                    let start = self.stmt(init, &mut buf);
+                    let (cond_text, _) = self.cond(c, &mut buf);
+                    let next = self.stmt(step, &mut buf);
+                    let text = format!(
+                        "for ({}; {cond_text}; {}) {{",
+                        start.trim_end_matches(';'),
+                        next.trim_end_matches(';')
+                    );
+                    self.push(&text, LineKind::Open, depth, buf);
+                    work.push(Task::Close(depth));
+                    work.push(Task::Tree(body, depth.saturating_add(1)));
+                }
+            }
         }
     }
 
