@@ -72,7 +72,7 @@ const ARGS: &[ArgSpec] = &[
         "binary_id",
         Role::Param,
         ArgKind::Str(64),
-        "The ID of a binary that is open in the session.",
+        "The ID of a binary that is open in the session, or of a project on disk.",
     ),
     ArgSpec::new(
         "file_format",

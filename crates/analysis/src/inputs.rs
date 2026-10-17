@@ -34,12 +34,8 @@ pub fn inputs_hash(program: &Program) -> Result<[u8; 32], JcsError> {
             .unwrap_or(Value::Array(Vec::new()));
         (name, rows)
     }));
-    let analyzers = ANALYZERS
-        .iter()
-        .map(|s| Value::Array(vec![Value::from(s.name), Value::from(s.version)]))
-        .collect();
     let value = Value::object([
-        ("analyzers", Value::Array(analyzers)),
+        ("analyzers", versions()),
         ("base", base),
         (
             "binary",
@@ -48,4 +44,15 @@ pub fn inputs_hash(program: &Program) -> Result<[u8; 32], JcsError> {
     ]);
     let text = write_jcs(&value)?;
     Ok(ghidorah_base::sha256(text.as_bytes()))
+}
+
+/// Gives `[name, version]` of each analyzer in registry order.
+#[must_use]
+pub fn versions() -> Value {
+    Value::Array(
+        ANALYZERS
+            .iter()
+            .map(|s| Value::Array(vec![Value::from(s.name), Value::from(s.version)]))
+            .collect(),
+    )
 }

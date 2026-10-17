@@ -49,6 +49,7 @@ fn boom(session: &mut Session, _args: &Args, ctx: &mut Ctx) -> Result<Payload, T
 /// `tools/list` order of design Section 10.3.
 pub static TOOLS: &[&ToolSpec<Session>] = &[
     &handlers::load::SPEC,
+    &handlers::analysis_run::SPEC,
     &handlers::calc::SPEC,
     &handlers::history_list::SPEC,
     &handlers::tool_search::SPEC,
@@ -59,6 +60,7 @@ pub static TOOLS: &[&ToolSpec<Session>] = &[
 /// The registry of the shipped tools and the history tools, in catalog order.
 pub static CATALOG: &[&ToolSpec<Session>] = &[
     &handlers::load::SPEC,
+    &handlers::analysis_run::SPEC,
     &handlers::calc::SPEC,
     &handlers::history_list::SPEC,
     &handlers::tool_search::SPEC,

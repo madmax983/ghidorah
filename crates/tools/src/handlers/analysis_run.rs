@@ -56,6 +56,24 @@ const fn state_of(state: RunState) -> AnalysisState {
     }
 }
 
+/// Runs `scheduler` on `binary` up to `band` within `fuel`.
+fn drive(
+    scheduler: &mut Scheduler,
+    binary: &mut OpenBinary,
+    band: Band,
+    fuel: &mut Fuel,
+) -> Result<RunReport, ToolError> {
+    let out = scheduler
+        .run(&mut binary.program, band, fuel)
+        .map_err(|e| {
+            ToolError::new(ErrorCode::InternalError).detail("reason", Value::from(e.to_string()))
+        })?;
+    Ok(RunReport {
+        state: state_of(out.state),
+        steps_used: out.steps_used,
+    })
+}
+
 impl AnalysisEngine for Engine {
     fn run(
         &mut self,
@@ -68,16 +86,28 @@ impl AnalysisEngine for Engine {
             Until::Full => Band::Full,
         };
         let scheduler = self.schedulers.entry(binary.id).or_default();
-        let out = scheduler
-            .run(&mut binary.program, band, fuel)
-            .map_err(|e| {
-                ToolError::new(ErrorCode::InternalError)
-                    .detail("reason", Value::from(e.to_string()))
-            })?;
-        Ok(RunReport {
-            state: state_of(out.state),
-            steps_used: out.steps_used,
-        })
+        drive(scheduler, binary, band, fuel)
+    }
+
+    /// Gives `{ analyzers: [[name, version], ..] }` in registry order.
+    fn inputs_tag(&self) -> Value {
+        Value::object([("analyzers", ghidorah_analysis::inputs::versions())])
+    }
+
+    /// Restarts the scheduler of `binary` at the start band `band` in shadow mode. A binary
+    /// with no scheduler gets a shadow scheduler. Then the run continues over every band.
+    fn reanalyze(
+        &mut self,
+        binary: &mut OpenBinary,
+        band: u16,
+        fuel: &mut Fuel,
+    ) -> Result<RunReport, ToolError> {
+        let scheduler = self
+            .schedulers
+            .entry(binary.id)
+            .or_insert_with(Scheduler::shadow);
+        scheduler.restart(band);
+        drive(scheduler, binary, Band::Full, fuel)
     }
 
     fn analyzers(&self, id: BinaryId) -> Vec<AnalyzerRow> {

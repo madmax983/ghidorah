@@ -1,14 +1,56 @@
 //! The executed examples, the registry lint and the agent text of the WP-13b tools.
 
+use ghidorah_base::{Address, BinaryId};
+use ghidorah_db::{Edit, SymKind};
 use ghidorah_json::{Value, write_pretty};
 use ghidorah_testkit::golden::{self, Header};
 use ghidorah_testkit::ste::check_agent_text;
 use ghidorah_tools::args::{globals_of, parse};
 use ghidorah_tools::outshape::Fit;
 use ghidorah_tools::registry::lint;
-use ghidorah_tools::{ArgKind, ArgSpec, demo, handlers, instructions};
+use ghidorah_tools::session::LabelRule;
+use ghidorah_tools::{ArgKind, ArgSpec, Session, ToolError, demo, handlers, instructions};
 
-use crate::support::{call, demo as demo_session, json, registry, root};
+use crate::support::{
+    DEMO_ID, call, config, demo as demo_session, json, registry, root, session_with,
+};
+
+/// The tools whose examples need one committed edit in the session `mcp-1`.
+const NEEDS_EDIT: &[&str] = &["history_list", "history_undo"];
+
+/// Gives the session of the examples of `tool`: the demo binary, and for a history tool one
+/// rename in the session `mcp-1`. So `history_undo` has a transaction to undo.
+fn example_session(tool: &str) -> Session {
+    if !NEEDS_EDIT.contains(&tool) {
+        return demo_session();
+    }
+    let mut cfg = config();
+    cfg.labels = LabelRule::Mcp;
+    let mut session = session_with(cfg);
+    let envelope = call(&mut session, "binary_load", r#"{"builtin":"demo"}"#);
+    assert_eq!(
+        envelope.pointer("/data/binary_id").and_then(Value::as_str),
+        Some(DEMO_ID),
+        "{envelope}"
+    );
+    let id = BinaryId::parse(DEMO_ID).expect("the ID parses");
+    session
+        .transact(id, "symbol_rename", "mcp-1", |tx| {
+            let fact = tx.fact("read_input".to_owned());
+            tx.apply(Edit::SetName {
+                addr: Address::ram(0x1090),
+                key: None,
+                kind: SymKind::Label,
+                primary: true,
+                name: Some(fact),
+                evidence: vec!["fn:0x1080".to_owned()],
+            })
+            .map(drop)
+            .map_err(|e| ToolError::new(e.code()))
+        })
+        .expect("the rename commits");
+    session
+}
 
 /// Gives the header of the example goldens: the demo binary is the fixture of each session.
 fn header() -> Header {
@@ -27,7 +69,7 @@ fn examples_on_demo() {
         for example in tool.examples {
             let args = json(example.args);
             parse(tool, &args, None).unwrap_or_else(|e| panic!("{}: {e}", example.args));
-            let mut session = demo_session();
+            let mut session = example_session(tool.name);
             let envelope = call(&mut session, tool.name, example.args);
             assert_eq!(
                 envelope.get("ok"),
@@ -95,7 +137,10 @@ fn agent_text_is_ste() {
         .iter()
         .chain(handlers::analysis_run::TEXTS)
         .chain(handlers::calc::TEXTS)
-        .chain(handlers::tool_search::TEXTS);
+        .chain(handlers::history_list::TEXTS)
+        .chain(handlers::tool_search::TEXTS)
+        .chain(handlers::history_undo::TEXTS)
+        .chain(&[ghidorah_tools::session::WHY_REOPEN]);
     for text in handler_texts {
         texts.push(("handler text".to_owned(), (*text).to_owned()));
     }

@@ -1,9 +1,19 @@
 //! `analysis_run`: fuel slices, resume, the analyzer table, the change counts and dry runs.
+//! The shipped engine also gives the analysis inputs tag of a project and the shadow
+//! re-analysis of a reopen with changed inputs.
 
+use std::path::{Path, PathBuf};
+
+use ghidorah_base::{Address, BinaryId, Fuel, Range};
+use ghidorah_db::{Edit, FuncRecord, Function, Source, StartReason};
 use ghidorah_json::Value;
-use ghidorah_tools::handlers::analysis_run::{self, SLICE_STEPS};
+use ghidorah_tools::handlers::analysis_run::{self, Engine, SLICE_STEPS};
+use ghidorah_tools::session::{AnalysisEngine, FULL_BAND, ProjectsConfig};
+use ghidorah_tools::{AnalysisState, Session, ToolError};
 
-use crate::support::{call, data, fixture, text_at};
+use crate::support::{
+    DEMO_ID, DEMO_MAIN, call, config, data, fixture, session, session_with, text_at,
+};
 
 fn int(v: &Value, pointer: &str) -> u64 {
     v.pointer(pointer)
@@ -115,4 +125,159 @@ fn analysis_run_texts_are_ste() {
         let found = ghidorah_testkit::ste::check_agent_text(text);
         assert!(found.is_empty(), "{text}: {found:?}");
     }
+}
+
+#[test]
+fn engine_tag_and_rows_of_a_session() {
+    let tag = Engine::default().inputs_tag();
+    let versions = tag
+        .get("analyzers")
+        .and_then(Value::as_array)
+        .expect("the tag lists the analyzers");
+    assert_eq!(versions.len(), ghidorah_analysis::ANALYZERS.len());
+    assert_eq!(
+        versions
+            .first()
+            .and_then(Value::as_array)
+            .map(<[Value]>::len),
+        Some(2),
+        "each analyzer has a name and a version"
+    );
+
+    let mut s = session();
+    assert!(!s.has_engine());
+    let id = BinaryId::parse(DEMO_ID).expect("the ID parses");
+    assert!(s.analyzer_rows(id).is_empty(), "no engine gives no rows");
+    analysis_run::install(&mut s);
+    assert!(s.has_engine());
+    assert!(s.analyzer_rows(id).is_empty(), "no run gives no rows");
+}
+
+#[test]
+fn engine_reanalyze_runs_a_shadow() {
+    let (mut s, id) = fixture("two_helpers.gcc-O2");
+    analysis_run::install(&mut s);
+    let id = BinaryId::parse(&id).expect("the ID parses");
+    let done = call(&mut s, "analysis_run", "{}");
+    assert_eq!(text_at(data(&done), "/state"), "complete");
+    let rev = s.binary(id).expect("open").program.rev();
+    let funcs = s.binary(id).expect("open").program.analysis().clone();
+
+    // One work unit stops the shadow run: reads keep the committed set.
+    let mut fuel = Fuel::new(1);
+    let report = s
+        .reanalyze(id, FULL_BAND, &mut fuel)
+        .expect("the run starts")
+        .expect("the session has an engine");
+    assert_eq!(report.state, AnalysisState::Stale);
+    let binary = s.binary(id).expect("open");
+    assert_eq!(
+        binary.program.rev(),
+        rev,
+        "a stopped shadow publishes nothing"
+    );
+    assert_eq!(binary.program.analysis(), &funcs);
+    assert_eq!(binary.analysis.map(|a| a.state), Some(AnalysisState::Stale));
+
+    // The next call resumes the shadow. The same inputs give the same set.
+    let rest = call(&mut s, "analysis_run", "{}");
+    assert_eq!(text_at(data(&rest), "/state"), "complete");
+    let binary = s.binary(id).expect("open");
+    assert_eq!(binary.program.analysis(), &funcs, "the shadow set is equal");
+    assert_eq!(
+        binary.analysis.map(|a| a.state),
+        Some(AnalysisState::Complete)
+    );
+}
+
+/// Gives a new empty projects root for one test.
+fn projects(name: &str) -> PathBuf {
+    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+        .join("session_projects")
+        .join(name);
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("the temp directory exists");
+    dir
+}
+
+/// Makes a session with the projects root `dir` and the shipped engine.
+fn engine_session(dir: &Path) -> Session {
+    let mut cfg = config();
+    cfg.projects = Some(ProjectsConfig {
+        root: dir.to_path_buf(),
+        named: true,
+        break_lock: false,
+    });
+    let mut s = session_with(cfg);
+    analysis_run::install(&mut s);
+    s
+}
+
+/// Commits one agent function at `main` through the journal: a base fact of the inputs hash.
+fn journal_function(s: &mut Session, id: BinaryId) {
+    let (commit, ()) = s
+        .transact(id, "func_edit", "cli", |tx| {
+            let mut func = Function::new(
+                Address::ram(DEMO_MAIN),
+                StartReason::Agent,
+                100,
+                Source::Agent,
+            );
+            func.body
+                .insert(Range::new(DEMO_MAIN, DEMO_MAIN + 0x52).expect("a range"));
+            let record = FuncRecord {
+                func,
+                vars: Vec::new(),
+                plate: None,
+            };
+            tx.apply(Edit::CreateFunction(Box::new(record)))
+                .map(drop)
+                .map_err(|e| ToolError::new(e.code()))
+        })
+        .expect("the function commits");
+    assert!(commit.rev.0 > 1);
+}
+
+#[test]
+fn reopen_with_changed_inputs_runs_the_engine() {
+    let dir = projects("reopen_engine");
+    let reopen = format!(r#"{{"binary_id":"{DEMO_ID}"}}"#);
+    let id = BinaryId::parse(DEMO_ID).expect("the ID parses");
+    {
+        let mut s = engine_session(&dir);
+        let load = call(&mut s, "binary_load", r#"{"builtin":"demo"}"#);
+        assert_eq!(text_at(data(&load), "/analysis/state"), "complete");
+    }
+    {
+        // The inputs are the same: the analysis of the project is current.
+        let mut s = engine_session(&dir);
+        let again = call(&mut s, "binary_load", &reopen);
+        assert_eq!(text_at(data(&again), "/analysis/state"), "complete");
+        assert_eq!(
+            data(&again).pointer("/analysis/steps_used"),
+            Some(&Value::from(0u64))
+        );
+        journal_function(&mut s, id);
+    }
+    // A base function changes the inputs hash: the reopen runs the shadow re-analysis.
+    let mut s = engine_session(&dir);
+    let stale = call(&mut s, "binary_load", &reopen);
+    assert_eq!(
+        text_at(data(&stale), "/analysis/state"),
+        "complete",
+        "{stale}"
+    );
+    let used = data(&stale)
+        .pointer("/analysis/steps_used")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    assert!(used > 0, "the reopen runs the engine: {stale}");
+    let history = call(&mut s, "history_list", r#"{"kinds":["analysis"]}"#);
+    assert!(
+        data(&history)
+            .get("items")
+            .and_then(Value::as_array)
+            .is_some_and(|rows| !rows.is_empty()),
+        "{history}"
+    );
 }

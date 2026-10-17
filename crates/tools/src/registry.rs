@@ -95,7 +95,9 @@ static SHIPPED: &[&ToolSpec<Session>] = &[
     &crate::handlers::load::SPEC,
     &crate::handlers::analysis_run::SPEC,
     &crate::handlers::calc::SPEC,
+    &crate::handlers::history_list::SPEC,
     &crate::handlers::tool_search::SPEC,
+    &crate::handlers::history_undo::SPEC,
 ];
 
 /// Gives the shipped registry: the plain list of the shipped tools.
