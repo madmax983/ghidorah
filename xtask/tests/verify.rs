@@ -339,6 +339,50 @@ fn verify_without_verus_is_skipped_only_when_optional() {
     );
 }
 
+/// Runs the `xtask` binary with `args` and no Verus. Gives the exit code and the JSON report.
+fn xtask_without_verus(args: &[&str], optional: bool) -> (Option<i32>, Value) {
+    let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_xtask"));
+    command.args(args).env("VERUS", "").env("PATH", "");
+    if optional {
+        command.env("GHIDORAH_VERUS_OPTIONAL", "1");
+    } else {
+        command.env_remove("GHIDORAH_VERUS_OPTIONAL");
+    }
+    let out = command.output().expect("the xtask binary starts");
+    let stdout = String::from_utf8(out.stdout).expect("the report is UTF-8");
+    let report = json::parse(stdout.trim()).expect("the binary prints one JSON object");
+    (out.status.code(), report)
+}
+
+#[test]
+fn verify_is_a_command_of_the_binary() {
+    let (code, report) = xtask_without_verus(&["verify"], true);
+    assert_eq!(code, Some(0), "{report:?}");
+    assert_eq!(
+        report.get("status").and_then(Value::as_str),
+        Some("skipped")
+    );
+
+    let (code, report) = xtask_without_verus(&["verify"], false);
+    assert_eq!(code, Some(1), "{report:?}");
+    assert_eq!(
+        report.get("status").and_then(Value::as_str),
+        Some("missing")
+    );
+
+    // An argument gives a usage error from `verify`, not the usage text of the binary.
+    let (code, report) = xtask_without_verus(&["verify", "--x"], true);
+    assert_eq!(code, Some(2), "{report:?}");
+    let error = report.get("error").and_then(Value::as_str).unwrap_or("");
+    assert!(error.contains("cargo xtask verify (no argument"), "{error}");
+
+    // The usage text of the binary names the command.
+    let (code, report) = xtask_without_verus(&["no-such-command"], true);
+    assert_eq!(code, Some(2), "{report:?}");
+    let error = report.get("error").and_then(Value::as_str).unwrap_or("");
+    assert!(error.contains("|verify>"), "{error}");
+}
+
 /// Copies the proof inputs and the negative patches of the workspace to `to`.
 fn copy_inputs(to: &Path) {
     let from = root();
