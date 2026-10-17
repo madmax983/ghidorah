@@ -91,6 +91,7 @@ jobs:
         working-directory: verus-src/source
         env:
           VERUS_Z3_PATH: ${{ github.workspace }}/verus-src/source/z3
+          CARGO_NET_OFFLINE: "false"
         run: |
           cargo +"$VERUS_TOOLCHAIN" build --release
           cargo +"$VERUS_TOOLCHAIN" run --release -p cargo-verus -- build --release --manifest-path vstd/Cargo.toml

@@ -39,6 +39,9 @@ pub const VERUS_NEEDS: &[&str] = &[
     "z3_solver-4.16.0.0.data/data/bin/z3",
     "actions/cache@",
     "cargo xtask verify",
+    // The workspace sets `net.offline`, and Cargo reads it in subdirectories.
+    // The Verus build needs the network, so its step turns offline mode off.
+    "CARGO_NET_OFFLINE: \"false\"",
 ];
 
 /// Text that the tier-2 job must hold.

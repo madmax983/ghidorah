@@ -585,6 +585,14 @@ fn ac_019_ci_workflow() {
 }
 
 #[test]
+fn regress_verus_build_is_online() {
+    let yaml = repo().read(workflow::PATH).expect("ci.yml reads");
+    assert!(workflow::check(&yaml).is_empty());
+    let offline = yaml.replacen("CARGO_NET_OFFLINE: \"false\"", "", 1);
+    assert!(!workflow::check(&offline).is_empty());
+}
+
+#[test]
 fn ac_223_no_set_var() {
     assert_clean("AC-223");
     let rel = "crates/cli/tests/x.rs";
