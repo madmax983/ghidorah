@@ -5,5 +5,7 @@
 //! plain list of the handler files.
 
 pub mod calc;
+pub mod history_list;
+pub mod history_undo;
 pub mod load;
 pub mod tool_search;

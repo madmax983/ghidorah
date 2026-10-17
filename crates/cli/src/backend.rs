@@ -52,6 +52,9 @@ impl Source {
 pub struct Options {
     /// The projects root, or `None` when the environment gives no default.
     pub project_root: Option<PathBuf>,
+    /// `true` when `--project-root` names the projects root. A default root must be outside
+    /// every git working tree (ADR-0022).
+    pub project_root_named: bool,
     /// The current directory. A relative root starts here.
     pub cwd: PathBuf,
     /// The roots that `binary_load { path }` can read under, as the flags give them.
@@ -83,6 +86,7 @@ impl Options {
     pub fn new(env: &Env, session: &str) -> Self {
         Self {
             project_root: env.projects_root(),
+            project_root_named: false,
             cwd: env.cwd.clone(),
             roots: vec![PathBuf::from(".")],
             profile: Profile::Full,
@@ -106,6 +110,7 @@ impl Options {
         let mut options = Self::new(env, flags.session.as_deref().unwrap_or(session));
         if let Some(root) = &flags.project_root {
             options.project_root = Some(env.cwd.join(root));
+            options.project_root_named = true;
         }
         if !flags.roots.is_empty() {
             options.roots.clone_from(&flags.roots);

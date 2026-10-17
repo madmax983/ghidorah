@@ -15,15 +15,28 @@
 //! | no `binary_id` | more than one | `BINARY_REQUIRED` with `details.binary_id` of the most recent binary |
 //!
 //! Session labels: the `session` argument, else the label of the transport, else the label of
-//! the bound binary. A binary gets its label from the [`LabelRule`] when it opens.
+//! the bound binary. A binary gets its label from the [`LabelRule`] when it opens. A project
+//! that opens gives the rule the number of distinct `mcp-` labels in its journal.
+//!
+//! The `store` module keeps the history and the project of each binary. Tool handlers commit
+//! through [`Session::transact`] and [`Session::undo`], so each commit gets its journal line.
+//! The `open` module opens, reloads and closes the projects.
+
+mod open;
+mod store;
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use ghidorah_base::{BinaryId, Clock, ErrorCode, FixedClock, Fuel, Limits, SetName, did_you_mean};
-use ghidorah_db::{Program, SetMembers};
+pub use ghidorah_db::Source;
+use ghidorah_db::{Fs, LockInfo, Program, RealFs, SetMembers};
 use ghidorah_json::Value;
+
+pub use open::{Admitted, FULL_BAND};
+pub(crate) use store::session_label;
+pub use store::{ProjectsConfig, Store};
 
 use crate::api::Host;
 use crate::args::Globals;
@@ -41,6 +54,9 @@ pub const MAX_CRASHES: usize = 64;
 
 /// The fuel of the did-you-mean scan of a set name.
 const DYM_FUEL: u64 = 100_000;
+
+/// The `why` of the reopen hint of `UNKNOWN_BINARY`.
+pub const WHY_REOPEN: &str = "Open the project of the binary.";
 
 /// The run settings that the `cli` crate reads once from the environment (ADR-0012).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -86,6 +102,10 @@ pub struct SessionConfig {
     pub read_only: bool,
     /// The caps of each load.
     pub limits: Limits,
+    /// The projects root, or `None` for a session that keeps no projects.
+    pub projects: Option<ProjectsConfig>,
+    /// The provenance source of the edits: `agent`, or `user` for a human.
+    pub source: Source,
 }
 
 impl SessionConfig {
@@ -100,6 +120,8 @@ impl SessionConfig {
             labels: LabelRule::Fixed("cli".to_owned()),
             read_only: false,
             limits: Limits::DEFAULT,
+            projects: None,
+            source: Source::Agent,
         }
     }
 }
@@ -152,6 +174,28 @@ pub trait AnalysisEngine: Send {
         until: Until,
         fuel: &mut Fuel,
     ) -> Result<RunReport, ToolError>;
+
+    /// Gives the analyzer versions and the analysis config for the analysis inputs hash
+    /// (design Section 3.9). The default is `null`.
+    fn inputs_tag(&self) -> Value {
+        Value::Null
+    }
+
+    /// Runs a re-analysis of `binary` from the start band `band` within `fuel`: the shadow run
+    /// of design Section 3.9. The default runs the full analysis.
+    ///
+    /// # Errors
+    ///
+    /// Returns a tool error when the analysis cannot start.
+    fn reanalyze(
+        &mut self,
+        binary: &mut OpenBinary,
+        band: u16,
+        fuel: &mut Fuel,
+    ) -> Result<RunReport, ToolError> {
+        let _ = band;
+        self.run(binary, Until::Full, fuel)
+    }
 }
 
 /// The session: the host of the shipped tools.
@@ -164,6 +208,10 @@ pub struct Session {
     engine: Option<Box<dyn AnalysisEngine>>,
     spill: RefCell<Spill>,
     crashes: Vec<Crash>,
+    stores: BTreeMap<BinaryId, Store>,
+    fs: Box<dyn Fs>,
+    me: LockInfo,
+    current: Option<BinaryId>,
 }
 
 impl fmt::Debug for Session {
@@ -196,6 +244,12 @@ impl Session {
             Some(ms) => Box::new(FixedClock::new(ms)),
             None => clock,
         };
+        let mut fs: Box<dyn Fs> = Box::new(RealFs);
+        let me = ghidorah_db::lock::current(fs.as_mut()).unwrap_or_else(|| LockInfo {
+            pid: std::process::id(),
+            start_time: 0,
+            boot_id: String::new(),
+        });
         Self {
             registry,
             config,
@@ -205,6 +259,10 @@ impl Session {
             engine: None,
             spill: RefCell::new(Spill::new()),
             crashes: Vec::new(),
+            stores: BTreeMap::new(),
+            fs,
+            me,
+            current: None,
         }
     }
 
@@ -259,11 +317,9 @@ impl Session {
         else {
             return Ok(None);
         };
+        let before = binary.program.rev();
         let report = engine.run(binary, until, fuel)?;
-        binary.analysis = Some(AnalysisInfo {
-            state: report.state,
-            rev: binary.program.rev().0,
-        });
+        self.finish_run(id, before, report)?;
         Ok(Some(report))
     }
 
@@ -274,8 +330,12 @@ impl Session {
     }
 
     /// Adds an open binary and makes it the most recent one. A binary with the same ID goes.
+    /// A binary with no store gets a store in memory.
     pub fn open(&mut self, binary: OpenBinary) {
         let id = binary.id;
+        self.stores
+            .entry(id)
+            .or_insert_with(|| Store::in_memory(&binary.program));
         self.binaries.insert(id, binary);
         self.touch(id);
     }
@@ -308,6 +368,20 @@ impl Session {
             .candidates(self.candidates())
     }
 
+    /// Gives the `UNKNOWN_BINARY` error of the call text `text`. When the projects root holds
+    /// the project of `text`, `next[0]` is `binary_load { binary_id }`.
+    pub fn unknown_binary_id(&mut self, text: &str) -> ToolError {
+        let error = self.unknown_binary();
+        match BinaryId::parse(text) {
+            Ok(id) if self.has_project(id) => error.next(crate::hints::Call::new(
+                "binary_load",
+                Value::object([("binary_id", Value::from(id.to_string()))]),
+                WHY_REOPEN,
+            )),
+            _ => error,
+        }
+    }
+
     /// Gives the `BINARY_REQUIRED` error with `details.binary_id` of the most recent binary.
     #[must_use]
     pub fn binary_required(&self) -> ToolError {
@@ -319,13 +393,19 @@ impl Session {
     }
 
     /// Gives the binary that a call binds, or `None` for a call with no binary.
-    fn bind(&self, given: Option<&str>, mode: BinaryArg) -> Result<Option<BinaryId>, ToolError> {
+    fn bind(
+        &mut self,
+        given: Option<&str>,
+        mode: BinaryArg,
+    ) -> Result<Option<BinaryId>, ToolError> {
         if let Some(text) = given {
-            return BinaryId::parse(text)
+            let open = BinaryId::parse(text)
                 .ok()
-                .filter(|id| self.binaries.contains_key(id))
-                .map(Some)
-                .ok_or_else(|| self.unknown_binary());
+                .filter(|id| self.binaries.contains_key(id));
+            return match open {
+                Some(id) => Ok(Some(id)),
+                None => Err(self.unknown_binary_id(text)),
+            };
         }
         match (self.binaries.len(), mode) {
             (1, _) => Ok(self.binaries.keys().next().copied()),
@@ -406,6 +486,7 @@ impl Host for Session {
         if let Some(id) = bound {
             self.touch(id);
         }
+        self.current = bound;
         let binary = bound.and_then(|id| self.binaries.get(&id));
         let session = globals
             .session
@@ -477,6 +558,19 @@ impl Host for Session {
         self.crashes.push(crash.clone());
         if self.crashes.len() > MAX_CRASHES {
             self.crashes.remove(0);
+        }
+        self.write_crash(crash);
+        if let Some(id) = self.current {
+            let _ = self.reload(id);
+        }
+    }
+}
+
+impl Drop for Session {
+    fn drop(&mut self) {
+        let ids: Vec<BinaryId> = self.binaries.keys().copied().collect();
+        for id in ids {
+            self.close(id);
         }
     }
 }

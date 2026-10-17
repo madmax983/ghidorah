@@ -11,14 +11,19 @@
 //! | Profile | `--profile` and the `--tools` allowlist. A name that is not a tool is a usage error. |
 //! | Session labels | `mcp-<k>` for `ghidorah mcp`, else `--session` or `cli` |
 //! | Read-only mode | `--read-only` |
+//! | Projects | `--project-root`, else the default root of the environment; `--break-lock` |
+//! | Edit source | `--source agent` or `--source user` |
 //! | Run settings and clock | `GHIDORAH_FIXED_TIME` and `GHIDORAH_EVAL` through [`crate::RunConfig`] |
 //!
-//! This build keeps no projects on disk. So `--open` is an open error.
+//! `--open BIN_ID` opens the project of each ID at the start. A project that does not open is
+//! an open error.
 
+use ghidorah_base::BinaryId;
 use ghidorah_json::Value;
+use ghidorah_tools::session::{ProjectsConfig, Source as EditSource};
 use ghidorah_tools::{Host, ProfileSet, Request, Roots, Session, SessionConfig, dispatch};
 
-use crate::backend::{Backend, OpenError, Options};
+use crate::backend::{Backend, OpenError, Options, Source};
 
 /// The backend of the `ghidorah` binary.
 pub type Shipped = Session;
@@ -52,18 +57,52 @@ pub fn session_config(options: &Options) -> Result<SessionConfig, OpenError> {
     config.run = options.run.into();
     config.labels = options.labels.clone();
     config.read_only = options.read_only;
+    config.projects = options.project_root.as_ref().map(|root| ProjectsConfig {
+        root: root.clone(),
+        named: options.project_root_named,
+        break_lock: options.break_lock,
+    });
+    config.source = match options.source {
+        Source::Agent => EditSource::Agent,
+        Source::User => EditSource::User,
+    };
     Ok(config)
+}
+
+/// Opens the project of each `--open` ID in `session`.
+///
+/// # Errors
+///
+/// Returns [`OpenError`] for an ID that does not parse or a project that does not open.
+fn open_projects(session: &mut Session, ids: &[String]) -> Result<(), OpenError> {
+    for text in ids {
+        let opened = BinaryId::parse(text)
+            .ok()
+            .map(|id| session.open_project(id));
+        match opened {
+            Some(Ok(true)) => {}
+            Some(Err(error)) => {
+                return Err(OpenError::new(&format!(
+                    "The project {text} does not open: {}. Remove the --open flag or stop the other writer.",
+                    error.code.name()
+                )));
+            }
+            _ => {
+                return Err(OpenError::new(&format!(
+                    "The projects root has no project {text}. Remove the --open flag."
+                )));
+            }
+        }
+    }
+    Ok(())
 }
 
 impl Backend for Session {
     fn open(options: &Options) -> Result<Self, OpenError> {
-        if let Some(id) = options.open.first() {
-            return Err(OpenError::new(&format!(
-                "The project {id} does not open. This build keeps no projects. Remove the --open flag."
-            )));
-        }
         let config = session_config(options)?;
-        Ok(Self::new(config, options.run.clock()))
+        let mut session = Self::new(config, options.run.clock());
+        open_projects(&mut session, &options.open)?;
+        Ok(session)
     }
 
     fn for_examples(options: &Options) -> Result<Self, OpenError> {
