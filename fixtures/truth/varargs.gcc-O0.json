@@ -1,0 +1,328 @@
+{
+  "binaries": [
+    {
+      "name": "varargs.gcc-O0",
+      "sha256": "d15bd94c1f1ded0babf0af90e5bcf433277227c013ac99d6db8357ada1095fa4",
+      "variant": "none"
+    },
+    {
+      "name": "varargs.gcc-O0.stripped",
+      "sha256": "f2645b48a608d0fa94c882841dd466c915016c84c6c33c8646b419be2d00045b",
+      "variant": "stripped"
+    }
+  ],
+  "build": {
+    "cflags": ["-O0"],
+    "compiler": "gcc 13.3.0",
+    "id": "gcc-O0",
+    "ldflags": []
+  },
+  "call_edges": [
+    ["__do_global_dtors_aux","__cxa_finalize"],
+    ["__do_global_dtors_aux","deregister_tm_clones"],
+    ["_start","__libc_start_main"],
+    ["frame_dummy","register_tm_clones"],
+    ["log_msg","__stack_chk_fail"],
+    ["log_msg","vprintf"],
+    ["main","log_msg"],
+    ["main","narrow"],
+    ["main","p0"],
+    ["main","p1"],
+    ["main","p2"],
+    ["main","p3"],
+    ["main","p4"],
+    ["main","p5"],
+    ["main","p6"],
+    ["main","p7"],
+    ["main","p8"],
+    ["main","scale"],
+    ["main","sum_va"],
+    ["sum_va","__stack_chk_fail"]
+  ],
+  "cold_parts": [],
+  "duplicate_names": {},
+  "elf": {
+    "entry": "0x1080",
+    "image_base": "0x0",
+    "interp": true,
+    "type": "DYN"
+  },
+  "facts": {
+    "claims": [
+      {
+        "args": ["main","sum_va"],
+        "rel": "calls"
+      },
+      {
+        "args": ["main","p8"],
+        "rel": "calls"
+      },
+      {
+        "args": ["main","log_msg"],
+        "rel": "calls"
+      }
+    ],
+    "prototypes": [
+      {
+        "name": "p0",
+        "params": 0,
+        "varargs": false
+      },
+      {
+        "name": "p1",
+        "params": 1,
+        "varargs": false
+      },
+      {
+        "name": "p2",
+        "params": 2,
+        "varargs": false
+      },
+      {
+        "name": "p3",
+        "params": 3,
+        "varargs": false
+      },
+      {
+        "name": "p4",
+        "params": 4,
+        "varargs": false
+      },
+      {
+        "name": "p5",
+        "params": 5,
+        "varargs": false
+      },
+      {
+        "name": "p6",
+        "params": 6,
+        "varargs": false
+      },
+      {
+        "name": "p7",
+        "params": 7,
+        "varargs": false
+      },
+      {
+        "name": "p8",
+        "params": 8,
+        "varargs": false
+      },
+      {
+        "name": "narrow",
+        "params": 3,
+        "varargs": false
+      },
+      {
+        "name": "scale",
+        "params": 2,
+        "varargs": false
+      },
+      {
+        "name": "sum_va",
+        "params": 1,
+        "varargs": true
+      },
+      {
+        "name": "log_msg",
+        "params": 1,
+        "varargs": true
+      }
+    ]
+  },
+  "fixture": "varargs.gcc-O0",
+  "function_count": 21,
+  "functions": [
+    {
+      "addr": "0x1000",
+      "insns": 8,
+      "name": "_init",
+      "size": 0
+    },
+    {
+      "addr": "0x1080",
+      "insns": 13,
+      "name": "_start",
+      "size": 38
+    },
+    {
+      "addr": "0x10b0",
+      "insns": 11,
+      "name": "deregister_tm_clones",
+      "size": 0
+    },
+    {
+      "addr": "0x10e0",
+      "insns": 16,
+      "name": "register_tm_clones",
+      "size": 0
+    },
+    {
+      "addr": "0x1120",
+      "insns": 16,
+      "name": "__do_global_dtors_aux",
+      "size": 0
+    },
+    {
+      "addr": "0x1160",
+      "insns": 2,
+      "name": "frame_dummy",
+      "size": 0
+    },
+    {
+      "addr": "0x1169",
+      "insns": 6,
+      "name": "p0",
+      "size": 15
+    },
+    {
+      "addr": "0x1178",
+      "insns": 10,
+      "name": "p1",
+      "size": 27
+    },
+    {
+      "addr": "0x1193",
+      "insns": 12,
+      "name": "p2",
+      "size": 35
+    },
+    {
+      "addr": "0x11b6",
+      "insns": 13,
+      "name": "p3",
+      "size": 41
+    },
+    {
+      "addr": "0x11df",
+      "insns": 15,
+      "name": "p4",
+      "size": 48
+    },
+    {
+      "addr": "0x120f",
+      "insns": 27,
+      "name": "p5",
+      "size": 92
+    },
+    {
+      "addr": "0x126b",
+      "insns": 21,
+      "name": "p6",
+      "size": 70
+    },
+    {
+      "addr": "0x12b1",
+      "insns": 27,
+      "name": "p7",
+      "size": 91
+    },
+    {
+      "addr": "0x130c",
+      "insns": 26,
+      "name": "p8",
+      "size": 88
+    },
+    {
+      "addr": "0x1364",
+      "insns": 16,
+      "name": "narrow",
+      "size": 41
+    },
+    {
+      "addr": "0x138d",
+      "insns": 10,
+      "name": "scale",
+      "size": 32
+    },
+    {
+      "addr": "0x13ad",
+      "insns": 60,
+      "name": "sum_va",
+      "size": 306
+    },
+    {
+      "addr": "0x14df",
+      "insns": 42,
+      "name": "log_msg",
+      "size": 218
+    },
+    {
+      "addr": "0x15b9",
+      "insns": 110,
+      "name": "main",
+      "size": 447
+    },
+    {
+      "addr": "0x1778",
+      "insns": 4,
+      "name": "_fini",
+      "size": 0
+    }
+  ],
+  "gaps": [],
+  "generator": {
+    "name": "xtask-fixtures",
+    "version": "1"
+  },
+  "imports": ["__cxa_finalize","__libc_start_main","__stack_chk_fail","vprintf"],
+  "jump_tables": [],
+  "leaf_functions": [],
+  "libraries": ["libc.so.6"],
+  "network_imports": [],
+  "program": "varargs",
+  "protections": {
+    "build_id": "6ddb946d2eb218dac4bc2129846989da7f4cd81c",
+    "canary": true,
+    "fortify": false,
+    "ibt": true,
+    "nx": true,
+    "pie": true,
+    "relro": "full",
+    "rpath": false,
+    "runpath": false,
+    "shstk": true
+  },
+  "self_calls": [],
+  "strings": [],
+  "survey_facts": [
+    {
+      "kind": "function",
+      "value": "log_msg"
+    },
+    {
+      "kind": "function",
+      "value": "sum_va"
+    },
+    {
+      "kind": "library",
+      "value": "libc.so.6"
+    },
+    {
+      "kind": "protection",
+      "value": "canary"
+    },
+    {
+      "kind": "protection",
+      "value": "ibt"
+    },
+    {
+      "kind": "protection",
+      "value": "nx"
+    },
+    {
+      "kind": "protection",
+      "value": "pie"
+    },
+    {
+      "kind": "protection",
+      "value": "shstk"
+    }
+  ],
+  "syscall_names": [],
+  "syscalls": [],
+  "tail_calls": [
+    ["frame_dummy","register_tm_clones"]
+  ],
+  "tier": "T1"
+}

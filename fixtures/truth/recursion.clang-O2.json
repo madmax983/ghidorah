@@ -1,0 +1,232 @@
+{
+  "binaries": [
+    {
+      "name": "recursion.clang-O2",
+      "sha256": "8d9910de20678fdf70f5307dea01f32dba42ba40e7a947505494ae963a04f6cd",
+      "variant": "none"
+    },
+    {
+      "name": "recursion.clang-O2.noeh",
+      "sha256": "b70976da22ddf9be2e92b010fdc296e628093d262035afcb0dcafce7a39c037d",
+      "variant": "noeh"
+    },
+    {
+      "name": "recursion.clang-O2.stripped",
+      "sha256": "1f0cd9b55bf05e1a2add9383bc1fd327d14c7f058ee5d1bdaf1e2420b551595a",
+      "variant": "stripped"
+    }
+  ],
+  "build": {
+    "cflags": ["-O2"],
+    "compiler": "clang 18.1.3",
+    "id": "clang-O2",
+    "ldflags": []
+  },
+  "call_edges": [
+    ["__do_global_dtors_aux","__cxa_finalize"],
+    ["__do_global_dtors_aux","deregister_tm_clones"],
+    ["_start","__libc_start_main"],
+    ["fib","fib"],
+    ["frame_dummy","register_tm_clones"],
+    ["is_even","is_odd"],
+    ["is_odd","is_even"],
+    ["main","fib"],
+    ["main","is_even"],
+    ["main","printf"],
+    ["main","walk"],
+    ["print_node","printf"],
+    ["walk","walk"]
+  ],
+  "cold_parts": [],
+  "duplicate_names": {},
+  "elf": {
+    "entry": "0x1050",
+    "image_base": "0x0",
+    "interp": true,
+    "type": "DYN"
+  },
+  "facts": {
+    "abstain": [
+      {
+        "answer": "unknown",
+        "claim": {
+          "args": ["walk","print_node"],
+          "rel": "calls"
+        },
+        "id": "walk_calls_print_node",
+        "reason": "walk calls a visitor that its caller passes as an argument"
+      },
+      {
+        "answer": "unknown",
+        "claim": {
+          "args": ["walk","fib"],
+          "rel": "calls"
+        },
+        "id": "walk_calls_fib",
+        "reason": "walk calls a visitor that its caller passes as an argument"
+      }
+    ],
+    "claims": [
+      {
+        "args": ["fib","fib"],
+        "rel": "calls"
+      },
+      {
+        "args": ["is_even","is_odd"],
+        "rel": "calls"
+      },
+      {
+        "args": ["is_odd","is_even"],
+        "rel": "calls"
+      },
+      {
+        "args": ["main","walk"],
+        "rel": "calls"
+      }
+    ],
+    "indirect_calls": [
+      {
+        "func": "walk",
+        "targets": ["print_node"]
+      }
+    ]
+  },
+  "fixture": "recursion.clang-O2",
+  "function_count": 13,
+  "functions": [
+    {
+      "addr": "0x1000",
+      "insns": 8,
+      "name": "_init",
+      "size": 0
+    },
+    {
+      "addr": "0x1050",
+      "insns": 13,
+      "name": "_start",
+      "size": 38
+    },
+    {
+      "addr": "0x1080",
+      "insns": 11,
+      "name": "deregister_tm_clones",
+      "size": 0
+    },
+    {
+      "addr": "0x10b0",
+      "insns": 16,
+      "name": "register_tm_clones",
+      "size": 0
+    },
+    {
+      "addr": "0x10f0",
+      "insns": 16,
+      "name": "__do_global_dtors_aux",
+      "size": 0
+    },
+    {
+      "addr": "0x1130",
+      "insns": 3,
+      "name": "frame_dummy",
+      "size": 0
+    },
+    {
+      "addr": "0x1140",
+      "insns": 20,
+      "name": "fib",
+      "size": 48
+    },
+    {
+      "addr": "0x1170",
+      "insns": 6,
+      "name": "is_even",
+      "size": 17
+    },
+    {
+      "addr": "0x1190",
+      "insns": 6,
+      "name": "is_odd",
+      "size": 14
+    },
+    {
+      "addr": "0x11a0",
+      "insns": 20,
+      "name": "walk",
+      "size": 50
+    },
+    {
+      "addr": "0x11e0",
+      "insns": 4,
+      "name": "print_node",
+      "size": 16
+    },
+    {
+      "addr": "0x11f0",
+      "insns": 37,
+      "name": "main",
+      "size": 157
+    },
+    {
+      "addr": "0x1290",
+      "insns": 4,
+      "name": "_fini",
+      "size": 0
+    }
+  ],
+  "gaps": [],
+  "generator": {
+    "name": "xtask-fixtures",
+    "version": "1"
+  },
+  "imports": ["__cxa_finalize","__libc_start_main","printf"],
+  "jump_tables": [],
+  "leaf_functions": [],
+  "libraries": ["libc.so.6"],
+  "network_imports": [],
+  "program": "recursion",
+  "protections": {
+    "build_id": "b85e540d657edbb78bafe0febc7e2aedff6452f0",
+    "canary": false,
+    "fortify": false,
+    "ibt": false,
+    "nx": true,
+    "pie": true,
+    "relro": "partial",
+    "rpath": false,
+    "runpath": false,
+    "shstk": false
+  },
+  "self_calls": ["fib","walk"],
+  "strings": [],
+  "survey_facts": [
+    {
+      "kind": "function",
+      "value": "fib"
+    },
+    {
+      "kind": "function",
+      "value": "walk"
+    },
+    {
+      "kind": "library",
+      "value": "libc.so.6"
+    },
+    {
+      "kind": "protection",
+      "value": "nx"
+    },
+    {
+      "kind": "protection",
+      "value": "pie"
+    }
+  ],
+  "syscall_names": [],
+  "syscalls": [],
+  "tail_calls": [
+    ["frame_dummy","register_tm_clones"],
+    ["is_even","is_odd"],
+    ["is_odd","is_even"],
+    ["print_node","printf"]
+  ],
+  "tier": "T1"
+}

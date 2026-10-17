@@ -1,0 +1,36 @@
+{
+  "claims": [
+    {
+      "args": [
+        "main",
+        "left_value"
+      ],
+      "rel": "calls"
+    },
+    {
+      "args": [
+        "main",
+        "right_value"
+      ],
+      "rel": "calls"
+    }
+  ],
+  "program": "two_helpers",
+  "runs": [
+    {
+      "args": [],
+      "exit": 0,
+      "stdout": "7 10\n"
+    }
+  ],
+  "survey_facts": [
+    {
+      "kind": "function",
+      "value": "helper"
+    },
+    {
+      "kind": "function",
+      "value": "left_value"
+    }
+  ]
+}

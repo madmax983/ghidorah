@@ -1,0 +1,15 @@
+[package]
+name = "ghidorah-oracle"
+description = "Dev-only test oracles for ghidorah: the counting allocator (unsafe code allowed, ADR-0025)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "ghidorah_oracle"
+path = "src/lib.rs"
+
+[lints]
+workspace = true

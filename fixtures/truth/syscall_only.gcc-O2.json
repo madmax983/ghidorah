@@ -1,0 +1,202 @@
+{
+  "binaries": [
+    {
+      "name": "syscall_only.gcc-O2",
+      "sha256": "9bc269247f3ef1fb6941f141b9ef72dfb29203bbfc3116373206a395f450a2e2",
+      "variant": "none"
+    },
+    {
+      "name": "syscall_only.gcc-O2.stripped",
+      "sha256": "087354993da44ad237233eef0677a48a0ba52d258d0a0073597a54ef2e85a67d",
+      "variant": "stripped"
+    }
+  ],
+  "build": {
+    "cflags": ["-O2","-fno-stack-protector"],
+    "compiler": "gcc 13.3.0",
+    "id": "gcc-O2",
+    "ldflags": ["-nostdlib","-static"]
+  },
+  "call_edges": [
+    ["_start","emit_banner"],
+    ["_start","emit_status"],
+    ["_start","exit_ok"],
+    ["_start","get_pid"]
+  ],
+  "cold_parts": [],
+  "duplicate_names": {},
+  "elf": {
+    "entry": "0x401060",
+    "image_base": "0x400000",
+    "interp": false,
+    "type": "EXEC"
+  },
+  "facts": {
+    "claims": [
+      {
+        "args": ["emit_banner","write"],
+        "rel": "has_syscall"
+      },
+      {
+        "args": ["exit_ok","exit"],
+        "rel": "has_syscall"
+      },
+      {
+        "args": ["_start","emit_banner"],
+        "rel": "calls"
+      }
+    ],
+    "noreturn": ["exit_ok"]
+  },
+  "fixture": "syscall_only.gcc-O2",
+  "function_count": 5,
+  "functions": [
+    {
+      "addr": "0x401000",
+      "insns": 7,
+      "name": "emit_banner",
+      "size": 27
+    },
+    {
+      "addr": "0x401020",
+      "insns": 7,
+      "name": "emit_status",
+      "size": 29
+    },
+    {
+      "addr": "0x401040",
+      "insns": 4,
+      "name": "get_pid",
+      "size": 12
+    },
+    {
+      "addr": "0x401050",
+      "insns": 4,
+      "name": "exit_ok",
+      "size": 13
+    },
+    {
+      "addr": "0x401060",
+      "insns": 10,
+      "name": "_start",
+      "size": 35
+    }
+  ],
+  "gaps": [],
+  "generator": {
+    "name": "xtask-fixtures",
+    "version": "1"
+  },
+  "imports": [],
+  "jump_tables": [],
+  "leaf_functions": [],
+  "libraries": [],
+  "network_imports": [],
+  "program": "syscall_only",
+  "protections": {
+    "build_id": "99a4281539a04471f794612a614544a1ee476283",
+    "canary": false,
+    "fortify": false,
+    "ibt": true,
+    "nx": true,
+    "pie": false,
+    "relro": "none",
+    "rpath": false,
+    "runpath": false,
+    "shstk": true
+  },
+  "self_calls": [],
+  "strings": [],
+  "survey_facts": [
+    {
+      "kind": "protection",
+      "value": "ibt"
+    },
+    {
+      "kind": "protection",
+      "value": "nx"
+    },
+    {
+      "kind": "protection",
+      "value": "shstk"
+    },
+    {
+      "kind": "syscall",
+      "value": "exit"
+    },
+    {
+      "kind": "syscall",
+      "value": "getpid"
+    },
+    {
+      "kind": "syscall",
+      "value": "write"
+    }
+  ],
+  "syscall_names": ["exit","getpid","write"],
+  "syscalls": [
+    {
+      "args": [
+        {
+          "kind": "int",
+          "v": "0x1"
+        },
+        {
+          "addr": "0x402010",
+          "kind": "str",
+          "text": "syscall only\n"
+        },
+        {
+          "kind": "int",
+          "v": "0xd"
+        }
+      ],
+      "func": "emit_banner",
+      "name": "write",
+      "nr": 1,
+      "site": "0x401018"
+    },
+    {
+      "args": [
+        {
+          "kind": "int",
+          "v": "0x2"
+        },
+        {
+          "addr": "0x402000",
+          "kind": "str",
+          "text": "status: ok\n"
+        },
+        {
+          "kind": "int",
+          "v": "0xb"
+        }
+      ],
+      "func": "emit_status",
+      "name": "write",
+      "nr": 1,
+      "site": "0x40103a"
+    },
+    {
+      "args": [],
+      "func": "get_pid",
+      "name": "getpid",
+      "nr": 39,
+      "site": "0x401049"
+    },
+    {
+      "args": [
+        {
+          "kind": "int",
+          "v": "0x0"
+        }
+      ],
+      "func": "exit_ok",
+      "name": "exit",
+      "nr": 60,
+      "site": "0x40105b"
+    }
+  ],
+  "tail_calls": [],
+  "tier": "T1"
+}

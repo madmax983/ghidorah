@@ -1,0 +1,46 @@
+{"id":"dev-01","intent":"open the ELF file in the samples folder and analyze it","expect":["binary_load"]}
+{"id":"dev-02","intent":"start working on a new executable from disk","expect":["binary_load"]}
+{"id":"dev-03","intent":"give me an overview of the binary: protections, imports and strings","expect":["binary_survey"]}
+{"id":"dev-04","intent":"what kind of program is this and what does it link against","expect":["binary_survey"]}
+{"id":"dev-05","intent":"continue the analysis that stopped on its budget","expect":["analysis_run"]}
+{"id":"dev-06","intent":"run the full analysis again with more steps","expect":["analysis_run"]}
+{"id":"dev-07","intent":"list all functions sorted by priority","expect":["func_list"]}
+{"id":"dev-08","intent":"show the biggest functions in the program","expect":["func_list"]}
+{"id":"dev-09","intent":"disassemble main","expect":["func_get"]}
+{"id":"dev-10","intent":"show the decompiled C code of the function at 0x401136","expect":["func_get"]}
+{"id":"dev-11","intent":"who calls puts","expect":["xref_list"]}
+{"id":"dev-12","intent":"find every place that reads this global variable","expect":["xref_list"]}
+{"id":"dev-13","intent":"find strings that contain password","expect":["search"]}
+{"id":"dev-14","intent":"look for the byte pattern 48 8b ?? 4?","expect":["search"]}
+{"id":"dev-15","intent":"dump 64 bytes of memory at 0x404010","expect":["mem_read"]}
+{"id":"dev-16","intent":"read the bytes at this address as a C string","expect":["mem_read"]}
+{"id":"dev-17","intent":"what is at address 0x401200","expect":["addr_info"]}
+{"id":"dev-18","intent":"which function and section hold this address","expect":["addr_info"]}
+{"id":"dev-19","intent":"convert 0x7fffffff to decimal and signed form","expect":["calc"]}
+{"id":"dev-20","intent":"compute the file offset of virtual address 0x401000","expect":["calc"]}
+{"id":"dev-21","intent":"prove that main calls connect","expect":["fact_check"]}
+{"id":"dev-22","intent":"explain why this function is marked noreturn","expect":["fact_check"]}
+{"id":"dev-23","intent":"show the layout of struct sockaddr_in","expect":["type_get"]}
+{"id":"dev-24","intent":"what are the field offsets of this C struct","expect":["type_get"]}
+{"id":"dev-25","intent":"what did I change since revision 12","expect":["history_list"]}
+{"id":"dev-26","intent":"show the edits of the last session","expect":["history_list"]}
+{"id":"dev-27","intent":"I lost my context, what was I doing on this binary","expect":["session_brief"]}
+{"id":"dev-28","intent":"brief me on the open todos and findings","expect":["session_brief"]}
+{"id":"dev-29","intent":"which tool can show cross references","expect":["tool_search"]}
+{"id":"dev-30","intent":"help me find the right command to rename a variable","expect":["tool_search"]}
+{"id":"dev-31","intent":"rename FUN_00401136 to parse_header","expect":["symbol_rename"]}
+{"id":"dev-32","intent":"give this function a better name","expect":["symbol_rename"]}
+{"id":"dev-33","intent":"add a comment at this instruction","expect":["comment_set"]}
+{"id":"dev-34","intent":"put a note on the line that compares the input","expect":["comment_set"]}
+{"id":"dev-35","intent":"record a finding: the key is 0x5a","expect":["note_write"]}
+{"id":"dev-36","intent":"add a todo to look at the network code later","expect":["note_write"]}
+{"id":"dev-37","intent":"create a function at the unowned code at 0x11d0","expect":["func_edit"]}
+{"id":"dev-38","intent":"mark this wrapper as noreturn","expect":["func_edit"]}
+{"id":"dev-39","intent":"apply the prototype int check(const char *s) to this function","expect":["type_edit"]}
+{"id":"dev-40","intent":"set the type of this variable to struct sockaddr_in *","expect":["type_edit"]}
+{"id":"dev-41","intent":"undo my last rename","expect":["history_undo"]}
+{"id":"dev-42","intent":"revert the last three edits","expect":["history_undo"]}
+{"id":"dev-43","intent":"run several dependent steps in one call","expect":["batch_run"]}
+{"id":"dev-44","intent":"look up every import and then list its callers in one request","expect":["batch_run"]}
+{"id":"dev-45","intent":"find functions that look like this one","expect":["func_similar"]}
+{"id":"dev-46","intent":"match the functions of the stripped build to the build with symbols","expect":["func_similar"]}

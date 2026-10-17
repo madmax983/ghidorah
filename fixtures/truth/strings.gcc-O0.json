@@ -1,0 +1,234 @@
+{
+  "binaries": [
+    {
+      "name": "strings.gcc-O0",
+      "sha256": "ca05eaa35b6923b58ce9e27b2a940fad5f36173979333b6a61f06aee0f11788e",
+      "variant": "none"
+    },
+    {
+      "name": "strings.gcc-O0.stripped",
+      "sha256": "edced48d550bfb0aefcf064bdc33ffbf4307fbf05ddf3a68e67a3ad91813701b",
+      "variant": "stripped"
+    }
+  ],
+  "build": {
+    "cflags": ["-O0"],
+    "compiler": "gcc 13.3.0",
+    "id": "gcc-O0",
+    "ldflags": []
+  },
+  "call_edges": [
+    ["__do_global_dtors_aux","__cxa_finalize"],
+    ["__do_global_dtors_aux","deregister_tm_clones"],
+    ["_start","__libc_start_main"],
+    ["find_keyword","strstr"],
+    ["frame_dummy","register_tm_clones"],
+    ["main","find_keyword"],
+    ["main","printf"],
+    ["main","show_banner"],
+    ["main","wide_length"],
+    ["show_banner","puts"]
+  ],
+  "cold_parts": [],
+  "duplicate_names": {},
+  "elf": {
+    "entry": "0x10a0",
+    "image_base": "0x0",
+    "interp": true,
+    "type": "DYN"
+  },
+  "facts": {
+    "claims": [
+      {
+        "args": ["main","show_banner"],
+        "rel": "calls"
+      },
+      {
+        "args": ["show_banner","puts"],
+        "rel": "calls"
+      },
+      {
+        "args": ["find_keyword","strstr"],
+        "rel": "calls"
+      }
+    ]
+  },
+  "fixture": "strings.gcc-O0",
+  "function_count": 11,
+  "functions": [
+    {
+      "addr": "0x1000",
+      "insns": 8,
+      "name": "_init",
+      "size": 0
+    },
+    {
+      "addr": "0x10a0",
+      "insns": 13,
+      "name": "_start",
+      "size": 38
+    },
+    {
+      "addr": "0x10d0",
+      "insns": 11,
+      "name": "deregister_tm_clones",
+      "size": 0
+    },
+    {
+      "addr": "0x1100",
+      "insns": 16,
+      "name": "register_tm_clones",
+      "size": 0
+    },
+    {
+      "addr": "0x1140",
+      "insns": 16,
+      "name": "__do_global_dtors_aux",
+      "size": 0
+    },
+    {
+      "addr": "0x1180",
+      "insns": 2,
+      "name": "frame_dummy",
+      "size": 0
+    },
+    {
+      "addr": "0x1189",
+      "insns": 17,
+      "name": "wide_length",
+      "size": 56
+    },
+    {
+      "addr": "0x11c1",
+      "insns": 12,
+      "name": "show_banner",
+      "size": 41
+    },
+    {
+      "addr": "0x11ea",
+      "insns": 15,
+      "name": "find_keyword",
+      "size": 49
+    },
+    {
+      "addr": "0x121b",
+      "insns": 30,
+      "name": "main",
+      "size": 109
+    },
+    {
+      "addr": "0x1288",
+      "insns": 4,
+      "name": "_fini",
+      "size": 0
+    }
+  ],
+  "gaps": [],
+  "generator": {
+    "name": "xtask-fixtures",
+    "version": "1"
+  },
+  "imports": ["__cxa_finalize","__libc_start_main","printf","puts","strstr"],
+  "jump_tables": [],
+  "leaf_functions": [],
+  "libraries": ["libc.so.6"],
+  "network_imports": [],
+  "program": "strings",
+  "protections": {
+    "build_id": "e1c0eefce2df867cf12d0ad9a0d01334d1a5ae30",
+    "canary": false,
+    "fortify": false,
+    "ibt": true,
+    "nx": true,
+    "pie": true,
+    "relro": "full",
+    "rpath": false,
+    "runpath": false,
+    "shstk": true
+  },
+  "self_calls": [],
+  "strings": [
+    {
+      "addr": "0x206e",
+      "encoding": "bytes",
+      "hex": "57656c636f6d6520746f2074686520737472696e672066697874757265",
+      "len": 29,
+      "text": "Welcome to the string fixture"
+    },
+    {
+      "addr": "0x208c",
+      "encoding": "bytes",
+      "hex": "436166c3a9206e61c3af76652072c3a973756dc3a9",
+      "len": 21,
+      "text": "Café naïve résumé"
+    },
+    {
+      "addr": "0x2020",
+      "encoding": "bytes",
+      "hex": "756e7573656420636f6e66696775726174696f6e2062616e6e6572",
+      "len": 27,
+      "text": "unused configuration banner"
+    },
+    {
+      "addr": "0x20a2",
+      "encoding": "bytes",
+      "hex": "70617373776f7264",
+      "len": 8,
+      "text": "password"
+    },
+    {
+      "addr": "0x20ab",
+      "encoding": "bytes",
+      "hex": "6e6f207365637265742068657265",
+      "len": 14,
+      "text": "no secret here"
+    },
+    {
+      "addr": "0x2040",
+      "encoding": "utf16le",
+      "hex": "57006900640065002000680065006c006c006f002000660072006f006d0020005500540046002d0031003600",
+      "len": 44,
+      "text": "Wide hello from UTF-16"
+    }
+  ],
+  "survey_facts": [
+    {
+      "kind": "import",
+      "value": "strstr"
+    },
+    {
+      "kind": "library",
+      "value": "libc.so.6"
+    },
+    {
+      "kind": "protection",
+      "value": "ibt"
+    },
+    {
+      "kind": "protection",
+      "value": "nx"
+    },
+    {
+      "kind": "protection",
+      "value": "pie"
+    },
+    {
+      "kind": "protection",
+      "value": "shstk"
+    },
+    {
+      "kind": "string",
+      "value": "Welcome to the string fixture"
+    },
+    {
+      "kind": "string",
+      "value": "password"
+    }
+  ],
+  "syscall_names": [],
+  "syscalls": [],
+  "tail_calls": [
+    ["frame_dummy","register_tm_clones"]
+  ],
+  "tier": "T1"
+}

@@ -1,0 +1,253 @@
+{
+  "binaries": [
+    {
+      "name": "socket_client.gcc-O2",
+      "sha256": "f2004baed91647db2c38b99cfb5e0578dfb2bc2f43f742d4902a526562755563",
+      "variant": "none"
+    },
+    {
+      "name": "socket_client.gcc-O2.noshdr",
+      "sha256": "d6caf92614e4794fed43e74b1ea5c8186ec91b47d75e64b1ef67c8bae00b8496",
+      "variant": "noshdr"
+    },
+    {
+      "name": "socket_client.gcc-O2.stripped",
+      "sha256": "7d9121f9037854c6a26099595b2ad462e03427f91be790fc477da942a1d2597f",
+      "variant": "stripped"
+    }
+  ],
+  "build": {
+    "cflags": ["-O2"],
+    "compiler": "gcc 13.3.0",
+    "id": "gcc-O2",
+    "ldflags": []
+  },
+  "call_edges": [
+    ["__do_global_dtors_aux","__cxa_finalize"],
+    ["__do_global_dtors_aux","deregister_tm_clones"],
+    ["_start","__libc_start_main"],
+    ["connect_to","__stack_chk_fail"],
+    ["connect_to","close"],
+    ["connect_to","connect"],
+    ["connect_to","inet_pton"],
+    ["connect_to","socket"],
+    ["frame_dummy","register_tm_clones"],
+    ["main","close"],
+    ["main","connect_to"],
+    ["main","puts"],
+    ["main","send_hello"],
+    ["send_hello","__stack_chk_fail"],
+    ["send_hello","puts"],
+    ["send_hello","recv"],
+    ["send_hello","send"]
+  ],
+  "cold_parts": [],
+  "duplicate_names": {},
+  "elf": {
+    "entry": "0x1190",
+    "image_base": "0x0",
+    "interp": true,
+    "type": "DYN"
+  },
+  "facts": {
+    "claims": [
+      {
+        "args": ["connect_to","socket"],
+        "rel": "calls"
+      },
+      {
+        "args": ["connect_to","connect"],
+        "rel": "calls"
+      },
+      {
+        "args": ["main","connect_to"],
+        "rel": "calls"
+      },
+      {
+        "args": ["send_hello","send"],
+        "rel": "calls"
+      }
+    ],
+    "constants": {
+      "port": "8080"
+    }
+  },
+  "fixture": "socket_client.gcc-O2",
+  "function_count": 10,
+  "functions": [
+    {
+      "addr": "0x1000",
+      "insns": 8,
+      "name": "_init",
+      "size": 0
+    },
+    {
+      "addr": "0x1140",
+      "insns": 20,
+      "name": "main",
+      "size": 65
+    },
+    {
+      "addr": "0x1190",
+      "insns": 13,
+      "name": "_start",
+      "size": 38
+    },
+    {
+      "addr": "0x11c0",
+      "insns": 11,
+      "name": "deregister_tm_clones",
+      "size": 0
+    },
+    {
+      "addr": "0x11f0",
+      "insns": 16,
+      "name": "register_tm_clones",
+      "size": 0
+    },
+    {
+      "addr": "0x1230",
+      "insns": 16,
+      "name": "__do_global_dtors_aux",
+      "size": 0
+    },
+    {
+      "addr": "0x1270",
+      "insns": 3,
+      "name": "frame_dummy",
+      "size": 0
+    },
+    {
+      "addr": "0x1280",
+      "insns": 54,
+      "name": "connect_to",
+      "size": 195
+    },
+    {
+      "addr": "0x1350",
+      "insns": 35,
+      "name": "send_hello",
+      "size": 124
+    },
+    {
+      "addr": "0x13cc",
+      "insns": 4,
+      "name": "_fini",
+      "size": 0
+    }
+  ],
+  "gaps": [],
+  "generator": {
+    "name": "xtask-fixtures",
+    "version": "1"
+  },
+  "imports": [
+    "__cxa_finalize",
+    "__libc_start_main",
+    "__stack_chk_fail",
+    "close",
+    "connect",
+    "inet_pton",
+    "puts",
+    "recv",
+    "send",
+    "socket"
+  ],
+  "jump_tables": [],
+  "leaf_functions": [],
+  "libraries": ["libc.so.6"],
+  "network_imports": ["connect","inet_pton","recv","send","socket"],
+  "program": "socket_client",
+  "protections": {
+    "build_id": "48cda25806508e5a7aa16b922121bb6dfd5c2c54",
+    "canary": true,
+    "fortify": false,
+    "ibt": true,
+    "nx": true,
+    "pie": true,
+    "relro": "full",
+    "rpath": false,
+    "runpath": false,
+    "shstk": true
+  },
+  "self_calls": [],
+  "strings": [
+    {
+      "addr": "0x2004",
+      "encoding": "bytes",
+      "hex": "3132372e302e302e31",
+      "len": 9,
+      "text": "127.0.0.1"
+    },
+    {
+      "addr": "0x2020",
+      "encoding": "bytes",
+      "hex": "48454c4c4f20676869646f7261680d0a",
+      "len": 16,
+      "text": "HELLO ghidorah\r\n"
+    },
+    {
+      "addr": "0x200e",
+      "encoding": "bytes",
+      "hex": "636f6e6e656374206661696c6564",
+      "len": 14,
+      "text": "connect failed"
+    }
+  ],
+  "survey_facts": [
+    {
+      "kind": "import",
+      "value": "connect"
+    },
+    {
+      "kind": "import",
+      "value": "inet_pton"
+    },
+    {
+      "kind": "import",
+      "value": "recv"
+    },
+    {
+      "kind": "import",
+      "value": "send"
+    },
+    {
+      "kind": "import",
+      "value": "socket"
+    },
+    {
+      "kind": "library",
+      "value": "libc.so.6"
+    },
+    {
+      "kind": "protection",
+      "value": "canary"
+    },
+    {
+      "kind": "protection",
+      "value": "ibt"
+    },
+    {
+      "kind": "protection",
+      "value": "nx"
+    },
+    {
+      "kind": "protection",
+      "value": "pie"
+    },
+    {
+      "kind": "protection",
+      "value": "shstk"
+    },
+    {
+      "kind": "string",
+      "value": "127.0.0.1"
+    }
+  ],
+  "syscall_names": [],
+  "syscalls": [],
+  "tail_calls": [
+    ["frame_dummy","register_tm_clones"]
+  ],
+  "tier": "T1"
+}

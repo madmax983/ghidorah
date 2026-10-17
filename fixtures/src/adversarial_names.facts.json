@@ -1,0 +1,47 @@
+{
+  "claims": [
+    {
+      "args": [
+        "main",
+        "FUN_00401000"
+      ],
+      "rel": "calls"
+    },
+    {
+      "args": [
+        "main",
+        "foo.cold"
+      ],
+      "rel": "calls"
+    },
+    {
+      "args": [
+        "main",
+        ".fini"
+      ],
+      "rel": "calls"
+    }
+  ],
+  "program": "adversarial_names",
+  "runs": [
+    {
+      "args": [],
+      "exit": 0,
+      "stdout": "187\n"
+    }
+  ],
+  "survey_facts": [
+    {
+      "kind": "function",
+      "value": "FUN_00401000"
+    },
+    {
+      "kind": "function",
+      "value": "x@plt"
+    },
+    {
+      "kind": "function",
+      "value": "foo.cold"
+    }
+  ]
+}

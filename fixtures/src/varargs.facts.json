@@ -1,0 +1,110 @@
+{
+  "claims": [
+    {
+      "args": [
+        "main",
+        "sum_va"
+      ],
+      "rel": "calls"
+    },
+    {
+      "args": [
+        "main",
+        "p8"
+      ],
+      "rel": "calls"
+    },
+    {
+      "args": [
+        "main",
+        "log_msg"
+      ],
+      "rel": "calls"
+    }
+  ],
+  "program": "varargs",
+  "prototypes": [
+    {
+      "name": "p0",
+      "params": 0,
+      "varargs": false
+    },
+    {
+      "name": "p1",
+      "params": 1,
+      "varargs": false
+    },
+    {
+      "name": "p2",
+      "params": 2,
+      "varargs": false
+    },
+    {
+      "name": "p3",
+      "params": 3,
+      "varargs": false
+    },
+    {
+      "name": "p4",
+      "params": 4,
+      "varargs": false
+    },
+    {
+      "name": "p5",
+      "params": 5,
+      "varargs": false
+    },
+    {
+      "name": "p6",
+      "params": 6,
+      "varargs": false
+    },
+    {
+      "name": "p7",
+      "params": 7,
+      "varargs": false
+    },
+    {
+      "name": "p8",
+      "params": 8,
+      "varargs": false
+    },
+    {
+      "name": "narrow",
+      "params": 3,
+      "varargs": false
+    },
+    {
+      "name": "scale",
+      "params": 2,
+      "varargs": false
+    },
+    {
+      "name": "sum_va",
+      "params": 1,
+      "varargs": true
+    },
+    {
+      "name": "log_msg",
+      "params": 1,
+      "varargs": true
+    }
+  ],
+  "runs": [
+    {
+      "args": [],
+      "exit": 0,
+      "stdout": "751 1.500000\n"
+    }
+  ],
+  "survey_facts": [
+    {
+      "kind": "function",
+      "value": "sum_va"
+    },
+    {
+      "kind": "function",
+      "value": "log_msg"
+    }
+  ]
+}
