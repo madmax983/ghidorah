@@ -10,8 +10,10 @@
 
 use core::fmt;
 
+mod leb;
+
 #[cfg(not(verus_only))]
-use ghidorah_spec::{verus_spec, verus_verify};
+use ghidorah_spec::{proof, verus_spec, verus_verify};
 #[cfg(verus_only)]
 use vstd::prelude::*;
 
@@ -53,7 +55,7 @@ impl std::error::Error for ReadError {}
 ///
 /// The position is always in the buffer. A failed read keeps the position.
 #[verus_verify]
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Reader<'a> {
     buf: &'a [u8],
     pos: usize,
@@ -103,77 +105,50 @@ impl<'a> Reader<'a> {
     }
 }
 
+/// Joins two bytes in the byte order `e`. The byte `x` comes first in memory.
+pub open spec fn join16(e: Endian, x: u8, y: u8) -> u16 {
+    if e == Endian::Little {
+        (x as u16) | ((y as u16) << 8u16)
+    } else {
+        ((x as u16) << 8u16) | (y as u16)
+    }
+}
+
+/// Joins two `u16` halves in the byte order `e`. The half `x` comes first in memory.
+pub open spec fn join32(e: Endian, x: u16, y: u16) -> u32 {
+    if e == Endian::Little {
+        (x as u32) | ((y as u32) << 16u32)
+    } else {
+        ((x as u32) << 16u32) | (y as u32)
+    }
+}
+
+/// Joins two `u32` halves in the byte order `e`. The half `x` comes first in memory.
+pub open spec fn join64(e: Endian, x: u32, y: u32) -> u64 {
+    if e == Endian::Little {
+        (x as u64) | ((y as u64) << 32u64)
+    } else {
+        ((x as u64) << 32u64) | (y as u64)
+    }
+}
+
 /// The value of the two bytes `s[0..2]` in the byte order `e`.
 pub open spec fn spec_u16(e: Endian, s: Seq<u8>) -> u16 {
-    if e == Endian::Little {
-        (s[0] as u16) | ((s[1] as u16) << 8u16)
-    } else {
-        ((s[0] as u16) << 8u16) | (s[1] as u16)
-    }
+    join16(e, s[0], s[1])
 }
 
 /// The value of the four bytes `s[0..4]` in the byte order `e`.
 pub open spec fn spec_u32(e: Endian, s: Seq<u8>) -> u32 {
-    let a = spec_u16(e, s.subrange(0, 2)) as u32;
-    let b = spec_u16(e, s.subrange(2, 4)) as u32;
-    if e == Endian::Little {
-        a | (b << 16u32)
-    } else {
-        (a << 16u32) | b
-    }
+    join32(e, join16(e, s[0], s[1]), join16(e, s[2], s[3]))
 }
 
 /// The value of the eight bytes `s[0..8]` in the byte order `e`.
 pub open spec fn spec_u64(e: Endian, s: Seq<u8>) -> u64 {
-    let a = spec_u32(e, s.subrange(0, 4)) as u64;
-    let b = spec_u32(e, s.subrange(4, 8)) as u64;
-    if e == Endian::Little {
-        a | (b << 32u64)
-    } else {
-        (a << 32u64) | b
-    }
-}
-
-/// The bits of the first `n` LEB128 bytes of `s`, without sign extension.
-pub open spec fn spec_leb_bits(s: Seq<u8>, n: nat) -> u64
-    decreases n,
-{
-    if n == 0 || n > 10 {
-        0
-    } else {
-        let k = (n - 1) as nat;
-        spec_leb_bits(s, k) | (((s[k as int] & 0x7f) as u64) << ((7 * k) as u64))
-    }
-}
-
-/// The first `n` bytes of `s` have the LEB128 form.
-///
-/// Each byte before the last has the continuation bit. The last byte does not.
-pub open spec fn leb_form(s: Seq<u8>, n: int) -> bool {
-    &&& 1 <= n <= 10
-    &&& n <= s.len()
-    &&& forall|k: int| 0 <= k < n - 1 ==> s[k] >= 0x80
-    &&& s[n - 1] < 0x80
-}
-
-/// The first `n` bytes of `s` are a valid unsigned LEB128 value of 64 bits.
-pub open spec fn uleb_valid(s: Seq<u8>, n: int) -> bool {
-    leb_form(s, n) && (n == 10 ==> s[9] <= 1)
-}
-
-/// The first `n` bytes of `s` are a valid signed LEB128 value of 64 bits.
-pub open spec fn sleb_valid(s: Seq<u8>, n: int) -> bool {
-    leb_form(s, n) && (n == 10 ==> (s[9] == 0 || s[9] == 0x7f))
-}
-
-/// The signed value of the first `n` LEB128 bytes of `s`.
-pub open spec fn spec_sleb(s: Seq<u8>, n: nat) -> i64 {
-    let bits = spec_leb_bits(s, n);
-    if 1 <= n < 10 && (s[n - 1] & 0x40) != 0 {
-        (bits | (0xffff_ffff_ffff_ffffu64 << ((7 * n) as u64))) as i64
-    } else {
-        bits as i64
-    }
+    join64(
+        e,
+        join32(e, join16(e, s[0], s[1]), join16(e, s[2], s[3])),
+        join32(e, join16(e, s[4], s[5]), join16(e, s[6], s[7])),
+    )
 }
 
 } // verus!
@@ -204,7 +179,7 @@ impl<'a> Reader<'a> {
             r as int == self.at(),
     )]
     pub fn pos(&self) -> usize {
-        0
+        self.pos
     }
 
     /// Gives the count of bytes after the position.
@@ -215,8 +190,9 @@ impl<'a> Reader<'a> {
         ensures
             r as int == self.left(),
     )]
+    #[expect(clippy::arithmetic_side_effects, reason = "bound proved by Verus")]
     pub fn remaining(&self) -> usize {
-        0
+        self.buf.len() - self.pos
     }
 
     /// Gives the byte order of the multi-byte reads.
@@ -226,7 +202,7 @@ impl<'a> Reader<'a> {
             r == self.order(),
     )]
     pub fn endian(&self) -> Endian {
-        Endian::Big
+        self.endian
     }
 
     /// Gives the bytes after the position. The position does not move.
@@ -237,8 +213,9 @@ impl<'a> Reader<'a> {
         ensures
             r@ == self.tail(),
     )]
+    #[expect(clippy::indexing_slicing, reason = "bound proved by Verus")]
     pub fn rest(&self) -> &'a [u8] {
-        &[]
+        &self.buf[self.pos..]
     }
 
     /// Reads one byte.
@@ -257,8 +234,15 @@ impl<'a> Reader<'a> {
                     && final(self).moved(old(self), 0),
             },
     )]
+    #[expect(clippy::indexing_slicing, reason = "bound proved by Verus")]
+    #[expect(clippy::arithmetic_side_effects, reason = "bound proved by Verus")]
     pub fn u8(&mut self) -> Result<u8, ReadError> {
-        Err(ReadError::Eof)
+        if self.pos >= self.buf.len() {
+            return Err(ReadError::Eof);
+        }
+        let v = self.buf[self.pos];
+        self.pos += 1;
+        Ok(v)
     }
 
     /// Reads a `u16` in the byte order of the reader.
@@ -278,8 +262,10 @@ impl<'a> Reader<'a> {
                     && final(self).moved(old(self), 0),
             },
     )]
+    #[expect(clippy::indexing_slicing, reason = "bound proved by Verus")]
     pub fn u16(&mut self) -> Result<u16, ReadError> {
-        Err(ReadError::Eof)
+        let s = self.take(2)?;
+        Ok(join_u16(self.endian, s[0], s[1]))
     }
 
     /// Reads a `u32` in the byte order of the reader.
@@ -299,8 +285,15 @@ impl<'a> Reader<'a> {
                     && final(self).moved(old(self), 0),
             },
     )]
+    #[expect(clippy::indexing_slicing, reason = "bound proved by Verus")]
     pub fn u32(&mut self) -> Result<u32, ReadError> {
-        Err(ReadError::Eof)
+        let s = self.take(4)?;
+        let e = self.endian;
+        Ok(join_u32(
+            e,
+            join_u16(e, s[0], s[1]),
+            join_u16(e, s[2], s[3]),
+        ))
     }
 
     /// Reads a `u64` in the byte order of the reader.
@@ -320,62 +313,13 @@ impl<'a> Reader<'a> {
                     && final(self).moved(old(self), 0),
             },
     )]
+    #[expect(clippy::indexing_slicing, reason = "bound proved by Verus")]
     pub fn u64(&mut self) -> Result<u64, ReadError> {
-        Err(ReadError::Eof)
-    }
-
-    /// Reads an unsigned LEB128 value of at most 64 bits.
-    ///
-    /// The value has at most 10 bytes. The 10th byte can only be 0 or 1.
-    ///
-    /// # Errors
-    ///
-    /// Gives [`ReadError::Eof`] when the data ends in the value.
-    /// Gives [`ReadError::BadLeb`] for a bad 10th byte.
-    #[verus_spec(r =>
-        requires
-            old(self).wf(),
-        ensures
-            match r {
-                Ok(v) => {
-                    let n = final(self).at() - old(self).at();
-                    &&& uleb_valid(old(self).tail(), n)
-                    &&& v == spec_leb_bits(old(self).tail(), n as nat)
-                    &&& final(self).moved(old(self), n)
-                },
-                Err(e) => (e == ReadError::Eof || e == ReadError::BadLeb)
-                    && final(self).moved(old(self), 0),
-            },
-    )]
-    pub fn uleb128(&mut self) -> Result<u64, ReadError> {
-        Err(ReadError::Eof)
-    }
-
-    /// Reads a signed LEB128 value of at most 64 bits.
-    ///
-    /// The value has at most 10 bytes. The 10th byte can only be `0x00` or `0x7f`.
-    ///
-    /// # Errors
-    ///
-    /// Gives [`ReadError::Eof`] when the data ends in the value.
-    /// Gives [`ReadError::BadLeb`] for a bad 10th byte.
-    #[verus_spec(r =>
-        requires
-            old(self).wf(),
-        ensures
-            match r {
-                Ok(v) => {
-                    let n = final(self).at() - old(self).at();
-                    &&& sleb_valid(old(self).tail(), n)
-                    &&& v == spec_sleb(old(self).tail(), n as nat)
-                    &&& final(self).moved(old(self), n)
-                },
-                Err(e) => (e == ReadError::Eof || e == ReadError::BadLeb)
-                    && final(self).moved(old(self), 0),
-            },
-    )]
-    pub fn sleb128(&mut self) -> Result<i64, ReadError> {
-        Err(ReadError::Eof)
+        let s = self.take(8)?;
+        let e = self.endian;
+        let low = join_u32(e, join_u16(e, s[0], s[1]), join_u16(e, s[2], s[3]));
+        let high = join_u32(e, join_u16(e, s[4], s[5]), join_u16(e, s[6], s[7]));
+        Ok(join_u64(e, low, high))
     }
 
     /// Reads a C string of at most `max_len` bytes and its NUL byte.
@@ -396,7 +340,7 @@ impl<'a> Reader<'a> {
                     &&& s@ == old(self).tail().subrange(0, s@.len() as int)
                     &&& old(self).tail()[s@.len() as int] == 0
                     &&& forall|k: int| 0 <= k < s@.len() ==> s@[k] != 0
-                    &&& final(self).moved(old(self), s@.len() + 1)
+                    &&& final(self).moved(old(self), s@.len() as int + 1)
                 },
                 Err(e) => {
                     &&& e == ReadError::NoNul
@@ -406,7 +350,34 @@ impl<'a> Reader<'a> {
                 },
             },
     )]
+    #[expect(clippy::indexing_slicing, reason = "bound proved by Verus")]
+    #[expect(clippy::arithmetic_side_effects, reason = "bound proved by Verus")]
     pub fn cstr(&mut self, max_len: usize) -> Result<&'a [u8], ReadError> {
+        let start = self.pos;
+        let left = self.buf.len() - start;
+        let mut i: usize = 0;
+        #[cfg_attr(verus_only, verus_spec(
+            invariant
+                self.moved(old(self), 0),
+                start as int == old(self).at(),
+                start as int + left as int == self.data().len(),
+                self.data().len() <= usize::MAX,
+                i <= left,
+                i <= max_len + 1,
+                forall|k: int| 0 <= k < i ==> old(self).tail()[k] != 0,
+            decreases left - i,
+        ))]
+        while i < left && i <= max_len {
+            if self.buf[start + i] == 0 {
+                let s = &self.buf[start..start + i];
+                self.pos = start + i + 1;
+                return Ok(s);
+            }
+            proof! {
+                assert(old(self).tail()[i as int] == self.buf@[start + i]);
+            }
+            i += 1;
+        }
         Err(ReadError::NoNul)
     }
 
@@ -427,8 +398,16 @@ impl<'a> Reader<'a> {
                     && final(self).moved(old(self), 0),
             },
     )]
+    #[expect(clippy::indexing_slicing, reason = "bound proved by Verus")]
+    #[expect(clippy::arithmetic_side_effects, reason = "bound proved by Verus")]
     pub fn take(&mut self, n: usize) -> Result<&'a [u8], ReadError> {
-        Err(ReadError::Eof)
+        if n > self.buf.len() - self.pos {
+            return Err(ReadError::Eof);
+        }
+        let start = self.pos;
+        let s = &self.buf[start..start + n];
+        self.pos = start + n;
+        Ok(s)
     }
 
     /// Moves the position `n` bytes further on.
@@ -446,8 +425,13 @@ impl<'a> Reader<'a> {
                     && final(self).moved(old(self), 0),
             },
     )]
+    #[expect(clippy::arithmetic_side_effects, reason = "bound proved by Verus")]
     pub fn skip(&mut self, n: usize) -> Result<(), ReadError> {
-        Err(ReadError::Eof)
+        if n > self.buf.len() - self.pos {
+            return Err(ReadError::Eof);
+        }
+        self.pos += n;
+        Ok(())
     }
 
     /// Moves the position to the offset `off` of the buffer.
@@ -467,6 +451,49 @@ impl<'a> Reader<'a> {
             },
     )]
     pub fn seek(&mut self, off: usize) -> Result<(), ReadError> {
-        Err(ReadError::Eof)
+        if off > self.buf.len() {
+            return Err(ReadError::Eof);
+        }
+        self.pos = off;
+        Ok(())
+    }
+}
+
+/// Joins two bytes in the byte order `e`. The byte `x` comes first in memory.
+#[verus_spec(r =>
+    ensures
+        r == join16(e, x, y),
+)]
+fn join_u16(e: Endian, x: u8, y: u8) -> u16 {
+    let (x, y) = (u16::from(x), u16::from(y));
+    match e {
+        Endian::Little => x | (y << 8),
+        Endian::Big => (x << 8) | y,
+    }
+}
+
+/// Joins two `u16` halves in the byte order `e`. The half `x` comes first in memory.
+#[verus_spec(r =>
+    ensures
+        r == join32(e, x, y),
+)]
+fn join_u32(e: Endian, x: u16, y: u16) -> u32 {
+    let (x, y) = (u32::from(x), u32::from(y));
+    match e {
+        Endian::Little => x | (y << 16),
+        Endian::Big => (x << 16) | y,
+    }
+}
+
+/// Joins two `u32` halves in the byte order `e`. The half `x` comes first in memory.
+#[verus_spec(r =>
+    ensures
+        r == join64(e, x, y),
+)]
+fn join_u64(e: Endian, x: u32, y: u32) -> u64 {
+    let (x, y) = (u64::from(x), u64::from(y));
+    match e {
+        Endian::Little => x | (y << 32),
+        Endian::Big => (x << 32) | y,
     }
 }

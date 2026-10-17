@@ -38,5 +38,6 @@ pub fn verus_verify(args: TokenStream, item: TokenStream) -> TokenStream {
 /// Verus reads the ghost code of the body. A plain build drops the body.
 #[proc_macro]
 pub fn proof(body: TokenStream) -> TokenStream {
-    body
+    drop(body);
+    TokenStream::new()
 }

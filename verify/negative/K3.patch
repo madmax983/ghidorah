@@ -1,0 +1,16 @@
+diff --git a/crates/kernel/src/rangeset.rs b/crates/kernel/src/rangeset.rs
+--- a/crates/kernel/src/rangeset.rs
++++ b/crates/kernel/src/rangeset.rs
+@@ -222,11 +222,7 @@
+             let head = list[lo];
+             let end = list[hi - 1];
+             Range {
+-                first: if range.first <= head.first {
+-                    range.first
+-                } else {
+-                    head.first
+-                },
++                first: range.first,
+                 last: if range.last >= end.last {
+                     range.last
+                 } else {

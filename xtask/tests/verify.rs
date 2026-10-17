@@ -1,5 +1,10 @@
 //! Tests of `xtask verify`: the tree hash, the negative patches, the Verus output and the run.
 
+#![allow(
+    clippy::expect_used,
+    reason = "test helpers fail the test with a message"
+)]
+
 use std::path::{Path, PathBuf};
 
 use xtask::json::{self, Value};
@@ -100,7 +105,11 @@ fn verify_tree_files_cover_the_sources() {
     assert!(paths.contains(&"crates/kernel/src/lib.rs"));
     assert!(paths.contains(&"crates/kernel/src/reader.rs"));
     assert!(paths.contains(&"crates/spec/src/lib.rs"));
-    assert!(paths.iter().all(|p| p.ends_with(".rs")));
+    assert!(
+        paths
+            .iter()
+            .all(|p| Path::new(p).extension().is_some_and(|x| x == "rs"))
+    );
     let mut sorted = paths.clone();
     sorted.sort_unstable();
     assert_eq!(paths, sorted, "the files come in path order");
@@ -211,6 +220,20 @@ fn verify_parses_verus_output() {
     assert_eq!(
         (counts.verified, counts.errors, counts.success),
         (3, 1, false)
+    );
+    let module_run =
+        r#"note: x {"verification-results":{"encountered-error":false,"verified":25,"errors":0}}"#;
+    let counts = verify::parse_counts(module_run).expect("the module report parses");
+    assert_eq!(
+        (counts.verified, counts.errors, counts.success),
+        (25, 0, true)
+    );
+    let failed_run =
+        r#"{"verification-results":{"encountered-error":true,"verified":24,"errors":1}}"#;
+    let counts = verify::parse_counts(failed_run).expect("the module report parses");
+    assert_eq!(
+        (counts.verified, counts.errors, counts.success),
+        (24, 1, false)
     );
     assert!(verify::parse_counts("").is_err());
     assert!(verify::parse_counts(r#"{"verus":{}}"#).is_err());

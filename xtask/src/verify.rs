@@ -14,6 +14,7 @@
 //! verified, errors, ok }] }`.
 
 pub mod patch;
+mod run;
 pub mod tree;
 
 use std::ffi::OsStr;
@@ -21,8 +22,8 @@ use std::path::{Path, PathBuf};
 
 pub use tree::{ARGV, RESULTS_PATH, tree_sha256};
 
-use crate::Error;
-use crate::json::Value;
+use crate::json::{self, Value};
+use crate::{Error, rustsrc};
 
 /// One kernel of design Section 13.1.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -37,13 +38,19 @@ impl Kernel {
     /// Gives the main source file of the kernel, relative to the workspace root.
     #[must_use]
     pub fn file(&self) -> String {
-        String::new()
+        format!("crates/kernel/src/{}.rs", self.module)
+    }
+
+    /// Gives the directory of the submodules of the kernel, relative to the workspace root.
+    #[must_use]
+    pub fn dir(&self) -> String {
+        format!("crates/kernel/src/{}", self.module)
     }
 
     /// Gives the negative patch of the kernel, relative to the workspace root.
     #[must_use]
     pub fn patch(&self) -> String {
-        String::new()
+        format!("verify/negative/{}.patch", self.name)
     }
 }
 
@@ -93,7 +100,15 @@ impl Settings {
     /// Reads `VERUS`, `PATH`, `VERUS_Z3_PATH` and `GHIDORAH_VERUS_OPTIONAL`.
     #[must_use]
     pub fn from_env() -> Self {
-        Self::default()
+        let non_empty = |name: &str| std::env::var_os(name).filter(|v| !v.is_empty());
+        let verus = non_empty("VERUS")
+            .map(PathBuf::from)
+            .or_else(|| find_on_path("verus", non_empty("PATH").as_deref()));
+        Self {
+            verus,
+            z3: non_empty("VERUS_Z3_PATH").map(PathBuf::from),
+            optional: std::env::var("GHIDORAH_VERUS_OPTIONAL").is_ok_and(|v| v == "1"),
+        }
     }
 }
 
@@ -119,30 +134,84 @@ pub struct Tools {
     pub z3: String,
 }
 
+/// The text of a missing tool version.
+const UNKNOWN: &str = "unknown";
+
+/// The message of a run without Verus.
+const NO_VERUS: &str = "no Verus binary: set VERUS or put `verus` on PATH";
+
+/// Parses the JSON object of Verus output. Text before the first `{` does not count.
+fn verus_json(stdout: &str) -> Option<Value> {
+    let start = stdout.find('{')?;
+    json::parse(stdout.get(start..)?.trim()).ok()
+}
+
 /// Reads the counts from the JSON output of `verus --output-json`.
+///
+/// Without a `success` member, the run succeeds when it has no error.
 ///
 /// # Errors
 ///
 /// Gives [`Error::Data`] when the output has no `verification-results` object.
 pub fn parse_counts(stdout: &str) -> Result<Counts, Error> {
-    let _ = stdout;
-    Err(Error::data("verus", "no verification results"))
+    let value = verus_json(stdout).ok_or_else(|| Error::data("verus", "no JSON output"))?;
+    let results = value
+        .get("verification-results")
+        .filter(|v| v.as_object().is_some())
+        .ok_or_else(|| Error::data("verus", "no verification-results object"))?;
+    let number = |key: &str| results.get(key).and_then(Value::as_u64).unwrap_or(0);
+    let flag = |key: &str| results.get(key).and_then(Value::as_bool);
+    let errors = number("errors");
+    // A run with `--verify-module` has no `success` member. Then no error means success.
+    let success =
+        flag("success").unwrap_or_else(|| flag("encountered-error") == Some(false) && errors == 0);
+    Ok(Counts {
+        verified: number("verified"),
+        errors,
+        success,
+    })
 }
 
 /// Reads the Verus commit and toolchain from the JSON output of `verus --output-json`.
 ///
-/// A missing value gives `unknown`.
+/// `z3_version` is the output of `z3 --version`. A missing value gives `unknown`.
 #[must_use]
 pub fn parse_tools(stdout: &str, z3_version: &str) -> Tools {
-    let _ = (stdout, z3_version);
-    Tools::default()
+    let value = verus_json(stdout);
+    let field = |key: &str| {
+        value
+            .as_ref()
+            .and_then(|v| v.pointer(&format!("/verus/{key}")))
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+    };
+    let z3 = z3_version
+        .split_whitespace()
+        .skip_while(|w| *w != "version")
+        .nth(1)
+        .unwrap_or(UNKNOWN);
+    Tools {
+        verus_commit: field("commit")
+            .map_or(UNKNOWN, |c| c.get(..7).unwrap_or(c))
+            .to_owned(),
+        toolchain: field("toolchain")
+            .and_then(|t| t.split(['-', ' ']).next())
+            .unwrap_or(UNKNOWN)
+            .to_owned(),
+        z3: z3.to_owned(),
+    }
 }
 
 /// Gives the first verification error of [`VERIFY_ERRORS`] in the Verus error output.
 #[must_use]
 pub fn error_kind(stderr: &str) -> Option<&'static str> {
-    let _ = stderr;
-    None
+    stderr.lines().find_map(|line| {
+        let message = line.trim().strip_prefix("error: ")?;
+        VERIFY_ERRORS
+            .iter()
+            .copied()
+            .find(|kind| message.starts_with(kind))
+    })
 }
 
 /// Gives the count of `#[verus_spec(..)]` items in a source text. Comments do not count.
@@ -150,15 +219,16 @@ pub fn error_kind(stderr: &str) -> Option<&'static str> {
 /// The loop form `#[cfg_attr(verus_only, verus_spec(..))]` does not count.
 #[must_use]
 pub fn spec_items(text: &str) -> u64 {
-    let _ = text;
-    0
+    let count = rustsrc::strip(text).matches("#[verus_spec(").count();
+    u64::try_from(count).unwrap_or(u64::MAX)
 }
 
 /// Finds `name` in the directories of a `PATH` value.
 #[must_use]
 pub fn find_on_path(name: &str, path: Option<&OsStr>) -> Option<PathBuf> {
-    let _ = (name, path);
-    None
+    std::env::split_paths(path?)
+        .map(|dir| dir.join(name))
+        .find(|candidate| candidate.is_file())
 }
 
 /// Runs the command with the settings of the environment.
@@ -179,9 +249,19 @@ pub fn run(root: &Path, args: &[String]) -> Result<Value, Error> {
 ///
 /// # Errors
 ///
-/// Gives [`Error::Io`] for a failed file operation, [`Error::Command`] when Verus does not start,
-/// and [`Error::Data`] for a bad patch or bad Verus output.
+/// Gives [`Error::Io`] for a failed file operation and [`Error::Command`] when Verus does not start.
 pub fn run_with(root: &Path, settings: &Settings) -> Result<Value, Error> {
-    let _ = (root, settings);
-    Ok(Value::object([("ok", Value::from(false))]))
+    let Some(verus) = &settings.verus else {
+        let (ok, status, key) = if settings.optional {
+            (true, "skipped", "reason")
+        } else {
+            (false, "missing", "error")
+        };
+        return Ok(Value::object([
+            ("ok", Value::from(ok)),
+            ("status", Value::from(status)),
+            (key, Value::from(NO_VERUS)),
+        ]));
+    };
+    run::proofs(root, verus, settings.z3.as_deref())
 }

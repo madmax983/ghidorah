@@ -6,7 +6,7 @@
 //! Verus proves that no function overflows. It also proves the exact result of each function.
 
 #[cfg(not(verus_only))]
-use ghidorah_spec::{verus_spec, verus_verify};
+use ghidorah_spec::{proof, verus_spec, verus_verify};
 #[cfg(verus_only)]
 use vstd::prelude::*;
 
@@ -65,8 +65,13 @@ impl Range {
             None => len == 0 || start + len - 1 > u64::MAX,
         },
 )]
+#[expect(clippy::arithmetic_side_effects, reason = "bound proved by Verus")]
 pub fn range_last(start: u64, len: u64) -> Option<u64> {
-    None
+    if len == 0 || len - 1 > u64::MAX - start {
+        None
+    } else {
+        Some(start + (len - 1))
+    }
 }
 
 #[verus_verify]
@@ -83,7 +88,11 @@ impl Range {
             },
     )]
     pub fn new(first: u64, last: u64) -> Option<Self> {
-        None
+        if first <= last {
+            Some(Self { first, last })
+        } else {
+            None
+        }
     }
 
     /// Makes the range of `len` values from `start`.
@@ -98,7 +107,8 @@ impl Range {
             },
     )]
     pub fn with_len(start: u64, len: u64) -> Option<Self> {
-        None
+        let last = range_last(start, len)?;
+        Some(Self { first: start, last })
     }
 
     /// Makes the range that holds only `x`.
@@ -108,7 +118,7 @@ impl Range {
             r.first == x && r.last == x,
     )]
     pub fn single(x: u64) -> Self {
-        Self { first: 0, last: 0 }
+        Self { first: x, last: x }
     }
 
     /// Gives the count of values in the range. An empty range gives 0.
@@ -118,8 +128,13 @@ impl Range {
             self.wf() ==> r == self.last - self.first + 1,
             !self.wf() ==> r == 0,
     )]
+    #[expect(clippy::arithmetic_side_effects, reason = "bound proved by Verus")]
     pub fn len(&self) -> u128 {
-        0
+        if self.first <= self.last {
+            u128::from(self.last) - u128::from(self.first) + 1
+        } else {
+            0
+        }
     }
 
     /// Tells if the range holds no value, so `first > last`.
@@ -129,7 +144,7 @@ impl Range {
             r == !self.wf(),
     )]
     pub fn is_empty(&self) -> bool {
-        false
+        self.first > self.last
     }
 
     /// Tells if the range holds `x`.
@@ -139,7 +154,7 @@ impl Range {
             r == self.has(x as int),
     )]
     pub fn contains(&self, x: u64) -> bool {
-        false
+        self.first <= x && x <= self.last
     }
 
     /// Tells if the two ranges hold a common value.
@@ -149,7 +164,22 @@ impl Range {
             r == (exists|x: int| self.has(x) && other.has(x)),
     )]
     pub fn overlaps(&self, other: &Self) -> bool {
-        false
+        let lo = if self.first >= other.first {
+            self.first
+        } else {
+            other.first
+        };
+        let hi = if self.last <= other.last {
+            self.last
+        } else {
+            other.last
+        };
+        proof! {
+            if lo <= hi {
+                assert(self.has(lo as int) && other.has(lo as int));
+            }
+        }
+        lo <= hi
     }
 
     /// Gives the offset of `x` from `first`, or `None` when the range does not hold `x`.
@@ -161,8 +191,13 @@ impl Range {
                 None => !self.has(x as int),
             },
     )]
+    #[expect(clippy::arithmetic_side_effects, reason = "bound proved by Verus")]
     pub fn offset_in(&self, x: u64) -> Option<u64> {
-        None
+        if self.contains(x) {
+            Some(x - self.first)
+        } else {
+            None
+        }
     }
 }
 
@@ -180,6 +215,14 @@ impl Range {
                 || map.file_off + (va - map.va) > u64::MAX,
         },
 )]
+#[expect(clippy::arithmetic_side_effects, reason = "bound proved by Verus")]
 pub fn va_to_file(map: &Mapping, va: u64) -> Option<u64> {
-    None
+    if va < map.va {
+        return None;
+    }
+    let delta = va - map.va;
+    if delta >= map.file_size {
+        return None;
+    }
+    map.file_off.checked_add(delta)
 }

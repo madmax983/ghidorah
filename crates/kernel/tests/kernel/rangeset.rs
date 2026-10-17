@@ -152,11 +152,11 @@ fn gen_pair(g: &mut Gen) -> (u64, u64) {
 
 fn gen_op(g: &mut Gen) -> Op {
     match g.draw(10) {
-        0 | 1 | 2 => {
+        0..=2 => {
             let (a, b) = gen_pair(g);
             Op::Insert(a, b)
         }
-        3 | 4 => {
+        3..=4 => {
             let (a, b) = gen_pair(g);
             Op::Remove(a, b)
         }
@@ -290,4 +290,14 @@ fn ac_036_rangeset_model() {
         sut_apply,
         model_apply,
     );
+}
+
+#[test]
+fn k3_clone_is_equal() {
+    let a = set(&[(1, 2), (10, 20), (MAX, MAX)]);
+    let mut b = a.clone();
+    assert_eq!(a, b);
+    b.remove(r(1, 1));
+    assert_ne!(a, b, "the clone owns its ranges");
+    assert_eq!(pairs(&a), [(1, 2), (10, 20), (MAX, MAX)]);
 }

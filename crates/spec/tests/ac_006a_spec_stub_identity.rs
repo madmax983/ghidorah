@@ -50,9 +50,9 @@ const LIMIT: u32 = 7;
     ensures
         r == x * 2 + 1,
 )]
-fn odd(x: u32, ghost_steps: &Cell<u32>) -> u32 {
+fn odd(x: u32, _ghost_steps: &Cell<u32>) -> u32 {
     proof! {
-        ghost_steps.set(ghost_steps.get() + 1);
+        _ghost_steps.set(_ghost_steps.get() + 1);
     }
     x * 2 + 1
 }
@@ -62,11 +62,11 @@ fn plain_odd(x: u32) -> u32 {
 }
 
 #[verus_spec(r => ensures r <= LIMIT)]
-fn count_to_limit(ghost_steps: &Cell<u32>) -> u32 {
+fn count_to_limit(_ghost_steps: &Cell<u32>) -> u32 {
     let mut i = 0;
     #[cfg_attr(verus_only, verus_spec(invariant i <= LIMIT, decreases LIMIT - i))]
     while i < LIMIT {
-        proof! { ghost_steps.set(ghost_steps.get() + 1); }
+        proof! { _ghost_steps.set(_ghost_steps.get() + 1); }
         i += 1;
     }
     i

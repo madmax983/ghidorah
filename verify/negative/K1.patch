@@ -1,0 +1,12 @@
+diff --git a/crates/kernel/src/reader/leb.rs b/crates/kernel/src/reader/leb.rs
+--- a/crates/kernel/src/reader/leb.rs
++++ b/crates/kernel/src/reader/leb.rs
+@@ -107,7 +107,7 @@
+             proof! {
+                 assert(b == old(self).tail()[i as int]);
+             }
+-            if i == 9 && b > 1 {
++            if i == 9 && b > 3 {
+                 return Err(ReadError::BadLeb);
+             }
+             value |= u64::from(b & 0x7f) << (7 * i);

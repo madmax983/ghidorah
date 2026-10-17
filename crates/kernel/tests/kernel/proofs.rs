@@ -1,10 +1,15 @@
 //! AC-034 and AC-035: the proof record is fresh, and the kernel has no proof cheats.
 
-mod support;
+#![allow(
+    clippy::expect_used,
+    clippy::panic,
+    clippy::print_stderr,
+    reason = "test helpers fail the test with a message or print a stale-record warning"
+)]
 
-use support::json::Value;
-use support::rustsrc::strip;
-use support::{kernel_sources, proofs_required, results, root, tree};
+use crate::support::json::Value;
+use crate::support::rustsrc::strip;
+use crate::support::{kernel_sources, proofs_required, results, root, tree};
 
 /// Gives the text after the attribute that starts at byte `at`, or `None` without a closing `]`.
 fn after_attribute(code: &str, at: usize) -> Option<&str> {
@@ -133,7 +138,7 @@ fn ac_035b_cfg_placement() {
     for (path, text) in &sources {
         let code = strip(text);
         for (i, _) in code.match_indices("verus_only") {
-            let start = code.get(..i).and_then(|h| h.rfind("#")).unwrap_or(0);
+            let start = code.get(..i).and_then(|h| h.rfind('#')).unwrap_or(0);
             let attr = code.get(start..i).unwrap_or_default();
             let next = after_attribute(&code, start)
                 .unwrap_or_default()

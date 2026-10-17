@@ -3,7 +3,11 @@
 //! The tests use the xtask JSON parser, the xtask comment stripper and the xtask tree hash.
 //! `#[path]` includes them, so the tests and `xtask verify` use one definition.
 
-#![allow(dead_code, reason = "each test binary uses a part of the helpers")]
+#![allow(dead_code, reason = "the tests use a part of the included xtask files")]
+#![allow(
+    clippy::expect_used,
+    reason = "test helpers fail the test with a message"
+)]
 
 #[path = "../../../../xtask/src/json.rs"]
 pub mod json;
@@ -21,7 +25,12 @@ pub fn root() -> PathBuf {
 
 /// Gives each `.rs` file under `crates/kernel/src` as a pair of a relative path and its text.
 pub fn kernel_sources() -> Vec<(String, String)> {
-    Vec::new()
+    tree::tree_files(&root())
+        .expect("the kernel and spec sources are readable")
+        .into_iter()
+        .filter(|(path, _)| path.starts_with("crates/kernel/src/"))
+        .map(|(path, bytes)| (path, String::from_utf8(bytes).expect("the source is UTF-8")))
+        .collect()
 }
 
 /// Tells if the environment has `GHIDORAH_REQUIRE_PROOFS=1`.

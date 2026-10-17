@@ -1,0 +1,12 @@
+diff --git a/crates/kernel/src/budget.rs b/crates/kernel/src/budget.rs
+--- a/crates/kernel/src/budget.rs
++++ b/crates/kernel/src/budget.rs
+@@ -119,7 +119,7 @@
+             lemma_cost_step(sizes@, overhead, sep, k as int);
+         }
+         match next {
+-            Some(c) if c <= max => {
++            Some(c) if c < max => {
+                 cost = c;
+                 k += 1;
+             }

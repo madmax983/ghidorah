@@ -22,6 +22,51 @@ fn model_va_to_file(map: &Mapping, va: u64) -> Option<u64> {
     u64::try_from(u128::from(map.file_off) + (va - start)).ok()
 }
 
+/// The `va_to_file` rows of the boundary table: the zero-fill tail and offsets near `u64::MAX`.
+fn check_va_to_file_rows() {
+    // A mapping of 0x100 file bytes at 0x1000. The memory after 0x10ff is the zero-fill tail.
+    let map = Mapping {
+        va: 0x1000,
+        file_off: 0x200,
+        file_size: 0x100,
+    };
+    let va_rows: &[(u64, Option<u64>)] = &[
+        (0xfff, None),
+        (0x1000, Some(0x200)),
+        (0x10ff, Some(0x2ff)),
+        (0x1100, None),
+        (0x1fff, None),
+        (MAX, None),
+    ];
+    for &(va, want) in va_rows {
+        assert_eq!(va_to_file(&map, va), want, "va_to_file({va:#x})");
+    }
+    let empty_map = Mapping {
+        va: 0x1000,
+        file_off: 0,
+        file_size: 0,
+    };
+    assert_eq!(va_to_file(&empty_map, 0x1000), None);
+    let top = Mapping {
+        va: MAX - 1,
+        file_off: MAX - 1,
+        file_size: 10,
+    };
+    assert_eq!(va_to_file(&top, MAX - 1), Some(MAX - 1));
+    assert_eq!(va_to_file(&top, MAX), Some(MAX));
+    let wrap = Mapping {
+        va: MAX - 1,
+        file_off: MAX,
+        file_size: 2,
+    };
+    assert_eq!(va_to_file(&wrap, MAX - 1), Some(MAX));
+    assert_eq!(
+        va_to_file(&wrap, MAX),
+        None,
+        "the file offset goes past u64::MAX"
+    );
+}
+
 #[test]
 fn ac_029_range_boundary_table() {
     let last_rows: &[(u64, u64, Option<u64>)] = &[
@@ -29,7 +74,8 @@ fn ac_029_range_boundary_table() {
         (MAX, 2, None),
         (MAX, 0, None),
         (0, 0, None),
-        (1, MAX, None),
+        (1, MAX, Some(MAX)),
+        (2, MAX, None),
         (0, MAX, Some(MAX - 1)),
         (0, 1, Some(0)),
         (5, 0, None),
@@ -92,47 +138,7 @@ fn ac_029_range_boundary_table() {
     assert_eq!(a.offset_in(21), None);
     assert_eq!(a.len(), 11);
 
-    // A mapping of 0x100 file bytes at 0x1000. The memory after 0x10ff is the zero-fill tail.
-    let map = Mapping {
-        va: 0x1000,
-        file_off: 0x200,
-        file_size: 0x100,
-    };
-    let va_rows: &[(u64, Option<u64>)] = &[
-        (0xfff, None),
-        (0x1000, Some(0x200)),
-        (0x10ff, Some(0x2ff)),
-        (0x1100, None),
-        (0x1fff, None),
-        (MAX, None),
-    ];
-    for &(va, want) in va_rows {
-        assert_eq!(va_to_file(&map, va), want, "va_to_file({va:#x})");
-    }
-    let empty_map = Mapping {
-        va: 0x1000,
-        file_off: 0,
-        file_size: 0,
-    };
-    assert_eq!(va_to_file(&empty_map, 0x1000), None);
-    let top = Mapping {
-        va: MAX - 1,
-        file_off: MAX - 1,
-        file_size: 10,
-    };
-    assert_eq!(va_to_file(&top, MAX - 1), Some(MAX - 1));
-    assert_eq!(va_to_file(&top, MAX), Some(MAX));
-    let wrap = Mapping {
-        va: MAX - 1,
-        file_off: MAX,
-        file_size: 2,
-    };
-    assert_eq!(va_to_file(&wrap, MAX - 1), Some(MAX));
-    assert_eq!(
-        va_to_file(&wrap, MAX),
-        None,
-        "the file offset goes past u64::MAX"
-    );
+    check_va_to_file_rows();
 }
 
 fn gen_range(g: &mut Gen) -> Range {

@@ -16,13 +16,13 @@ fn function<'a>(text: &'a str, name: &str) -> &'a str {
 
 #[test]
 fn ac_006b_loop_invariant_builds() {
-    let reader = include_str!("../src/reader.rs");
+    let reader = include_str!("../../src/reader/leb.rs");
     let uleb = function(reader, "uleb128");
     assert!(
         uleb.contains("#[cfg_attr(verus_only, verus_spec(") && uleb.contains("proof! {"),
         "uleb128 has a cfg_attr loop invariant and a proof! block"
     );
-    let budget = include_str!("../src/budget.rs");
+    let budget = include_str!("../../src/budget.rs");
     let fit = function(budget, "fit_prefix");
     assert!(
         fit.contains("#[cfg_attr(verus_only, verus_spec(") && fit.contains("proof! {"),

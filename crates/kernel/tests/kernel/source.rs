@@ -30,7 +30,11 @@ fn ac_033_source_table_exhaustive() {
     for (f, table) in ALLOWED.iter().enumerate() {
         for (o, row) in table.iter().enumerate() {
             for (n, &want) in row.iter().enumerate() {
-                let (old, new, force) = (o as u8 + 1, n as u8 + 1, f == 1);
+                let (old, new, force) = (
+                    u8::try_from(o + 1).unwrap(),
+                    u8::try_from(n + 1).unwrap(),
+                    f == 1,
+                );
                 assert_eq!(
                     may_overwrite(old, new, force),
                     want,

@@ -39,5 +39,5 @@ pub const USER: u8 = 5;
         r == (new_rank >= old_rank || (old_rank == IMPORTED && new_rank == AGENT && force)),
 )]
 pub fn may_overwrite(old_rank: u8, new_rank: u8, force: bool) -> bool {
-    false
+    new_rank >= old_rank || (old_rank == IMPORTED && new_rank == AGENT && force)
 }

@@ -7,7 +7,7 @@ use ghidorah_testkit::pbt::{Gen, check};
 fn uleb(mut v: u64) -> Vec<u8> {
     let mut out = Vec::new();
     loop {
-        let byte = (v & 0x7f) as u8;
+        let byte = u8::try_from(v & 0x7f).unwrap_or(0);
         v >>= 7;
         if v == 0 {
             out.push(byte);
@@ -21,7 +21,7 @@ fn uleb(mut v: u64) -> Vec<u8> {
 fn sleb(mut v: i64) -> Vec<u8> {
     let mut out = Vec::new();
     loop {
-        let byte = (v & 0x7f) as u8;
+        let byte = u8::try_from(v & 0x7f).unwrap_or(0);
         v >>= 7;
         let done = (v == 0 && byte & 0x40 == 0) || (v == -1 && byte & 0x40 != 0);
         if done {
@@ -129,7 +129,7 @@ fn k1_fixed_width_values() {
         let mut r = Reader::new(&data, endian);
         let mut at = 0usize;
         while at < data.len() {
-            let width = [1usize, 2, 4, 8][g.draw(4) as usize];
+            let width = *g.pick(&[1usize, 2, 4, 8]).unwrap_or(&1);
             let Some(bytes) = data.get(at..at + width) else {
                 return Ok(());
             };
@@ -200,7 +200,7 @@ fn k1_leb_known_vectors() {
 fn k1_leb_round_trip() {
     check("k1_leb_round_trip", 2_000, |g: &mut Gen| {
         let u = g.u64();
-        let i = g.u64() as i64;
+        let i = g.u64().cast_signed();
         let mut data = uleb(u);
         data.extend(sleb(i));
         let mut r = Reader::new(&data, Endian::Big);
@@ -280,7 +280,8 @@ impl Model {
         let mut value = 0u64;
         for k in 0..10 {
             let b = *self.data.get(self.pos + k).ok_or(ReadError::Eof)?;
-            value |= u64::from(b & 0x7f).checked_shl(7 * k as u32).unwrap_or(0);
+            let shift = u32::try_from(7 * k).unwrap_or(u32::MAX);
+            value |= u64::from(b & 0x7f).checked_shl(shift).unwrap_or(0);
             if b & 0x80 == 0 {
                 return Ok((value, k + 1, b));
             }
@@ -306,7 +307,7 @@ impl Model {
                     return Err(ReadError::BadLeb);
                 }
                 self.pos += n;
-                let shift = 7 * n as u32;
+                let shift = u32::try_from(7 * n).unwrap_or(u32::MAX);
                 let v = if shift < 64 && last & 0x40 != 0 {
                     v | (u64::MAX << shift)
                 } else {
@@ -346,7 +347,7 @@ fn apply(r: &mut Reader<'_>, op: Op) -> Seen {
         Op::U32 => Seen::Value(r.u32().map(u64::from)),
         Op::U64 => Seen::Value(r.u64()),
         Op::Uleb => Seen::Value(r.uleb128()),
-        Op::Sleb => Seen::Value(r.sleb128().map(|v| v as u64)),
+        Op::Sleb => Seen::Value(r.sleb128().map(i64::cast_unsigned)),
         Op::Cstr(max) => Seen::Bytes(r.cstr(max).map(<[u8]>::to_vec)),
         Op::Take(n) => Seen::Bytes(r.take(n).map(<[u8]>::to_vec)),
         Op::Skip(n) => Seen::Bytes(r.skip(n).map(|()| Vec::new())),
@@ -358,8 +359,8 @@ fn apply(r: &mut Reader<'_>, op: Op) -> Seen {
 fn gen_len(g: &mut Gen) -> usize {
     match g.draw(8) {
         0 => usize::MAX,
-        1 => usize::MAX - g.draw(4) as usize,
-        _ => g.draw(40) as usize,
+        1 => usize::MAX - usize::try_from(g.draw(4)).unwrap_or(0),
+        _ => usize::try_from(g.draw(40)).unwrap_or(0),
     }
 }
 
@@ -383,7 +384,7 @@ fn gen_op(g: &mut Gen) -> Op {
 fn gen_data(g: &mut Gen) -> Vec<u8> {
     g.vec(48, |g| match g.draw(4) {
         0 => 0x80 | g.u8(),
-        1 => [0x00, 0x01, 0x7f, 0x40][g.draw(4) as usize],
+        1 => *g.pick(&[0x00, 0x01, 0x7f, 0x40]).unwrap_or(&0),
         _ => g.u8(),
     })
 }
@@ -443,4 +444,20 @@ fn ac_038_reader_props() {
 
 fn seen_failed(seen: &Seen) -> bool {
     matches!(seen, Seen::Value(Err(_)) | Seen::Bytes(Err(_)))
+}
+
+#[test]
+fn k1_read_error_display() {
+    let errors = [ReadError::Eof, ReadError::BadLeb, ReadError::NoNul];
+    let texts: Vec<String> = errors.iter().map(ToString::to_string).collect();
+    assert_eq!(
+        texts,
+        [
+            "the data ends before the end of the read",
+            "the LEB128 value is not valid",
+            "the C string has no NUL byte in its limit",
+        ]
+    );
+    let boxed: Box<dyn std::error::Error> = Box::new(ReadError::Eof);
+    assert!(boxed.source().is_none());
 }

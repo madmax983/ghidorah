@@ -9,7 +9,7 @@
 //! |---|---|---|
 //! | K1 Reader | [`reader`] | [`Reader`]: fixed-width reads, LEB128, C strings, `take`, `skip`, `seek` |
 //! | K2 Range math | [`range`] | [`range_last`], [`Range`], [`va_to_file`] |
-//! | K3 RangeSet | [`rangeset`] | [`RangeSet`]: `contains`, `find`, `insert`, `remove`, set operations |
+//! | K3 `RangeSet` | [`rangeset`] | [`RangeSet`]: `contains`, `find`, `insert`, `remove`, set operations |
 //! | K6 Budget fit | [`budget`] | [`fit_prefix`] |
 //! | K7 Provenance | [`source`] | [`may_overwrite`] |
 //!
