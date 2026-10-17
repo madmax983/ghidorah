@@ -108,6 +108,10 @@ fn pointer_parse_table() {
     }
     assert_eq!(PointerError::NoLeadingSlash.code(), "E_POINTER_SLASH");
     assert_eq!(
+        PointerError::NoLeadingSlash.to_string(),
+        "E_POINTER_SLASH: a pointer that is not empty starts with '/'"
+    );
+    assert_eq!(
         PointerError::BadEscape { offset: 3 }.to_string(),
         "E_POINTER_ESCAPE at byte 3: '~' must come before '0' or '1'"
     );

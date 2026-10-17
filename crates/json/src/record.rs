@@ -28,7 +28,7 @@ pub trait FromJson: Sized {
 
     /// Gives the value of a record field that the object does not have.
     ///
-    /// `Option` gives `Some(None)`. Other types give `None`, so the field is required.
+    /// `Option` gives `Some(None)`. Other types give `None`, so the record needs the field.
     #[must_use]
     fn from_absent() -> Option<Self> {
         None

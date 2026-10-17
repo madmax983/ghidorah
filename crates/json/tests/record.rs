@@ -1,4 +1,4 @@
-//! Record codec contract: `json_record!`, `ToJson`, `FromJson` and decode errors.
+//! Record codec contract: `json_record!`, `ToJson`, `FromJson` and the errors of a read.
 
 #![allow(clippy::panic, reason = "a test fails through a panic")]
 
@@ -17,7 +17,7 @@ json_record! {
     pub struct Call {
         /// The target name.
         pub to: String,
-        /// The argument count, when it is known.
+        /// The argument count, or `None`.
         pub args: Option<u8>,
     }
 
@@ -206,6 +206,10 @@ fn json_record_errors() {
             String::new()
         ))
     );
+}
+
+#[test]
+fn decode_error_texts() {
     let err = DecodeError::new(DecodeKind::Missing)
         .at_key("x")
         .at_index(2)
@@ -216,6 +220,26 @@ fn json_record_errors() {
         "E_MISSING at '/items/2/x': the required field is missing"
     );
     assert_eq!(DecodeKind::Range.as_str(), "E_RANGE");
+    let texts: Vec<String> = [
+        DecodeKind::Range,
+        DecodeKind::Unknown,
+        DecodeKind::Duplicate,
+    ]
+    .into_iter()
+    .map(|kind| DecodeError::new(kind).at_key("k").to_string())
+    .collect();
+    assert_eq!(
+        texts,
+        [
+            "E_RANGE at '/k': the number is not an integer in range",
+            "E_UNKNOWN at '/k': the record has no field with this name",
+            "E_DUPLICATE at '/k': the object has two members with this name",
+        ]
+    );
+    assert_eq!(
+        DecodeError::new(DecodeKind::Unknown).kind(),
+        DecodeKind::Unknown
+    );
 }
 
 #[test]

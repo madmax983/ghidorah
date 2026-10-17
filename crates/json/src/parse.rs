@@ -180,7 +180,7 @@ impl Parser<'_> {
         }
     }
 
-    /// Reads one value, or opens a frame and gives `None`. White space before it is gone.
+    /// Reads one value, or opens a frame and gives `None`. The caller skips the white space first.
     fn start_value(&mut self, stack: &mut Vec<Frame>) -> Result<Option<Value>, JsonError> {
         match self.peek() {
             None => Err(self.err(Code::Eof)),

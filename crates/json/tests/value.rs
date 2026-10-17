@@ -183,6 +183,7 @@ fn number_grammar() {
     assert!(!Number::parse("4e2").is_ok_and(|n| n.is_integer()));
     assert_eq!(Number::from(-5i32).as_i64(), Some(-5));
     assert_eq!(Number::from(5u32).as_u64(), Some(5));
+    assert_eq!(Number::parse("1.5").ok().and_then(|n| n.as_i64()), None);
     assert_eq!(
         Number::from(5u32).as_f64().map(f64::to_bits),
         Some(5f64.to_bits())

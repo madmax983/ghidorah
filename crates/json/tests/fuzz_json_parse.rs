@@ -67,7 +67,7 @@ fn check_value(value: &Value, limits: &Limits) -> Result<(), String> {
 
 /// Builds a value from the input bytes as choices, then checks the writers on it.
 ///
-/// Havoc breaks most JSON text, so this second path gives the writers deep random values.
+/// Havoc breaks most JSON text. So this second path makes deep values for the writer checks.
 fn check_generated(input: &[u8], limits: &Limits) -> Result<(), String> {
     let choices = input.iter().map(|&b| u64::from(b)).collect();
     let value = common::value(&mut Gen::replay(choices), 4);

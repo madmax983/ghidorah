@@ -104,7 +104,7 @@ impl FromStr for Pointer {
 pub enum PointerError {
     /// The text is not empty, and it does not start with `/`.
     NoLeadingSlash,
-    /// A `~` is not followed by `0` or `1`. The offset is the byte offset of the `~`.
+    /// A `~` has no `0` or `1` after it. The offset is the byte offset of the `~`.
     BadEscape {
         /// The byte offset of the `~` in the pointer text.
         offset: usize,

@@ -17,7 +17,7 @@ const ES_MIN_PLAIN: i32 = -5;
 /// `-? (0 | [1-9][0-9]*) (. [0-9]+)? ([eE] [+-]? [0-9]+)?`.
 /// So `9007199254740993` keeps all its digits, and the writer never emits `NaN` or `inf`.
 /// Two numbers are equal when their lexemes are equal: `1.0` and `1` are different numbers.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Number(String);
 
 impl Number {

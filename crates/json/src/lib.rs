@@ -8,12 +8,13 @@
 //!   A [`Number`] keeps its raw lexeme, so a large integer does not lose bits.
 //! - [`parse`] and [`parse_bytes`]: a strict parser with a depth limit and a byte limit.
 //!   An error gives a [`Code`] and a byte offset ([`JsonError`]).
-//! - [`write`] and [`write_pretty`]: writers that keep the member order.
+//! - [`write()`] and [`write_pretty`]: writers that keep the member order.
 //! - [`write_jcs`]: the canonical form of RFC 8785 (JCS) for hashes and golden files.
-//! - [`pointer`]: the one pointer dialect of ghidorah, RFC 6901 plus a `*` segment.
+//! - [`mod@pointer`]: the one pointer dialect of ghidorah, RFC 6901 plus a `*` segment.
 //! - [`ToJson`], [`FromJson`] and [`json_record!`]: codecs for record structs.
 //!
-//! The parser and the writers use no recursion, so deep input cannot overflow the stack.
+//! The parser, the writers and [`pointer::select`] use no recursion, so deep input cannot
+//! overflow the stack. The parser also keeps each value at most [`DEPTH_CEILING`] levels deep.
 
 #![deny(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 

@@ -132,7 +132,7 @@ impl<'a> Level<'a> {
     }
 }
 
-/// Gives the RFC 6901 pointer of the current item, plus `last` when it is given.
+/// Gives the RFC 6901 pointer of the current item, plus the segment `last` when it is `Some`.
 fn path_of(stack: &[Level<'_>], last: Option<&str>) -> String {
     let mut path = String::new();
     for segment in stack.iter().filter_map(Level::segment) {
@@ -182,7 +182,7 @@ pub(crate) fn render<F: Form>(root: &Value) -> Result<String, (F::Error, String)
                 Value::Bool(true) => out.push_str("true"),
                 Value::Bool(false) => out.push_str("false"),
                 Value::Number(n) => {
-                    F::number(n, &mut out).map_err(|e| (e, path_of(&stack, None)))?
+                    F::number(n, &mut out).map_err(|e| (e, path_of(&stack, None)))?;
                 }
                 Value::String(s) => write_string(&mut out, s),
                 Value::Array(items) if items.is_empty() => out.push_str("[]"),
@@ -240,25 +240,25 @@ pub(crate) fn write_string(out: &mut String, text: &str) {
     let mut start = 0;
     for (i, b) in text.bytes().enumerate() {
         let short = match b {
-            b'"' => "\\\"",
-            b'\\' => "\\\\",
-            0x08 => "\\b",
-            0x0c => "\\f",
-            b'\n' => "\\n",
-            b'\r' => "\\r",
-            b'\t' => "\\t",
-            0..=0x1f => "",
+            b'"' => Some("\\\""),
+            b'\\' => Some("\\\\"),
+            0x08 => Some("\\b"),
+            0x0c => Some("\\f"),
+            b'\n' => Some("\\n"),
+            b'\r' => Some("\\r"),
+            b'\t' => Some("\\t"),
+            0..=0x1f => None,
             _ => continue,
         };
         // An escaped byte is ASCII, so `i` is on a character boundary.
         out.push_str(text.get(start..i).unwrap_or_default());
-        if short.is_empty() {
+        if let Some(short) = short {
+            out.push_str(short);
+        } else {
             out.push_str("\\u00");
             for nibble in [u32::from(b).wrapping_shr(4), u32::from(b) & 0xf] {
                 out.push(char::from_digit(nibble, 16).unwrap_or('0'));
             }
-        } else {
-            out.push_str(short);
         }
         start = i.saturating_add(1);
     }

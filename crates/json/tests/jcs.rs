@@ -221,6 +221,10 @@ fn jcs_errors_name_the_path() {
     let range = parse(r#"{"x~/y":[0, -1e999]}"#, &limits).unwrap_or_default();
     let err = write_jcs(&range).map_err(|e| (e.kind.as_str(), e.path));
     assert_eq!(err, Err(("E_NUMBER_RANGE", "/x~0~1y/1".to_owned())));
+    assert_eq!(
+        write_jcs(&range).map_err(|e| e.to_string()),
+        Err("E_NUMBER_RANGE at '/x~0~1y/1': the number is outside the f64 range".to_owned())
+    );
     let mut object = Object::new();
     object.push("k", Value::from(1u8));
     object.push("k", Value::from(1u8));

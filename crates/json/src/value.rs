@@ -7,7 +7,7 @@ use crate::number::Number;
 
 /// A JSON value.
 ///
-/// `Default` gives [`Value::Null`]. `Display` gives the compact text of [`crate::write`].
+/// `Default` gives [`Value::Null`]. `Display` gives the compact text of [`crate::write()`].
 /// Equality compares objects member by member in order.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum Value {
