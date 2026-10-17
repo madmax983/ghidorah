@@ -1,0 +1,295 @@
+# golden: generator=x86-print version=1 fixture=loops.clang-O2 fixture_sha256=c5067593a4912f0e52fbdcf98cf41fe456976dacfac8dddd2aa71e4af846645e
+<_init>:
+1000 endbr64
+1004 sub rsp, 0x8
+1008 mov rax, qword ptr [rip+0x2fc1] ; 0x3fd0
+100f test rax, rax
+1012 je 0x1016
+1014 call rax
+1016 add rsp, 0x8
+101a ret
+<printf@plt-0x10>:
+1020 push qword ptr [rip+0x2fca] ; 0x3ff0
+1026 jmp qword ptr [rip+0x2fcc] ; 0x3ff8
+102c nop dword ptr [rax+0x0]
+<printf@plt>:
+1030 jmp qword ptr [rip+0x2fca] ; 0x4000
+1036 push 0x0
+103b jmp printf@plt-0x10
+<strtoull@plt>:
+1040 jmp qword ptr [rip+0x2fc2] ; 0x4008
+1046 push 0x1
+104b jmp printf@plt-0x10
+<__cxa_finalize@plt>:
+1050 jmp qword ptr [rip+0x2f8a] ; 0x3fe0
+1056 xchg ax, ax
+<_start>:
+1060 endbr64
+1064 xor ebp, ebp
+1066 mov r9, rdx
+1069 pop rsi
+106a mov rdx, rsp
+106d and rsp, 0xfffffffffffffff0
+1071 push rax
+1072 push rsp
+1073 xor r8d, r8d
+1076 xor ecx, ecx
+1078 lea rdi, [rip+0x311] ; 0x1390 main
+107f call qword ptr [rip+0x2f3b] ; 0x3fc0
+1085 hlt
+1086 cs nop word ptr [rax+rax*1+0x0]
+<deregister_tm_clones>:
+1090 lea rdi, [rip+0x2f89] ; 0x4020
+1097 lea rax, [rip+0x2f82] ; 0x4020
+109e cmp rax, rdi
+10a1 je 0x10b8
+10a3 mov rax, qword ptr [rip+0x2f1e] ; 0x3fc8
+10aa test rax, rax
+10ad je 0x10b8
+10af jmp rax
+10b1 nop dword ptr [rax+0x0]
+10b8 ret
+10b9 nop dword ptr [rax+0x0]
+<register_tm_clones>:
+10c0 lea rdi, [rip+0x2f59] ; 0x4020
+10c7 lea rsi, [rip+0x2f52] ; 0x4020
+10ce sub rsi, rdi
+10d1 mov rax, rsi
+10d4 shr rsi, 0x3f
+10d8 sar rax, 0x3
+10dc add rsi, rax
+10df sar rsi, 1
+10e2 je 0x10f8
+10e4 mov rax, qword ptr [rip+0x2eed] ; 0x3fd8
+10eb test rax, rax
+10ee je 0x10f8
+10f0 jmp rax
+10f2 nop word ptr [rax+rax*1+0x0]
+10f8 ret
+10f9 nop dword ptr [rax+0x0]
+<__do_global_dtors_aux>:
+1100 endbr64
+1104 cmp byte ptr [rip+0x2f15], 0x0 ; 0x4020
+110b jne 0x1138
+110d push rbp
+110e cmp qword ptr [rip+0x2eca], 0x0 ; 0x3fe0
+1116 mov rbp, rsp
+1119 je 0x1127
+111b mov rdi, qword ptr [rip+0x2ef6] ; 0x4018
+1122 call __cxa_finalize@plt
+1127 call deregister_tm_clones
+112c mov byte ptr [rip+0x2eed], 0x1 ; 0x4020
+1133 pop rbp
+1134 ret
+1135 nop dword ptr [rax]
+1138 ret
+1139 nop dword ptr [rax+0x0]
+<frame_dummy>:
+1140 endbr64
+1144 jmp register_tm_clones
+1149 nop dword ptr [rax+0x0]
+<sum_squares>:
+1150 and rdi, 0x3f
+1154 je 0x119c
+1156 lea rax, [rdi-0x1]
+115a lea rcx, [rdi-0x2]
+115e mul rcx
+1161 mov rsi, rax
+1164 mov rcx, rdx
+1167 lea r8, [rdi-0x3]
+116b mul r8
+116e imul r8d, ecx
+1172 add edx, r8d
+1175 shld rdx, rax, 0x3f
+117a movabs rax, 0x5555555555555556
+1184 shld rcx, rsi, 0x3f
+1189 imul rax, rdx
+118d lea rcx, [rcx+rcx*2]
+1191 add rcx, rax
+1194 lea rax, [rdi+rcx*1]
+1198 dec rax
+119b ret
+119c xor eax, eax
+119e ret
+119f nop
+<gcd>:
+11a0 mov rax, rdi
+11a3 test rsi, rsi
+11a6 je 0x11d5
+11a8 mov rdx, rsi
+11ab jmp 0x11bd
+11ad nop dword ptr [rax]
+11b0 xor edx, edx
+11b2 div rcx
+11b5 mov rax, rcx
+11b8 test rdx, rdx
+11bb je 0x11d2
+11bd mov rcx, rdx
+11c0 mov rdx, rax
+11c3 or rdx, rcx
+11c6 shr rdx, 0x20
+11ca jne 0x11b0
+11cc xor edx, edx
+11ce div ecx
+11d0 jmp 0x11b5
+11d2 mov rax, rcx
+11d5 ret
+11d6 cs nop word ptr [rax+rax*1+0x0]
+<count_bits>:
+11e0 xor eax, eax
+11e2 test rdi, rdi
+11e5 je 0x11fb
+11e7 nop word ptr [rax+rax*1+0x0]
+11f0 lea rcx, [rdi-0x1]
+11f4 inc eax
+11f6 and rdi, rcx
+11f9 jne 0x11f0
+11fb ret
+11fc nop dword ptr [rax+0x0]
+<reverse_bits>:
+1200 xor eax, eax
+1202 mov ecx, 0x20
+1207 nop word ptr [rax+rax*1+0x0]
+1210 mov edx, edi
+1212 and edx, 0x1
+1215 shl edx, 0x2
+1218 lea eax, [rdx+rax*8]
+121b mov edx, edi
+121d and edx, 0x2
+1220 or edx, eax
+1222 mov eax, edi
+1224 shr eax, 0x2
+1227 and eax, 0x1
+122a or eax, edx
+122c mov edx, edi
+122e shr edx, 0x3
+1231 and edx, 0x1
+1234 lea eax, [rdx+rax*2]
+1237 shr edi, 0x4
+123a add ecx, 0xfffffffc
+123d jne 0x1210
+123f ret
+<grid_walk>:
+1240 and esi, 0xf
+1243 je 0x1383
+1249 and edi, 0xf
+124c lea ecx, [rdi+0x3]
+124f and ecx, 0xfffffffc
+1252 lea eax, [rdi-0x1]
+1255 movd xmm0, eax
+1259 pshufd xmm0, xmm0, 0x0
+125e xor edx, edx
+1260 movdqa xmm1, xmmword ptr [rip+0xda8] ; 0x2010
+1268 movdqa xmm2, xmmword ptr [rip+0xdb0] ; 0x2020
+1270 movdqa xmm3, xmmword ptr [rip+0xde8] ; 0x2060
+1278 pxor xmm0, xmm3
+127c movdqa xmm4, xmmword ptr [rip+0xdac] ; 0x2030
+1284 movdqa xmm5, xmmword ptr [rip+0xdb4] ; 0x2040
+128c movdqa xmm6, xmmword ptr [rip+0xdbc] ; 0x2050
+1294 xor eax, eax
+1296 jmp 0x12e3
+1298 nop dword ptr [rax+rax*1+0x0]
+12a0 movdqa xmm10, xmm1
+12a5 pxor xmm10, xmm3
+12aa pcmpgtd xmm10, xmm0
+12af pand xmm9, xmm10
+12b4 pandn xmm10, xmm7
+12b9 por xmm10, xmm9
+12be pshufd xmm7, xmm10, 0xee
+12c4 paddd xmm7, xmm10
+12c9 pshufd xmm8, xmm7, 0x55
+12cf paddd xmm8, xmm7
+12d4 movd eax, xmm8
+12d9 inc edx
+12db cmp esi, edx
+12dd je 0x1385
+12e3 test edi, edi
+12e5 je 0x12d9
+12e7 movd xmm7, edx
+12eb pshufd xmm8, xmm7, 0x0
+12f1 movd xmm9, eax
+12f6 movdqa xmm7, xmm8
+12fb pxor xmm7, xmm1
+12ff paddd xmm7, xmm9
+1304 paddd xmm7, xmm2
+1308 cmp ecx, 0x4
+130b je 0x12a0
+130d movdqa xmm11, xmm8
+1312 pxor xmm11, xmm4
+1317 paddd xmm11, xmm7
+131c paddd xmm11, xmm2
+1321 cmp ecx, 0x8
+1324 jne 0x133a
+1326 movdqa xmm10, xmm4
+132b movdqa xmm9, xmm7
+1330 movdqa xmm7, xmm11
+1335 jmp 0x12a5
+133a movdqa xmm7, xmm8
+133f pxor xmm7, xmm5
+1343 paddd xmm7, xmm11
+1348 paddd xmm7, xmm2
+134c cmp ecx, 0xc
+134f jne 0x1360
+1351 movdqa xmm10, xmm5
+1356 movdqa xmm9, xmm11
+135b jmp 0x12a5
+1360 pxor xmm8, xmm6
+1365 paddd xmm8, xmm7
+136a paddd xmm8, xmm2
+136f movdqa xmm10, xmm6
+1374 movdqa xmm9, xmm7
+1379 movdqa xmm7, xmm8
+137e jmp 0x12a5
+1383 xor eax, eax
+1385 ret
+1386 cs nop word ptr [rax+rax*1+0x0]
+<main>:
+1390 push rbp
+1391 push r15
+1393 push r14
+1395 push r12
+1397 push rbx
+1398 mov ebx, 0xa
+139d cmp edi, 0x2
+13a0 jl 0x13b2
+13a2 mov rdi, qword ptr [rsi+0x8]
+13a6 xor esi, esi
+13a8 xor edx, edx
+13aa call strtoull@plt
+13af mov rbx, rax
+13b2 mov rdi, rbx
+13b5 call sum_squares
+13ba mov r14, rax
+13bd mov esi, 0x54
+13c2 mov rdi, rbx
+13c5 call gcd
+13ca mov r15, rax
+13cd mov rdi, rbx
+13d0 call count_bits
+13d5 mov ebp, eax
+13d7 mov edi, ebx
+13d9 call reverse_bits
+13de mov r12d, eax
+13e1 mov edi, ebx
+13e3 mov esi, 0x7
+13e8 call grid_walk
+13ed lea rdi, [rip+0xc7c] ; 0x2070
+13f4 mov rsi, r14
+13f7 mov rdx, r15
+13fa mov ecx, ebp
+13fc mov r8d, r12d
+13ff mov r9d, eax
+1402 xor eax, eax
+1404 call printf@plt
+1409 xor eax, eax
+140b pop rbx
+140c pop r12
+140e pop r14
+1410 pop r15
+1412 pop rbp
+1413 ret
+<_fini>:
+1414 endbr64
+1418 sub rsp, 0x8
+141c add rsp, 0x8
+1420 ret

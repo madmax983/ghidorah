@@ -48,6 +48,13 @@ name = "ghidorah-testkit"
 version = "0.1.0"
 
 [[package]]
+name = "ghidorah-x86"
+version = "0.1.0"
+dependencies = [
+ "ghidorah-testkit",
+]
+
+[[package]]
 name = "xtask"
 version = "0.1.0"
 dependencies = [
