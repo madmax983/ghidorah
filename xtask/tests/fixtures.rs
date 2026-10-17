@@ -172,6 +172,31 @@ fn fixtures_and_golden_commands() {
 }
 
 #[test]
+fn fixtures_and_golden_are_commands_of_the_binary() {
+    // Each row: the arguments, the exit code and a part of the error text.
+    let cases: [(&[&str], i32, &str); 5] = [
+        (&["fixtures", "check"], 0, ""),
+        (&["golden", "headers"], 0, ""),
+        (&["fixtures", "bogus"], 2, "cargo xtask fixtures <"),
+        (&["golden"], 2, "cargo xtask golden <"),
+        (&["no-such-command"], 2, "|fixtures|golden>"),
+    ];
+    for (args, code, error) in cases {
+        let out = std::process::Command::new(env!("CARGO_BIN_EXE_xtask"))
+            .args(args)
+            .output()
+            .expect("the xtask binary starts");
+        let stdout = String::from_utf8(out.stdout).expect("the report is UTF-8");
+        let report = xtask::json::parse(stdout.trim()).expect("the binary prints one JSON object");
+        assert_eq!(out.status.code(), Some(code), "{args:?}: {report}");
+        let ok = report.get("ok").and_then(Value::as_bool);
+        assert_eq!(ok, Some(code == 0), "{args:?}: {report}");
+        let text = report.get("error").and_then(Value::as_str).unwrap_or("");
+        assert!(text.contains(error), "{args:?}: {text}");
+    }
+}
+
+#[test]
 #[ignore = "tier2"]
 fn fixtures_build_reproduces_checked_in_files() {
     let root = root();

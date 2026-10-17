@@ -22,6 +22,11 @@ Revision 3 decisions of the owner apply over the design text. SSA and the decomp
 | AC table check | `cargo xtask ac` |
 | AC evidence run | `cargo xtask ac --run [--tier2] [AC-nnn ..]` |
 | Kernel proofs | `VERUS=<verus> VERUS_Z3_PATH=<z3> cargo xtask verify` |
+| Fixture build | `cargo xtask fixtures build [--check]` |
+| Fixture checks | `cargo xtask fixtures check` |
+| T2 source | `cargo xtask fixtures gen-large` |
+| Golden bless | `cargo xtask golden bless [cargo test args]` |
+| Golden headers | `cargo xtask golden headers` |
 
 - Each xtask command prints one JSON object on stdout. The exit code is 0 for `ok: true`, 1 for `ok: false` and 2 for an error.
 - Set `GHIDORAH_VERUS_OPTIONAL=1` to get `status: skipped` from `xtask verify` when Verus is missing.

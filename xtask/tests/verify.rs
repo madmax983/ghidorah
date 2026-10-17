@@ -380,7 +380,7 @@ fn verify_is_a_command_of_the_binary() {
     let (code, report) = xtask_without_verus(&["no-such-command"], true);
     assert_eq!(code, Some(2), "{report:?}");
     let error = report.get("error").and_then(Value::as_str).unwrap_or("");
-    assert!(error.contains("|verify>"), "{error}");
+    assert!(error.contains("|verify|"), "{error}");
 }
 
 /// Copies the proof inputs and the negative patches of the workspace to `to`.
