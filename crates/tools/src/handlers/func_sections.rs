@@ -10,11 +10,13 @@
 //! | `text` | [`Namer`], binary text, address texts, budgets and per-item results |
 //! | `rows` | disassembly rows, IR rows and [`CursorScope`] for section cursors |
 //! | `lists` | the other sections of `func_get` |
+//! | `decomp` | the `decomp` section and the L1 IR rows |
 //!
 //! Names from the binary pass through [`Namer`]: it escapes them like `BinText`, caps them
 //! at [`NAME_CHARS`] characters and notes a mangled name, so a result carries
 //! `W_NOT_DEMANGLED` once (AC-115a).
 
+mod decomp;
 mod lists;
 mod rows;
 mod text;
@@ -24,6 +26,7 @@ use ghidorah_base::{Caps, FuncId};
 use ghidorah_db::Program;
 use ghidorah_json::Value;
 
+pub use decomp::{DECOMP, DecompOpts, WHY_DISASM, WHY_INSN, l1_rows};
 pub use lists::{func_ref, jump_table, table_ids, type_text};
 pub use rows::{
     CursorScope, DISASM, IR, IrRows, SWEEP, bad_row, body_rows, body_units, decode, ir_rows, row,
@@ -37,7 +40,7 @@ pub use text::{
 pub const WHY_FIRST_ROWS: &str = "Read the sections again from their first rows.";
 
 /// Every fixed text of the renderers that an agent reads.
-pub const TEXTS: &[&str] = &[WHY_FIRST_ROWS];
+pub const TEXTS: &[&str] = &[WHY_FIRST_ROWS, WHY_DISASM, WHY_INSN];
 
 /// The parts of one function render that every section shares.
 #[derive(Debug, Clone, Copy)]

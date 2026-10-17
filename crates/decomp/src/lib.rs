@@ -17,23 +17,41 @@
 //! | `fold` | Safe folding: the fold plan of each block | Section 8.2 |
 //! | `vars`, `vars_names` | Out-of-SSA variables with storage-based identity | Section 8.2 |
 //! | `schemas`, `loops` | The acyclic and cyclic schemas of the structurer | Section 8.1 |
+//! | [`selfcheck`] | The self-check: 8 branch oracles over the tree and the CFG | Section 8.2 |
+//! | [`lattice`] | The minimal type lattice and the field names of typed pointers | Section 8.4 |
+//! | [`precedence`] | The C operator precedence numbers | Section 8.3 |
+//! | [`print`] | [`print::print`]: the C printer with the ops of each line | Section 8.3 |
+//! | [`linemap`] | The line map and the coverage of each instruction | Section 8.3 |
+//! | [`window`] | [`Window`]: line windows | Section 8.3 |
+//! | [`metrics`], [`warnings`] | The metrics and the warning rows with their remedies | Section 8.5 |
+//! | [`cache`] | [`Cache`]: the decompile cache by function epoch | Section 8.5 |
 //!
 //! [`decompile`] runs the steps in order: the L1 form, the view (with safe folding and the
-//! out-of-SSA variables), the SAILR-lite passes and the structurer.
+//! out-of-SSA variables), the SAILR-lite passes and the structurer. [`render`] then runs the
+//! self-check, the type lattice, the printer and the line map, and gives an [`Output`].
 
+pub mod cache;
 pub mod expr;
 pub mod flat;
 mod fold;
 pub mod interp_ast;
+pub mod lattice;
+pub mod linemap;
 mod loops;
+pub mod metrics;
+pub mod precedence;
+pub mod print;
 pub mod sailr;
 mod schemas;
+pub mod selfcheck;
 pub mod shape;
 pub mod structure;
 pub mod tree;
 mod vars;
 mod vars_names;
 pub mod view;
+pub mod warnings;
+pub mod window;
 
 use std::fmt;
 
@@ -42,13 +60,19 @@ use ghidorah_analysis::fir::Opts as FirOpts;
 use ghidorah_analysis::fir::l1::{self, L1Error, L1Ir};
 use ghidorah_base::{Address, Fuel, FuncId, WarningCode};
 use ghidorah_db::Program;
-use ghidorah_ir::Switches;
+use ghidorah_ir::{IntrinsicNames, Switches};
 
+pub use cache::{Cache, Key};
 pub use expr::{Call, Callee, Expr, Stmt, VarIdx};
+pub use metrics::Metrics;
+pub use print::{CallRow, CallTarget, Line, LineKind, PrintEnv, Signature, VarRow};
+pub use selfcheck::Validation;
 pub use shape::{Exit, NodeKind, Shape, ShapeNode};
 pub use structure::{FlatReason, Mode};
 pub use tree::{Arm, Cond, LoopKind, Tree};
 pub use view::{Env, Input, NoEnv, NodeView, Var, VarKind, View, ViewError};
+pub use warnings::{Remedy, WarningRow};
+pub use window::Window;
 
 /// The default largest count of blocks that the structurer takes.
 pub const DEFAULT_MAX_NODES: usize = 500;
@@ -119,6 +143,13 @@ pub enum ElideReason {
     Canary,
     /// A block that no run from the entry reaches.
     Unreachable,
+    /// A jump at the end of a block. The structure of the text shows it.
+    Flow,
+    /// An instruction of a reachable block whose effect no line shows, for example a push of
+    /// a callee-saved register.
+    NoEffect,
+    /// An instruction of the body outside every block, for example alignment bytes.
+    Padding,
 }
 
 impl ElideReason {
@@ -128,6 +159,9 @@ impl ElideReason {
         match self {
             Self::Canary => "stack canary",
             Self::Unreachable => "unreachable",
+            Self::Flow => "control flow",
+            Self::NoEffect => "no effect",
+            Self::Padding => "padding",
         }
     }
 }
@@ -320,4 +354,87 @@ pub fn from_input(
         elided,
         warnings,
     })
+}
+
+/// The printed result of a decompile (design Section 8.3).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Output {
+    /// The entry address of the function.
+    pub entry: u64,
+    /// The name of the function in the text.
+    pub name: String,
+    /// The lines of the full text.
+    pub lines: Vec<Line>,
+    /// The instruction ranges that no line shows, with their reasons, in address order.
+    pub elided: Vec<Elided>,
+    /// The variables that the text names.
+    pub vars: Vec<VarRow>,
+    /// The warnings in output order.
+    pub warnings: Vec<WarningRow>,
+    /// The metrics.
+    pub metrics: Metrics,
+}
+
+impl Output {
+    /// Gives the window of `count` lines from the line `start` (from 1).
+    #[must_use]
+    pub fn window(&self, start: usize, count: usize) -> Window<'_> {
+        Window::new(self, start, count)
+    }
+
+    /// Gives the full text: each line with a newline after it.
+    #[must_use]
+    pub fn text(&self) -> String {
+        self.window(1, self.lines.len()).text()
+    }
+}
+
+/// Decompiles and prints the published function `id` of `program`. `names` gives the names
+/// of the intrinsic instructions.
+///
+/// # Errors
+///
+/// Returns the [`DecompError`] of [`decompile`].
+pub fn render(
+    program: &Program,
+    id: FuncId,
+    opts: &Opts,
+    names: &dyn IntrinsicNames,
+    fuel: &mut Fuel,
+) -> Result<Output, DecompError> {
+    let decomp = decompile(program, id, opts, fuel)?;
+    let env = ProgramEnv(program);
+    let name = env.callee_name(id.0.off).unwrap_or_default();
+    let body = print::body_units(program, id);
+    Ok(finish(decomp, &env, names, &name, &body))
+}
+
+/// Runs the self-check, the printer and the line map on `decomp`. `name` is the name of the
+/// function, and `body` holds the address and the length of each instruction of its body.
+#[must_use]
+pub fn finish(
+    mut decomp: Decomp,
+    env: &dyn PrintEnv,
+    names: &dyn IntrinsicNames,
+    name: &str,
+    body: &[(u64, u8)],
+) -> Output {
+    let validation = selfcheck::check(&mut decomp);
+    let printed = print::print(&decomp, env, names, name);
+    let mut elided = decomp.elided.clone();
+    let flow = print::flow_addrs(&decomp.view);
+    linemap::cover(&printed.lines, &decomp.view.insns, &flow, body, &mut elided);
+    elided.sort_unstable();
+    elided.dedup();
+    let mut all = decomp.warnings.clone();
+    all.extend(printed.warnings);
+    Output {
+        entry: decomp.view.entry,
+        name: name.to_owned(),
+        metrics: metrics::measure(&printed.lines, decomp.mode, validation),
+        warnings: warnings::rows(&all, &decomp.view),
+        lines: printed.lines,
+        elided,
+        vars: printed.vars,
+    }
 }

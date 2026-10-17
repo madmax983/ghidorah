@@ -1,0 +1,41 @@
+{
+  "about": "AC-102: each function meets its goto budget, and its decompiled text holds each snippet.",
+  "functions": [
+    {
+      "fixture": "hello.gcc-O0",
+      "function": "finish",
+      "max_gotos": 0,
+      "snippets": ["puts(\"Goodbye.\")", "return "]
+    },
+    {
+      "fixture": "hello.gcc-O2",
+      "function": "run",
+      "max_gotos": 0,
+      "snippets": ["greet(", "return finish("]
+    },
+    {
+      "fixture": "loops.gcc-O0",
+      "function": "gcd",
+      "max_gotos": 0,
+      "snippets": ["while (", "% "]
+    },
+    {
+      "fixture": "switch.gcc-O2",
+      "function": "run_command",
+      "max_gotos": 0,
+      "snippets": ["switch (", "puts(\"start\")"]
+    },
+    {
+      "fixture": "socket_client.gcc-O0",
+      "function": "connect_to",
+      "max_gotos": 0,
+      "snippets": ["socket(2, 1, 0)", "connect(", "close("]
+    },
+    {
+      "fixture": "recursion.gcc-O0",
+      "function": "main",
+      "max_gotos": 0,
+      "snippets": ["return "]
+    }
+  ]
+}

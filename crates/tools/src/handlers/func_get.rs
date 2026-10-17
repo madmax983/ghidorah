@@ -50,6 +50,26 @@ pub const SECTIONS: [&str; 12] = [
     "jumptables",
 ];
 
+/// The sections of [`SPEC_DECOMP`] in schema order: [`SECTIONS`] with `decomp`.
+pub const DECOMP_SECTIONS: [&str; 13] = [
+    "summary",
+    "disasm",
+    "ir",
+    "decomp",
+    "xrefs",
+    "callers",
+    "callees",
+    "strings",
+    "vars",
+    "notes",
+    "why",
+    "cfg",
+    "jumptables",
+];
+
+/// The IR levels of `ir_opts.level`.
+pub const IR_LEVELS: [&str; 2] = ["l0", "l1"];
+
 /// The largest number of targets of one call.
 pub const MAX_TARGETS: usize = 50;
 
@@ -78,6 +98,135 @@ const CURSORS: &[ArgSpec] = &[
         Role::Param,
         ArgKind::Str(1_024),
         "The ir.next_cursor of the previous call.",
+    ),
+];
+
+const DECOMP_SECTION_ITEM: ArgSpec = ArgSpec::new(
+    "section",
+    Role::Param,
+    ArgKind::Enum(&DECOMP_SECTIONS),
+    "One section of the function.",
+);
+
+const DECOMP_CURSORS: &[ArgSpec] = &[
+    CURSORS[0],
+    CURSORS[1],
+    ArgSpec::new(
+        "decomp",
+        Role::Param,
+        ArgKind::Str(1_024),
+        "The decomp.next_cursor of the previous call.",
+    ),
+];
+
+const IR_OPTS: &[ArgSpec] = &[ArgSpec::new(
+    "level",
+    Role::Param,
+    ArgKind::Enum(&IR_LEVELS),
+    "The IR level: l0 for the lifted ops, l1 for the SSA form after the passes.",
+)
+.default_json("\"l0\"")];
+
+/// The largest number of lines of one decompile window.
+pub const MAX_LINES: i64 = 1_000;
+
+const LINES: &[ArgSpec] = &[
+    ArgSpec::new(
+        "start",
+        Role::Param,
+        ArgKind::Int {
+            min: 1,
+            max: 1_000_000,
+        },
+        "The number of the first line, from 1.",
+    )
+    .default_json("1"),
+    ArgSpec::new(
+        "count",
+        Role::Param,
+        ArgKind::Int {
+            min: 1,
+            max: MAX_LINES,
+        },
+        "The largest number of lines.",
+    )
+    .default_json("150"),
+];
+
+const PASSES: &[ArgSpec] = &[
+    ArgSpec::new(
+        "fold",
+        Role::Param,
+        ArgKind::Bool,
+        "Put each value with one use into its use.",
+    )
+    .default_json("true"),
+    ArgSpec::new(
+        "sailr",
+        Role::Param,
+        ArgKind::Bool,
+        "Run the SAILR-lite passes: canary removal, noreturn calls and tail calls.",
+    )
+    .default_json("true"),
+    ArgSpec::new(
+        "canary",
+        Role::Param,
+        ArgKind::Bool,
+        "Remove the stack canary check. It needs sailr.",
+    )
+    .default_json("true"),
+    ArgSpec::new(
+        "tailcall",
+        Role::Param,
+        ArgKind::Bool,
+        "Show a tail jump as return f(..). It needs sailr.",
+    )
+    .default_json("true"),
+];
+
+const DECOMP_OPTS: &[ArgSpec] = &[
+    ArgSpec::new(
+        "lines",
+        Role::Param,
+        ArgKind::Obj(LINES),
+        "The window of lines to return.",
+    ),
+    ArgSpec::new(
+        "passes",
+        Role::Param,
+        ArgKind::Obj(PASSES),
+        "The decompiler passes to turn on or off.",
+    ),
+];
+
+const DECOMP_ARGS: &[ArgSpec] = &[
+    ARGS[0],
+    ARGS[1],
+    ArgSpec::new(
+        "include",
+        Role::Param,
+        ArgKind::List(&DECOMP_SECTION_ITEM, 13),
+        "The sections to return in this order.",
+    )
+    .default_json("[\"summary\"]"),
+    ArgSpec::new(
+        "ir_opts",
+        Role::Param,
+        ArgKind::Obj(IR_OPTS),
+        "The options of the ir section.",
+    ),
+    ArgSpec::new(
+        "decomp_opts",
+        Role::Param,
+        ArgKind::Obj(DECOMP_OPTS),
+        "The options of the decomp section: the window of lines and the passes.",
+    ),
+    ARGS[3],
+    ArgSpec::new(
+        "cursors",
+        Role::Param,
+        ArgKind::Obj(DECOMP_CURSORS),
+        "The section cursors of the previous call, to get the next rows of a section.",
     ),
 ];
 
@@ -134,6 +283,7 @@ const FIELDS: &[Field] = &[
     Field::opt("summary", OutputShape::Any),
     Field::opt("disasm", OutputShape::Any),
     Field::opt("ir", OutputShape::Any),
+    Field::opt("decomp", OutputShape::Any),
     Field::opt("xrefs", OutputShape::Any),
     Field::opt("callers", OutputShape::Any),
     Field::opt("callees", OutputShape::Any),
@@ -185,6 +335,38 @@ pub const SPEC: ToolSpec<Session> = ToolSpec {
     ..ToolSpec::base("func_get", run)
 };
 
+/// `func_get` with the `decomp` section, `ir_opts` and `decomp_opts` (WP-23).
+pub const SPEC_DECOMP: ToolSpec<Session> = ToolSpec {
+    summary: "Get one or more functions with selected sections: summary, disassembly, IR, decompiled C, xrefs, callers, callees, strings, variables, notes, why, CFG and jump tables.",
+    description: "Get one or more functions with selected sections: summary, disassembly, IR, decompiled C, xrefs, callers, callees, strings, variables, notes, why, CFG and jump tables. \
+                  Send target, or targets for up to 50 functions. \
+                  The sections share max_chars by weight, so a large section can come back cut. \
+                  A cut disassembly or decompile gives next_cursor: send it in cursors to read on. \
+                  decomp_opts.lines selects a window of lines of the decompiled C, and ir_opts.level l1 gives the SSA form. \
+                  The member omitted names each section that did not fit, with its size. \
+                  A call with disasm, ir or decomp marks the function as visited, and this mark changes no fact.",
+    args: DECOMP_ARGS,
+    examples: &[
+        Example {
+            args: r#"{"target":"main"}"#,
+            golden: "tests/golden/tools/func_get.1.json",
+        },
+        Example {
+            args: r#"{"target":"fn:0x1080","include":["disasm","callees"],"disasm_limit":8}"#,
+            golden: "tests/golden/tools/func_get.2.json",
+        },
+        Example {
+            args: r#"{"targets":["main","0x11e0"],"include":["summary","strings"]}"#,
+            golden: "tests/golden/tools/func_get.3.json",
+        },
+        Example {
+            args: r#"{"target":"main","include":["decomp"],"decomp_opts":{"lines":{"start":1,"count":40}}}"#,
+            golden: "tests/golden/tools/func_get.4.json",
+        },
+    ],
+    ..SPEC
+};
+
 /// The smallest share of a section that the handler renders. A section with a smaller
 /// share goes to `omitted` with `null`.
 pub const MIN_SHARE: u64 = 48;
@@ -202,7 +384,7 @@ fn included(args: &Args) -> Vec<&'static str> {
         .collect();
     let mut out: Vec<&'static str> = Vec::new();
     for name in names {
-        if let Some(s) = SECTIONS.iter().find(|s| **s == name)
+        if let Some(s) = DECOMP_SECTIONS.iter().find(|s| **s == name)
             && !out.contains(s)
         {
             out.push(s);

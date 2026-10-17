@@ -1,0 +1,12 @@
+{
+  "about": "AC-113b: the signature `void (int)` on the callee changes the call text of each caller.",
+  "fixture": "socket_client.gcc-O0",
+  "callee": "connect_to",
+  "callers": [
+    {
+      "caller": "main",
+      "before": "connect_to(\"127.0.0.1\", 0x1f90)",
+      "snippet": "connect_to(\"127.0.0.1\");"
+    }
+  ]
+}

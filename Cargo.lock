@@ -114,6 +114,7 @@ dependencies = [
  "ghidorah-analysis",
  "ghidorah-base",
  "ghidorah-db",
+ "ghidorah-decomp",
  "ghidorah-json",
  "ghidorah-loader",
  "ghidorah-testkit",
