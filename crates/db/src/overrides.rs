@@ -1,8 +1,8 @@
 //! The flow override manager (design Sections 3.4 and 7.5).
 //!
 //! The key is the address of an instruction. An override changes the flow that analysis
-//! gives the instruction. An `IndirectTargets` list is sorted, has no duplicate and holds at
-//! most [`MAX_TARGETS`] addresses.
+//! gives the instruction. The manager sorts an `IndirectTargets` list and removes its
+//! duplicates. The list holds at most [`MAX_TARGETS`] addresses.
 
 #[cfg(test)]
 mod tests;

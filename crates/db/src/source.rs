@@ -11,7 +11,7 @@
 //! A write succeeds when its rank is at least the rank of the current fact.
 //! An `Agent` write over an `Imported` fact succeeds only with `force`.
 //! Kernel K7 ([`ghidorah_kernel::may_overwrite`]) proves this rule.
-//! The rank numbers are persisted, so they never change.
+//! The journal and the snapshots keep the rank numbers, so the numbers never change.
 
 use std::fmt;
 

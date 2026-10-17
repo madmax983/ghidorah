@@ -183,25 +183,24 @@ impl SetMembers {
     /// Returns [`Invalid::SetKinds`] when one set holds addresses and the other holds IDs,
     /// unless `op` is `Replace`.
     pub fn apply(&self, op: SetOp, other: &Self) -> Result<Self, Invalid> {
-        if op == SetOp::Replace {
-            return Ok(other.clone());
-        }
         match (self, other) {
             (Self::Addrs(a), Self::Addrs(b)) => Ok(Self::Addrs(match op {
+                SetOp::Replace => b.clone(),
                 SetOp::Union => a.union(b),
                 SetOp::Intersect => a.intersect(b),
-                SetOp::Replace | SetOp::Subtract => a.subtract(b),
+                SetOp::Subtract => a.subtract(b),
             })),
             (Self::Ids(a), Self::Ids(b)) => {
-                let a: BTreeSet<&String> = a.iter().collect();
-                let b: BTreeSet<&String> = b.iter().collect();
-                let out: Vec<&String> = match op {
-                    SetOp::Union => a.union(&b).copied().collect(),
-                    SetOp::Intersect => a.intersection(&b).copied().collect(),
-                    SetOp::Replace | SetOp::Subtract => a.difference(&b).copied().collect(),
+                let in_b: BTreeSet<&String> = b.iter().collect();
+                let out: Vec<String> = match op {
+                    SetOp::Replace => b.clone(),
+                    SetOp::Union => a.iter().chain(b).cloned().collect(),
+                    SetOp::Intersect => a.iter().filter(|x| in_b.contains(x)).cloned().collect(),
+                    SetOp::Subtract => a.iter().filter(|x| !in_b.contains(x)).cloned().collect(),
                 };
-                Ok(Self::Ids(out.into_iter().cloned().collect()))
+                Ok(Self::ids(out))
             }
+            _ if op == SetOp::Replace => Ok(other.clone()),
             _ => Err(Invalid::SetKinds),
         }
     }
@@ -355,9 +354,8 @@ impl Notes {
     /// Returns [`Invalid`] when the note breaks a rule: the text cap, the item caps, the
     /// set rules, an evidence entry that does not parse or a source other than `Agent` and
     /// `User`. Then the store does not change.
-    pub(crate) fn write(&mut self, note: Note) -> Result<Option<Note>, Invalid> {
+    pub(crate) fn write(&mut self, mut note: Note) -> Result<Option<Note>, Invalid> {
         self.check(&note)?;
-        let mut note = note;
         if let Some(NoteSet {
             members: SetMembers::Ids(ids),
             ..
@@ -367,20 +365,13 @@ impl Notes {
             ids.dedup();
         }
         let id = note.id;
-        if let Some(set) = &note.set {
-            self.sets.insert(set.name.clone(), id);
-        }
+        let name = note.set.as_ref().map(|s| s.name.clone());
         let old = self.map.insert(id, note);
-        if let Some(old_set) = old.as_ref().and_then(|n| n.set.as_ref())
-            && self.sets.get(&old_set.name) == Some(&id)
-            && self
-                .map
-                .get(&id)
-                .and_then(|n| n.set.as_ref())
-                .map(|s| &s.name)
-                != Some(&old_set.name)
-        {
-            self.sets.remove(&old_set.name);
+        if let Some(old) = &old {
+            self.unlink(old);
+        }
+        if let Some(name) = name {
+            self.sets.insert(name, id);
         }
         self.next = self.next.max(id.0.saturating_add(1));
         Ok(old)
