@@ -28,6 +28,7 @@
 
 use std::fmt::Write as _;
 
+mod generate;
 mod tables;
 
 /// The address of the instruction of each vector.
@@ -311,22 +312,72 @@ impl Form {
     /// The inputs depend only on the form name, so each run gives the same inputs.
     #[must_use]
     pub fn vectors(&self) -> Vec<Vector> {
-        let _ = self.run;
-        Vec::new()
+        (0..usize::from(self.cases))
+            .map(|i| generate::vector(self, i))
+            .collect()
     }
 
     /// Gives the header line of the form in a vector file.
     #[must_use]
     pub fn header_line(&self) -> String {
+        let regs: Vec<String> = self
+            .regs
+            .iter()
+            .map(|r| format!("\"{}\"", r.name()))
+            .collect();
+        let ptrs: Vec<String> = self
+            .ptrs
+            .iter()
+            .map(|(r, off)| format!("[\"{}\",{off}]", r.name()))
+            .collect();
         let mut out = String::new();
-        let _ = write!(out, "{{\"form\":\"{}\"", self.name);
+        let _ = write!(
+            out,
+            "{{\"form\":\"{}\",\"row\":\"{}\",\"w\":{},\"bytes\":\"{}\",\"kind\":\"{}\",\
+             \"regs\":[{}],\"ptrs\":[{}],\"mem\":{},\"cases\":{},\
+             \"ip\":\"{VIP:#x}\",\"base\":\"{VBASE:#x}\",\"fill\":\"{FILL:#x}\"}}",
+            self.name,
+            self.row,
+            self.w,
+            hex(self.bytes),
+            self.kind.name(),
+            regs.join(","),
+            ptrs.join(","),
+            self.mem,
+            self.cases,
+        );
         out
     }
 
     /// Gives the line of one vector in a vector file.
     #[must_use]
     pub fn vector_line(&self, v: &Vector) -> String {
-        let _ = v;
-        String::new()
+        let list = |values: &[u128]| -> String {
+            let items: Vec<String> = values.iter().map(|x| format!("\"{x:#x}\"")).collect();
+            items.join(",")
+        };
+        let mut out = format!(
+            "{{\"in\":[{}],\"out\":[{}]",
+            list(&v.inputs),
+            list(&v.outputs)
+        );
+        if self.mem > 0 {
+            let _ = write!(
+                out,
+                ",\"mem_in\":\"{}\",\"mem_out\":\"{}\"",
+                hex(&v.mem_in),
+                hex(&v.mem_out)
+            );
+        }
+        out.push('}');
+        out
     }
+}
+
+/// Gives bytes as lowercase hex without separators.
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().fold(String::new(), |mut out, b| {
+        let _ = write!(out, "{b:02x}");
+        out
+    })
 }

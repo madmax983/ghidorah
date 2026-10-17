@@ -10,10 +10,13 @@
 //! another CPU can differ in the flags that the hardware leaves undefined.
 
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::process::Command;
 
-use crate::Error;
-use crate::json::Value;
+use ghidorah_testkit::golden::{Format, Header};
+
+use crate::json::{self, Value};
+use crate::{Error, proc};
 
 /// The vector directory, relative to the workspace root.
 pub const SEMANTICS_DIR: &str = "tests/golden/semantics/x86";
@@ -44,11 +47,35 @@ pub const BASH_TEST: &[&str] = &[
     "--nocapture",
 ];
 
+/// The cargo arguments that build the oracle binary.
+const BUILD: &[&str] = &[
+    "build",
+    "--quiet",
+    "-p",
+    "ghidorah-oracle",
+    "--bin",
+    "ghidorah-oracle",
+    "--message-format=json",
+];
+
+const USAGE: &str = "cargo xtask oracle <semantics [--check]|bash>";
+
 /// Gives the CPU model of `/proc/cpuinfo` text, or `unknown`.
 #[must_use]
 pub fn cpu_model(cpuinfo: &str) -> String {
-    let _ = cpuinfo;
-    String::new()
+    cpuinfo
+        .lines()
+        .find(|l| l.starts_with("model name"))
+        .and_then(|l| l.split_once(':'))
+        .map_or_else(|| "unknown".to_owned(), |(_, v)| v.trim().to_owned())
+}
+
+/// Tells if a vector file name is a plain name: lowercase letters, digits and `_`.
+fn plain_name(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
 }
 
 /// Parses the output of `ghidorah-oracle list` into `(file, form name)` pairs.
@@ -57,8 +84,18 @@ pub fn cpu_model(cpuinfo: &str) -> String {
 ///
 /// Returns [`Error::Data`] for a line without a tab or a file name that is not a plain name.
 pub fn parse_list(text: &str) -> Result<Vec<(String, String)>, Error> {
-    let _ = text;
-    Ok(Vec::new())
+    text.lines()
+        .filter(|l| !l.is_empty())
+        .map(|l| match l.split_once('\t') {
+            Some((file, name)) if plain_name(file) && !name.is_empty() => {
+                Ok((file.to_owned(), name.to_owned()))
+            }
+            _ => Err(Error::data(
+                "ghidorah-oracle list",
+                format!("bad line `{l}`"),
+            )),
+        })
+        .collect()
 }
 
 /// Gives the text of each vector file: the header line, then the output of each form in
@@ -71,18 +108,130 @@ pub fn render_files(
     list: &[(String, String)],
     outputs: &[String],
 ) -> BTreeMap<String, String> {
-    let _ = (cpu, list, outputs);
-    BTreeMap::new()
+    let mut bodies: BTreeMap<String, (usize, String)> = BTreeMap::new();
+    for ((file, _), out) in list.iter().zip(outputs) {
+        let entry = bodies.entry(file.clone()).or_default();
+        entry.0 += 1;
+        entry.1.push_str(out);
+        if !out.ends_with('\n') {
+            entry.1.push('\n');
+        }
+    }
+    bodies
+        .into_iter()
+        .map(|(file, (forms, body))| {
+            let header = Header::new(GENERATOR, VERSION)
+                .with("cpu", cpu)
+                .with("forms", &forms.to_string())
+                .render(Format::Json);
+            (file, format!("{header}\n{body}"))
+        })
+        .collect()
 }
 
 /// Makes the record of the host boundary oracle from the output of its test.
 ///
 /// # Errors
 ///
-/// Returns [`Error::Data`] when the output has no result line or the line is not JSON.
+/// Returns [`Error::Data`] when the output has no result line or the line is not a JSON
+/// object.
 pub fn bash_record(test_stdout: &str) -> Result<Value, Error> {
-    let _ = test_stdout;
-    Err(Error::data("oracle bash", "no result line"))
+    let origin = "oracle bash";
+    let line = test_stdout
+        .lines()
+        .find_map(|l| l.strip_prefix(RESULT_PREFIX))
+        .ok_or_else(|| Error::data(origin, "no result line"))?;
+    let value = json::parse(line).map_err(|e| Error::data(origin, e.to_string()))?;
+    let Value::Object(mut members) = value else {
+        return Err(Error::data(origin, "the result is not an object"));
+    };
+    members.insert("generator".to_owned(), Value::from(GENERATOR));
+    members.insert("version".to_owned(), Value::from(VERSION));
+    Ok(Value::Object(members))
+}
+
+/// Builds the oracle binary and gives its path.
+fn oracle_binary(root: &Path) -> Result<PathBuf, Error> {
+    let mut cmd = proc::cargo_cmd(BUILD);
+    let out = proc::run_ok(cmd.current_dir(root))?;
+    out.stdout
+        .lines()
+        .filter_map(|l| json::parse(l).ok())
+        .filter(|v| v.pointer("/target/name").and_then(Value::as_str) == Some("ghidorah-oracle"))
+        .find_map(|v| {
+            v.get("executable")
+                .and_then(Value::as_str)
+                .map(PathBuf::from)
+        })
+        .ok_or_else(|| Error::data("cargo build", "no ghidorah-oracle executable"))
+}
+
+/// Runs every form in its own child process.
+fn run_forms(bin: &Path, list: &[(String, String)]) -> Result<Vec<String>, Error> {
+    list.iter()
+        .map(|(_, name)| {
+            let out = proc::run_ok(Command::new(bin).args(["form", name]))?;
+            if out.stdout.starts_with("{\"form\":") {
+                Ok(out.stdout)
+            } else {
+                Err(Error::data(name.clone(), "no form header line"))
+            }
+        })
+        .collect()
+}
+
+fn semantics(root: &Path, check: bool) -> Result<Value, Error> {
+    let bin = oracle_binary(root)?;
+    let list = parse_list(&proc::run_ok(Command::new(&bin).arg("list"))?.stdout)?;
+    let outputs = run_forms(&bin, &list)?;
+    let cpu = cpu_model(&std::fs::read_to_string("/proc/cpuinfo").unwrap_or_default());
+    let files = render_files(&cpu, &list, &outputs);
+    let dir = root.join(SEMANTICS_DIR);
+    let mut changed = Vec::new();
+    for (name, text) in &files {
+        let path = dir.join(format!("{name}.jsonl"));
+        if std::fs::read_to_string(&path).ok().as_deref() != Some(text.as_str()) {
+            changed.push(Value::from(name.as_str()));
+            if !check {
+                std::fs::create_dir_all(&dir).map_err(|e| Error::io(&dir, e))?;
+                std::fs::write(&path, text).map_err(|e| Error::io(&path, e))?;
+            }
+        }
+    }
+    let vectors: usize = outputs
+        .iter()
+        .map(|o| o.lines().count().saturating_sub(1))
+        .sum();
+    Ok(Value::object([
+        ("ok", Value::from(!check || changed.is_empty())),
+        ("check", Value::from(check)),
+        ("cpu", Value::from(cpu)),
+        ("files", Value::from(files.len())),
+        ("forms", Value::from(list.len())),
+        ("vectors", Value::from(vectors)),
+        ("changed", Value::from(changed)),
+    ]))
+}
+
+fn bash(root: &Path) -> Result<Value, Error> {
+    let mut cmd = proc::cargo_cmd(BASH_TEST);
+    let out = proc::run(cmd.current_dir(root))?;
+    let record = bash_record(&out.stdout)?;
+    let path = root.join(RECORD);
+    let text = format!("{}\n", json::write(&record));
+    std::fs::write(&path, text).map_err(|e| Error::io(&path, e))?;
+    let mismatches = |key: &str| {
+        record
+            .pointer(&format!("/{key}/mismatches"))
+            .and_then(Value::as_u64)
+    };
+    let ok = out.ok() && mismatches("bash") == Some(0) && mismatches("libc") == Some(0);
+    Ok(Value::object([
+        ("ok", Value::from(ok)),
+        ("record", Value::from(RECORD)),
+        ("bash", record.get("bash").cloned().unwrap_or(Value::Null)),
+        ("libc", record.get("libc").cloned().unwrap_or(Value::Null)),
+    ]))
 }
 
 /// Runs `xtask oracle <semantics [--check]|bash>`.
@@ -90,10 +239,14 @@ pub fn bash_record(test_stdout: &str) -> Result<Value, Error> {
 /// # Errors
 ///
 /// Returns [`Error::Usage`] for bad arguments, [`Error::Command`] when a child process
-/// fails and [`Error::Io`] when a file does not read or write.
+/// fails, [`Error::Data`] for a bad child output and [`Error::Io`] when a file does not
+/// write.
 pub fn run(root: &Path, args: &[String]) -> Result<Value, Error> {
-    let _ = (root, args);
-    Err(Error::Usage(
-        "cargo xtask oracle <semantics [--check]|bash>".to_owned(),
-    ))
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+    match args.as_slice() {
+        ["semantics"] => semantics(root, false),
+        ["semantics", "--check"] => semantics(root, true),
+        ["bash"] => bash(root),
+        _ => Err(Error::Usage(USAGE.to_owned())),
+    }
 }

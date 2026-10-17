@@ -11,9 +11,9 @@ macro_rules! move_rows {
         &[$(
             plain!("sse_move", $row, 128, concat!($row, " xmm0, xmm1"), [$($rr),+], [Xmm0, Xmm1, Flags], 64),
             form!("sse_move", $row, 128, concat!($row, " xmm0, xmmword ptr [rsi]"), Plain, [] [$($ld),+] [],
-                [Xmm0, Rsi, Flags], [Rsi = 16], 64, 32, Rule::Free),
+                [Xmm0, Rsi, Flags], [Rsi = 16], 32, 32, Rule::Free),
             form!("sse_move", $row, 128, concat!($row, " xmmword ptr [rsi], xmm1"), Plain, [] [$($st),+] [],
-                [Xmm1, Rsi, Flags], [Rsi = 16], 64, 32, Rule::Free),
+                [Xmm1, Rsi, Flags], [Rsi = 16], 32, 32, Rule::Free),
         )*]
     };
 }
@@ -49,7 +49,7 @@ pub(super) const SSE_MOVE: &[Form] = &[
         64
     ),
     form!("sse_move", "movd", 32, "movd xmm0, dword ptr [rsi]", Plain, [] [0x66, 0x0f, 0x6e, 0x06] [],
-        [Xmm0, Rsi, Flags], [Rsi = 16], 64, 16, Rule::Free),
+        [Xmm0, Rsi, Flags], [Rsi = 16], 32, 16, Rule::Free),
     plain!(
         "sse_move",
         "movq",
@@ -78,9 +78,9 @@ pub(super) const SSE_MOVE: &[Form] = &[
         64
     ),
     form!("sse_move", "movq", 64, "movq xmm0, qword ptr [rsi]", Plain, [] [0xf3, 0x0f, 0x7e, 0x06] [],
-        [Xmm0, Rsi, Flags], [Rsi = 16], 64, 16, Rule::Free),
+        [Xmm0, Rsi, Flags], [Rsi = 16], 32, 16, Rule::Free),
     form!("sse_move", "movq", 64, "movq qword ptr [rsi], xmm1", Plain, [] [0x66, 0x0f, 0xd6, 0x0e] [],
-        [Xmm1, Rsi, Flags], [Rsi = 16], 64, 16, Rule::Free),
+        [Xmm1, Rsi, Flags], [Rsi = 16], 32, 16, Rule::Free),
     plain!(
         "sse_move",
         "movss",
@@ -91,9 +91,9 @@ pub(super) const SSE_MOVE: &[Form] = &[
         64
     ),
     form!("sse_move", "movss", 32, "movss xmm0, dword ptr [rsi]", Plain, [] [0xf3, 0x0f, 0x10, 0x06] [],
-        [Xmm0, Rsi, Flags], [Rsi = 16], 64, 32, Rule::Free),
+        [Xmm0, Rsi, Flags], [Rsi = 16], 32, 32, Rule::Free),
     form!("sse_move", "movss", 32, "movss dword ptr [rsi], xmm1", Plain, [] [0xf3, 0x0f, 0x11, 0x0e] [],
-        [Xmm1, Rsi, Flags], [Rsi = 16], 64, 32, Rule::Free),
+        [Xmm1, Rsi, Flags], [Rsi = 16], 32, 32, Rule::Free),
     plain!(
         "sse_move",
         "movsd",
@@ -104,9 +104,9 @@ pub(super) const SSE_MOVE: &[Form] = &[
         64
     ),
     form!("sse_move", "movsd", 64, "movsd xmm0, qword ptr [rsi]", Plain, [] [0xf2, 0x0f, 0x10, 0x06] [],
-        [Xmm0, Rsi, Flags], [Rsi = 16], 64, 32, Rule::Free),
+        [Xmm0, Rsi, Flags], [Rsi = 16], 32, 32, Rule::Free),
     form!("sse_move", "movsd", 64, "movsd qword ptr [rsi], xmm1", Plain, [] [0xf2, 0x0f, 0x11, 0x0e] [],
-        [Xmm1, Rsi, Flags], [Rsi = 16], 64, 32, Rule::Free),
+        [Xmm1, Rsi, Flags], [Rsi = 16], 32, 32, Rule::Free),
 ];
 
 /// The `sse_zero` rows.
