@@ -1,0 +1,24 @@
+[package]
+name = "ghidorah-types"
+description = "Type core, data models, C parser, prelude types, natural layout, Tier-0 prototypes, calling conventions, noreturn and syscall data."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# The crate has no unit tests. Its tests are in the test binary `tests/types/main.rs`
+# and in the fuzz binary `tests/fuzz_cparse.rs`.
+[lib]
+name = "ghidorah_types"
+path = "src/lib.rs"
+test = false
+
+[dependencies]
+ghidorah-base = { path = "../base" }
+
+[dev-dependencies]
+ghidorah-testkit = { path = "../testkit" }
+
+[lints]
+workspace = true
