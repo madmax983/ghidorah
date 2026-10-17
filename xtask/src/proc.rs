@@ -57,6 +57,16 @@ pub fn tail(text: &str, count: usize) -> String {
     lines.get(start..).unwrap_or_default().join("\n")
 }
 
+/// Makes the [`Error::Command`] value of a process that fails to start or to stream.
+#[must_use]
+pub fn start_error(argv: &str, err: &std::io::Error) -> Error {
+    Error::Command {
+        argv: argv.to_owned(),
+        code: None,
+        stderr: err.to_string(),
+    }
+}
+
 /// Runs a command to its end and captures its output.
 ///
 /// A non-zero exit code is not an error here. Use [`Output::ok`].
@@ -68,11 +78,7 @@ pub fn run(cmd: &mut Command) -> Result<Output, Error> {
     let out = cmd
         .stdin(Stdio::null())
         .output()
-        .map_err(|e| Error::Command {
-            argv: describe(cmd),
-            code: None,
-            stderr: e.to_string(),
-        })?;
+        .map_err(|e| start_error(&describe(cmd), &e))?;
     Ok(Output {
         code: out.status.code(),
         stdout: String::from_utf8_lossy(&out.stdout).into_owned(),

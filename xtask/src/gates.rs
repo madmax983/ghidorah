@@ -158,20 +158,12 @@ pub const GATES: &[Gate] = &[
     gate(
         "AC-010",
         "The clippy policy of ADR-0019 applies to every package.",
-        |r| {
-            let mut found = manifest::lint_policy(&r.read("Cargo.toml")?);
-            found.extend(each_package_manifest(r, manifest::lints_inherited)?);
-            Ok(found)
-        },
+        |r| policy(r, manifest::lint_policy),
     ),
     gate(
         "AC-011",
-        "`missing_docs` and `unsafe_code` are denied.",
-        |r| {
-            let mut found = manifest::docs_policy(&r.read("Cargo.toml")?);
-            found.extend(each_package_manifest(r, manifest::lints_inherited)?);
-            Ok(found)
-        },
+        "The workspace denies `missing_docs` and `unsafe_code`.",
+        |r| policy(r, manifest::docs_policy),
     ),
     gate(
         "AC-012",
@@ -243,6 +235,13 @@ fn each_package_manifest(
     for rel in repo.manifests().into_iter().filter(|m| m != "Cargo.toml") {
         found.extend(check(&rel, &repo.read(&rel)?));
     }
+    Ok(found)
+}
+
+/// Checks the root lint policy, then the `[lints] workspace = true` line of each package.
+fn policy(repo: &Repo, root_check: fn(&str) -> Vec<Finding>) -> Result<Vec<Finding>, Error> {
+    let mut found = root_check(&repo.read("Cargo.toml")?);
+    found.extend(each_package_manifest(repo, manifest::lints_inherited)?);
     Ok(found)
 }
 

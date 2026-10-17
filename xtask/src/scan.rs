@@ -80,16 +80,9 @@ pub fn crate_dir(rel: &str) -> Option<&str> {
     }
 }
 
-fn find_all(
-    rule: &str,
-    rel: &str,
-    text: &str,
-    hay: &str,
-    needle: &str,
-    what: &str,
-) -> Vec<Finding> {
+fn find_text(rule: &str, rel: &str, hay: &str, needle: &str, what: &str) -> Vec<Finding> {
     hay.match_indices(needle)
-        .map(|(i, _)| Finding::new(rule, rel, line_of(text, i), what))
+        .map(|(i, _)| Finding::new(rule, rel, line_of(hay, i), what))
         .collect()
 }
 
@@ -113,7 +106,7 @@ pub fn no_stubs(rel: &str, text: &str) -> Vec<Finding> {
         (concat!(".ex", "pect("), "panicking call"),
     ];
     for (needle, what) in calls {
-        found.extend(find_all("AC-012", rel, &code, &code, needle, what));
+        found.extend(find_text("AC-012", rel, &code, needle, what));
     }
     for word in [
         concat!("TO", "DO"),
@@ -142,10 +135,14 @@ pub fn file_size(rel: &str, text: &str) -> Vec<Finding> {
     }
 }
 
-fn attribute_end(code: &str, start: usize) -> usize {
-    code.get(start..)
+/// Gives the attribute text around byte `at`: from the last `[` before it to the next `]`.
+fn enclosing_attribute(code: &str, at: usize) -> &str {
+    let open = code.get(..at).and_then(|b| b.rfind('[')).unwrap_or(0);
+    let close = code
+        .get(at..)
         .and_then(|rest| rest.find(']'))
-        .map_or(code.len(), |i| start + i)
+        .map_or(code.len(), |i| at + i);
+    code.get(open..close).unwrap_or_default()
 }
 
 /// AC-016: finds an `allow` of `disallowed_types`, or an `expect` without a reason.
@@ -155,9 +152,7 @@ pub fn disallowed_exceptions(rel: &str, text: &str) -> Vec<Finding> {
     let mut found = Vec::new();
     let needle = concat!("clippy::disallowed", "_types");
     for (i, _) in code.match_indices(needle) {
-        let before = code.get(..i).unwrap_or_default();
-        let open = before.rfind('[').unwrap_or(0);
-        let attr = code.get(open..attribute_end(&code, i)).unwrap_or_default();
+        let attr = enclosing_attribute(&code, i);
         let line = line_of(&code, i);
         if attr.contains("allow(") {
             found.push(Finding::new(
@@ -266,9 +261,7 @@ pub fn no_unsafe(rel: &str, text: &str) -> Vec<Finding> {
     );
     let lint = concat!("unsafe", "_code");
     for i in find_word(&code, lint) {
-        let before = code.get(..i).unwrap_or_default();
-        let open = before.rfind('[').unwrap_or(0);
-        let attr = code.get(open..i).unwrap_or_default();
+        let attr = enclosing_attribute(&code, i);
         if attr.contains("expect(") || attr.contains("allow(") {
             found.push(Finding::new(
                 "AC-004",

@@ -287,27 +287,15 @@ fn run_times(root: &Path) -> Result<Value, Error> {
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
         .spawn()
-        .map_err(|e| Error::Command {
-            argv: argv.clone(),
-            code: None,
-            stderr: e.to_string(),
-        })?;
+        .map_err(|e| proc::start_error(&argv, &e))?;
     let mut lines = Vec::new();
     if let Some(stdout) = child.stdout.take() {
         for line in BufReader::new(stdout).lines() {
-            let line = line.map_err(|e| Error::Command {
-                argv: argv.clone(),
-                code: None,
-                stderr: e.to_string(),
-            })?;
+            let line = line.map_err(|e| proc::start_error(&argv, &e))?;
             lines.push((elapsed_ms(start), line));
         }
     }
-    let status = child.wait().map_err(|e| Error::Command {
-        argv,
-        code: None,
-        stderr: e.to_string(),
-    })?;
+    let status = child.wait().map_err(|e| proc::start_error(&argv, &e))?;
     let mut times = parse_test_times(&lines);
     let max_ms = times.iter().map(|t| t.ms).max().unwrap_or(0);
     let failed: Vec<Value> = times
