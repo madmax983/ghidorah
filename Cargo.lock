@@ -103,6 +103,8 @@ dependencies = [
  "ghidorah-json",
  "ghidorah-loader",
  "ghidorah-testkit",
+ "ghidorah-types",
+ "ghidorah-x86",
 ]
 
 [[package]]

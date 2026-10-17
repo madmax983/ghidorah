@@ -24,6 +24,10 @@ ghidorah-db = { path = "../db" }
 ghidorah-json = { path = "../json" }
 # `binary_load` reads files through the loader.
 ghidorah-loader = { path = "../loader" }
+# `binary_survey`, `func_list`, `search` and `mem_read` read the C types and the Tier-0 data.
+ghidorah-types = { path = "../types" }
+# `func_get`, `xref_list` and `mem_read` decode and print instructions.
+ghidorah-x86 = { path = "../x86" }
 
 [dev-dependencies]
 ghidorah-testkit = { path = "../testkit" }
