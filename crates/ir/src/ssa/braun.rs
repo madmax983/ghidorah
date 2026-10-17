@@ -1,11 +1,13 @@
 //! The value of a location at a block start: Braun SSA with all blocks sealed.
 //!
-//! The CFG does not change, so all blocks are sealed from the start. Each block knows its
-//! own last write of each location before the first read. A read at a block start walks up
-//! the chain of single predecessors with an explicit loop. The walk stops at a block with a
-//! write, at a known value, at the function start or at a merge block. A merge block gets
-//! an empty phi at once, and the walk keeps the phi for each block of the chain. The phi
-//! gets its arguments later, from a list of open phis. So no read recurses.
+//! The CFG does not change, so the build seals all blocks at the start. The local step
+//! gives the last write of each location in each block.
+//!
+//! A read at a block start walks up the chain of single predecessors in a loop. The walk
+//! stops at a block with a write, at a known value, at the function start or at a merge
+//! block. A merge block gets an empty phi at once. The walk keeps its result for each block
+//! of the chain. The phi gets its arguments later, from a list of open phis. So no read
+//! recurses.
 //!
 //! A chain of single predecessors that goes back to itself has no entry, so no run reaches
 //! it. The walk puts a phi in such a cycle, and the cleanup keeps that phi.

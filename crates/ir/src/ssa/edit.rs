@@ -258,8 +258,7 @@ impl Ssa {
                 let kept: Vec<Arg> = args
                     .iter()
                     .enumerate()
-                    .filter(|&(j, _)| preds.get(j).is_none_or(|&p| keep(p, block)))
-                    .filter(|&(j, _)| j < preds.len() || block == entry)
+                    .filter(|&(j, _)| preds.get(j).map_or(block == entry, |&p| keep(p, block)))
                     .map(|(_, &a)| a)
                     .collect();
                 self.set_phi_args(phi, kept);

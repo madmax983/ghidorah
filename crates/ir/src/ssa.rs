@@ -506,14 +506,15 @@ pub(crate) const fn low_mask(w: u8) -> u64 {
 /// The build checks the body. It reads the locations of each block, then it reads the
 /// values at block starts with phis (Braun, all blocks sealed). Last, it removes the
 /// redundant phis with the SCC method of Braun, so the result is minimal for a reducible
-/// CFG. Each walk uses an explicit stack. Each op and each step of a walk takes one unit of
-/// `fuel`.
+/// CFG. No step recurses, so a deep CFG does not overflow the thread stack. Each op and each
+/// step of a walk takes one unit of `fuel`.
 ///
 /// # Errors
 ///
 /// Returns [`SsaError::BlockCount`], [`SsaError::BadBlock`] and [`SsaError::InsnCover`] for a
-/// bad body, [`SsaError::BadOp`] for an op that is not valid L0, [`SsaError::SeqFull`] and
-/// [`SsaError::Full`] when the arena cannot take an op, and [`SsaError::OutOfFuel`].
+/// bad body. Returns [`SsaError::BadOp`] for an op that is not valid L0. Returns
+/// [`SsaError::SeqFull`] and [`SsaError::Full`] when the arena cannot take an op. Returns
+/// [`SsaError::OutOfFuel`] when the fuel runs out.
 pub fn build(arena: Arena, body: Body, opts: &Opts, fuel: &mut Fuel) -> Result<Ssa, SsaError> {
     build::build(arena, body, opts, fuel)
 }

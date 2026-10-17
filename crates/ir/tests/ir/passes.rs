@@ -166,8 +166,8 @@ fn dce_keeps_calls() {
     let report = run_all(&mut ssa, Switches::all());
     assert!(report.changes(Pass::Dce).is_some_and(|n| n >= 2));
     assert_clean(&ssa, "dce");
-    // The call and its argument stay. The pure dead ops go. A load and a division by a
-    // value that can be 0 can stop a run, so they stay.
+    // The call and its argument stay. DCE removes each pure op that no live op reads.
+    // A load and a division by a value that can be 0 can stop a run, so they stay.
     assert_eq!(
         insn_opcodes(&ssa),
         [
@@ -347,6 +347,65 @@ fn cond_through_phi_rows() {
             (Loc::RAX, rax),
             (Loc::Flags, u128::from(flags)),
         ];
+        let want = run_l0(&arena, &image, &ret, &setup, 0x5000, 100);
+        assert_eq!(run_l1(&ssa, &image, &setup, 100), want, "{setup:?}");
+    }
+}
+
+#[test]
+fn cond_through_phi_constant_and_double_edge() {
+    // A: go to B or C on rsi. B: flags of `rax - 1`, then D on both edges of a CJump.
+    // C: flags = ZF, then D. D: rax = ZF of the merged flags, return.
+    let arena = program(|b| {
+        b.begin(0x5000, 4)?;
+        let s = b.get(Loc::RSI)?;
+        let c = b.binary(Opc::Ne, 64, s.into(), Arg::k(0))?;
+        b.flow(Opc::CJump, c.into(), Arg::k(0x500c))?;
+        b.begin(0x5004, 4)?;
+        let x = b.get(Loc::RAX)?;
+        let f = b.flags(FlagOp::X86Sub, 64, x.into(), Arg::k(1), Arg::k(0))?;
+        b.put(Loc::Flags, f.into())?;
+        let d = b.get(Loc::RDX)?;
+        let c2 = b.binary(Opc::Ne, 64, d.into(), Arg::k(0))?;
+        b.flow(Opc::CJump, c2.into(), Arg::k(0x5008))?;
+        b.begin(0x5008, 4)?;
+        let g = b.get(Loc::Flags)?;
+        let e = b.cond(cc(4), g.into())?;
+        let r = b.extend(false, 64, 1, e.into())?;
+        b.put(Loc::RAX, r.into())?;
+        b.flow(Opc::Ret, NIL, NIL)?;
+        b.begin(0x500c, 4)?;
+        b.put(Loc::Flags, Arg::k(u64::from(ZF)))?;
+        b.flow(Opc::Jump, Arg::k(0x5008), NIL)
+    });
+    let ret = ret_opts(&[Loc::RAX]);
+    let mut ssa = build(
+        &arena,
+        body(&arena, &[0x5000, 0x5004, 0x5008, 0x500c]),
+        &ret,
+    );
+    assert_eq!(ssa.preds(Node(2)), [Node(1), Node(1), Node(3)]);
+    let report = run_all(&mut ssa, Switches::all());
+    assert_eq!(report.changes(Pass::CondThroughPhi), Some(1));
+    assert_clean(&ssa, "constant and double edge");
+    let tail = ssa.anchored(Anchor::Tail(Node(1))).to_vec();
+    assert_eq!(tail.len(), 1, "one compare serves both edges");
+    let eq = ssa
+        .arena()
+        .op(tail[0])
+        .and_then(|op| op.out)
+        .expect("compare");
+    let [phi] = ssa.phis(Node(2)) else {
+        panic!("one phi: {:?}", ssa.phis(Node(2)));
+    };
+    let op = ssa.arena().op(*phi).expect("phi");
+    assert_eq!(
+        ssa.arena().phi_args(op).expect("args"),
+        [Arg::V(eq), Arg::V(eq), Arg::k(1)]
+    );
+    let image = ram_image(16);
+    for (rsi, rax, rdx) in [(0, 1, 0), (0, 2, 1), (1, 0, 0)] {
+        let setup = [(Loc::RSI, rsi), (Loc::RAX, rax), (Loc::RDX, rdx)];
         let want = run_l0(&arena, &image, &ret, &setup, 0x5000, 100);
         assert_eq!(run_l1(&ssa, &image, &setup, 100), want, "{setup:?}");
     }

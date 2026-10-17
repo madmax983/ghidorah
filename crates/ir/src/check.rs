@@ -7,7 +7,7 @@
 //! | [`Rule::SingleDef`] | Each value has one def op, and the arena gives that op. |
 //! | [`Rule::DefDominatesUse`] | The def of each use comes before it in its block, or its block dominates the block of the use. A phi argument is a use at the end of its predecessor. |
 //! | [`Rule::PhiArity`] | Each phi has one argument for each predecessor, plus one for the function entry in the entry block. |
-//! | [`Rule::RemovedValue`] | No op reads a value whose def op is gone. |
+//! | [`Rule::RemovedValue`] | Each value that an op reads still has its def op. |
 //! | [`Rule::Shape`] | No instruction op is a `Get`, `Put` or `Phi`. A block head holds only phis. An added `Get` is at the anchor `Start` or after an op. |
 //!
 //! The entry does not reach an unreachable block, so no run reads its values. The checker

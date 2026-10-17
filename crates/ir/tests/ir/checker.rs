@@ -77,7 +77,7 @@ fn checker_finds_each_rule() {
     let mut ssa = clean.clone();
     ssa.arena_mut().ops_mut()[3].a[0] = Arg::V(Y);
     assert!(found(&ssa, Rule::DefDominatesUse, 3));
-    // A use in the block that no edge reaches is not checked for dominance.
+    // The checker does not apply the dominance rule in the block that no edge reaches.
     let mut ssa = clean.clone();
     ssa.arena_mut().ops_mut()[12].a[0] = Arg::V(Y);
     assert!(check(&ssa).is_empty());
@@ -85,7 +85,7 @@ fn checker_finds_each_rule() {
     let mut ssa = clean.clone();
     ssa.arena_mut().ops_mut()[9].a[1] = Arg::V(Val(500));
     assert!(found(&ssa, Rule::RemovedValue, 9));
-    // A value whose def op is gone.
+    // A value without its def op.
     let mut ssa = clean.clone();
     ssa.arena_mut().ops_mut()[4].out = None;
     assert!(

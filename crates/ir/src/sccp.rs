@@ -1,4 +1,4 @@
-//! The pass `sccp`: sparse conditional constant propagation (Wegman and Zadeck).
+//! The pass `sccp`: constant propagation along the edges that can run (Wegman and Zadeck).
 //!
 //! Each value has a lattice cell: unknown (top), one constant, or many values (bottom). Two
 //! worklists drive the pass. The flow list holds the CFG edges that become live. The value

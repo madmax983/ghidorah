@@ -39,7 +39,7 @@ pub enum Pass {
     Fuse,
     /// Copy propagation.
     Copyprop,
-    /// Sparse conditional constant propagation.
+    /// Constant propagation along the edges that can run.
     Sccp,
     /// Conditions through flag phis.
     CondThroughPhi,
@@ -221,8 +221,9 @@ fn fold(ssa: &mut Ssa, fuel: &mut Fuel) -> Result<u64, SsaError> {
         if op.opc == Opc::Phi {
             let args = ssa.arena().phi_args(&op).unwrap_or_default();
             let values: Option<Vec<u128>> = args.iter().map(|&a| known_value(a, &known)).collect();
-            if let Some(&first) = values.as_deref().and_then(<[u128]>::first)
-                && values.iter().flatten().all(|&v| v == first)
+            if let Some(values) = values
+                && let Some(&first) = values.first()
+                && values.iter().all(|&v| v == first)
             {
                 known.insert(out, first);
             }
