@@ -246,15 +246,14 @@ impl Ctx {
 }
 
 /// The parts of one call that the shaping steps share.
-struct Call0<'a, S: Host> {
+struct Invocation<'a, S: Host> {
     registry: &'a Registry<S>,
     tool: &'static ToolSpec<S>,
     index: usize,
     args: &'a Args,
-    request: &'a Request,
 }
 
-/// Gives the request arguments with `key` set to `value`, or removed for `None`.
+/// Gives the call arguments with `key` set to `value`, or removed for `None`.
 fn with_arg(args: &Value, key: &str, value: Option<Value>) -> Value {
     let mut object = args.as_object().cloned().unwrap_or_default();
     let _ = object.remove(key);
@@ -351,7 +350,11 @@ pub(crate) fn run<S: Host>(registry: &Registry<S>, host: &mut S, request: &Reque
     if let (true, Some(expected)) = (tool.mutating, globals.expected_rev)
         && expected != frame.rev
     {
-        let args = with_arg(&request.args, "expected_rev", Some(int(frame.rev)));
+        let args = with_arg(
+            parsed.args.canonical(),
+            "expected_rev",
+            Some(int(frame.rev)),
+        );
         let error = ToolError::new(ErrorCode::Conflict)
             .detail("current_rev", int(frame.rev))
             .next(Call::new(tool.name, args, WHY_REV));
@@ -375,12 +378,11 @@ pub(crate) fn run<S: Host>(registry: &Registry<S>, host: &mut S, request: &Reque
     let result = catch_unwind(AssertUnwindSafe(|| {
         (tool.handler)(host, &parsed.args, &mut ctx)
     }));
-    let call = Call0 {
+    let call = Invocation {
         registry,
         tool,
         index,
         args: &parsed.args,
-        request,
     };
     match result {
         Ok(Ok(payload)) => success(&call, host, ctx, payload),
@@ -396,7 +398,7 @@ pub(crate) fn run<S: Host>(registry: &Registry<S>, host: &mut S, request: &Reque
 }
 
 /// Gives the valid `next` calls and warnings of a success.
-fn hints<S: Host>(call: &Call0<'_, S>, host: &S, ctx: &mut Ctx) -> Vec<Call> {
+fn hints<S: Host>(call: &Invocation<'_, S>, host: &S, ctx: &mut Ctx) -> Vec<Call> {
     let in_profile = |name: &str| host.in_profile(name);
     let mut next = std::mem::take(&mut ctx.next);
     if ctx.frame.partial() && call.tool.name != "analysis_run" {
@@ -419,7 +421,12 @@ fn hints<S: Host>(call: &Call0<'_, S>, host: &S, ctx: &mut Ctx) -> Vec<Call> {
 }
 
 /// Wraps a handler payload into the success envelope.
-fn success<S: Host>(call: &Call0<'_, S>, host: &S, mut ctx: Ctx, payload: Payload) -> Envelope {
+fn success<S: Host>(
+    call: &Invocation<'_, S>,
+    host: &S,
+    mut ctx: Ctx,
+    payload: Payload,
+) -> Envelope {
     let next = hints(call, host, &mut ctx);
     let fields = &call.args.globals().fields;
     match payload {
@@ -449,7 +456,12 @@ fn success<S: Host>(call: &Call0<'_, S>, host: &S, mut ctx: Ctx, payload: Payloa
 }
 
 /// Gives `envelope` when it fits the budget, else an `OUTPUT_BUDGET_EXCEEDED` failure.
-fn fit_or_fail<S: Host>(call: &Call0<'_, S>, host: &S, ctx: &Ctx, envelope: Envelope) -> Envelope {
+fn fit_or_fail<S: Host>(
+    call: &Invocation<'_, S>,
+    host: &S,
+    ctx: &Ctx,
+    envelope: Envelope,
+) -> Envelope {
     let size = result_chars(&envelope.to_json(), false, ctx.budget.mode);
     if size <= ctx.budget.limit() {
         envelope
@@ -468,9 +480,9 @@ fn fit_or_fail<S: Host>(call: &Call0<'_, S>, host: &S, ctx: &Ctx, envelope: Enve
 }
 
 /// Gives the repair call of a cursor error: the call without `cursor`.
-fn first_page<S: Host>(call: &Call0<'_, S>, error: ToolError) -> ToolError {
+fn first_page<S: Host>(call: &Invocation<'_, S>, error: ToolError) -> ToolError {
     if error.next.is_empty() {
-        let args = with_arg(&call.request.args, "cursor", None);
+        let args = with_arg(call.args.canonical(), "cursor", None);
         error.next(Call::new(call.tool.name, args, WHY_FIRST_PAGE))
     } else {
         error

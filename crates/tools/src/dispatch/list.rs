@@ -4,7 +4,7 @@ use ghidorah_base::ErrorCode;
 use ghidorah_json::pointer::{Pointer, Segment};
 use ghidorah_json::{Object, Value};
 
-use super::{Call0, Ctx, CursorCall, Item, ListPayload, SortKey, Total, first_page};
+use super::{Ctx, CursorCall, Invocation, Item, ListPayload, SortKey, Total, first_page};
 use crate::api::Host;
 use crate::args::Shape;
 use crate::budget::{MAX_LIMIT, fit_items};
@@ -254,7 +254,7 @@ impl<S: Host> Pager<'_, S> {
 
 /// Applies the `in` filter and the cursor. Gives the items left, the total and the bound flag.
 fn select<S: Host>(
-    call: &Call0<'_, S>,
+    call: &Invocation<'_, S>,
     host: &S,
     ctx: &Ctx,
     cursor: &CursorCall<'_>,
@@ -285,7 +285,7 @@ fn select<S: Host>(
 
 /// Shapes, pages and trims a list payload into its envelope.
 pub(super) fn shape<S: Host>(
-    call: &Call0<'_, S>,
+    call: &Invocation<'_, S>,
     host: &S,
     ctx: &Ctx,
     list: ListPayload,

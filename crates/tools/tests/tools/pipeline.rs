@@ -572,3 +572,61 @@ fn members_and_ctx() {
     assert!(!Frame::default().partial());
     assert_eq!(AnalysisState::BudgetStopped.as_str(), "budget_stopped");
 }
+
+const SIZE: &[ghidorah_tools::ArgSpec] = &[ghidorah_tools::ArgSpec::new(
+    "size",
+    ghidorah_tools::Role::Param,
+    ghidorah_tools::ArgKind::Int { min: 0, max: 9 },
+    "The size.",
+)
+.aliases(&["sz"])];
+
+const ALIAS_LIST: ghidorah_tools::ToolSpec<TestHost> = ghidorah_tools::ToolSpec {
+    title: "Alias list",
+    summary: "List with an alias.",
+    description: "List with an alias.",
+    args: SIZE,
+    annotations: ghidorah_tools::Annotations::EDIT,
+    mutating: true,
+    list: Some(ghidorah_tools::ListSpec { default_limit: 5 }),
+    ..ghidorah_tools::ToolSpec::base("alias_list", alias_list)
+};
+
+fn alias_list(
+    _: &mut TestHost,
+    _: &ghidorah_tools::Args,
+    _: &mut Ctx,
+) -> Result<ghidorah_tools::Payload, ghidorah_tools::ToolError> {
+    Ok(ghidorah_tools::Payload::List(
+        ghidorah_tools::ListPayload::new(Vec::new()),
+    ))
+}
+
+static ALIASES: &[&ghidorah_tools::ToolSpec<TestHost>] = &[&ALIAS_LIST];
+
+#[test]
+fn regress_repairs_use_canonical_names() {
+    let registry = ghidorah_tools::Registry::new(ALIASES);
+    let mut host = TestHost::default();
+    let mut send = |args: &str| {
+        dispatch_with(
+            &registry,
+            &mut host,
+            &Request::new("alias_list", json(args)),
+        )
+        .to_json()
+    };
+    let cursor = send(r#"{"sz":3,"cursor":"bad"}"#);
+    assert_eq!(code(&cursor), "CURSOR_INVALID");
+    assert_eq!(cursor.pointer("/next/0/args"), Some(&json(r#"{"size":3}"#)));
+    let conflict = send(r#"{"sz":3,"expected_rev":1}"#);
+    assert_eq!(code(&conflict), "CONFLICT");
+    assert_eq!(
+        conflict.pointer("/next/0/args"),
+        Some(&json(r#"{"size":3,"expected_rev":7}"#))
+    );
+    let args = ghidorah_tools::args::parse(&ALIAS_LIST, &json(r#"{"sz":3}"#), None)
+        .expect("a parse")
+        .args;
+    assert_eq!(args.canonical(), &json(r#"{"size":3}"#));
+}

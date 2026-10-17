@@ -240,6 +240,7 @@ pub struct Args {
     given: BTreeSet<&'static str>,
     selector: Option<&'static str>,
     globals: Globals,
+    canonical: Value,
 }
 
 impl Args {
@@ -300,6 +301,14 @@ impl Args {
     /// Gives the arguments of the tool with their values, in name order.
     pub fn values(&self) -> impl Iterator<Item = (&'static str, &Value)> {
         self.values.iter().map(|(name, value)| (*name, value))
+    }
+
+    /// Gives the arguments of the call with canonical names, in input order.
+    ///
+    /// Aliases have their canonical names, and defaults are absent. Repair calls start here.
+    #[must_use]
+    pub const fn canonical(&self) -> &Value {
+        &self.canonical
     }
 }
 
@@ -386,6 +395,7 @@ fn parse_with<S: 'static>(
     let mut args = Args {
         tool: tool.name,
         selector: tool.selector().map(|s| s.name),
+        canonical: std::mem::take(&mut walk.base),
         ..Args::default()
     };
     let mut global_values = BTreeMap::new();
