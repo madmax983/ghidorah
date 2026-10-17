@@ -22,8 +22,8 @@
 //! region with the given permissions. A byte pattern is a list of hex bytes: `??` matches any
 //! byte, and `4?` matches a nibble.
 //!
-//! With `ids`, each `note:`, `set:` or `jt:` ID gives its full record. A set record is
-//! followed by one item per member, so the cursor pages the members. String items carry
+//! With `ids`, each `note:`, `set:` or `jt:` ID gives its full record. One item per member
+//! comes after a set record, so the cursor pages the members. String items carry
 //! `ref_count`, at most 3 `funcs` and a `next` call to `xref_list`. Name and byte searches
 //! use fuel. When the fuel runs out, `page.total_lower_bound` replaces `page.total`.
 

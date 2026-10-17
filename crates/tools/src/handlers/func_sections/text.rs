@@ -17,8 +17,8 @@ use crate::resolve::Site;
 /// The largest number of characters of a name in output.
 pub const NAME_CHARS: usize = 256;
 
-/// The characters of the result that a handler keeps free for each copy of the envelope
-/// members around `data`: the frame, the warnings and the `next` calls.
+/// The characters that a handler keeps free for each copy of the envelope members around
+/// `data`. These members are the frame, the warnings and the `next` calls.
 pub const RESERVE: u64 = 700;
 
 /// Gives the output text of a binary-derived name: the escapes of `BinText`, at most
@@ -66,13 +66,13 @@ impl Namer {
             .map_or_else(|| addr.to_string(), |n| self.text(&n.text))
     }
 
-    /// Tells if a name of the result is mangled.
+    /// Tells if the result holds a mangled name.
     #[must_use]
     pub fn mangled(&self) -> bool {
         self.mangled.get()
     }
 
-    /// Adds `W_NOT_DEMANGLED` to the call once when a name of the result is mangled.
+    /// Adds `W_NOT_DEMANGLED` to the call once when the result holds a mangled name.
     pub fn finish(&self, ctx: &mut Ctx) {
         let known = ctx
             .warnings

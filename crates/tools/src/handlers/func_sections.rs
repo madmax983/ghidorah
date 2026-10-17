@@ -24,17 +24,14 @@ use ghidorah_base::{Caps, FuncId};
 use ghidorah_db::Program;
 use ghidorah_json::Value;
 
-pub use lists::{callee_ref, func_ref, jump_table, table_ids, type_text};
+pub use lists::{func_ref, jump_table, table_ids, type_text};
 pub use rows::{
     CursorScope, DISASM, IR, IrRows, SWEEP, bad_row, body_rows, body_units, decode, ir_rows, row,
 };
 pub use text::{
-    NAME_CHARS, Namer, RESERVE, addr, bin_text, caps, chars, glob, hex, is_mangled, item_path,
-    per_item, rendered, room, safe, site, size, string_text, x86_only,
+    NAME_CHARS, Namer, addr, bin_text, caps, chars, glob, hex, item_path, per_item, rendered, room,
+    safe, site, size, string_text, x86_only,
 };
-
-/// The output names of the row members in row order.
-pub const ROW_MEMBERS: [&str; 7] = ["a", "n", "b", "m", "t", "f", "c"];
 
 /// The `why` of the repair call that drops the section cursors.
 pub const WHY_FIRST_ROWS: &str = "Read the sections again from their first rows.";
