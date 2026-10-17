@@ -1,0 +1,12 @@
+diff --git a/crates/kernel/src/reader/leb.rs b/crates/kernel/src/reader/leb.rs
+--- a/crates/kernel/src/reader/leb.rs
++++ b/crates/kernel/src/reader/leb.rs
+@@ -174,7 +174,7 @@
+             proof! {
+                 assert(b == self.tail()[i as int]);
+             }
+-            let tenth_ok = if signed { b == 0 || b == 0x7f } else { b <= 1 };
++            let tenth_ok = if signed { b == 0 || b == 0x7f } else { b <= 3 };
+             if i == 9 && !tenth_ok {
+                 return Err(ReadError::BadLeb);
+             }
