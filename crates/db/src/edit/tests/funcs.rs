@@ -231,3 +231,45 @@ fn exact_symbol_inserts_keep_one_primary() {
     };
     assert!(tx.restore(same).unwrap().is_none());
 }
+
+#[test]
+fn regress_create_keeps_a_plate_comment() {
+    let mut p = seeded();
+    let mut tx = p
+        .begin("comment_set", Source::Agent, session("mcp-1"))
+        .unwrap();
+    let text = tx.fact("a plate".to_string());
+    tx.apply(Edit::SetComment {
+        addr: ram(0x1140),
+        kind: CommentKind::Plate,
+        text: Some(text),
+    })
+    .unwrap();
+    tx.commit().unwrap();
+    let before = p.state_hash().unwrap();
+    let mut tx = p
+        .begin("func_edit", Source::Agent, session("mcp-1"))
+        .unwrap();
+    // A record with no plate leaves the plate slot alone.
+    let applied = tx
+        .apply(record(func(0x1140, Source::Agent), Vec::new(), None))
+        .unwrap()
+        .cloned()
+        .unwrap();
+    tx.commit().unwrap();
+    let plate = p.base().comments().get(ram(0x1140), CommentKind::Plate);
+    assert!(plate.is_some(), "the create keeps the plate");
+    let mut tx = p
+        .begin("history_undo", Source::Agent, session("mcp-1"))
+        .unwrap();
+    let undo = tx.restore(applied.inverse).unwrap().cloned().unwrap();
+    tx.commit().unwrap();
+    assert_eq!(p.state_hash().unwrap(), before, "the inverse is exact");
+    let mut tx = p
+        .begin("history_undo", Source::Agent, session("mcp-1"))
+        .unwrap();
+    tx.restore(undo.inverse).unwrap();
+    tx.commit().unwrap();
+    let plate = p.base().comments().get(ram(0x1140), CommentKind::Plate);
+    assert!(plate.is_some(), "the redo keeps the plate");
+}

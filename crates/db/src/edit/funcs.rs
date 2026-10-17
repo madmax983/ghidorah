@@ -77,7 +77,8 @@ fn own_record(ctx: &Ctx<'_>, p: &Program, r: &FuncRecord) -> Result<(), EditErro
     Ok(())
 }
 
-/// Puts the variable facts and the plate comment of a record into empty slots.
+/// Puts the variable facts and the plate comment of a record into empty slots. A record with
+/// no plate comment leaves the plate slot alone.
 fn fill(t: &mut Tables, r: &FuncRecord) -> Result<(), EditError> {
     for (var, facts) in &r.vars {
         exact(&mut t.vars, facts.name.as_ref(), |m, v, o| {
@@ -87,10 +88,12 @@ fn fill(t: &mut Tables, r: &FuncRecord) -> Result<(), EditError> {
             m.set_type(var, v, o)
         })?;
     }
-    let entry = r.func.entry;
-    exact(&mut t.comments, r.plate.as_ref(), |m, v, o| {
-        m.set(entry, CommentKind::Plate, v, o)
-    })?;
+    if let Some(plate) = &r.plate {
+        let entry = r.func.entry;
+        exact(&mut t.comments, Some(plate), |m, v, o| {
+            m.set(entry, CommentKind::Plate, v, o)
+        })?;
+    }
     Ok(())
 }
 
