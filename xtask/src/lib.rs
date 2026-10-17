@@ -16,6 +16,7 @@
 //! | `xtask verify` | [`verify`] | Runs the Verus proofs of the kernel and writes `verify/results.json`. |
 //! | `xtask fixtures` | [`fixtures`] | Builds the fixture corpus, its truth and its goldens, and checks them (WP-06). |
 //! | `xtask golden` | [`golden`] | Blesses goldens and checks their headers. |
+//! | `xtask oracle` | [`oracle`] | Writes the native semantic vectors and the host boundary record (WP-16). |
 
 pub mod ac;
 pub mod acrun;
@@ -29,6 +30,7 @@ pub mod gates;
 pub mod golden;
 pub mod json;
 pub mod manifest;
+pub mod oracle;
 pub mod proc;
 pub mod rustsrc;
 pub mod scan;

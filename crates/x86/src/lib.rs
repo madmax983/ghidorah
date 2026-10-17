@@ -11,6 +11,7 @@
 //! | [`Reg`], [`RegSet`] | The register model, with XMM registers | Section 5.3 |
 //! | [`Operand`], [`Mem`] | The operand model | Section 5.3 |
 //! | [`Flow`] | The control flow kind of an instruction | Section 5.3 |
+//! | [`lift()`] | The L0 lifter with its mnemonic table [`lift::ROWS`] | Section 6.3 |
 //!
 //! Layer 1 knows the prefix, `ModRM`, SIB, displacement and immediate sizes of all maps:
 //! 1-byte, 0F, 0F38, 0F3A, VEX2, VEX3, EVEX, REX2 and XOP. Layer 2 has semantic tables
@@ -27,6 +28,7 @@ mod flow;
 mod implicit;
 mod insn;
 mod len;
+pub mod lift;
 mod operand;
 mod print;
 mod regs;
@@ -36,6 +38,7 @@ pub use error::{DecodeError, Feature, InvalidReason};
 pub use flags::FlagSet;
 pub use flow::Flow;
 pub use insn::{Encoding, Insn, Map, OpaqueForm, Ops, PrefixSet, RawFields};
+pub use lift::{LIFT_VER, LiftError, LiftKind, Row, Template, WidthRule, lift};
 pub use operand::{Access, Mem, Operand};
 pub use print::{NoSymbols, Symbolizer, operand_text, print};
 pub use regs::{Reg, RegClass, RegSet, Seg};

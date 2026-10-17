@@ -16,6 +16,7 @@
 //! | [`ssa`] | [`Ssa`], [`Body`] and [`ssa::build`]: L1 Braun SSA | Section 6.4 |
 //! | [`passes`] | [`Pass`], [`Switches`] and [`passes::run`]: the L1 passes | Section 6.4 |
 //! | [`check`](mod@check) | [`check()`]: the SSA checker | Section 6.4 |
+//! | [`print`](mod@print) | The IR text and JSON printers | Sections 6.1, 10.4 |
 
 pub mod arena;
 pub mod check;
@@ -27,6 +28,7 @@ pub mod interp;
 pub mod loc;
 pub mod op;
 pub mod passes;
+pub mod print;
 mod sccp;
 pub mod sem;
 pub mod ssa;
@@ -39,5 +41,6 @@ pub use interp::{Config, EvalError, FlatImage, Image, Interp, NoImage, Stop, Sto
 pub use loc::{Loc, LocSet};
 pub use op::{Arg, Cc, Effect, FlagOp, Imm, IntrinsicId, MemEffect, Op, OpId, Opc, Val};
 pub use passes::{Pass, PassRun, Report, Switches};
+pub use print::{IntrinsicNames, NoNames};
 pub use sem::{undefined_mask, x86_cond, x86_flags};
 pub use ssa::{Anchor, Block, Body, Opts, Ssa, SsaError};
