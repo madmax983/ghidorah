@@ -45,7 +45,7 @@ Then `ac_034_proof_freshness` gives a warning, and it fails under `GHIDORAH_REQU
 
 | Kernel | File | Change | Expected error |
 |---|---|---|---|
-| K1 | `reader/leb.rs` | `uleb128` accepts a 10th byte up to 3. | postcondition not satisfied |
+| K1 | `reader/leb.rs` | `leb_scan` accepts an unsigned 10th byte up to 3. | postcondition not satisfied |
 | K2 | `range.rs` | `va_to_file` accepts the first address after the file bytes. | postcondition not satisfied |
 | K3 | `rangeset.rs` | `insert` does not extend the merged range to the left. | precondition not satisfied |
 | K6 | `budget.rs` | `fit_prefix` rejects a prefix with a cost equal to `max`. | postcondition not satisfied |
