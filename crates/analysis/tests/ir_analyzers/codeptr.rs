@@ -1,19 +1,20 @@
 //! Seeds 11 (`DataPtr`) and 12 (`AddrTaken`) of design Section 7.3 (WP-19b, AC-257).
 //!
-//! The small files come from `ElfBuilder`. Their scheduler runs the shipped list with the two
-//! seed analyzers. The fixture tests run the shipped list.
+//! The small files come from `ElfBuilder`. Each test runs the shipped analyzer list.
 
 use std::collections::BTreeSet;
 
 use ghidorah_analysis::analyzers::{addrtaken, dataptr};
-use ghidorah_analysis::{AnalyzerSpec, Rule, RunState, Scheduler, Trigger, Until};
-use ghidorah_base::{Address, Fuel, JumpTableId};
-use ghidorah_db::{FactKey, Program, StartReason};
+use ghidorah_analysis::{ANALYZERS, Rule, RunState, Scheduler, Trigger, Until, registry};
+use ghidorah_base::{Address, Fuel, JumpTableId, TxId};
+use ghidorah_db::{
+    Edit, FactKey, JtMethod, JumpTable, Origin, Program, SessionLabel, Source, StartReason,
+};
 use ghidorah_loader::LoadOpts;
 use ghidorah_testkit::elf::{ElfBuilder, FixupKind, Layout, Loc, Reloc, RelocTable, Section};
 use ghidorah_x86::{Opts, decode};
 
-use crate::support::{cached, fid, fixtures, program_of, truth, truth_funcs};
+use crate::support::{analyze, cached, fid, fixtures, program_of, truth, truth_funcs};
 
 /// `push rbp; mov rbp, rsp; xor eax, eax; pop rbp; ret`: five instructions.
 const FUNC: [u8; 8] = [0x55, 0x48, 0x89, 0xe5, 0x31, 0xc0, 0x5d, 0xc3];
@@ -21,26 +22,11 @@ const FUNC: [u8; 8] = [0x55, 0x48, 0x89, 0xe5, 0x31, 0xc0, 0x5d, 0xc3];
 /// `R_X86_64_RELATIVE`.
 const RELATIVE: u32 = 8;
 
-/// Gives the shipped analyzer list with the two seed analyzers.
-fn seeded() -> Vec<&'static AnalyzerSpec> {
-    let mut list = ghidorah_analysis::ANALYZERS.to_vec();
-    for spec in [&dataptr::SPEC, &addrtaken::SPEC] {
-        if !list.iter().any(|s| s.id == spec.id) {
-            list.push(spec);
-        }
-    }
-    list
-}
-
-/// Builds the file of `b`, loads it and runs the seeded list to completion.
+/// Builds the file of `b`, loads it and runs the shipped list to completion.
 fn analyzed(b: &ElfBuilder) -> (Program, Layout) {
     let (bytes, layout) = b.build_with_layout();
     let mut p = program_of(&bytes, &LoadOpts::AUTO);
-    let mut sched = Scheduler::with_analyzers(seeded());
-    let out = sched
-        .run(&mut p, Until::Full, &mut Fuel::unlimited())
-        .expect("the analysis runs");
-    assert_eq!(out.state, RunState::Complete);
+    let _ = analyze(&mut p);
     (p, layout)
 }
 
@@ -121,6 +107,8 @@ fn seed_specs() {
             !spec.listens(Trigger::Signatures),
             "band {band} is below 800"
         );
+        let i = registry::index(spec.id).expect("the shipped list holds the seed");
+        assert_eq!(ANALYZERS[i].name, name);
     }
     assert_eq!(dataptr::SPEC.option("min_insns"), Some(dataptr::MIN_INSNS));
     assert_eq!(dataptr::SPEC.option("min_run"), Some(dataptr::MIN_RUN));
@@ -425,6 +413,60 @@ fn mov_immediate_seeds_only_at_a_fixed_address() {
     assert!(
         pie.func(fid(text_at + 0x10)).is_none(),
         "a PIE immediate is no address"
+    );
+}
+
+#[test]
+fn lost_seed_goes_after_an_agent_table() {
+    // The entry is `jmp rax` with no table. A pointer seeds FUNC at 0x10.
+    let text = code(0x20, &[(0, &[0xff, 0xe0]), (0x10, &FUNC)]);
+    let data = Section::data(".data.rel.ro", &[0; 8]).fixup(
+        0,
+        FixupKind::Abs64,
+        Loc::section(".text", 0x10),
+    );
+    let b = ElfBuilder::dyn_object()
+        .section(Section::code(".text", &text))
+        .section(data)
+        .relr(Loc::section(".data.rel.ro", 0));
+    let (bytes, layout) = b.build_with_layout();
+    let text = sec(&layout, ".text");
+    let mut p = program_of(&bytes, &LoadOpts::AUTO);
+    let mut sched = analyze(&mut p);
+    assert_eq!(reason(&p, text + 0x10), Some((StartReason::DataPtr, 70)));
+    // An agent table at the jump makes the target a case of the entry.
+    let label = SessionLabel::new("test").expect("a label");
+    let next = p.last_tx().0.checked_add(1).expect("a free ID");
+    let o = Origin::new(Source::Agent, TxId(next), label.clone(), false);
+    let mut tx = p.begin("test", Source::Agent, label).expect("a Tx");
+    let table = JumpTable {
+        base: None,
+        entry_size: 0,
+        count: 1,
+        targets: vec![Address::ram(text + 0x10)],
+        method: JtMethod::Agent,
+        resolved: true,
+    };
+    let edit = Edit::SetJumpTable {
+        id: JumpTableId(Address::ram(text)),
+        table: Some(o.fact(table)),
+    };
+    assert!(tx.apply(edit).is_ok(), "the table applies");
+    let commit = tx.commit().expect("the table commits");
+    sched.restart(commit.start_band().expect("an analysis edit"));
+    let out = sched
+        .run(&mut p, Until::Full, &mut Fuel::unlimited())
+        .expect("a re-analysis");
+    assert_eq!(out.state, RunState::Complete);
+    assert_eq!(entries(&p), [text], "the case is no function now");
+    assert_eq!(p.owner_of(Address::ram(text + 0x10)), Some(fid(text)));
+    let mut fresh = Scheduler::new();
+    let out = fresh
+        .run(&mut p, Until::Full, &mut Fuel::unlimited())
+        .expect("a fresh run");
+    assert!(
+        out.commit.is_none_or(|c| c.noop),
+        "a fresh run gives the same set"
     );
 }
 
