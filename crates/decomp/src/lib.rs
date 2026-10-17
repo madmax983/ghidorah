@@ -20,7 +20,7 @@
 //! | [`selfcheck`] | The self-check: 8 branch oracles over the tree and the CFG | Section 8.2 |
 //! | [`lattice`] | The minimal type lattice and the field names of typed pointers | Section 8.4 |
 //! | [`precedence`] | The C operator precedence numbers | Section 8.3 |
-//! | [`print`] | [`print::print`]: the C printer with the ops of each line | Section 8.3 |
+//! | [`print`](mod@print) | [`print::print`]: the C printer with the ops of each line | Section 8.3 |
 //! | [`linemap`] | The line map and the coverage of each instruction | Section 8.3 |
 //! | [`window`] | [`Window`]: line windows | Section 8.3 |
 //! | [`metrics`], [`warnings`] | The metrics and the warning rows with their remedies | Section 8.5 |

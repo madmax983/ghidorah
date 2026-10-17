@@ -1,6 +1,6 @@
 //! The C printer (design Section 8.3).
 //!
-//! [`print`] walks the statement tree of a [`Decomp`] with an explicit stack and gives one
+//! [`print()`] walks the statement tree of a [`Decomp`] with an explicit stack and gives one
 //! [`Line`] for each line of text. Each line holds the ops that it shows, so the line map
 //! ([`crate::linemap`]) can map it to its instructions.
 //!
@@ -203,7 +203,7 @@ pub struct VarRow {
     pub source: &'static str,
 }
 
-/// The result of [`print`].
+/// The result of [`print()`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Printed {
     /// The lines in text order.
