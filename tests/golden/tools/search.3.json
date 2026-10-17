@@ -1,0 +1,49 @@
+{"golden":"generator=tools_examples version=1 fixture=crackme.gcc-O2 fixture_sha256=467a43b75d95c826daba8cb216d01d7fd386aa96c5ef5a95c2effffe1780de8f"}
+{
+  "ok": true,
+  "binary_id": "467a43b75d95c826",
+  "rev": 1,
+  "session": "cli",
+  "analysis": {
+    "state": "complete",
+    "rev": 1
+  },
+  "partial": false,
+  "data": {
+    "items": [
+      {
+        "kind": "bytes",
+        "id": "0x5e8",
+        "addr": "0x5e8",
+        "extra": {
+          "region": "seg:2"
+        }
+      },
+      {
+        "kind": "bytes",
+        "id": "0x1091",
+        "addr": "0x1091",
+        "func": "fn:0x1080",
+        "extra": {
+          "region": "seg:3"
+        }
+      },
+      {
+        "kind": "bytes",
+        "id": "0x10a1",
+        "addr": "0x10a1",
+        "func": "fn:0x1080",
+        "extra": {
+          "region": "seg:3"
+        }
+      }
+    ]
+  },
+  "page": {
+    "returned": 3,
+    "total": 8,
+    "truncated": true,
+    "next_cursor": "010600f9ccf947006aac58000000000000000000000500050000000000000000010000000000000000a11000000000000001060000003078313061310000000000000000002705d5dc",
+    "hint": "Add query or scope to narrow the list."
+  }
+}

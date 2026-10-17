@@ -1,0 +1,101 @@
+{"golden":"generator=tools_examples version=1 fixture=crackme.gcc-O2 fixture_sha256=467a43b75d95c826daba8cb216d01d7fd386aa96c5ef5a95c2effffe1780de8f"}
+{
+  "ok": true,
+  "binary_id": "467a43b75d95c826",
+  "rev": 1,
+  "session": "cli",
+  "analysis": {
+    "state": "complete",
+    "rev": 1
+  },
+  "partial": false,
+  "data": {
+    "items": [
+      {
+        "kind": "import",
+        "id": "imp:__cxa_finalize",
+        "addr": "0x1050",
+        "text": "__cxa_finalize",
+        "extra": {
+          "slot": "0x3ff8",
+          "stub": "0x1050",
+          "ext": "ext:0x7",
+          "delay": false
+        }
+      },
+      {
+        "kind": "import",
+        "id": "imp:puts",
+        "addr": "0x1060",
+        "text": "puts",
+        "extra": {
+          "slot": "0x3fc8",
+          "stub": "0x1060",
+          "ext": "ext:0x3",
+          "delay": false
+        }
+      },
+      {
+        "kind": "import",
+        "id": "imp:strlen",
+        "addr": "0x1070",
+        "text": "strlen",
+        "extra": {
+          "slot": "0x3fd0",
+          "stub": "0x1070",
+          "ext": "ext:0x4",
+          "delay": false
+        }
+      },
+      {
+        "kind": "import",
+        "id": "imp:__libc_start_main",
+        "addr": "0x3fd8",
+        "text": "__libc_start_main",
+        "extra": {
+          "slot": "0x3fd8",
+          "ext": "ext:0x1",
+          "delay": false
+        }
+      },
+      {
+        "kind": "import",
+        "id": "imp:_ITM_deregisterTMCloneTable",
+        "addr": "0x3fe0",
+        "text": "_ITM_deregisterTMCloneTable",
+        "extra": {
+          "slot": "0x3fe0",
+          "ext": "ext:0x2",
+          "delay": false
+        }
+      },
+      {
+        "kind": "import",
+        "id": "imp:__gmon_start__",
+        "addr": "0x3fe8",
+        "text": "__gmon_start__",
+        "extra": {
+          "slot": "0x3fe8",
+          "ext": "ext:0x5",
+          "delay": false
+        }
+      },
+      {
+        "kind": "import",
+        "id": "imp:_ITM_registerTMCloneTable",
+        "addr": "0x3ff0",
+        "text": "_ITM_registerTMCloneTable",
+        "extra": {
+          "slot": "0x3ff0",
+          "ext": "ext:0x6",
+          "delay": false
+        }
+      }
+    ]
+  },
+  "page": {
+    "returned": 7,
+    "total": 7,
+    "truncated": false
+  }
+}

@@ -24,10 +24,18 @@
 //! `basis: { complete, unresolved }` tells if an unresolved indirect call can add callers.
 //! A bad target never fails the call. It goes to `errors: [{ input, index, error }]`.
 
+mod items;
+mod sites;
+
+use ghidorah_analysis::CallGraph;
+use ghidorah_json::{Object, Value};
+
+use super::func_sections::{self as fs, Namer};
 use crate::args::Args;
-use crate::dispatch::{Ctx, ListPayload, Payload};
+use crate::dispatch::{Ctx, ListPayload, Payload, Total};
 use crate::errors::ToolError;
 use crate::outshape::{Field, OutputShape};
+use crate::resolve::Family;
 use crate::session::Session;
 use crate::spec::{ArgKind, ArgSpec, Example, ListSpec, Profile, Role, ToolSpec};
 
@@ -151,7 +159,61 @@ pub const SPEC: ToolSpec<Session> = ToolSpec {
     ..ToolSpec::base("xref_list", run)
 };
 
-fn run(session: &mut Session, _args: &Args, ctx: &mut Ctx) -> Result<Payload, ToolError> {
-    let _ = session.bound(&ctx.frame)?;
-    Ok(Payload::List(ListPayload::new(Vec::new())))
+fn run(session: &mut Session, args: &Args, ctx: &mut Ctx) -> Result<Payload, ToolError> {
+    let p = &session.bound(&ctx.frame)?.program;
+    fs::x86_only(p)?;
+    let to = args.str("direction") != Some("from");
+    let q = items::Query {
+        classes: args
+            .list("kinds")
+            .unwrap_or_default()
+            .iter()
+            .filter_map(Value::as_str)
+            .map(str::to_owned)
+            .collect(),
+        context: usize::try_from(args.int("context").unwrap_or(0)).unwrap_or(0),
+        args: args.bool("args").unwrap_or(false),
+        caps: fs::caps(ctx),
+    };
+    let namer = Namer::new();
+    let family = if to { Family::XrefTo } else { Family::XrefFrom };
+    let found = sites::resolve_all(p, args.list("targets").unwrap_or_default(), family);
+    let mut list = items::ref_items(p, &found.refs, &q, &namer, &mut ctx.fuel);
+    list.extend(items::syscall_items(
+        p,
+        &found.syscalls,
+        &q,
+        &namer,
+        &mut ctx.fuel,
+    ));
+    let depth = u64::try_from(args.int("depth").unwrap_or(1)).unwrap_or(1);
+    let max = usize::try_from(args.int("max_nodes").unwrap_or(200)).unwrap_or(200);
+    let mut extra = Object::new();
+    if depth > 1 {
+        let graph = CallGraph::build(p);
+        extra.push("edges", sites::edges(&graph, &found.starts, to, depth, max));
+    }
+    let open = sites::unresolved(p, (!to).then_some(found.bodies.as_slice()));
+    let shown = open
+        .iter()
+        .take(MAX_UNRESOLVED)
+        .map(|a| fs::addr(*a))
+        .collect();
+    extra.push(
+        "basis",
+        Value::object([
+            ("complete", Value::Bool(open.is_empty())),
+            ("unresolved", Value::Array(shown)),
+        ]),
+    );
+    if !found.errors.is_empty() {
+        extra.push("errors", Value::Array(found.errors));
+    }
+    namer.finish(ctx);
+    Ok(Payload::List(ListPayload {
+        items: list,
+        total: Total::Items,
+        extra,
+        narrow: Some(HINT_NARROW.to_owned()),
+    }))
 }

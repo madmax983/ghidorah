@@ -1,6 +1,7 @@
 //! `mem_read`: read memory in one form (design Section 10.4, tool 8).
 //!
-//! The result is `{ addr, len, hex, text, values?, fields?, rows?, next_cursor?, region }`.
+//! The result is `{ addr, len, hex?, text?, values?, fields?, type?, rows?, next_cursor?,
+//! region }`. A sweep has no `hex` and no `text`: its rows hold the bytes.
 //! The read never crosses the end of the region of `target`. Bytes past the file size of a
 //! region read as zero (design Section 3.3).
 //!
@@ -17,9 +18,18 @@
 //! same `target` for the next rows. A sweep needs no function. A byte that does not decode
 //! gives a row with `m: "(bad)"`, and the sweep goes on at the next byte.
 
+mod typed;
+
+use ghidorah_base::{Address, Caps, ErrorCode, Limits};
+use ghidorah_db::Program;
+use ghidorah_json::{Object, Value};
+use ghidorah_loader::Region;
+
+use super::func_sections::{self as fs, CursorScope, Namer};
 use crate::args::Args;
-use crate::dispatch::{Ctx, Payload};
+use crate::dispatch::{Ctx, KeyPart, Payload, SortKey};
 use crate::errors::ToolError;
+use crate::hints::Call;
 use crate::outshape::{Field, OutputShape};
 use crate::session::Session;
 use crate::spec::{ActionSpec, ArgKind, ArgSpec, Example, Profile, Role, ToolSpec};
@@ -225,8 +235,8 @@ const fn action(value: &'static str, line: &'static str, example: &'static str) 
 const FIELDS: &[Field] = &[
     Field::req("addr", OutputShape::Addr),
     Field::req("len", OutputShape::Int),
-    Field::req("hex", OutputShape::Str),
-    Field::req("text", OutputShape::Text),
+    Field::opt("hex", OutputShape::Str),
+    Field::opt("text", OutputShape::Text),
     Field::opt("values", OutputShape::Any),
     Field::opt("fields", OutputShape::Any),
     Field::opt("type", OutputShape::Any),
@@ -314,7 +324,247 @@ const fn example(args: &'static str, golden: &'static str) -> Example {
     Example { args, golden }
 }
 
-fn run(session: &mut Session, _args: &Args, ctx: &mut Ctx) -> Result<Payload, ToolError> {
-    let _ = session.bound(&ctx.frame)?;
-    Ok(Payload::Object(ghidorah_json::Object::new()))
+/// The arguments that a sweep cursor does not bind.
+const CURSOR_FREE: [&str; 3] = ["cursor", "count", "len"];
+
+/// Gives the width in bytes and the signedness of an integer form.
+fn width(form: &str) -> Option<(u64, bool)> {
+    Some(match form {
+        "u8" => (1, false),
+        "u16" => (2, false),
+        "u32" => (4, false),
+        "u64" | "ptr" => (8, false),
+        "i8" => (1, true),
+        "i16" => (2, true),
+        "i32" => (4, true),
+        "i64" => (8, true),
+        _ => return None,
+    })
+}
+
+/// Gives the bytes of the read: at most `len` bytes, and never past the end of `region`.
+fn read(p: &Program, region: &Region, at: u64, len: u64) -> Vec<u8> {
+    let left = region.va.last.saturating_sub(at).saturating_add(1);
+    p.mem()
+        .read(at, len.min(left), &Limits::DEFAULT)
+        .map(std::borrow::Cow::into_owned)
+        .unwrap_or_default()
+}
+
+/// Gives the members `addr`, `len`, `hex` and `text` of the bytes `bytes` at `at`.
+fn byte_members(at: u64, bytes: &[u8], caps: Caps) -> Object {
+    let shown = bytes.get(..caps.hex_bytes).unwrap_or(bytes);
+    let mut out = Object::new();
+    out.push("addr", fs::hex(at));
+    out.push("len", Value::from(bytes.len()));
+    out.push("hex", Value::from(ghidorah_base::hex::encode(shown)));
+    out.push("text", fs::bin_text(bytes, caps));
+    out
+}
+
+/// Gives the values of an integer form. A pointer names its target when the target has a name.
+fn values(p: &Program, bytes: &[u8], w: u64, signed: bool, ptr: bool, namer: &Namer) -> Value {
+    let step = usize::try_from(w).unwrap_or(8);
+    let list = bytes
+        .chunks_exact(step)
+        .map(|chunk| {
+            let mut word = [0u8; 8];
+            for (dst, src) in word.iter_mut().zip(chunk) {
+                *dst = *src;
+            }
+            let raw = u64::from_le_bytes(word);
+            if signed {
+                let shift = 64u32.saturating_sub(u32::try_from(w.saturating_mul(8)).unwrap_or(64));
+                let v = i64::from_le_bytes(word)
+                    .wrapping_shl(shift)
+                    .wrapping_shr(shift);
+                return Value::from(v.to_string());
+            }
+            if !ptr {
+                return fs::hex(raw);
+            }
+            let mut out = Object::new();
+            out.push("v", fs::hex(raw));
+            let target = Address::ram(raw);
+            let label = p
+                .primary_symbol(target)
+                .map(|s| namer.text(&s.name.value))
+                .or_else(|| {
+                    p.func(ghidorah_base::FuncId(target))
+                        .map(|_| namer.of(p, target))
+                });
+            if let Some(name) = label {
+                out.push("name", Value::from(name));
+            }
+            Value::Object(out)
+        })
+        .collect();
+    Value::Array(list)
+}
+
+/// Gives the result of the sweep form from `start`.
+fn sweep(
+    p: &Program,
+    region: &Region,
+    start: u64,
+    count: usize,
+    scope: &CursorScope<'_>,
+    namer: &Namer,
+) -> Object {
+    let mut rows = Vec::new();
+    let mut at = start;
+    let mut end = false;
+    while rows.len() < count {
+        if at > region.va.last {
+            end = true;
+            break;
+        }
+        let (row, len) = match fs::decode(p, at) {
+            Some(insn) => (fs::row(p, &insn, namer), u64::from(insn.len())),
+            None => (fs::bad_row(p, at, 1), 1),
+        };
+        rows.push(row);
+        let Some(next) = at.checked_add(len) else {
+            end = true;
+            break;
+        };
+        at = next;
+    }
+    let mut out = Object::new();
+    out.push("addr", fs::hex(start));
+    out.push("len", Value::from(at.saturating_sub(start)));
+    out.push("rows", Value::Array(rows));
+    if !end && at <= region.va.last {
+        let key = SortKey(vec![KeyPart::Int(at)]);
+        out.push("next_cursor", Value::from(scope.encode(key)));
+    }
+    out
+}
+
+/// Gives the start of a sweep: the address of its cursor, else the target.
+fn start_of(
+    args: &Args,
+    scope: &CursorScope<'_>,
+    region: &Region,
+    target: u64,
+) -> Result<u64, ToolError> {
+    let Some(text) = args.str("cursor") else {
+        return Ok(target);
+    };
+    let key = scope.decode(text)?;
+    match key.0.as_slice() {
+        [KeyPart::Int(at)] if region.va.first <= *at && *at <= region.va.last && *at >= target => {
+            Ok(*at)
+        }
+        _ => Err(ToolError::new(ErrorCode::CursorInvalid)),
+    }
+}
+
+/// Adds the repair call of a cursor error: the call without `cursor`.
+fn restart(args: &Args, error: ToolError) -> ToolError {
+    let mut object = args.canonical().as_object().cloned().unwrap_or_default();
+    let _ = object.remove("cursor");
+    error.next(Call::new("mem_read", Value::Object(object), WHY_RESTART))
+}
+
+fn run(session: &mut Session, args: &Args, ctx: &mut Ctx) -> Result<Payload, ToolError> {
+    let p = &session.bound(&ctx.frame)?.program;
+    let input = args.get("target").cloned().unwrap_or_default();
+    let (addr, _) = crate::resolve::address(p, &input, &fs::site("/target"))?;
+    let Some(region) = addr.is_ram().then(|| p.mem().region_at(addr.off)).flatten() else {
+        return Err(ToolError::new(ErrorCode::InvalidArgument)
+            .var("field", "target")
+            .path("/target")
+            .detail(
+                "expected",
+                Value::from("an address with bytes in a mapped region"),
+            ));
+    };
+    let at = addr.off;
+    let form = args.str("as").unwrap_or("hex");
+    let caps = fs::caps(ctx);
+    let namer = Namer::new();
+    let len = u64::try_from(args.int("len").unwrap_or(DEFAULT_LEN)).unwrap_or(256);
+    let mut out = match form {
+        "insn" => {
+            fs::x86_only(p)?;
+            let frame = ctx.frame.clone();
+            let scope = CursorScope {
+                session,
+                frame: &frame,
+                args,
+                drop: &CURSOR_FREE,
+                section: fs::SWEEP,
+            };
+            let start = start_of(args, &scope, region, at).map_err(|e| restart(args, e))?;
+            let count = usize::try_from(args.int("count").unwrap_or(DEFAULT_ROWS)).unwrap_or(100);
+            sweep(p, region, start, count, &scope, &namer)
+        }
+        "type" => {
+            let typed = typed::parse(p, args.str("c").unwrap_or_default())?;
+            let bytes = read(p, region, at, typed.size);
+            let mut out = byte_members(at, &bytes, caps);
+            let c = typed.store.c_text(typed.id).unwrap_or_default();
+            out.push(
+                "type",
+                Value::object([
+                    ("c", Value::from(c)),
+                    ("size", Value::from(typed.size)),
+                    ("align", Value::from(typed.align)),
+                ]),
+            );
+            out.push(
+                "fields",
+                Value::Array(typed::fields(p, &typed, &bytes, caps)),
+            );
+            out
+        }
+        "cstr" => {
+            let bytes = read(p, region, at, len);
+            let text = bytes.split(|b| *b == 0).next().unwrap_or_default();
+            byte_members(at, text, caps)
+        }
+        "utf16" => {
+            let bytes = read(p, region, at, len);
+            let units: Vec<u16> = bytes
+                .chunks_exact(2)
+                .map(|c| u16::from_le_bytes([c[0], c[1]]))
+                .take_while(|u| *u != 0)
+                .collect();
+            let raw = bytes
+                .get(..units.len().saturating_mul(2))
+                .unwrap_or_default();
+            let mut out = byte_members(at, raw, caps);
+            let text = String::from_utf16_lossy(&units);
+            let mut shown = ghidorah_base::BinText::new(text.into_bytes()).render(caps);
+            shown.hex = ghidorah_base::hex::encode(raw.get(..caps.hex_bytes).unwrap_or(raw));
+            shown.len = raw.len();
+            let _ = out.insert("text", fs::rendered(shown));
+            out
+        }
+        other => match width(other) {
+            Some((w, signed)) => {
+                let count = args
+                    .int("count")
+                    .map_or(len / w, |c| u64::try_from(c).unwrap_or(1));
+                let bytes = read(p, region, at, count.max(1).saturating_mul(w));
+                let mut out = byte_members(at, &bytes, caps);
+                out.push(
+                    "values",
+                    values(p, &bytes, w, signed, other == "ptr", &namer),
+                );
+                out
+            }
+            None => byte_members(at, &read(p, region, at, len), caps),
+        },
+    };
+    out.push(
+        "region",
+        Value::object([
+            ("name", Value::from(fs::safe(&region.name))),
+            ("perms", Value::from(region.perms.to_string())),
+        ]),
+    );
+    namer.finish(ctx);
+    Ok(Payload::Object(out))
 }

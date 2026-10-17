@@ -27,8 +27,15 @@
 //! `ref_count`, at most 3 `funcs` and a `next` call to `xref_list`. Name and byte searches
 //! use fuel. When the fuel runs out, `page.total_lower_bound` replaces `page.total`.
 
+mod filter;
+mod kinds;
+mod tables;
+
+use ghidorah_json::Object;
+
+use super::func_sections::{self as fs, Namer};
 use crate::args::Args;
-use crate::dispatch::{Ctx, ListPayload, Payload};
+use crate::dispatch::{Ctx, ListPayload, Payload, Total};
 use crate::errors::ToolError;
 use crate::outshape::{Field, OutputShape};
 use crate::session::Session;
@@ -414,7 +421,53 @@ pub const SPEC: ToolSpec<Session> = ToolSpec {
     ..ToolSpec::base("search", run)
 };
 
-fn run(session: &mut Session, _args: &Args, ctx: &mut Ctx) -> Result<Payload, ToolError> {
-    let _ = session.bound(&ctx.frame)?;
-    Ok(Payload::List(ListPayload::new(Vec::new())))
+fn run(session: &mut Session, args: &Args, ctx: &mut Ctx) -> Result<Payload, ToolError> {
+    let p = &session.bound(&ctx.frame)?.program;
+    let namer = Namer::new();
+    let caps = fs::caps(ctx);
+    let mut items = filter::Items {
+        program: p,
+        scope: filter::Scope::of(p, args)?,
+        list: Vec::new(),
+        cut: false,
+    };
+    if let Some(ids) = args.list("ids") {
+        kinds::records(&mut items, ids)?;
+    } else {
+        let m = filter::Matcher::of(args)?;
+        match args.str("kind").unwrap_or_default() {
+            "name" => kinds::names(&mut items, &m, &namer, &mut ctx.fuel),
+            "string" => {
+                let all = args.bool("include_unreferenced").unwrap_or(false);
+                kinds::strings(&mut items, &m, all, caps);
+            }
+            "bytes" => {
+                let pat = kinds::pattern(args.str("pattern").unwrap_or_default())?;
+                kinds::bytes(&mut items, &pat, &mut ctx.fuel);
+            }
+            "comment" => kinds::comments(&mut items, &m),
+            "note" => kinds::notes(&mut items, &m, args.get("note_filter")),
+            "type" => kinds::types(&mut items, &m),
+            "import" => tables::imports(&mut items, &m, &namer),
+            "export" => tables::exports(&mut items, &m, &namer),
+            "section" => tables::sections(&mut items, &m),
+            "segment" => tables::segments(&mut items, &m),
+            "library" => tables::libraries(&mut items, &m),
+            "symbol" => tables::symbols(&mut items, &m, &namer),
+            "set" => kinds::sets(&mut items, &m),
+            _ => kinds::jumptables(&mut items),
+        }
+    }
+    namer.finish(ctx);
+    let count = u64::try_from(items.list.len()).unwrap_or(u64::MAX);
+    Ok(Payload::List(ListPayload {
+        items: items.list,
+        total: if items.cut {
+            Total::AtLeast(count)
+        } else {
+            Total::Items
+        },
+        extra: Object::new(),
+        narrow: Some(HINT_NARROW.to_owned()),
+    }))
 }

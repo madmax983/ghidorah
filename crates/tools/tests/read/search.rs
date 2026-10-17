@@ -267,8 +267,11 @@ fn search_notes_sets_and_ids() {
 fn search_jumptables() {
     let (mut session, _) = fixture("switch.gcc-O2");
     let tables = items(&call(&mut session, "search", r#"{"kind":"jumptable"}"#));
-    assert!(!tables.is_empty(), "the switch fixture has a jump table");
-    let first = str_of(&tables[0], "id");
+    let resolved = tables
+        .iter()
+        .find(|t| t.pointer("/extra/resolved") == Some(&Value::Bool(true)))
+        .expect("the switch fixture has a resolved jump table");
+    let first = str_of(resolved, "id");
     assert!(first.starts_with("jt:"));
     let args = Value::object([("ids", Value::Array(vec![Value::from(first.as_str())]))]);
     let records = items(&call_value(&mut session, "search", args));

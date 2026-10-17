@@ -15,11 +15,21 @@
 //! A call with `disasm` or `ir` marks the function `visited`. The mark changes no fact and no
 //! `rev`.
 
-use ghidorah_json::{Object, Value};
+mod render;
 
-use crate::args::Args;
+use ghidorah_analysis::CallGraph;
+use ghidorah_base::{BinaryId, ErrorCode, FuncId, WarningCode};
+use ghidorah_db::{FuncProgress, MetaLine, Program};
+use ghidorah_json::Value;
+
+use self::render::{Cursors, Job, Marks, cursors, one};
+use super::func_sections::{self as fs, Namer, Render};
+use crate::args::{Args, Format};
+use crate::budget::split_even;
 use crate::dispatch::{Ctx, Payload};
+use crate::envelope::Warning;
 use crate::errors::ToolError;
+use crate::hints::Call;
 use crate::outshape::{Field, OutputShape};
 use crate::session::Session;
 use crate::spec::{ArgKind, ArgSpec, Example, Group, GroupRule, Profile, Role, ToolSpec};
@@ -175,9 +185,136 @@ pub const SPEC: ToolSpec<Session> = ToolSpec {
     ..ToolSpec::base("func_get", run)
 };
 
-fn run(session: &mut Session, _args: &Args, ctx: &mut Ctx) -> Result<Payload, ToolError> {
-    let _ = session.bound(&ctx.frame)?;
-    let mut out = Object::new();
-    out.push("omitted", Value::Object(Object::new()));
-    Ok(Payload::Object(out))
+/// The smallest share of a section that the handler renders. A section with a smaller
+/// share goes to `omitted` with `null`.
+pub const MIN_SHARE: u64 = 48;
+
+/// The characters of the wrapper of one item of a `targets` result.
+const ITEM_WRAPPER: u64 = 64;
+
+/// Gives the sections of the call in include order.
+fn included(args: &Args) -> Vec<&'static str> {
+    let names: Vec<&str> = args
+        .list("include")
+        .unwrap_or_default()
+        .iter()
+        .filter_map(Value::as_str)
+        .collect();
+    let mut out: Vec<&'static str> = Vec::new();
+    for name in names {
+        if let Some(s) = SECTIONS.iter().find(|s| **s == name)
+            && !out.contains(s)
+        {
+            out.push(s);
+        }
+    }
+    if out.is_empty() && !args.given("include") {
+        out.push("summary");
+    }
+    out
+}
+
+/// Gives the function of one target input, or `NOT_FOUND` for an ID of no function.
+fn func_of(program: &Program, input: &Value, path: &str) -> Result<FuncId, ToolError> {
+    let (func, _) = crate::resolve::function(program, input, &fs::site(path))?;
+    if program.func(func).is_none() {
+        return Err(ToolError::new(ErrorCode::NotFound)
+            .var("kind", "function")
+            .path(path)
+            .detail("kind", Value::from("function")));
+    }
+    Ok(func)
+}
+
+fn run(session: &mut Session, args: &Args, ctx: &mut Ctx) -> Result<Payload, ToolError> {
+    let (data, marks, id) = {
+        let binary = session.bound(&ctx.frame)?;
+        let program = &binary.program;
+        fs::x86_only(program)?;
+        let include = included(args);
+        let namer = Namer::new();
+        let graph = CallGraph::build(program);
+        let limit = args.int("disasm_limit").unwrap_or(DEFAULT_DISASM_LIMIT);
+        let frame = ctx.frame.clone();
+        let mut job = Job {
+            render: Render {
+                program,
+                graph: &graph,
+                namer: &namer,
+                caps: fs::caps(ctx),
+            },
+            include: &include,
+            limit: usize::try_from(limit).unwrap_or(usize::MAX),
+            cursors: Cursors::default(),
+            session,
+            frame: &frame,
+            args,
+            mode: ctx.budget.mode,
+            detailed: ctx.format == Format::Detailed,
+        };
+        job.cursors = cursors(&job).map_err(|e| first_rows(args, e))?;
+        let room = fs::room(ctx);
+        let mut marks = Marks::default();
+        let data = if let Some(targets) = args.list("targets") {
+            let n = targets.len().max(1);
+            let wrap = ITEM_WRAPPER.saturating_mul(u64::try_from(n).unwrap_or(u64::MAX));
+            let shares = split_even(room.saturating_sub(wrap), n);
+            let fuel = &mut ctx.fuel;
+            let out = fs::per_item("targets", targets, |i, input| {
+                let path = fs::item_path("targets", i);
+                let func = func_of(program, input, &path)?;
+                let share = shares.get(i).copied().unwrap_or(0);
+                one(&job, func, share, fuel, &mut marks)
+            });
+            Value::Object(out)
+        } else {
+            let input = args.get("target").cloned().unwrap_or_default();
+            let func = func_of(program, &input, "/target")?;
+            one(&job, func, room, &mut ctx.fuel, &mut marks)?
+        };
+        namer.finish(ctx);
+        (data, marks, binary.id)
+    };
+    for at in &marks.intrinsic {
+        let mut warning = Warning::new(WarningCode::LiftUnsupported);
+        warning.at = Some(ghidorah_base::hex::u64_text(*at));
+        ctx.warn(warning);
+    }
+    mark_visited(session, id, &marks.visited);
+    match data {
+        Value::Object(object) => Ok(Payload::Object(object)),
+        _ => Err(ToolError::new(ErrorCode::InternalError)),
+    }
+}
+
+/// Marks each function of `funcs` as visited. A failed journal write keeps the mark in
+/// memory, so the read still succeeds.
+fn mark_visited(session: &mut Session, id: BinaryId, funcs: &[FuncId]) {
+    for func in funcs {
+        let Some(row) = session.binary(id).map(|b| b.program.progress().get(*func)) else {
+            return;
+        };
+        if row.visited {
+            continue;
+        }
+        let line = MetaLine::Progress {
+            func: *func,
+            row: FuncProgress {
+                visited: true,
+                ..row
+            },
+        };
+        let _ = session.write_meta(id, &line);
+    }
+}
+
+/// Adds the repair call of a cursor error: the call without `cursors`.
+fn first_rows(args: &Args, error: ToolError) -> ToolError {
+    let mut object = args.canonical().as_object().cloned().unwrap_or_default();
+    let _ = object.remove("cursors");
+    error.next(Call::new(
+        "func_get",
+        Value::Object(object),
+        fs::WHY_FIRST_ROWS,
+    ))
 }

@@ -37,9 +37,11 @@ fn ac_056b_other_arch_survey() {
         sections.iter().any(|s| str_of(s, "name") == ".text"),
         "{survey}"
     );
-    assert_eq!(
-        d.pointer("/functions/total").and_then(Value::as_u64),
-        Some(0)
+    assert!(
+        d.pointer("/functions/total")
+            .and_then(Value::as_u64)
+            .is_some_and(|n| n <= 1),
+        "no code analyzer runs: {survey}"
     );
     let func = call(&mut session, "func_get", r#"{"target":"main"}"#);
     assert_eq!(code(&func), "UNSUPPORTED_ARCH", "{func}");

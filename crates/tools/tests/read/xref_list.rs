@@ -199,7 +199,8 @@ fn xref_list_args_values() {
     );
     assert_eq!(
         args[0].pointer("/value/v").and_then(Value::as_str),
-        Some("0x1")
+        Some("0x2"),
+        "the fortify level"
     );
     assert_eq!(args[0].get("name").and_then(Value::as_str), Some("flag"));
     assert_eq!(
@@ -248,47 +249,52 @@ fn xref_list_syscall_sites() {
     );
 }
 
+/// Gives the `(from, to)` pairs of the call-graph edges of an `xref_list` result.
+fn edge_pairs(envelope: &Value) -> BTreeSet<(String, String)> {
+    data(envelope)
+        .get("edges")
+        .and_then(Value::as_array)
+        .expect("edges")
+        .iter()
+        .map(|e| (str_of(e, "from"), str_of(e, "to")))
+        .collect()
+}
+
 #[test]
 fn xref_list_depth_edges() {
-    let (mut session, _) = fixture("hello.gcc-O2");
-    let envelope = call(
+    // gcc -O0 has no tail calls, so each truth call edge is a call.
+    let (mut session, _) = fixture("hello.gcc-O0");
+    let pair = |a: &str, b: &str| (a.to_owned(), b.to_owned());
+    let up = call(
         &mut session,
         "xref_list",
         r#"{"targets":["finish"],"depth":3}"#,
     );
-    let edges: BTreeSet<(String, String)> = data(&envelope)
-        .get("edges")
-        .and_then(Value::as_array)
-        .expect("edges")
-        .iter()
-        .map(|e| (str_of(e, "from"), str_of(e, "to")))
-        .collect();
-    assert!(
-        edges.contains(&("fn:0x11c0".to_owned(), "fn:0x11a0".to_owned())),
-        "{edges:?}"
-    );
-    assert!(
-        edges.contains(&("fn:0x1080".to_owned(), "fn:0x11c0".to_owned())),
-        "{edges:?}"
-    );
-    let basis = data(&envelope).get("basis").expect("basis");
+    let edges = edge_pairs(&up);
+    assert!(edges.contains(&pair("fn:0x11ba", "fn:0x1197")), "{edges:?}");
+    assert!(edges.contains(&pair("fn:0x11f6", "fn:0x11ba")), "{edges:?}");
+    let basis = data(&up).get("basis").expect("basis");
     assert!(basis.get("complete").and_then(Value::as_bool).is_some());
-    let from = call(
+    let down = call(
         &mut session,
         "xref_list",
-        r#"{"targets":["main"],"direction":"from","depth":2,"kinds":["call"]}"#,
+        r#"{"targets":["fn:0x11f6"],"direction":"from","depth":2,"kinds":["call"]}"#,
     );
-    let edges: BTreeSet<(String, String)> = data(&from)
-        .get("edges")
-        .and_then(Value::as_array)
-        .expect("edges")
-        .iter()
-        .map(|e| (str_of(e, "from"), str_of(e, "to")))
+    let edges = edge_pairs(&down);
+    assert!(edges.contains(&pair("fn:0x11f6", "fn:0x11ba")), "{edges:?}");
+    assert!(edges.contains(&pair("fn:0x11ba", "fn:0x1169")), "{edges:?}");
+    let one = call(&mut session, "xref_list", r#"{"targets":["finish"]}"#);
+    assert!(data(&one).get("edges").is_none(), "depth 1 has no edges");
+    let small = call(
+        &mut session,
+        "xref_list",
+        r#"{"targets":["fn:0x11f6"],"direction":"from","depth":3,"max_nodes":2}"#,
+    );
+    let nodes: BTreeSet<String> = edge_pairs(&small)
+        .into_iter()
+        .flat_map(<[String; 2]>::from)
         .collect();
-    assert!(
-        edges.contains(&("fn:0x11c0".to_owned(), "fn:0x1180".to_owned())),
-        "{edges:?}"
-    );
+    assert!(nodes.len() <= 2, "{nodes:?}");
 }
 
 #[test]

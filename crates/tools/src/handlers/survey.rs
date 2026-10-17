@@ -26,11 +26,19 @@
 //! On a binary for another machine, the code sections stay empty, and the result carries
 //! `W_ARCH_UNSUPPORTED` (design Section 4.1).
 
+mod parts;
+
+use ghidorah_analysis::CallGraph;
+use ghidorah_base::WarningCode;
 use ghidorah_json::{Object, Value};
 
+use super::func_sections::{self as fs, Namer};
 use crate::args::Args;
+use crate::content::{self, ContentMode};
 use crate::dispatch::{Ctx, Payload};
+use crate::envelope::Warning;
 use crate::errors::ToolError;
+use crate::hints::Call;
 use crate::outshape::{Field, OutputShape};
 use crate::session::Session;
 use crate::spec::{ArgKind, ArgSpec, Example, Profile, Role, ToolSpec};
@@ -146,14 +154,133 @@ pub const SPEC: ToolSpec<Session> = ToolSpec {
     ..ToolSpec::base("binary_survey", run)
 };
 
-fn run(session: &mut Session, _args: &Args, ctx: &mut Ctx) -> Result<Payload, ToolError> {
-    let _ = session.bound(&ctx.frame)?;
-    Ok(Payload::Object(Object::new()))
+/// Gives the characters of the member `"name":value,` in the result.
+fn member(mode: ContentMode, name: &str, value: &Value) -> u64 {
+    content::cost(
+        &format!("\"{name}\":{},", ghidorah_json::write(value)),
+        mode,
+    )
+}
+
+/// Gives the value of `part` that fits `share`: the whole section, else the first items of
+/// its list that fit. A section with no list always comes whole.
+fn fit(part: &parts::Part, name: &str, share: u64, mode: ContentMode) -> (Value, u64) {
+    let n = part.list.len();
+    let full = part.value(n);
+    let need = member(mode, name, &full);
+    if need <= share || part.key.is_none() {
+        return (full, need);
+    }
+    let mut k = 0;
+    let mut cost = member(mode, name, &part.value(0));
+    for item in &part.list {
+        let next = cost
+            .saturating_add(content::cost(&ghidorah_json::write(item), mode))
+            .saturating_add(mode.copies());
+        if next > share {
+            break;
+        }
+        cost = next;
+        k += 1;
+    }
+    loop {
+        let value = part.value(k);
+        let exact = member(mode, name, &value);
+        if exact <= share || k == 0 {
+            return (value, exact);
+        }
+        k -= 1;
+    }
+}
+
+fn run(session: &mut Session, args: &Args, ctx: &mut Ctx) -> Result<Payload, ToolError> {
+    let binary = session.bound(&ctx.frame)?;
+    let p = &binary.program;
+    let include = included(args);
+    let namer = Namer::new();
+    let graph = CallGraph::build(p);
+    let c = parts::Ctx {
+        program: p,
+        file_name: &binary.file_name,
+        namer: &namer,
+        caps: fs::caps(ctx),
+    };
+    let mode = ctx.budget.mode;
+    let built: Vec<(&'static str, parts::Part)> = include
+        .iter()
+        .map(|name| (*name, parts::part(&c, name, &graph, &mut ctx.fuel)))
+        .collect();
+    // The members of each section without its list items come first. The list items then
+    // share the rest by weight.
+    let room = fs::room(ctx);
+    let heads: Vec<u64> = built
+        .iter()
+        .map(|(name, part)| member(mode, name, &part.value(0)))
+        .collect();
+    let mut free =
+        u128::from(room.saturating_sub(heads.iter().fold(0, |a: u64, h| a.saturating_add(*h))));
+    let mut left: u128 = built
+        .iter()
+        .filter(|(_, part)| part.key.is_some())
+        .map(|(name, _)| u128::from(weight(name)))
+        .sum();
+    let mut out = Object::new();
+    for ((name, part), head) in built.iter().zip(&heads) {
+        let w = if part.key.is_some() {
+            u128::from(weight(name))
+        } else {
+            0
+        };
+        let share = u64::try_from(free.saturating_mul(w) / left.max(1)).unwrap_or(u64::MAX);
+        left = left.saturating_sub(w);
+        let (value, used) = fit(part, name, head.saturating_add(share), mode);
+        free = free.saturating_sub(u128::from(used.saturating_sub(*head)));
+        out.push(*name, value);
+    }
+    // A budget below the fixed members drops whole sections from the end.
+    while fs::chars(ctx, &Value::Object(out.clone())) > room && !out.is_empty() {
+        let last = out
+            .members()
+            .last()
+            .map(|(k, _)| k.clone())
+            .unwrap_or_default();
+        let _ = out.remove(&last);
+    }
+    let id = Value::from(binary.id.to_string());
+    let main = p
+        .funcs()
+        .iter()
+        .find(|f| p.name(f.id().0).is_some_and(|n| n.text == "main"))
+        .map(ghidorah_db::FuncView::id);
+    let x86 = p.meta().arch.is_x86_64();
+    namer.finish(ctx);
+    if !x86 {
+        ctx.warn(Warning::new(WarningCode::ArchUnsupported));
+    }
+    ctx.hint(Call::new(
+        "func_list",
+        Value::object([("binary_id", id.clone()), ("sort", Value::from("priority"))]),
+        WHY_PRIORITY,
+    ));
+    if let Some(main) = main {
+        ctx.hint(Call::new(
+            "func_get",
+            Value::object([("binary_id", id), ("target", Value::from(main.to_string()))]),
+            WHY_MAIN,
+        ));
+    }
+    Ok(Payload::Object(out))
 }
 
 /// Gives the included sections of the call in output order.
 #[must_use]
 pub fn included(args: &Args) -> Vec<&'static str> {
-    let _ = args.get("include").and_then(Value::as_array);
-    Vec::new()
+    let Some(list) = args.list("include") else {
+        return SECTIONS.to_vec();
+    };
+    SECTIONS
+        .iter()
+        .filter(|s| list.iter().any(|v| v.as_str() == Some(**s)))
+        .copied()
+        .collect()
 }

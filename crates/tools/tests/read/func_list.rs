@@ -37,7 +37,7 @@ fn rename(session: &mut ghidorah_tools::Session, id: &str, entry: u64, name: &st
 
 #[test]
 fn ac_157_priority_frozen() {
-    let name = "socket_client.gcc-O2";
+    let name = "socket_client.gcc-O2.stripped";
     let (mut session, id) = fixture(name);
     let first = call(
         &mut session,

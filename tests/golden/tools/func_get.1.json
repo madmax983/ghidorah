@@ -1,0 +1,45 @@
+{"golden":"generator=tools_examples version=1 fixture=crackme.gcc-O2 fixture_sha256=467a43b75d95c826daba8cb216d01d7fd386aa96c5ef5a95c2effffe1780de8f"}
+{
+  "ok": true,
+  "binary_id": "467a43b75d95c826",
+  "rev": 1,
+  "session": "cli",
+  "analysis": {
+    "state": "complete",
+    "rev": 1
+  },
+  "partial": false,
+  "data": {
+    "id": "fn:0x1080",
+    "name": "main",
+    "entry": "0x1080",
+    "size": 83,
+    "parts": [
+      {
+        "start": "0x1080",
+        "size": "0x53",
+        "kind": "main"
+      }
+    ],
+    "signature": null,
+    "start_reason": "symbol",
+    "confidence": 100,
+    "flags": [],
+    "caveats": [],
+    "summary": {
+      "blocks": 10,
+      "insns": 21,
+      "edges": 11,
+      "cyclomatic": 3,
+      "callers": 0,
+      "callees": 2,
+      "string_refs": 3,
+      "import_calls": [
+        {
+          "category": "io",
+          "count": 3
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,97 @@
+{"golden":"generator=tools_examples version=1 fixture=crackme.gcc-O2 fixture_sha256=467a43b75d95c826daba8cb216d01d7fd386aa96c5ef5a95c2effffe1780de8f"}
+{
+  "ok": true,
+  "binary_id": "467a43b75d95c826",
+  "rev": 1,
+  "session": "cli",
+  "analysis": {
+    "state": "complete",
+    "rev": 1
+  },
+  "partial": false,
+  "data": {
+    "items": [
+      {
+        "id": "fn:0x1080",
+        "addr": "0x1080",
+        "name": "main",
+        "size": 83,
+        "start_reason": "symbol",
+        "confidence": 100,
+        "flags": [],
+        "callers": 0,
+        "callees": 2,
+        "caveats": [],
+        "visited": false,
+        "named": true
+      },
+      {
+        "id": "fn:0x1060",
+        "addr": "0x1060",
+        "name": "puts@plt",
+        "size": 10,
+        "start_reason": "plt_stub",
+        "confidence": 100,
+        "flags": [
+          "thunk"
+        ],
+        "callers": 0,
+        "callees": 0,
+        "caveats": [],
+        "visited": false,
+        "named": true
+      },
+      {
+        "id": "fn:0x11e0",
+        "addr": "0x11e0",
+        "name": "check_password",
+        "size": 73,
+        "start_reason": "symbol",
+        "confidence": 100,
+        "flags": [],
+        "callers": 1,
+        "callees": 1,
+        "caveats": [],
+        "visited": false,
+        "named": true
+      },
+      {
+        "id": "fn:0x1140",
+        "addr": "0x1140",
+        "name": "register_tm_clones",
+        "size": 51,
+        "start_reason": "tail_call",
+        "confidence": 80,
+        "flags": [],
+        "callers": 0,
+        "callees": 0,
+        "caveats": [
+          "W_JUMPTABLE_UNRESOLVED"
+        ],
+        "visited": false,
+        "named": true
+      },
+      {
+        "id": "fn:0x1180",
+        "addr": "0x1180",
+        "name": "__do_global_dtors_aux",
+        "size": 54,
+        "start_reason": "entry",
+        "confidence": 100,
+        "flags": [],
+        "callers": 0,
+        "callees": 2,
+        "caveats": [],
+        "visited": false,
+        "named": true
+      }
+    ]
+  },
+  "page": {
+    "returned": 5,
+    "total": 12,
+    "truncated": true,
+    "next_cursor": "01030019368873ebe2514a000101000000000000000200040000000000000000801100000000000052376eaa",
+    "hint": "Add filter.name, filter.min_confidence or filter.calls to narrow the list."
+  }
+}

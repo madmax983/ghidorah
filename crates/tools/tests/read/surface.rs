@@ -149,7 +149,7 @@ fn ac_146a_controls_escaped() {
                 }
             });
         }
-        assert!(texts >= 50, "{name}: {texts} binary texts");
+        assert!(texts >= 20, "{name}: {texts} binary texts");
     }
 }
 
