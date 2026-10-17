@@ -1,4 +1,6 @@
 {"golden":"generator=mcp_transcript version=1"}
 {"c":{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"e2e-client","version":"1.0"}}}}
+{"s":{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-11-25","capabilities":{"tools":{"listChanged":false}},"serverInfo":{"name":"ghidorah","version":"<version>"},"instructions":"ghidorah analyzes x86-64 binaries for reverse engineering. All tools work offline and never run the binary."}}}
 {"c":{"jsonrpc":"2.0","method":"notifications/initialized"}}
 {"c":{"jsonrpc":"2.0","id":2,"method":"tools/list"}}
+{"s":{"jsonrpc":"2.0","id":2,"result":{"tools":[]}}}

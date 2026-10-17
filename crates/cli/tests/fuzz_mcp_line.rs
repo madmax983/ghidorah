@@ -141,7 +141,15 @@ fn fuzz_mcp_line() {
         report.crashes
     );
     assert_eq!(fuzz::panic_count(), 0, "no case panics");
-    assert!(report.reached_percent(1) >= 10, "json share: {:?}", report.reached);
-    assert!(report.reached_percent(2) >= 5, "message share: {:?}", report.reached);
+    assert!(
+        report.reached_percent(1) >= 10,
+        "json share: {:?}",
+        report.reached
+    );
+    assert!(
+        report.reached_percent(2) >= 5,
+        "message share: {:?}",
+        report.reached
+    );
     assert!(report.reached[3] > 0, "result count: {:?}", report.reached);
 }

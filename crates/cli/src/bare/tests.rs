@@ -12,6 +12,10 @@ use super::{Bare, INSTRUCTIONS};
 use crate::backend::{Backend, Options};
 use crate::config::Env;
 
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "a test handler has the handler type, which returns a Result"
+)]
 fn handler(_host: &mut Bare, _args: &Args, _ctx: &mut Ctx) -> Result<Payload, ToolError> {
     Ok(Payload::Object(Object::new()))
 }
@@ -47,7 +51,9 @@ fn bound_tool_needs_a_binary() {
 #[test]
 fn free_tool_frame_takes_the_session_label() {
     let mut host = bare();
-    let frame = host.frame(&FREE, &Globals::default(), None).expect("a frame");
+    let frame = host
+        .frame(&FREE, &Globals::default(), None)
+        .expect("a frame");
     assert_eq!(frame.session, "cli");
     assert_eq!(frame.binary_id, None);
     assert_eq!(frame.rev, 0);
@@ -74,7 +80,10 @@ fn cursor_round_trip() {
         args: &args,
         frame: &frame,
     };
-    let key = SortKey(vec![KeyPart::Int(0x40_1000), KeyPart::Text("näme.x".to_owned())]);
+    let key = SortKey(vec![
+        KeyPart::Int(0x40_1000),
+        KeyPart::Text("näme.x".to_owned()),
+    ]);
     let text = host.encode_cursor(&call, &key);
     assert_eq!(host.decode_cursor(&call, &text), Ok(key));
     let other = CursorCall {

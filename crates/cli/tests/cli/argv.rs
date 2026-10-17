@@ -4,7 +4,7 @@ use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 use ghidorah_cli::Source;
-use ghidorah_cli::argv::{ArgsInput, Command, PrintFormat, parse};
+use ghidorah_cli::argv::{ArgsInput, Command, DoctorArgs, PrintFormat, parse};
 use ghidorah_json::pointer;
 use ghidorah_tools::{ContentMode, Profile};
 
@@ -117,7 +117,7 @@ fn parse_other_commands() {
         (&["-V"], Command::Version),
         (&["--help"], Command::Help),
         (&["-h"], Command::Help),
-        (&["doctor"], Command::Doctor(Default::default())),
+        (&["doctor"], Command::Doctor(DoctorArgs::default())),
         (
             &["tools", "--json", "--profile", "readonly"],
             Command::Tools(ghidorah_cli::argv::ToolsArgs {
@@ -154,8 +154,15 @@ fn usage_errors_name_candidates() {
     ];
     for (line, best) in cases {
         let error = parse(&args(line)).expect_err("the command line is not valid");
-        assert_eq!(error.candidates.first().map(String::as_str), best, "{line:?}");
+        assert_eq!(
+            error.candidates.first().map(String::as_str),
+            best,
+            "{line:?}"
+        );
         let text = error.to_string();
-        assert!(text.ends_with("Run ghidorah --help to see the usage."), "{text}");
+        assert!(
+            text.ends_with("Run ghidorah --help to see the usage."),
+            "{text}"
+        );
     }
 }

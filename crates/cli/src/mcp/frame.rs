@@ -41,7 +41,49 @@ impl<R: BufRead> LineReader<R> {
     ///
     /// Returns the read error of the input.
     pub fn next_frame(&mut self) -> io::Result<Option<Frame>> {
-        let _ = (&mut self.inner, self.cap);
-        Ok(None)
+        let mut line = Vec::new();
+        let mut bytes: usize = 0;
+        let mut last = None;
+        let mut started = false;
+        // A line keeps one byte more than the cap, so a `\r` before the line end fits.
+        let keep = self.cap.saturating_add(1);
+        loop {
+            let buf = match self.inner.fill_buf() {
+                Ok(buf) => buf,
+                Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+                Err(e) => return Err(e),
+            };
+            if buf.is_empty() {
+                return Ok(started.then(|| self.finish(line, bytes, last)));
+            }
+            started = true;
+            let end = buf.iter().position(|&b| b == b'\n');
+            let part = end.map_or(buf, |i| buf.get(..i).unwrap_or_default());
+            bytes = bytes.saturating_add(part.len());
+            last = part.last().copied().or(last);
+            if bytes <= keep {
+                line.extend_from_slice(part);
+            }
+            let used = end.map_or(buf.len(), |i| i.saturating_add(1));
+            self.inner.consume(used);
+            if end.is_some() {
+                return Ok(Some(self.finish(line, bytes, last)));
+            }
+        }
+    }
+
+    /// Gives the frame of a whole line of `bytes` bytes that ends with `last`.
+    ///
+    /// A `\r` at the end does not count.
+    fn finish(&self, mut line: Vec<u8>, bytes: usize, last: Option<u8>) -> Frame {
+        let cr = last == Some(b'\r');
+        let bytes = if cr { bytes.saturating_sub(1) } else { bytes };
+        if bytes > self.cap {
+            return Frame::TooLong { bytes };
+        }
+        if cr {
+            let _ = line.pop();
+        }
+        Frame::Line(line)
     }
 }

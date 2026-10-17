@@ -11,13 +11,18 @@ use ghidorah_json::pointer::Pointer;
 /// Gives the output line of one selected value.
 #[must_use]
 pub fn value_line(value: &Value) -> String {
-    let _ = value;
-    String::new()
+    match value {
+        Value::String(text) if !text.contains(['\n', '\r']) => text.clone(),
+        other => ghidorah_json::write(other),
+    }
 }
 
 /// Gives the output lines of the values at `pointer` in `envelope`, in document order.
 #[must_use]
 pub fn lines(envelope: &Value, pointer: &Pointer) -> Vec<String> {
-    let _ = (envelope, pointer);
-    Vec::new()
+    ghidorah_json::pointer::select(envelope, pointer)
+        .values
+        .into_iter()
+        .map(value_line)
+        .collect()
 }

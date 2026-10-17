@@ -23,7 +23,10 @@ fn jsonl_echoes_ids() {
     assert_eq!(lines[0].pointer("/data/text"), Some(&json(r#""one""#)));
     assert_eq!(lines[0].get("session"), Some(&json(r#""batch-a""#)));
     assert_eq!(lines[1].get("id"), Some(&json(r#""two""#)));
-    assert_eq!(lines[1].pointer("/data/items/0/id"), Some(&json(r#""fn:0x401000""#)));
+    assert_eq!(
+        lines[1].pointer("/data/items/0/id"),
+        Some(&json(r#""fn:0x401000""#))
+    );
     assert_eq!(lines[2].get("ok"), Some(&Value::Bool(false)));
     let first = lines[0]
         .as_object()
@@ -57,6 +60,9 @@ fn jsonl_bad_lines_give_two() {
     }
     assert_eq!(lines[1].get("id"), Some(&json("1")));
     assert_eq!(lines[3].get("ok"), Some(&Value::Bool(true)));
-    let clean = run::<TestHost>(&["jsonl"], "{\"id\":1,\"tool\":\"echo_text\",\"args\":{\"text\":\"a\"}}");
+    let clean = run::<TestHost>(
+        &["jsonl"],
+        "{\"id\":1,\"tool\":\"echo_text\",\"args\":{\"text\":\"a\"}}",
+    );
     assert_eq!(clean.code, 0, "{}", clean.stdout);
 }

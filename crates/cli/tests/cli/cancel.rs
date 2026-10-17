@@ -48,7 +48,9 @@ impl Live {
     }
 
     fn send(&mut self, line: &str) {
-        self.input.write_all(line.as_bytes()).expect("the server reads");
+        self.input
+            .write_all(line.as_bytes())
+            .expect("the server reads");
         self.input.write_all(b"\n").expect("the server reads");
         self.input.flush().expect("the server reads");
     }
@@ -69,7 +71,9 @@ impl Live {
 }
 
 fn call(id: u64, tool: &str, args: &str, token: Option<&str>) -> String {
-    let meta = token.map_or_else(String::new, |t| format!(r#","_meta":{{"progressToken":"{t}"}}"#));
+    let meta = token.map_or_else(String::new, |t| {
+        format!(r#","_meta":{{"progressToken":"{t}"}}"#)
+    });
     format!(
         r#"{{"jsonrpc":"2.0","id":{id},"method":"tools/call","params":{{"name":"{tool}","arguments":{args}{meta}}}}}"#
     )
@@ -110,7 +114,11 @@ fn ac_169e_cancelled() {
     }
     let rest = live.finish();
     for reply in after.iter().chain(&rest) {
-        assert_ne!(reply.get("id"), Some(&json("2")), "no reply for request 2: {reply}");
+        assert_ne!(
+            reply.get("id"),
+            Some(&json("2")),
+            "no reply for request 2: {reply}"
+        );
     }
     let progress: Vec<u64> = std::iter::once(&first)
         .chain(&after)

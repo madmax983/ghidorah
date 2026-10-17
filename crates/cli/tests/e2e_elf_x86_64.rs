@@ -21,14 +21,22 @@ use crate::common::transcript::{check, clients, run_spawned};
 #[test]
 fn e2e_elf_x86_64() {
     let clients = clients("e2e");
-    assert!(clients.len() >= 3, "version 1 has the handshake and tools/list");
+    assert!(
+        clients.len() >= 3,
+        "version 1 has the handshake and tools/list"
+    );
     let steps = run_spawned(&[], &clients);
     check("e2e", &steps);
     let init = json(&steps[0].1[0]);
     assert_eq!(
-        init.pointer("/result/serverInfo/name").and_then(Value::as_str),
+        init.pointer("/result/serverInfo/name")
+            .and_then(Value::as_str),
         Some("ghidorah")
     );
     let list = json(steps[2].1.last().expect("a tools/list reply"));
-    assert!(list.pointer("/result/tools").and_then(Value::as_array).is_some());
+    assert!(
+        list.pointer("/result/tools")
+            .and_then(Value::as_array)
+            .is_some()
+    );
 }

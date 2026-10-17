@@ -90,7 +90,42 @@ where
 ///
 /// Gives the exit code of Section 10.14: 0 for a success, 1 for a tool error and 2 for a
 /// usage or protocol error.
-pub fn main_with<B: Backend>(args: &[String], env: &Env, streams: Streams) -> u8 {
-    let _ = (args, env, streams);
-    Exit::Usage.code()
+#[must_use]
+pub fn main_with<B: Backend>(args: &[String], env: &Env, mut streams: Streams) -> u8 {
+    let command = match argv::parse(args) {
+        Ok(command) => command,
+        Err(error) => {
+            out::log(&mut streams.stderr, &error.to_string());
+            return Exit::Usage.code();
+        }
+    };
+    let env = env.clone();
+    let exit = match command {
+        Command::Help => print(&mut streams, argv::USAGE.trim_end()),
+        Command::Version => print(&mut streams, &format!("ghidorah {VERSION}")),
+        Command::Mcp(args) => {
+            let options = call::options(&args.session, &env, MCP_SESSION);
+            let serve = mcp::ServeOptions {
+                content: args.content,
+                record: args.record.map(|path| env.cwd.join(path)),
+            };
+            mcp::serve::<B>(options, &serve, streams)
+        }
+        Command::Call(args) => on_worker(move || call::call::<B>(&args, &env, &mut streams)),
+        Command::Jsonl(flags) => on_worker(move || call::jsonl::<B>(&flags, &env, &mut streams)),
+        Command::Tools(args) => on_worker(move || catalog::tools::<B>(args, &env, &mut streams)),
+        Command::Doctor(args) => on_worker(move || doctor::doctor::<B>(&args, &env, &mut streams)),
+    };
+    exit.code()
+}
+
+/// The default session label of `ghidorah mcp`.
+pub const MCP_SESSION: &str = "mcp-1";
+
+/// Prints `text` and one line end on stdout.
+fn print(streams: &mut Streams, text: &str) -> Exit {
+    match out::line(&mut streams.stdout, text) {
+        Ok(()) => Exit::Ok,
+        Err(stop) => stop.exit(),
+    }
 }

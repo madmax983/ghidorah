@@ -43,8 +43,10 @@ impl Stop {
 ///
 /// Returns [`Stop`] when the write or the flush fails.
 pub fn line(out: &mut dyn Write, text: &str) -> Result<(), Stop> {
-    let _ = (out, text);
-    Ok(())
+    out.write_all(text.as_bytes())
+        .and_then(|()| out.write_all(b"\n"))
+        .and_then(|()| out.flush())
+        .map_err(Stop::of)
 }
 
 /// Writes one log line to `err`. A failed write changes nothing.

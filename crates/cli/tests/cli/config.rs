@@ -11,7 +11,12 @@ fn lookup(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> + use<> {
         .iter()
         .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
         .collect();
-    move |name| pairs.iter().find(|(k, _)| k == name).map(|(_, v)| v.clone())
+    move |name| {
+        pairs
+            .iter()
+            .find(|(k, _)| k == name)
+            .map(|(_, v)| v.clone())
+    }
 }
 
 #[test]
@@ -36,7 +41,11 @@ fn runconfig_from_env_in_child() {
     command.env("GHIDORAH_EVAL", "maybe");
     let output = command.output().expect("the binary runs");
     let stderr = String::from_utf8(output.stderr).expect("UTF-8");
-    assert_eq!(output.status.code(), Some(2), "a bad variable is a usage error");
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "a bad variable is a usage error"
+    );
     assert!(stderr.contains("GHIDORAH_EVAL"), "{stderr}");
     assert!(output.stdout.is_empty(), "a usage error writes no data");
 
@@ -60,8 +69,14 @@ fn runconfig_parses_each_variable() {
     );
     assert_eq!(config.clock().unix_ms(), 42);
     assert_eq!(config.clock().monotonic_ms(), 0);
-    assert_eq!(config.to_json(), json(r#"{"fixed_time":42,"eval_mode":false}"#));
-    assert_eq!(RunConfig::from_lookup(&lookup(&[])), Ok(RunConfig::default()));
+    assert_eq!(
+        config.to_json(),
+        json(r#"{"fixed_time":42,"eval_mode":false}"#)
+    );
+    assert_eq!(
+        RunConfig::from_lookup(&lookup(&[])),
+        Ok(RunConfig::default())
+    );
     assert_eq!(
         RunConfig::default().to_json(),
         json(r#"{"fixed_time":null,"eval_mode":false}"#)

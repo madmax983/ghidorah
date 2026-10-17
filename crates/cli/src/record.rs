@@ -20,10 +20,12 @@ use std::fs::OpenOptions;
 use std::io::{self, Write};
 use std::path::Path;
 
-use ghidorah_json::Value;
+use ghidorah_base::FixedClock;
+use ghidorah_json::{Limits, Value};
 use ghidorah_tools::ContentMode;
 
 use crate::backend::{Backend, OpenError, Options};
+use crate::mcp::server::Server;
 
 /// One line of a call record.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -46,7 +48,14 @@ impl Entry {
     /// Gives the JSON form `{ seq, request, response, chars, copies, ms }`.
     #[must_use]
     pub fn to_json(&self) -> Value {
-        Value::Null
+        Value::object([
+            ("seq", Value::from(self.seq)),
+            ("request", self.request.clone()),
+            ("response", self.response.clone()),
+            ("chars", Value::from(self.chars)),
+            ("copies", Value::from(self.copies)),
+            ("ms", Value::from(self.ms)),
+        ])
     }
 
     /// Reads an entry from its JSON form.
@@ -55,8 +64,26 @@ impl Entry {
     ///
     /// Returns a message when a member is missing or has the wrong type.
     pub fn from_json(value: &Value) -> Result<Self, String> {
-        let _ = value;
-        Err(String::new())
+        let number = |key: &str| {
+            value
+                .get(key)
+                .and_then(Value::as_u64)
+                .ok_or_else(|| format!("the member {key} is not a number"))
+        };
+        let member = |key: &str| {
+            value
+                .get(key)
+                .cloned()
+                .ok_or_else(|| format!("the member {key} is missing"))
+        };
+        Ok(Self {
+            seq: number("seq")?,
+            request: member("request")?,
+            response: member("response")?,
+            chars: number("chars")?,
+            copies: number("copies")?,
+            ms: number("ms")?,
+        })
     }
 }
 
@@ -71,7 +98,11 @@ pub struct RecordError {
 
 impl fmt::Display for RecordError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Line {} of the record is not valid: {}", self.line, self.message)
+        write!(
+            f,
+            "Line {} of the record is not valid: {}",
+            self.line, self.message
+        )
     }
 }
 
@@ -109,7 +140,28 @@ impl Recorder {
     ///
     /// After the first write error, the recorder keeps the error and writes no more lines.
     pub fn record(&mut self, request: &Value, response: &Value, copies: u64, ms: u64) {
-        let _ = (request, response, copies, ms, &mut self.out, &mut self.seq);
+        if self.error.is_some() {
+            return;
+        }
+        self.seq = self.seq.saturating_add(1);
+        let chars = ghidorah_json::write(response).chars().count();
+        let entry = Entry {
+            seq: self.seq,
+            request: request.clone(),
+            response: response.clone(),
+            chars: u64::try_from(chars).unwrap_or(u64::MAX),
+            copies,
+            ms,
+        };
+        let mut line = ghidorah_json::write(&entry.to_json());
+        line.push('\n');
+        if let Err(error) = self
+            .out
+            .write_all(line.as_bytes())
+            .and_then(|()| self.out.flush())
+        {
+            self.error = Some(error);
+        }
     }
 
     /// Takes the first write error, if any.
@@ -124,8 +176,19 @@ impl Recorder {
 ///
 /// Returns [`RecordError`] for a line that is not an entry.
 pub fn parse(text: &str) -> Result<Vec<Entry>, RecordError> {
-    let _ = text;
-    Ok(Vec::new())
+    let mut entries = Vec::new();
+    for (index, line) in text.lines().enumerate() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let at = |message: String| RecordError {
+            line: index.saturating_add(1),
+            message,
+        };
+        let value = ghidorah_json::parse(line, &Limits::DEFAULT).map_err(|e| at(e.to_string()))?;
+        entries.push(Entry::from_json(&value).map_err(at)?);
+    }
+    Ok(entries)
 }
 
 /// One reply of a replay that differs from the record.
@@ -151,6 +214,23 @@ pub fn replay<B: Backend>(
     options: &Options,
     content: ContentMode,
 ) -> Result<Vec<Diff>, OpenError> {
-    let _ = (entries, options, content);
-    Err(OpenError::new("The replay does not run."))
+    let backend = B::open(options)?;
+    let mut server = Server::new(backend, content, Box::new(FixedClock::new(0)));
+    let mut diffs = Vec::new();
+    for entry in entries {
+        let line = ghidorah_json::write(&entry.request);
+        let actual = server
+            .handle_line(line.as_bytes())
+            .into_iter()
+            .filter_map(|text| ghidorah_json::parse(&text, &Limits::DEFAULT).ok())
+            .find(|message| message.get("id").is_some());
+        if actual.as_ref() != Some(&entry.response) {
+            diffs.push(Diff {
+                seq: entry.seq,
+                expected: entry.response.clone(),
+                actual,
+            });
+        }
+    }
+    Ok(diffs)
 }

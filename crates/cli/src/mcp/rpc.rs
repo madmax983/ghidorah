@@ -14,7 +14,7 @@
 
 use std::fmt;
 
-use ghidorah_json::{Limits, Number, Value};
+use ghidorah_json::{Limits, Number, Object, Value};
 
 /// The JSON-RPC version.
 pub const JSONRPC: &str = "2.0";
@@ -112,23 +112,50 @@ pub enum Message {
 /// `id` is `None` when the request has no valid ID. The reply then has `id: null`.
 #[must_use]
 pub fn error(id: Option<&RequestId>, code: i64, message: &str, data: Option<Value>) -> Value {
-    let _ = (id, code, message, data);
-    Value::Null
+    let mut body = Object::new();
+    body.push("code", Value::from(code));
+    body.push("message", Value::from(message));
+    if let Some(data) = data {
+        body.push("data", data);
+    }
+    Value::object([
+        ("jsonrpc", Value::from(JSONRPC)),
+        ("id", id.map_or(Value::Null, RequestId::to_json)),
+        ("error", Value::Object(body)),
+    ])
 }
 
 /// Gives the result reply `{ jsonrpc, id, result }`.
 #[must_use]
 pub fn result(id: &RequestId, result: Value) -> Value {
-    let _ = (id, result);
-    Value::Null
+    Value::object([
+        ("jsonrpc", Value::from(JSONRPC)),
+        ("id", id.to_json()),
+        ("result", result),
+    ])
 }
 
 /// Gives the notification `{ jsonrpc, method, params }`.
 #[must_use]
 pub fn notification(method: &str, params: Value) -> Value {
-    let _ = (method, params);
-    Value::Null
+    Value::object([
+        ("jsonrpc", Value::from(JSONRPC)),
+        ("method", Value::from(method)),
+        ("params", params),
+    ])
 }
+
+/// The message of a line that is not JSON.
+const NOT_JSON: &str = "The line is not valid JSON. Each line must hold one JSON-RPC message.";
+
+/// The message of a batch array.
+const BATCH: &str = "The line holds a batch array. No supported protocol version allows batches. Send one message on each line.";
+
+/// The message of a message that is not a valid request.
+const NOT_REQUEST: &str = "The message is not a valid JSON-RPC 2.0 request. Send an object with jsonrpc \"2.0\", a string method and a string or integer id.";
+
+/// The message of params that are not an object.
+const PARAMS_NOT_OBJECT: &str = "The params member is not an object. Send the params as an object.";
 
 /// Classifies one input line.
 ///
@@ -136,6 +163,50 @@ pub fn notification(method: &str, params: Value) -> Value {
 ///
 /// Returns the error reply of a protocol fault (see the module table).
 pub fn classify(line: &[u8]) -> Result<Message, Value> {
-    let _ = line;
-    Err(Value::Null)
+    let value = ghidorah_json::parse_bytes(line, &LIMITS)
+        .map_err(|_| error(None, PARSE_ERROR, NOT_JSON, None))?;
+    let object = match &value {
+        Value::Object(object) => object,
+        Value::Array(_) => return Err(error(None, INVALID_REQUEST, BATCH, None)),
+        _ => return Err(error(None, INVALID_REQUEST, NOT_REQUEST, None)),
+    };
+    let id = match object.get("id") {
+        None => None,
+        Some(raw) => Some(
+            RequestId::of(raw).ok_or_else(|| error(None, INVALID_REQUEST, NOT_REQUEST, None))?,
+        ),
+    };
+    if object.get("jsonrpc").and_then(Value::as_str) != Some(JSONRPC) {
+        return Err(error(id.as_ref(), INVALID_REQUEST, NOT_REQUEST, None));
+    }
+    let Some(method) = object.get("method") else {
+        let reply = object.contains_key("result") || object.contains_key("error");
+        return match (reply, id) {
+            (true, Some(_)) => Ok(Message::Reply),
+            (_, id) => Err(error(id.as_ref(), INVALID_REQUEST, NOT_REQUEST, None)),
+        };
+    };
+    let Some(method) = method.as_str().map(str::to_owned) else {
+        return Err(error(id.as_ref(), INVALID_REQUEST, NOT_REQUEST, None));
+    };
+    let params = object.get("params");
+    let Some(id) = id else {
+        // A notification never gets a reply, so params that are not an object drop silently.
+        let params = params.filter(|p| p.as_object().is_some()).cloned();
+        return Ok(Message::Notification { method, params });
+    };
+    let params = match params {
+        None => None,
+        Some(Value::Object(params)) => Some(Value::Object(params.clone())),
+        Some(Value::Array(_)) => {
+            return Err(error(Some(&id), INVALID_PARAMS, PARAMS_NOT_OBJECT, None));
+        }
+        Some(_) => return Err(error(Some(&id), INVALID_REQUEST, NOT_REQUEST, None)),
+    };
+    Ok(Message::Request(Request {
+        id,
+        method,
+        params,
+        message: value,
+    }))
 }

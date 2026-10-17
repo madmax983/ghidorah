@@ -9,7 +9,13 @@ use crate::common::{json, run};
 #[test]
 fn ac_185_cli_select() {
     let output = run::<TestHost>(
-        &["call", "item_list", r#"{"count":3}"#, "--select", "/data/items/*/id"],
+        &[
+            "call",
+            "item_list",
+            r#"{"count":3}"#,
+            "--select",
+            "/data/items/*/id",
+        ],
         "",
     );
     assert_eq!(output.code, 0, "{}", output.stderr);
@@ -20,10 +26,19 @@ fn ac_185_cli_select() {
         "",
     );
     assert_eq!(output.lines().len(), 1, "an object prints on one line");
-    assert_eq!(output.lines()[0], r#"{"returned":2,"total":2,"truncated":false}"#);
+    assert_eq!(
+        output.lines()[0],
+        r#"{"returned":2,"total":2,"truncated":false}"#
+    );
 
     let failed = run::<TestHost>(
-        &["call", "echo_text", r#"{"text":1}"#, "--select", "/error/code"],
+        &[
+            "call",
+            "echo_text",
+            r#"{"text":1}"#,
+            "--select",
+            "/error/code",
+        ],
         "",
     );
     assert_eq!(failed.code, 1);

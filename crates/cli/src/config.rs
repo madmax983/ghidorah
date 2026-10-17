@@ -39,8 +39,26 @@ impl RunConfig {
     ///
     /// Returns [`EnvError`] when a variable has a value that does not parse.
     pub fn from_lookup(lookup: &dyn Fn(&str) -> Option<String>) -> Result<Self, EnvError> {
-        let _ = lookup;
-        Ok(Self::default())
+        let fixed_time = match lookup(FIXED_TIME_VAR) {
+            None => None,
+            Some(text) => Some(
+                text.parse::<u64>()
+                    .ok()
+                    .filter(|_| text.bytes().all(|b| b.is_ascii_digit()))
+                    .ok_or_else(|| {
+                        EnvError::new(FIXED_TIME_VAR, &text, "a decimal number of milliseconds")
+                    })?,
+            ),
+        };
+        let eval_mode = match lookup(EVAL_VAR).as_deref() {
+            None | Some("0") => false,
+            Some("1") => true,
+            Some(text) => return Err(EnvError::new(EVAL_VAR, text, "1 or 0")),
+        };
+        Ok(Self {
+            fixed_time,
+            eval_mode,
+        })
     }
 
     /// Gives the clock of the run: a [`FixedClock`] with a fixed time, else a [`SystemClock`].
@@ -55,7 +73,10 @@ impl RunConfig {
     /// Gives the JSON form `{ fixed_time, eval_mode }`. A missing time is `null`.
     #[must_use]
     pub fn to_json(&self) -> Value {
-        Value::Null
+        Value::object([
+            ("fixed_time", Value::from(self.fixed_time)),
+            ("eval_mode", Value::Bool(self.eval_mode)),
+        ])
     }
 }
 
@@ -68,6 +89,18 @@ pub struct EnvError {
     pub value: String,
     /// The values that the variable accepts.
     pub expected: &'static str,
+}
+
+impl EnvError {
+    /// Makes an error of the variable `var` with the bad value `value`.
+    #[must_use]
+    pub fn new(var: &'static str, value: &str, expected: &'static str) -> Self {
+        Self {
+            var,
+            value: value.chars().take(64).collect(),
+            expected,
+        }
+    }
 }
 
 impl fmt::Display for EnvError {
@@ -168,6 +201,10 @@ impl Env {
     /// `$HOME/.local/share/ghidorah/projects`, else `None`.
     #[must_use]
     pub fn projects_root(&self) -> Option<PathBuf> {
-        None
+        let data = self
+            .xdg_data_home
+            .clone()
+            .or_else(|| self.home.as_ref().map(|h| h.join(".local/share")))?;
+        Some(data.join("ghidorah").join("projects"))
     }
 }

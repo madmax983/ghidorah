@@ -21,7 +21,11 @@ pub fn server() -> Server<TestHost> {
         eval_mode: false,
     };
     let host = TestHost::open(&options).expect("the test host opens");
-    Server::new(host, ContentMode::Both, Box::new(FixedClock::new(FIXED_TIME)))
+    Server::new(
+        host,
+        ContentMode::Both,
+        Box::new(FixedClock::new(FIXED_TIME)),
+    )
 }
 
 /// Runs the transcript `name` on a new server and checks it.
@@ -51,7 +55,8 @@ fn ac_169a_legacy_handshakes() {
         let steps = check(name);
         let init = &replies(&steps, 0)[0];
         assert_eq!(
-            init.pointer("/result/protocolVersion").and_then(Value::as_str),
+            init.pointer("/result/protocolVersion")
+                .and_then(Value::as_str),
             Some(version),
             "{name}"
         );
@@ -64,7 +69,10 @@ fn ac_169a_legacy_handshakes() {
         assert!(init.pointer("/result/instructions").is_some(), "{name}");
     }
     let steps = check("legacy_2025_11_25");
-    assert!(steps[1].1.is_empty(), "notifications/initialized gets no reply");
+    assert!(
+        steps[1].1.is_empty(),
+        "notifications/initialized gets no reply"
+    );
     assert_eq!(replies(&steps, 2)[0].get("result"), Some(&json("{}")));
     let list = &replies(&steps, 3)[0];
     let names: Vec<&str> = list
@@ -77,7 +85,8 @@ fn ac_169a_legacy_handshakes() {
     assert_eq!(names, ["item_list", "echo_text", "wait_cancel"]);
     let call = &replies(&steps, 4)[0];
     assert_eq!(
-        call.pointer("/result/structuredContent/data/text").and_then(Value::as_str),
+        call.pointer("/result/structuredContent/data/text")
+            .and_then(Value::as_str),
         Some("hello")
     );
     assert_eq!(call.pointer("/result/isError"), Some(&Value::Bool(false)));
@@ -101,7 +110,8 @@ fn ac_169b_modern_era() {
     }
     let call = &replies(&steps, 2)[0];
     assert_eq!(
-        call.pointer("/result/structuredContent/session").and_then(Value::as_str),
+        call.pointer("/result/structuredContent/session")
+            .and_then(Value::as_str),
         Some("agent-7")
     );
     assert_eq!(code(&replies(&steps, 3)[0]), Some(rpc::METHOD_NOT_FOUND));
@@ -158,7 +168,11 @@ fn ac_169d_framing() {
     for (index, error, null_id) in expect {
         let reply = &replies(&steps, index)[0];
         assert_eq!(code(reply), Some(error), "line {index}");
-        assert_eq!(reply.get("id") == Some(&Value::Null), null_id, "line {index}");
+        assert_eq!(
+            reply.get("id") == Some(&Value::Null),
+            null_id,
+            "line {index}"
+        );
     }
     assert_eq!(replies(&steps, 12)[0].get("result"), Some(&json("{}")));
 }

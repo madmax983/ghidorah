@@ -31,7 +31,9 @@ pub fn json(text: &str) -> Value {
 
 /// Gives a new empty directory for one test under the cargo temp directory.
 pub fn tmp(name: &str) -> PathBuf {
-    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("cli").join(name);
+    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+        .join("cli")
+        .join(name);
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("the temp directory exists");
     dir
@@ -61,7 +63,10 @@ impl SharedBuf {
 
 impl Write for SharedBuf {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.0.lock().expect("the buffer lock").extend_from_slice(buf);
+        self.0
+            .lock()
+            .expect("the buffer lock")
+            .extend_from_slice(buf);
         Ok(buf.len())
     }
 

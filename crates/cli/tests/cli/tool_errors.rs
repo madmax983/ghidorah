@@ -32,7 +32,11 @@ fn ac_169f_tool_errors() {
     );
     for (index, error) in [(3, "INVALID_ARGUMENT"), (4, "UNKNOWN_ARGUMENT")] {
         let reply = &replies(&steps, index)[0];
-        assert_eq!(reply.pointer("/result/isError"), Some(&Value::Bool(true)), "{index}");
+        assert_eq!(
+            reply.pointer("/result/isError"),
+            Some(&Value::Bool(true)),
+            "{index}"
+        );
         assert_eq!(
             reply
                 .pointer("/result/structuredContent/error/code")
@@ -48,6 +52,10 @@ fn ac_169f_tool_errors() {
         "next[0] removes the unknown argument"
     );
     for index in [5, 6] {
-        assert_eq!(code(&replies(&steps, index)[0]), Some(rpc::INVALID_PARAMS), "{index}");
+        assert_eq!(
+            code(&replies(&steps, index)[0]),
+            Some(rpc::INVALID_PARAMS),
+            "{index}"
+        );
     }
 }

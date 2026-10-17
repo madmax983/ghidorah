@@ -20,6 +20,11 @@
 
 use ghidorah_json::Value;
 
+use crate::mcp::rpc;
+
+/// The name of the server in `serverInfo`.
+pub const SERVER_NAME: &str = "ghidorah";
+
 /// The modern protocol version.
 pub const MODERN: &str = "2026-07-28";
 
@@ -96,8 +101,48 @@ impl EraState {
 /// Gives the version of the `initialize` reply for the requested version.
 #[must_use]
 pub fn negotiate(requested: Option<&str>) -> &'static str {
-    let _ = requested;
-    MODERN
+    LEGACY
+        .into_iter()
+        .find(|v| Some(*v) == requested)
+        .unwrap_or(LEGACY[0])
+}
+
+/// The message of rule 3.
+const UNKNOWN_METHOD: &str = "The method is not available. The server serves initialize, server/discover, ping, tools/list and tools/call.";
+
+/// The message of a modern `ping` (rule 7).
+const MODERN_PING: &str = "The method ping is not available in protocol version 2026-07-28. Send server/discover to check the server.";
+
+/// The message of a missing key (rules 4 and 6).
+const MISSING_KEYS: &str = "The request has no protocol keys in _meta. Send initialize first, or add the keys of data.missing to params._meta.";
+
+/// The message of rule 5.
+const BAD_VERSION: &str =
+    "The protocol version of the request is not supported. Use a version of data.supported.";
+
+fn method_of(name: &str) -> Option<Method> {
+    match name {
+        "ping" => Some(Method::Ping),
+        "tools/list" => Some(Method::ToolsList),
+        "tools/call" => Some(Method::ToolsCall),
+        _ => None,
+    }
+}
+
+fn strings(values: &[&str]) -> Value {
+    Value::Array(values.iter().map(|v| Value::from(*v)).collect())
+}
+
+fn missing(meta: Option<&Value>) -> Rejection {
+    let absent: Vec<&str> = REQUIRED_KEYS
+        .into_iter()
+        .filter(|key| meta.and_then(|m| m.get(key)).is_none())
+        .collect();
+    Rejection {
+        code: rpc::INVALID_PARAMS,
+        message: MISSING_KEYS.to_owned(),
+        data: Some(Value::object([("missing", strings(&absent))])),
+    }
 }
 
 /// Applies the era rules to one request.
@@ -110,45 +155,106 @@ pub fn decide(
     method: &str,
     params: Option<&Value>,
 ) -> Result<(Era, Method), Rejection> {
-    let _ = (state, method, params);
-    Err(Rejection {
-        code: 0,
-        message: String::new(),
+    match method {
+        "initialize" => {
+            let requested = params
+                .and_then(|p| p.get("protocolVersion"))
+                .and_then(Value::as_str);
+            let version = negotiate(requested);
+            state.legacy = Some(version);
+            return Ok((Era::Legacy, Method::Initialize(version)));
+        }
+        "server/discover" => return Ok((Era::Modern, Method::Discover)),
+        _ => {}
+    }
+    let reject = |code, message: &str| Rejection {
+        code,
+        message: message.to_owned(),
         data: None,
-    })
+    };
+    let call = method_of(method).ok_or_else(|| reject(rpc::METHOD_NOT_FOUND, UNKNOWN_METHOD))?;
+    let meta = params.and_then(|p| p.get("_meta"));
+    let era = match meta.and_then(|m| m.get(VERSION_KEY)) {
+        Some(Value::String(version)) if version == MODERN => {
+            if REQUIRED_KEYS
+                .iter()
+                .any(|key| meta.and_then(|m| m.get(key)).is_none())
+            {
+                return Err(missing(meta));
+            }
+            Era::Modern
+        }
+        Some(other) => {
+            return Err(Rejection {
+                code: rpc::UNSUPPORTED_VERSION,
+                message: BAD_VERSION.to_owned(),
+                data: Some(Value::object([
+                    ("supported", strings(&SUPPORTED)),
+                    ("requested", other.clone()),
+                ])),
+            });
+        }
+        None if state.legacy.is_some() => Era::Legacy,
+        None => return Err(missing(meta)),
+    };
+    if era == Era::Modern && call == Method::Ping {
+        return Err(reject(rpc::METHOD_NOT_FOUND, MODERN_PING));
+    }
+    Ok((era, call))
 }
 
 /// Gives the server capabilities: tools only, `{ tools: { listChanged: false } }`.
 #[must_use]
 pub fn capabilities() -> Value {
-    Value::Null
+    Value::object([(
+        "tools",
+        Value::object([("listChanged", Value::Bool(false))]),
+    )])
 }
 
 /// Gives the server info `{ name: "ghidorah", version }`.
 #[must_use]
 pub fn server_info(version: &str) -> Value {
-    let _ = version;
-    Value::Null
+    Value::object([
+        ("name", Value::from(SERVER_NAME)),
+        ("version", Value::from(version)),
+    ])
 }
 
 /// Gives the `initialize` result `{ protocolVersion, capabilities, serverInfo, instructions }`.
 #[must_use]
 pub fn initialize_result(version: &str, server_info: &Value, instructions: &str) -> Value {
-    let _ = (version, server_info, instructions);
-    Value::Null
+    Value::object([
+        ("protocolVersion", Value::from(version)),
+        ("capabilities", capabilities()),
+        ("serverInfo", server_info.clone()),
+        ("instructions", Value::from(instructions)),
+    ])
 }
 
 /// Gives the `server/discover` result
 /// `{ supportedVersions, capabilities, serverInfo, instructions, resultType }`.
 #[must_use]
 pub fn discover_result(server_info: &Value, instructions: &str) -> Value {
-    let _ = (server_info, instructions);
-    Value::Null
+    finish(
+        Era::Modern,
+        Value::object([
+            ("supportedVersions", strings(&SUPPORTED)),
+            ("capabilities", capabilities()),
+            ("serverInfo", server_info.clone()),
+            ("instructions", Value::from(instructions)),
+        ]),
+    )
 }
 
 /// Gives `result` in `era`: a modern result gains `resultType: "complete"`.
 #[must_use]
 pub fn finish(era: Era, result: Value) -> Value {
-    let _ = era;
-    result
+    match (era, result) {
+        (Era::Modern, Value::Object(mut object)) => {
+            let _ = object.insert("resultType", Value::from("complete"));
+            Value::Object(object)
+        }
+        (_, result) => result,
+    }
 }

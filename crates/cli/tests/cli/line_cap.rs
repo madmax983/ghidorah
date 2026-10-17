@@ -45,9 +45,17 @@ fn ac_194_line_cap() {
         Some(rpc::INVALID_REQUEST)
     );
     assert_eq!(replies[1].get("id"), Some(&Value::Null));
-    assert_eq!(replies[2].get("id"), Some(&json("3")), "a line at the cap is a request");
+    assert_eq!(
+        replies[2].get("id"),
+        Some(&json("3")),
+        "a line at the cap is a request"
+    );
     assert_eq!(replies[2].get("result"), Some(&json("{}")));
-    assert_eq!(replies[3].get("id"), Some(&json("4")), "the server answers the next request");
+    assert_eq!(
+        replies[3].get("id"),
+        Some(&json("4")),
+        "the server answers the next request"
+    );
 }
 
 #[test]

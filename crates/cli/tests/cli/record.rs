@@ -23,14 +23,17 @@ const SESSION: &[&str] = &[
 fn ac_201_record_replay() {
     let dir = tmp("record");
     let file = dir.join("calls.jsonl");
-    let input: String = SESSION.iter().map(|l| format!("{l}\n")).collect();
+    let input = format!("{}\n", SESSION.join("\n"));
     let (streams, out, _err) = streams(input.as_bytes());
     let options = Options::new(&env("record_run"), "mcp-1");
     let serve_options = ServeOptions {
         content: ContentMode::Both,
         record: Some(file.clone()),
     };
-    assert_eq!(serve::<TestHost>(options.clone(), &serve_options, streams), Exit::Ok);
+    assert_eq!(
+        serve::<TestHost>(options.clone(), &serve_options, streams),
+        Exit::Ok
+    );
     let text = std::fs::read_to_string(&file).expect("the record exists");
     let entries = record::parse(&text).expect("the record parses");
     assert_eq!(entries.len(), 5, "one line per answered request: {text}");
@@ -44,25 +47,31 @@ fn ac_201_record_replay() {
     for (entry, reply) in entries.iter().zip(&answered) {
         assert_eq!(&entry.response, *reply, "the record holds the reply");
         assert_eq!(entry.ms, 0, "a fixed time gives 0 ms");
-        let chars = u64::try_from(ghidorah_json::write(&entry.response).chars().count())
-            .expect("a count");
+        let chars =
+            u64::try_from(ghidorah_json::write(&entry.response).chars().count()).expect("a count");
         assert_eq!(entry.chars, chars);
     }
-    assert_eq!(entries[2].copies, 2, "a tool result in mode both has 2 copies");
+    assert_eq!(
+        entries[2].copies, 2,
+        "a tool result in mode both has 2 copies"
+    );
     assert_eq!(entries[0].copies, 0, "a handshake has no envelope");
     for entry in &entries {
         assert_eq!(Entry::from_json(&entry.to_json()).as_ref(), Ok(entry));
     }
 
-    let diffs = record::replay::<TestHost>(&entries, &options, ContentMode::Both)
-        .expect("the replay runs");
-    assert!(diffs.is_empty(), "the replay gives equal replies: {diffs:?}");
+    let diffs =
+        record::replay::<TestHost>(&entries, &options, ContentMode::Both).expect("the replay runs");
+    assert!(
+        diffs.is_empty(),
+        "the replay gives equal replies: {diffs:?}"
+    );
 
-    let mut changed = entries.clone();
+    let mut changed = entries;
     changed[2].response = json(r#"{"jsonrpc":"2.0","id":3,"result":{}}"#);
     changed[3].ms = 999;
-    let diffs = record::replay::<TestHost>(&changed, &options, ContentMode::Both)
-        .expect("the replay runs");
+    let diffs =
+        record::replay::<TestHost>(&changed, &options, ContentMode::Both).expect("the replay runs");
     let seqs: Vec<u64> = diffs.iter().map(|d| d.seq).collect();
     assert_eq!(seqs, [3], "ms does not count");
 }
@@ -93,6 +102,9 @@ fn record_appends_and_rejects_bad_lines() {
         "",
         &env("record_cli_bad"),
     );
-    assert_eq!(output.code, 2, "a record file that does not open is a usage error");
+    assert_eq!(
+        output.code, 2,
+        "a record file that does not open is a usage error"
+    );
     assert!(output.stdout.is_empty());
 }

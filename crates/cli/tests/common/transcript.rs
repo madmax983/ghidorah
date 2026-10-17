@@ -63,7 +63,9 @@ pub fn header() -> Header {
 
 /// Gives the path of the transcript `name`.
 pub fn path(name: &str) -> PathBuf {
-    root().join("tests/golden/mcp").join(format!("{name}.jsonl"))
+    root()
+        .join("tests/golden/mcp")
+        .join(format!("{name}.jsonl"))
 }
 
 /// Reads the client lines of the transcript `name`.

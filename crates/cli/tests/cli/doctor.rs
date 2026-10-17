@@ -28,7 +28,11 @@ fn doctor_reports_checks() {
     let report = json(&output.stdout);
     assert_eq!(report.get("ok"), Some(&Value::Bool(true)));
     for name in ["registry_lint", "examples", "project_dir", "era"] {
-        assert_eq!(check(&report, name).get("ok"), Some(&Value::Bool(true)), "{name}");
+        assert_eq!(
+            check(&report, name).get("ok"),
+            Some(&Value::Bool(true)),
+            "{name}"
+        );
     }
     let sizes = check(&report, "examples")
         .get("results")
@@ -37,7 +41,9 @@ fn doctor_reports_checks() {
     assert_eq!(sizes.len(), 4, "one row per example");
     for row in sizes {
         for mode in ["plain", "structured", "text", "both"] {
-            let chars = row.pointer(&format!("/chars/{mode}")).and_then(Value::as_u64);
+            let chars = row
+                .pointer(&format!("/chars/{mode}"))
+                .and_then(Value::as_u64);
             assert!(chars.is_some_and(|c| c > 0 && c <= 60_000), "{row}");
         }
     }

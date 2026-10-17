@@ -19,6 +19,8 @@ pub mod progress;
 pub mod rpc;
 pub mod server;
 
+mod threads;
+
 use std::path::PathBuf;
 
 use ghidorah_tools::ContentMode;
@@ -49,7 +51,7 @@ impl Default for ServeOptions {
 ///
 /// Gives [`Exit::Ok`] at the end of stdin and on a broken pipe. Gives [`Exit::Usage`] when
 /// the backend or the record file does not open, or when stdout fails.
+#[must_use]
 pub fn serve<B: Backend>(options: Options, serve: &ServeOptions, streams: Streams) -> Exit {
-    let _ = (options, serve, streams);
-    Exit::Usage
+    threads::serve::<B>(options, serve, streams)
 }

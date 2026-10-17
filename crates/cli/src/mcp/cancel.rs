@@ -34,8 +34,11 @@ impl CancelMap {
     /// Sets the flag of request `id`. Gives `false` when no request has that ID.
     #[must_use]
     pub fn cancel(&self, id: &RequestId) -> bool {
-        let _ = (id, Ordering::Relaxed);
-        false
+        let flags = self.flags.lock().unwrap_or_else(PoisonError::into_inner);
+        flags.get(id).is_some_and(|flag| {
+            flag.store(true, Ordering::Relaxed);
+            true
+        })
     }
 
     /// Removes the flag of request `id` after its reply.

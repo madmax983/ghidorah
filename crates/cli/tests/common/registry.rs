@@ -6,6 +6,11 @@
 //! | `echo_text` | A tool with no binary and one required text | `full`, `mini` |
 //! | `wait_cancel` | A tool that waits for the cancel flag and sends progress | `full` |
 
+#![allow(
+    clippy::unnecessary_wraps,
+    reason = "test handlers have the handler type, which returns a Result"
+)]
+
 use std::time::Duration;
 
 use ghidorah_base::{ErrorCode, IdKind};
@@ -111,7 +116,9 @@ impl Host for TestHost {
 impl Backend for TestHost {
     fn open(options: &Options) -> Result<Self, OpenError> {
         if options.open.iter().any(|id| id != BINARY) {
-            return Err(OpenError::new("The project does not exist. Remove the --open flag."));
+            return Err(OpenError::new(
+                "The project does not exist. Remove the --open flag.",
+            ));
         }
         Ok(Self {
             options: options.clone(),
@@ -173,7 +180,10 @@ pub const ITEM_LIST: ToolSpec<TestHost> = ToolSpec {
 };
 
 fn item_list(_host: &mut TestHost, args: &Args, _ctx: &mut Ctx) -> Result<Payload, ToolError> {
-    let count = args.int("count").and_then(|c| u64::try_from(c).ok()).unwrap_or(5);
+    let count = args
+        .int("count")
+        .and_then(|c| u64::try_from(c).ok())
+        .unwrap_or(5);
     let items = (0..count)
         .map(|i| {
             let addr = BASE + i * 0x10;
@@ -256,7 +266,10 @@ pub const WAIT_CANCEL: ToolSpec<TestHost> = ToolSpec {
 };
 
 fn wait_cancel(_host: &mut TestHost, args: &Args, ctx: &mut Ctx) -> Result<Payload, ToolError> {
-    let ms = args.int("ms").and_then(|v| u64::try_from(v).ok()).unwrap_or(0);
+    let ms = args
+        .int("ms")
+        .and_then(|v| u64::try_from(v).ok())
+        .unwrap_or(0);
     let report = |progress| Progress {
         progress,
         total: Some(3),

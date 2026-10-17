@@ -39,7 +39,7 @@ fn messages(stdout: &str) -> Vec<Value> {
 
 #[test]
 fn ac_170_stdout_purity() {
-    let input: String = LINES.iter().map(|l| format!("{l}\n")).collect();
+    let input = format!("{}\n", LINES.join("\n"));
     let output = run_binary(&["mcp"], &input);
     assert_eq!(output.code, 0, "{}", output.stderr);
     let replies = messages(&output.stdout);

@@ -11,11 +11,13 @@
 //! A flag value follows the flag as the next argument or after `=`.
 //! An unknown command or flag gives a [`UsageError`] with did-you-mean candidates.
 
+mod flags;
+
 use std::collections::BTreeSet;
 use std::fmt;
 use std::path::PathBuf;
 
-use ghidorah_json::pointer::Pointer;
+use ghidorah_json::pointer::{self, Pointer};
 use ghidorah_tools::{ContentMode, Profile};
 
 use crate::backend::Source;
@@ -185,6 +187,72 @@ impl fmt::Display for UsageError {
 
 impl std::error::Error for UsageError {}
 
+/// The top-level flags.
+const TOP_FLAGS: [&str; 4] = ["--version", "-V", "--help", "-h"];
+
+fn mcp(args: &[String]) -> Result<Command, UsageError> {
+    let scan = flags::scan("mcp", args, flags::MCP)?;
+    scan.no_positional()?;
+    let content = scan
+        .one(flags::CONTENT)
+        .map(|text| {
+            ContentMode::parse(text)
+                .ok_or_else(|| flags::bad_value(flags::CONTENT, text, "both, structured or text"))
+        })
+        .transpose()?
+        .unwrap_or(ContentMode::Both);
+    Ok(Command::Mcp(McpArgs {
+        session: flags::session(&scan)?,
+        record: scan.one(flags::RECORD).map(PathBuf::from),
+        content,
+    }))
+}
+
+fn call(args: &[String]) -> Result<Command, UsageError> {
+    let scan = flags::scan("call", args, flags::CALL)?;
+    let mut positional = scan.positional.iter();
+    let tool = positional
+        .next()
+        .cloned()
+        .ok_or_else(|| UsageError::new("The command call needs a tool name."))?;
+    let input = match positional.next().map(String::as_str) {
+        None => ArgsInput::Empty,
+        Some("-") => ArgsInput::Stdin,
+        Some(text) => text.strip_prefix('@').map_or_else(
+            || ArgsInput::Inline(text.to_owned()),
+            |path| ArgsInput::File(PathBuf::from(path)),
+        ),
+    };
+    if let Some(arg) = positional.next() {
+        return Err(flags::extra(arg));
+    }
+    let select = scan
+        .one(flags::SELECT)
+        .map(|text| {
+            pointer::parse(text).map_err(|_| {
+                flags::bad_value(
+                    flags::SELECT,
+                    text,
+                    "a JSON pointer such as /data/items/*/id",
+                )
+            })
+        })
+        .transpose()?;
+    let format = match scan.one(flags::FORMAT) {
+        None | Some("json") => PrintFormat::Json,
+        Some("jsonl") => PrintFormat::Jsonl,
+        Some("text") => PrintFormat::Text,
+        Some(text) => return Err(flags::bad_value(flags::FORMAT, text, "json, jsonl or text")),
+    };
+    Ok(Command::Call(CallArgs {
+        session: flags::session(&scan)?,
+        tool,
+        input,
+        select,
+        format,
+    }))
+}
+
 /// Parses a command line without the program name.
 ///
 /// # Errors
@@ -192,6 +260,45 @@ impl std::error::Error for UsageError {}
 /// Returns [`UsageError`] for an unknown command or flag, a missing or bad flag value, a
 /// missing tool name or an extra argument.
 pub fn parse(args: &[String]) -> Result<Command, UsageError> {
-    let _ = args;
-    Err(UsageError::new("The command line does not parse."))
+    let Some((first, rest)) = args.split_first() else {
+        return Err(UsageError::new("The command line has no command."));
+    };
+    let alone = |command: Command| {
+        rest.first()
+            .map_or(Ok(command), |arg| Err(flags::extra(arg)))
+    };
+    match first.as_str() {
+        "--version" | "-V" => alone(Command::Version),
+        "--help" | "-h" => alone(Command::Help),
+        "mcp" => mcp(rest),
+        "call" => call(rest),
+        "jsonl" => {
+            let scan = flags::scan("jsonl", rest, flags::JSONL)?;
+            scan.no_positional()?;
+            Ok(Command::Jsonl(flags::session(&scan)?))
+        }
+        "tools" => {
+            let scan = flags::scan("tools", rest, flags::TOOLS_COMMAND)?;
+            scan.no_positional()?;
+            Ok(Command::Tools(ToolsArgs {
+                json: scan.has(flags::JSON),
+                profile: flags::profile(&scan)?.unwrap_or(Profile::Full),
+            }))
+        }
+        "doctor" => {
+            let scan = flags::scan("doctor", rest, flags::DOCTOR)?;
+            scan.no_positional()?;
+            Ok(Command::Doctor(DoctorArgs {
+                project_root: scan.one(flags::PROJECT_ROOT).map(PathBuf::from),
+            }))
+        }
+        other if other.starts_with('-') => Err(UsageError {
+            message: format!("The flag {other} is not known."),
+            candidates: flags::closest(other, TOP_FLAGS.into_iter()),
+        }),
+        other => Err(UsageError {
+            message: format!("The command {other} is not known."),
+            candidates: flags::closest(other, COMMANDS.into_iter()),
+        }),
+    }
 }

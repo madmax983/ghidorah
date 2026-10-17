@@ -165,25 +165,38 @@ fn ac_149b_tools_json() {
     assert_eq!(Some(&json(&cli.stdout)), reply.get("result"));
     let text = run::<TestHost>(&["tools"], "");
     assert_eq!(text.lines().len(), 3, "{}", text.stdout);
-    assert!(text.lines()[0].starts_with("item_list  "), "{}", text.stdout);
+    assert!(
+        text.lines()[0].starts_with("item_list  "),
+        "{}",
+        text.stdout
+    );
 }
 
 fn check_result(tool: &str, reply: &Value, mode: ContentMode) {
     let result = reply.get("result").expect("a tool result");
-    let content = result.get("content").and_then(Value::as_array).expect("content");
+    let content = result
+        .get("content")
+        .and_then(Value::as_array)
+        .expect("content");
     let structured = result.get("structuredContent");
-    let is_error = result.get("isError").and_then(Value::as_bool).expect("isError");
-    let envelope = match mode {
-        ContentMode::Text => {
-            assert!(structured.is_none(), "{tool}: mode text has no structuredContent");
-            let text = content[0].get("text").and_then(Value::as_str).expect("a text");
-            json(text)
-        }
-        _ => {
-            let envelope = structured.cloned().expect("structuredContent");
-            assert!(envelope.as_object().is_some(), "{tool}: an object");
-            envelope
-        }
+    let is_error = result
+        .get("isError")
+        .and_then(Value::as_bool)
+        .expect("isError");
+    let envelope = if mode == ContentMode::Text {
+        assert!(
+            structured.is_none(),
+            "{tool}: mode text has no structuredContent"
+        );
+        let text = content[0]
+            .get("text")
+            .and_then(Value::as_str)
+            .expect("a text");
+        json(text)
+    } else {
+        let envelope = structured.cloned().expect("structuredContent");
+        assert!(envelope.as_object().is_some(), "{tool}: an object");
+        envelope
     };
     let blocks = usize::from(mode != ContentMode::Structured);
     assert_eq!(content.len(), blocks, "{tool} {mode:?}: text blocks");
@@ -233,7 +246,11 @@ fn list_shapes<B: Backend>(name: &str) {
     }
     let options = Options::new(&env(name), LABEL);
     for (tool, _, args) in examples::<B>() {
-        for mode in [ContentMode::Both, ContentMode::Structured, ContentMode::Text] {
+        for mode in [
+            ContentMode::Both,
+            ContentMode::Structured,
+            ContentMode::Text,
+        ] {
             check_result(tool, &mcp_call::<B>(&options, tool, &args, mode), mode);
         }
     }
@@ -244,7 +261,12 @@ fn ac_174_tools_list_shape() {
     list_shapes::<TestHost>("shape_test");
     list_shapes::<Shipped>("shape_shipped");
     let options = Options::new(&env("shape_error"), LABEL);
-    let reply = mcp_call::<TestHost>(&options, "echo_text", &json(r#"{"text":3}"#), ContentMode::Both);
+    let reply = mcp_call::<TestHost>(
+        &options,
+        "echo_text",
+        &json(r#"{"text":3}"#),
+        ContentMode::Both,
+    );
     check_result("echo_text", &reply, ContentMode::Both);
     assert_eq!(reply.pointer("/result/isError"), Some(&Value::Bool(true)));
 }
@@ -254,11 +276,18 @@ fn sizes<B: Backend>(name: &str, extra: &[(&'static str, Value)]) {
     let mut calls = examples::<B>();
     calls.extend(extra.iter().map(|(tool, args)| (*tool, "", args.clone())));
     for (tool, _, args) in calls {
-        for mode in [ContentMode::Both, ContentMode::Structured, ContentMode::Text] {
+        for mode in [
+            ContentMode::Both,
+            ContentMode::Structured,
+            ContentMode::Text,
+        ] {
             let reply = mcp_call::<B>(&options, tool, &args, mode);
             let result = reply.get("result").expect("a result");
             let chars = write(result).chars().count();
-            assert!(chars <= 60_000, "{tool} {args} {mode:?}: {chars} characters");
+            assert!(
+                chars <= 60_000,
+                "{tool} {args} {mode:?}: {chars} characters"
+            );
             let cap = args
                 .get("max_chars")
                 .and_then(Value::as_u64)
