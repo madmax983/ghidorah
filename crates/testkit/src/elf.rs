@@ -10,8 +10,13 @@
 //! also maps the ELF header and the program headers.
 
 pub mod consts;
+mod dynamic;
 mod layout;
 mod malformed;
+mod plan;
+mod plt;
+mod symtab;
+mod unwind;
 mod write;
 
 use std::collections::BTreeMap;
