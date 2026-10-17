@@ -33,7 +33,7 @@ i_string_overlong_sequence_2_bytes.json reject E_UTF8 2
 i_string_overlong_sequence_6_bytes.json reject E_UTF8 2
 i_string_overlong_sequence_6_bytes_null.json reject E_UTF8 2
 i_string_truncated-utf-8.json reject E_UTF8 2
-i_string_utf16BE_no_BOM.json reject E_SYNTAX 0
-i_string_utf16LE_no_BOM.json reject E_SYNTAX 1
+i_string_utf16BE_no_BOM.json reject E_UTF8 5
+i_string_utf16LE_no_BOM.json reject E_UTF8 4
 i_structure_500_nested_arrays.json reject E_DEPTH 128
 i_structure_UTF-8_BOM_empty_object.json reject E_SYNTAX 0

@@ -1,5 +1,6 @@
 //! The JSON value and the insertion-ordered object.
 
+use std::collections::BTreeSet;
 use std::fmt;
 
 use crate::number::Number;
@@ -58,14 +59,20 @@ impl Object {
     /// Gives the value of the last member with the name `key`.
     #[must_use]
     pub fn get(&self, key: &str) -> Option<&Value> {
-        let _ = key;
-        None
+        self.members
+            .iter()
+            .rev()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v)
     }
 
     /// Gives the value of the last member with the name `key`, for a change.
     pub fn get_mut(&mut self, key: &str) -> Option<&mut Value> {
-        let _ = key;
-        None
+        self.members
+            .iter_mut()
+            .rev()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v)
     }
 
     /// Tells if a member has the name `key`.
@@ -76,21 +83,34 @@ impl Object {
 
     /// Adds a member at the end. A repeated name gives a second member.
     pub fn push(&mut self, key: impl Into<String>, value: Value) {
-        let _ = (key.into(), value);
+        self.members.push((key.into(), value));
     }
 
     /// Sets the value of the last member with the name `key`, or adds a member at the end.
     ///
     /// Gives the old value when a member with the name exists.
     pub fn insert(&mut self, key: impl Into<String>, value: Value) -> Option<Value> {
-        let _ = (key.into(), value);
+        let key = key.into();
+        if let Some(slot) = self.get_mut(&key) {
+            return Some(std::mem::replace(slot, value));
+        }
+        self.members.push((key, value));
         None
     }
 
     /// Removes all members with the name `key` and gives the value of the last one.
     pub fn remove(&mut self, key: &str) -> Option<Value> {
-        let _ = key;
-        None
+        let mut found = None;
+        let mut kept = Vec::with_capacity(self.members.len());
+        for (k, v) in std::mem::take(&mut self.members) {
+            if k == key {
+                found = Some(v);
+            } else {
+                kept.push((k, v));
+            }
+        }
+        self.members = kept;
+        found
     }
 
     /// Gives the members in insertion order.
@@ -104,10 +124,14 @@ impl Object {
         self.members.iter().map(|(k, v)| (k.as_str(), v))
     }
 
-    /// Gives the first name that two or more members have, in insertion order.
+    /// Gives the name of the first member whose name an earlier member has.
     #[must_use]
     pub fn first_duplicate(&self) -> Option<&str> {
-        None
+        let mut seen = BTreeSet::new();
+        self.members
+            .iter()
+            .map(|(k, _)| k.as_str())
+            .find(|k| !seen.insert(*k))
     }
 
     /// Gives the members and drops the object.
@@ -170,66 +194,86 @@ impl Value {
     /// Gives the boolean of a `true` or `false` value.
     #[must_use]
     pub const fn as_bool(&self) -> Option<bool> {
-        None
+        match self {
+            Self::Bool(b) => Some(*b),
+            _ => None,
+        }
     }
 
     /// Gives the number of a number value.
     #[must_use]
     pub const fn as_number(&self) -> Option<&Number> {
-        None
+        match self {
+            Self::Number(n) => Some(n),
+            _ => None,
+        }
     }
 
     /// Gives a number value as `u64`. See [`Number::as_u64`].
     #[must_use]
     pub fn as_u64(&self) -> Option<u64> {
-        None
+        self.as_number().and_then(Number::as_u64)
     }
 
     /// Gives a number value as `i64`. See [`Number::as_i64`].
     #[must_use]
     pub fn as_i64(&self) -> Option<i64> {
-        None
+        self.as_number().and_then(Number::as_i64)
     }
 
     /// Gives a number value as `f64`. See [`Number::as_f64`].
     #[must_use]
     pub fn as_f64(&self) -> Option<f64> {
-        None
+        self.as_number().and_then(Number::as_f64)
     }
 
     /// Gives the text of a string value.
     #[must_use]
     pub fn as_str(&self) -> Option<&str> {
-        None
+        match self {
+            Self::String(s) => Some(s),
+            _ => None,
+        }
     }
 
     /// Gives the items of an array value.
     #[must_use]
     pub fn as_array(&self) -> Option<&[Self]> {
-        None
+        match self {
+            Self::Array(items) => Some(items),
+            _ => None,
+        }
     }
 
     /// Gives the items of an array value, for a change.
-    pub fn as_array_mut(&mut self) -> Option<&mut Vec<Self>> {
-        None
+    pub const fn as_array_mut(&mut self) -> Option<&mut Vec<Self>> {
+        match self {
+            Self::Array(items) => Some(items),
+            _ => None,
+        }
     }
 
     /// Gives the object of an object value.
     #[must_use]
     pub const fn as_object(&self) -> Option<&Object> {
-        None
+        match self {
+            Self::Object(o) => Some(o),
+            _ => None,
+        }
     }
 
     /// Gives the object of an object value, for a change.
-    pub fn as_object_mut(&mut self) -> Option<&mut Object> {
-        None
+    pub const fn as_object_mut(&mut self) -> Option<&mut Object> {
+        match self {
+            Self::Object(o) => Some(o),
+            _ => None,
+        }
     }
 
     /// Gives the value of the last member named `key` of an object value.
     #[must_use]
     pub fn get(&self, key: &str) -> Option<&Self> {
-        let _ = key;
-        None
+        self.as_object().and_then(|o| o.get(key))
     }
 
     /// Gives the value at an RFC 6901 pointer, or `None` when the text or the path is not valid.
@@ -237,8 +281,8 @@ impl Value {
     /// See [`crate::pointer::get`]. A `*` segment here is a plain name, not a map.
     #[must_use]
     pub fn pointer(&self, text: &str) -> Option<&Self> {
-        let _ = text;
-        None
+        let pointer = crate::pointer::parse(text).ok()?;
+        crate::pointer::get(self, &pointer)
     }
 }
 

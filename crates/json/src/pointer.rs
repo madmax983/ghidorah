@@ -16,6 +16,7 @@ use std::fmt;
 use std::str::FromStr;
 
 use crate::value::Value;
+use crate::write::push_segment;
 
 /// One segment of a pointer.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -67,7 +68,7 @@ impl Pointer {
     /// Tells if the pointer has a [`Segment::Star`], so [`select`] can give more than one value.
     #[must_use]
     pub fn has_star(&self) -> bool {
-        false
+        self.segments.contains(&Segment::Star)
     }
 
     /// Adds `segment` at the end.
@@ -77,10 +78,16 @@ impl Pointer {
 }
 
 /// Writes the RFC 6901 text: `/` before each segment, with `~` as `~0` and `/` as `~1`.
+///
+/// The text of a parsed pointer parses back as the same pointer.
+/// A `Key("*")` writes as `/*`, so it parses back as [`Segment::Star`].
 impl fmt::Display for Pointer {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let _ = f;
-        Ok(())
+        let mut text = String::new();
+        for segment in &self.segments {
+            push_segment(&mut text, segment.token());
+        }
+        f.write_str(&text)
     }
 }
 
@@ -141,8 +148,60 @@ impl std::error::Error for PointerError {}
 /// Returns [`PointerError::NoLeadingSlash`] for a text that is not empty and has no leading `/`.
 /// Returns [`PointerError::BadEscape`] for a `~` that does not come before `0` or `1`.
 pub fn parse(text: &str) -> Result<Pointer, PointerError> {
-    let _ = text;
-    Err(PointerError::NoLeadingSlash)
+    if text.is_empty() {
+        return Ok(Pointer::root());
+    }
+    let rest = text.strip_prefix('/').ok_or(PointerError::NoLeadingSlash)?;
+    let mut segments = Vec::new();
+    let mut offset = 1usize;
+    for token in rest.split('/') {
+        segments.push(segment(token, offset)?);
+        offset = offset.saturating_add(token.len()).saturating_add(1);
+    }
+    Ok(Pointer { segments })
+}
+
+/// Reads one token that starts at the byte offset `base` of the pointer text.
+fn segment(token: &str, base: usize) -> Result<Segment, PointerError> {
+    if token == "*" {
+        return Ok(Segment::Star);
+    }
+    let mut out = String::with_capacity(token.len());
+    let mut chars = token.char_indices();
+    while let Some((i, c)) = chars.next() {
+        if c == '~' {
+            match chars.next() {
+                Some((_, '0')) => out.push('~'),
+                Some((_, '1')) => out.push('/'),
+                _ => {
+                    return Err(PointerError::BadEscape {
+                        offset: base.saturating_add(i),
+                    });
+                }
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    Ok(Segment::Key(out))
+}
+
+/// Gives the array index of `token`: `0`, or digits without a leading zero.
+fn index(token: &str) -> Option<usize> {
+    match token.as_bytes() {
+        [b'0'] => Some(0),
+        [b'1'..=b'9', rest @ ..] if rest.iter().all(u8::is_ascii_digit) => token.parse().ok(),
+        _ => None,
+    }
+}
+
+/// Gives the child of `value` that `token` names, with the rules of RFC 6901.
+fn step<'a>(value: &'a Value, token: &str) -> Option<&'a Value> {
+    match value {
+        Value::Object(object) => object.get(token),
+        Value::Array(items) => items.get(index(token)?),
+        _ => None,
+    }
 }
 
 /// Gives the value at `pointer` with the rules of RFC 6901, or `None` when the path is missing.
@@ -150,8 +209,10 @@ pub fn parse(text: &str) -> Result<Pointer, PointerError> {
 /// A [`Segment::Star`] is the member name `*` here. Use [`select`] for the map form.
 #[must_use]
 pub fn get<'a>(root: &'a Value, pointer: &Pointer) -> Option<&'a Value> {
-    let _ = (root, pointer);
-    None
+    pointer
+        .segments
+        .iter()
+        .try_fold(root, |value, segment| step(value, segment.token()))
 }
 
 /// The result of [`select`]: the values found and the count of missing paths.
@@ -180,6 +241,66 @@ impl Selection<'_> {
 /// The function uses no recursion.
 #[must_use]
 pub fn select<'a>(root: &'a Value, pointer: &Pointer) -> Selection<'a> {
-    let _ = (root, pointer);
-    Selection::default()
+    let segments = pointer.segments();
+    let mut selection = Selection::default();
+    // Each path step records its parent step, so a missing path can name its location.
+    let mut steps: Vec<(Option<usize>, Step<'_>)> = Vec::new();
+    // Depth-first walk in document order: (value, index of the next segment, path step).
+    let mut stack: Vec<(&'a Value, usize, Option<usize>)> = vec![(root, 0, None)];
+    while let Some((value, depth, node)) = stack.pop() {
+        let Some(segment) = segments.get(depth) else {
+            selection.values.push(value);
+            continue;
+        };
+        let next = depth.saturating_add(1);
+        if let (Segment::Star, Value::Array(items)) = (segment, value) {
+            for (i, item) in items.iter().enumerate().rev() {
+                stack.push((item, next, Some(steps.len())));
+                steps.push((node, Step::Index(i)));
+            }
+            continue;
+        }
+        if let Some(child) = step(value, segment.token()) {
+            stack.push((child, next, Some(steps.len())));
+            steps.push((node, Step::Token(segment.token())));
+        } else {
+            selection.missing = selection.missing.saturating_add(1);
+            if selection.first_missing.is_none() {
+                selection.first_missing = Some(path_text(&steps, node, segment.token()));
+            }
+        }
+    }
+    selection
+}
+
+/// One step of a concrete path.
+#[derive(Debug, Clone, Copy)]
+enum Step<'p> {
+    /// A member name or an index text of the pointer.
+    Token(&'p str),
+    /// An array index that a `*` segment gave.
+    Index(usize),
+}
+
+/// Gives the pointer text of the path that ends at `node`, plus the token `last`.
+fn path_text(steps: &[(Option<usize>, Step<'_>)], node: Option<usize>, last: &str) -> String {
+    let mut tokens = Vec::new();
+    let mut current = node;
+    // A parent step comes before its child step, so this walk ends after at most `steps.len()` steps.
+    while let Some(id) = current {
+        let Some((parent, step)) = steps.get(id) else {
+            break;
+        };
+        tokens.push(match step {
+            Step::Token(token) => (*token).to_owned(),
+            Step::Index(i) => i.to_string(),
+        });
+        current = parent.filter(|p| *p < id);
+    }
+    let mut text = String::new();
+    for token in tokens.iter().rev() {
+        push_segment(&mut text, token);
+    }
+    push_segment(&mut text, last);
+    text
 }

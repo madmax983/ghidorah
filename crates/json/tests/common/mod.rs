@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use ghidorah_json::{Limits, Number, Object, Value};
 use ghidorah_testkit::pbt::Gen;
 
-/// Gives the directory of the vendored JSONTestSuite files.
+/// Gives the directory of the vendored `JSONTestSuite` files.
 pub fn suite_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/data/jsontestsuite")
 }
@@ -143,7 +143,7 @@ pub fn jcs_value(g: &mut Gen, depth: u32) -> Value {
     match g.draw(kinds) {
         0 => Value::Null,
         1 => Value::Bool(g.bool()),
-        2 => Value::from_f64(f64::from_bits(g.u64())).unwrap_or(Value::from(1u8)),
+        2 => Value::from_f64(f64::from_bits(g.u64())).unwrap_or_else(|| Value::from(1u8)),
         3 => Value::String(string(g)),
         4 => Value::Array(g.vec(4, |g| jcs_value(g, depth - 1))),
         _ => Value::Object(unique_object(g, depth)),

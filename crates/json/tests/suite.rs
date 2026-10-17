@@ -1,4 +1,4 @@
-//! AC-039: the vendored JSONTestSuite files (MIT, `tests/data/jsontestsuite/`).
+//! AC-039: the vendored `JSONTestSuite` files (MIT, `tests/data/jsontestsuite/`).
 
 #![allow(clippy::panic, reason = "a test fails through a panic")]
 

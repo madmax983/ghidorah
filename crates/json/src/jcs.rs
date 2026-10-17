@@ -1,9 +1,11 @@
 //! The JSON canonicalization scheme of RFC 8785 (JCS).
 
+use std::cmp::Ordering;
 use std::fmt;
 
-use crate::value::Value;
-use crate::write::{Style, render};
+use crate::number::Number;
+use crate::value::{Object, Value};
+use crate::write::{Form, Members, render};
 
 /// The reason that a value has no JCS form.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -57,11 +59,37 @@ impl std::error::Error for JcsError {}
 /// Returns [`JcsErrorKind::DuplicateKey`] for an object with a repeated name.
 /// Returns [`JcsErrorKind::NumberRange`] for a number outside the `f64` range.
 pub fn write_jcs(value: &Value) -> Result<String, JcsError> {
-    render(value, Style::Jcs)
+    render::<Jcs>(value).map_err(|(kind, path)| JcsError { kind, path })
+}
+
+/// The RFC 8785 form of the writer engine.
+struct Jcs;
+
+impl Form for Jcs {
+    type Error = JcsErrorKind;
+    const INDENT: Option<&'static str> = None;
+
+    fn number(number: &Number, out: &mut String) -> Result<(), JcsErrorKind> {
+        let text = number.to_jcs().ok_or(JcsErrorKind::NumberRange)?;
+        out.push_str(&text);
+        Ok(())
+    }
+
+    fn members(object: &Object) -> Members<'_, JcsErrorKind> {
+        let mut members: Vec<&(String, Value)> = object.members().iter().collect();
+        members.sort_by(|a, b| utf16_cmp(&a.0, &b.0));
+        for pair in members.windows(2) {
+            if let [(a, _), (b, _)] = pair
+                && a == b
+            {
+                return Err((JcsErrorKind::DuplicateKey, a.as_str()));
+            }
+        }
+        Ok(members)
+    }
 }
 
 /// Compares two names by their UTF-16 code units, as RFC 8785 sorts them.
-pub(crate) fn utf16_cmp(a: &str, b: &str) -> std::cmp::Ordering {
-    let _ = (a, b);
-    std::cmp::Ordering::Equal
+fn utf16_cmp(a: &str, b: &str) -> Ordering {
+    a.encode_utf16().cmp(b.encode_utf16())
 }

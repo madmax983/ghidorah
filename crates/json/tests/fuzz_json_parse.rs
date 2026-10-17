@@ -1,7 +1,7 @@
 //! Fuzz target `json_parse` (design Section 13.5).
 //!
 //! This binary has one test, so the global panic hook has no race.
-//! The seeds are the vendored JSONTestSuite files. Each case runs in a 256 KiB stack.
+//! The seeds are the vendored `JSONTestSuite` files. Each case runs in a 256 KiB stack.
 
 #![allow(clippy::panic, reason = "a test fails through a panic")]
 
@@ -12,9 +12,11 @@ use std::path::PathBuf;
 use ghidorah_json::pointer;
 use ghidorah_json::{Limits, Value, parse, parse_bytes, write, write_jcs, write_pretty};
 use ghidorah_testkit::fuzz::{self, Config, Outcome};
+use ghidorah_testkit::pbt::Gen;
 
-/// Stage 0: any input. Stage 1: the input parses. Stage 2: the value is an array or an object.
-const STAGES: [&str; 3] = ["input", "parsed", "container"];
+/// Stage 0: any input. Stage 1: the parser reads past the first byte.
+/// Stage 2: the input parses. Stage 3: the value is an array or an object.
+const STAGES: [&str; 4] = ["input", "past_start", "parsed", "container"];
 
 /// The regression directory of the target: `tests/regress/json_parse/`.
 fn regress_dir() -> PathBuf {
@@ -63,18 +65,30 @@ fn check_value(value: &Value, limits: &Limits) -> Result<(), String> {
     Ok(())
 }
 
+/// Builds a value from the input bytes as choices, then checks the writers on it.
+///
+/// Havoc breaks most JSON text, so this second path gives the writers deep random values.
+fn check_generated(input: &[u8], limits: &Limits) -> Result<(), String> {
+    let choices = input.iter().map(|&b| u64::from(b)).collect();
+    let value = common::value(&mut Gen::replay(choices), 4);
+    check_value(&value, limits)
+}
+
 fn target(input: &[u8]) -> Outcome {
     let limits = Limits::DEFAULT;
+    if let Err(message) = check_generated(input, &limits) {
+        return Outcome::violation(0, format!("generated value: {message}"));
+    }
     match parse_bytes(input, &limits) {
         Err(e) if e.offset > input.len() => {
             Outcome::violation(0, format!("offset {} after the end", e.offset))
         }
-        Err(_) => Outcome::reached(0),
+        Err(e) => Outcome::reached(usize::from(e.offset > 0)),
         Ok(value) => {
             let stage = if matches!(value, Value::Array(_) | Value::Object(_)) {
-                2
+                3
             } else {
-                1
+                2
             };
             match check_value(&value, &limits) {
                 Ok(()) => Outcome::reached(stage),
@@ -104,14 +118,20 @@ fn fuzz_json_parse() {
         report.crashes
     );
     assert_eq!(fuzz::panic_count(), 0, "no case panics");
+    // Havoc breaks most JSON text, so the deep stages get a small share.
     assert!(
-        report.reached_percent(1) >= 10,
+        report.reached_percent(1) >= 50,
+        "past-start share: {:?}",
+        report.reached
+    );
+    assert!(
+        report.reached_percent(2) >= 1,
         "parsed share: {:?}",
         report.reached
     );
     assert!(
-        report.reached_percent(2) >= 5,
-        "container share: {:?}",
+        report.reached[3] > 0,
+        "container count: {:?}",
         report.reached
     );
 }

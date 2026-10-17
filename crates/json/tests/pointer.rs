@@ -16,7 +16,7 @@ fn ptr(text: &str) -> Pointer {
 }
 
 fn texts(selection: &Selection<'_>) -> Vec<String> {
-    selection.values.iter().map(|v| v.to_string()).collect()
+    selection.values.iter().map(ToString::to_string).collect()
 }
 
 /// The example document of RFC 6901 Section 5.

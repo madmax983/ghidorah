@@ -4,7 +4,7 @@ use std::fmt;
 
 /// The stable code of a parse error.
 ///
-/// Each code has an UPPER_SNAKE text form that never changes, for example `E_DEPTH`.
+/// Each code has an `UPPER_SNAKE` text form that never changes, for example `E_DEPTH`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Code {
     /// The text ends before the value is complete.
