@@ -11,7 +11,7 @@
   "partial": false,
   "data": {
     "state": "complete",
-    "steps_used": 499,
+    "steps_used": 976,
     "resume": false,
     "analyzers": [
       {
@@ -39,26 +39,50 @@
         "runs": 1
       },
       {
+        "name": "Overrides",
+        "priority": 160,
+        "pending": 0,
+        "runs": 1
+      },
+      {
         "name": "Disasm",
         "priority": 300,
         "pending": 0,
-        "runs": 15
+        "runs": 21
       },
       {
         "name": "NoReturnKnown",
         "priority": 301,
         "pending": 0,
-        "runs": 2
+        "runs": 4
       },
       {
         "name": "NoReturnDiscovered",
         "priority": 302,
         "pending": 0,
-        "runs": 2
+        "runs": 4
       },
       {
         "name": "CallTargets",
         "priority": 400,
+        "pending": 0,
+        "runs": 3
+      },
+      {
+        "name": "JumpTables",
+        "priority": 410,
+        "pending": 0,
+        "runs": 2
+      },
+      {
+        "name": "TailCallsAndParts",
+        "priority": 420,
+        "pending": 0,
+        "runs": 3
+      },
+      {
+        "name": "MainDiscovery",
+        "priority": 430,
         "pending": 0,
         "runs": 2
       },
@@ -79,13 +103,31 @@
         "priority": 650,
         "pending": 0,
         "runs": 1
+      },
+      {
+        "name": "StackFrames",
+        "priority": 700,
+        "pending": 0,
+        "runs": 1
+      },
+      {
+        "name": "CallingConvention",
+        "priority": 800,
+        "pending": 0,
+        "runs": 1
+      },
+      {
+        "name": "Syscalls",
+        "priority": 810,
+        "pending": 0,
+        "runs": 1
       }
     ],
     "changed": {
-      "functions": 11,
+      "functions": 12,
       "refs": 54,
       "strings": 4,
-      "jumptables": 0
+      "jumptables": 2
     }
   },
   "noop": false

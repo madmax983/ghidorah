@@ -50,13 +50,20 @@ fn analysis_run_completes_and_reports() {
             "Symbols",
             "ImportStubs",
             "FdeSeeds",
+            "Overrides",
             "Disasm",
             "NoReturnKnown",
             "NoReturnDiscovered",
             "CallTargets",
+            "JumpTables",
+            "TailCallsAndParts",
+            "MainDiscovery",
             "EndbrSeeds",
             "References",
-            "Strings"
+            "Strings",
+            "StackFrames",
+            "CallingConvention",
+            "Syscalls"
         ]
     );
     assert!(rows.iter().all(|r| int(r, "/pending") == 0));
@@ -107,7 +114,11 @@ fn analysis_run_triage_and_an_installed_engine() {
     let (mut s, _) = fixture("hello.gcc-O2");
     analysis_run::install(&mut s);
     let got = call(&mut s, "analysis_run", r#"{"until":"triage"}"#);
-    assert_eq!(text_at(data(&got), "/state"), "complete");
+    assert_eq!(
+        text_at(data(&got), "/state"),
+        "budget_stopped",
+        "bands 800 and 810 wait for a full run"
+    );
     let load = call(
         &mut s,
         "binary_load",

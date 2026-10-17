@@ -5,14 +5,14 @@
   "rev": 1,
   "session": "cli",
   "analysis": {
-    "state": "complete",
+    "state": "budget_stopped",
     "rev": 1
   },
-  "partial": false,
+  "partial": true,
   "data": {
-    "state": "complete",
-    "steps_used": 499,
-    "resume": false,
+    "state": "budget_stopped",
+    "steps_used": 841,
+    "resume": true,
     "analyzers": [
       {
         "name": "Entry",
@@ -39,26 +39,50 @@
         "runs": 1
       },
       {
+        "name": "Overrides",
+        "priority": 160,
+        "pending": 0,
+        "runs": 1
+      },
+      {
         "name": "Disasm",
         "priority": 300,
         "pending": 0,
-        "runs": 15
+        "runs": 21
       },
       {
         "name": "NoReturnKnown",
         "priority": 301,
         "pending": 0,
-        "runs": 2
+        "runs": 4
       },
       {
         "name": "NoReturnDiscovered",
         "priority": 302,
         "pending": 0,
-        "runs": 2
+        "runs": 4
       },
       {
         "name": "CallTargets",
         "priority": 400,
+        "pending": 0,
+        "runs": 3
+      },
+      {
+        "name": "JumpTables",
+        "priority": 410,
+        "pending": 0,
+        "runs": 2
+      },
+      {
+        "name": "TailCallsAndParts",
+        "priority": 420,
+        "pending": 0,
+        "runs": 3
+      },
+      {
+        "name": "MainDiscovery",
+        "priority": 430,
         "pending": 0,
         "runs": 2
       },
@@ -79,14 +103,41 @@
         "priority": 650,
         "pending": 0,
         "runs": 1
+      },
+      {
+        "name": "StackFrames",
+        "priority": 700,
+        "pending": 0,
+        "runs": 1
+      },
+      {
+        "name": "CallingConvention",
+        "priority": 800,
+        "pending": 15,
+        "runs": 0
+      },
+      {
+        "name": "Syscalls",
+        "priority": 810,
+        "pending": 15,
+        "runs": 0
       }
     ],
     "changed": {
-      "functions": 11,
+      "functions": 12,
       "refs": 54,
       "strings": 4,
-      "jumptables": 0
+      "jumptables": 2
     }
   },
+  "next": [
+    {
+      "tool": "analysis_run",
+      "args": {
+        "binary_id": "467a43b75d95c826"
+      },
+      "why": "The analysis has more work. Call analysis_run again to resume it."
+    }
+  ],
   "noop": false
 }

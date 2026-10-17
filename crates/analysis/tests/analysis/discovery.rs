@@ -68,8 +68,12 @@ fn seeds_of_a_stripped_file() {
         "a call beats an FDE"
     );
     let main = truth_addr(&t, "main");
-    assert_eq!(reason(&p, main), Some(StartReason::Fde));
-    assert_eq!(p.func(fid(main)).map(|f| f.func.confidence), Some(90));
+    assert_eq!(
+        reason(&p, main),
+        Some(StartReason::Main),
+        "MainDiscovery beats an FDE"
+    );
+    assert_eq!(p.func(fid(main)).map(|f| f.func.confidence), Some(95));
     let check = truth_addr(&t, "check_args");
     assert_eq!(p.func(fid(check)).map(|f| f.func.confidence), Some(95));
 }

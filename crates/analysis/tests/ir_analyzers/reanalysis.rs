@@ -2,8 +2,7 @@
 //! seeds and conflicts of agent overrides.
 //!
 //! The agent edits commit with the origin of their transaction, and the undos use the undo API.
-//! The path independence test also runs with the WP-15 rows only. The override test needs the
-//! WP-19 analyzer rows of the registry. The register step adds them.
+//! The tests run the shipped analyzer list, with the WP-19 rows of the registry.
 
 use ghidorah_analysis::{RunState, Scheduler, Until};
 use ghidorah_base::{Address, Fuel, FuncId, JumpTableId, TxId, WarningCode};
@@ -316,7 +315,6 @@ fn ac_092_fuel_slicing_t2() {
 }
 
 #[test]
-#[ignore = "needs the WP-19 analyzer rows of the register step"]
 fn agent_overrides_seed_and_conflict() {
     // 0x0: call 0x10; ret.  0x10: ret.  0x20: ret, reached by no flow.
     let mut bytes = vec![0xe8, 0x0b, 0x00, 0x00, 0x00, 0xc3];

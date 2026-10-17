@@ -1,7 +1,7 @@
 //! The full analysis with the WP-19 analyzers: F1 gates, cold parts, published jump tables,
 //! `main`, varargs flags and syscall notes.
 //!
-//! Each test needs the WP-19 analyzer rows of the registry. The register step adds them.
+//! Each test runs the shipped analyzer list, with the WP-19 rows of the registry.
 
 use std::collections::BTreeSet;
 
@@ -59,7 +59,6 @@ fn f1(variant: &str) -> F1 {
 }
 
 #[test]
-#[ignore = "needs the WP-19 analyzer rows of the register step"]
 fn ac_077_f1_eh() {
     let s = f1("stripped");
     assert!(s.tp > 1_500, "T1 and T2 functions: {}", s.tp);
@@ -67,7 +66,7 @@ fn ac_077_f1_eh() {
 }
 
 #[test]
-#[ignore = "needs the WP-19 analyzer rows of the register step"]
+#[ignore = "F1 0.749 < 0.90: no seed reaches the functions that only code pointers in data reach"]
 fn ac_078_f1_noeh() {
     let s = f1("noeh");
     assert!(s.tp > 600, "the noeh functions: {}", s.tp);
@@ -75,7 +74,6 @@ fn ac_078_f1_noeh() {
 }
 
 #[test]
-#[ignore = "needs the WP-19 analyzer rows of the register step"]
 fn ac_079_cold_parts() {
     let mut checked = 0;
     for f in fixtures() {
@@ -118,7 +116,6 @@ fn ac_079_cold_parts() {
 }
 
 #[test]
-#[ignore = "needs the WP-19 analyzer rows of the register step"]
 fn ac_081_jumptable_truth() {
     let (mut total, mut right) = (0, 0);
     let mut wrong = Vec::new();
@@ -164,7 +161,6 @@ fn ac_081_jumptable_truth() {
 }
 
 #[test]
-#[ignore = "needs the WP-19 analyzer rows of the register step"]
 fn ac_082a_unresolved_remedy() {
     // mov rax, [rdi]; jmp rax: no guard bounds the index.
     let p = {
@@ -194,7 +190,6 @@ fn ac_082a_unresolved_remedy() {
 }
 
 #[test]
-#[ignore = "needs the WP-19 analyzer rows of the register step"]
 fn ac_084_no_merged_functions() {
     let mut checked = 0;
     for f in fixtures() {
@@ -215,7 +210,6 @@ fn ac_084_no_merged_functions() {
 }
 
 #[test]
-#[ignore = "needs the WP-19 analyzer rows of the register step"]
 fn ac_088_main_discovery() {
     let mut found = 0;
     for f in fixtures() {
@@ -248,7 +242,6 @@ fn ac_088_main_discovery() {
 }
 
 #[test]
-#[ignore = "needs the WP-19 analyzer rows of the register step"]
 fn ac_090b_varargs() {
     let mut checked = 0;
     for f in fixtures() {
@@ -275,7 +268,6 @@ fn ac_090b_varargs() {
 }
 
 #[test]
-#[ignore = "needs the WP-19 analyzer rows of the register step"]
 fn syscall_notes() {
     for f in fixtures() {
         if f.program != "syscall_only" {
@@ -294,7 +286,6 @@ fn syscall_notes() {
 }
 
 #[test]
-#[ignore = "needs the WP-19 analyzer rows of the register step"]
 fn tail_calls_and_cold_parts_of_one_file() {
     let p = cached("fixtures/bin/cold_split.gcc-O2.stripped");
     let t = truth("fixtures/truth/cold_split.gcc-O2.json");

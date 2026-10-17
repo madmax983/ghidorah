@@ -1,9 +1,8 @@
 //! The tier-1 tests of the IR-based analyzers of `ghidorah-analysis` (WP-19).
 //!
 //! The derived views (function IR, stack frames, method A, parameters, syscall sites, call
-//! arguments and the start call) run over the published facts of the WP-15 analyzers. The
-//! pipeline tests need the WP-19 analyzer rows of the registry, so they carry an ignore
-//! reason until the register step.
+//! arguments and the start call) run over the published facts of the analyzers. The pipeline
+//! tests run the shipped analyzer list, with the WP-19 rows of the registry.
 
 #![allow(
     clippy::expect_used,

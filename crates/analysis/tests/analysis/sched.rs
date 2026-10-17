@@ -123,7 +123,7 @@ fn sched_tie_break_order() {
                 AnalyzerId::Symbols,
                 AnalyzerId::ImportStubs,
                 AnalyzerId::FdeSeeds,
-                AnalyzerId::Disasm
+                AnalyzerId::Overrides
             ][..]
         )
     );
@@ -257,9 +257,13 @@ fn triage_and_full_bands() {
     assert!(sched.is_done(Until::Triage));
     assert_eq!(
         out.state,
-        RunState::Complete,
-        "every WP-15 band is a triage band"
+        RunState::BudgetStopped,
+        "bands 800 and 810 wait for a full run"
     );
+    let out = sched
+        .run(&mut p, Until::Full, &mut Fuel::unlimited())
+        .expect("a full run");
+    assert_eq!(out.state, RunState::Complete);
     assert_eq!(hash(&p), hash(&full));
 }
 
@@ -330,9 +334,9 @@ fn restart_keeps_the_lower_bands() {
         .run(&mut p, Until::Full, &mut Fuel::unlimited())
         .expect("a restart");
     assert_eq!(out.state, RunState::Complete);
-    assert_eq!(
-        out.steps_used, 0,
-        "no WP-15 analyzer is at band 800 or above"
+    assert!(
+        out.steps_used > 0,
+        "CallingConvention and Syscalls run again from band 800"
     );
     sched.restart(BAND_FULL);
     let out = sched
@@ -351,7 +355,10 @@ fn registry_follows_section_7_1() {
     let priorities: Vec<u16> = ANALYZERS.iter().map(|s| s.priority).collect();
     assert_eq!(
         priorities,
-        [100, 110, 120, 150, 300, 301, 302, 400, 440, 600, 650]
+        [
+            100, 110, 120, 150, 160, 300, 301, 302, 400, 410, 420, 430, 440, 600, 650, 700, 800,
+            810
+        ]
     );
     for (i, s) in ANALYZERS.iter().enumerate() {
         assert_eq!(index(s.id), Some(i));

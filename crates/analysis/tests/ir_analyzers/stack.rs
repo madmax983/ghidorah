@@ -96,7 +96,6 @@ fn cfa_mismatches(skip_fde_only: bool) -> (usize, Vec<String>) {
 }
 
 #[test]
-#[ignore = "needs the WP-19 analyzer rows of the register step"]
 fn ac_091_sp_vs_cfa() {
     let (checked, bad) = cfa_mismatches(false);
     assert!(checked > 2_000, "call sites with a CFA row: {checked}");
