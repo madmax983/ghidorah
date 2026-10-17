@@ -14,7 +14,8 @@
 //!
 //! The flags of the flow are the least fixpoint from the known flags. Each run computes them
 //! again for all functions, so a lost reason also removes a flag. A body that a flag of the
-//! fixpoint does not cut waits for the next `Disasm` run.
+//! fixpoint does not cut waits for the next `Disasm` run. A flag of the fall-through rule
+//! stays while its function exists: its cuts can remove the call sites that gave it.
 
 use std::collections::BTreeMap;
 
@@ -203,10 +204,14 @@ pub fn run_discovered(ctx: &mut AnalysisCtx<'_>, ranges: &RangeSet) -> Step {
         .funcs()
         .filter_map(|(e, f)| f.summary.clone().map(|s| (e, s)))
         .collect();
-    let mut fix = Fix {
-        ctx,
-        found: BTreeMap::new(),
-    };
+    let kept: BTreeMap<u64, Why> = ctx
+        .work
+        .found
+        .iter()
+        .filter(|(e, w)| w.rule == Rule::NoreturnFallthrough && ctx.is_entry(**e))
+        .map(|(e, w)| (*e, w.clone()))
+        .collect();
+    let mut fix = Fix { ctx, found: kept };
     let sites: BTreeMap<u64, Why> = ctx
         .entries()
         .into_iter()

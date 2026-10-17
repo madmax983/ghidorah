@@ -1,8 +1,8 @@
 //! Raw blobs: the raw loader (AC-057), retraction, shared code, endbr heads and hostile bytes.
 
-use ghidorah_analysis::{RunState, Scheduler, Until};
+use ghidorah_analysis::{Rule, RunState, Scheduler, Until};
 use ghidorah_base::{Address, Fuel, FuncId};
-use ghidorah_db::{Program, StartReason};
+use ghidorah_db::{FactKey, Program, StartReason};
 use ghidorah_loader::LoadOpts;
 use ghidorah_testkit::rng::{Rng, Xoshiro256ss};
 
@@ -161,6 +161,54 @@ fn slot_jump_and_bad_code() {
         "{:?}",
         p.check_invariants()
     );
+}
+
+#[test]
+fn regress_fallthrough_flag_is_stable() {
+    // 0x0: call 0x100; call 0x110; call 0x120; ret.  Each callee calls 0x200 and then holds
+    // bad bytes.  0x200: jmp rax.  The fall-through rule flags 0x200, and the cut after the
+    // call of 0x100 then makes the calls of 0x110 and 0x120 dead code.
+    let mut blob = Blob::new().call(0x100).call(0x110).call(0x120).ret();
+    for off in [0x100, 0x110, 0x120] {
+        blob = blob.at(off).call(0x200).raw(&[0x06]);
+    }
+    let blob = blob.at(0x200).jmp_rax();
+    let mut p = blob.load(Some(0));
+    let (sched, out) = analyze(&mut p);
+    assert!(
+        out.steps_used < 1_000,
+        "the fixpoint ends early: {}",
+        out.steps_used
+    );
+    let disasm = sched
+        .rows()
+        .into_iter()
+        .find(|r| r.name == "Disasm")
+        .expect("a row");
+    assert!(
+        disasm.runs < 20,
+        "no flag flips back and forth: {}",
+        disasm.runs
+    );
+    let shared = FuncId(Address::ram(BASE + 0x200));
+    let why = p.why(&FactKey::Noreturn(shared)).expect("a flag");
+    assert_eq!(why.rule.as_str(), Rule::NoreturnFallthrough.code());
+    let first = FuncId(Address::ram(BASE + 0x100));
+    assert_eq!(
+        p.why(&FactKey::Noreturn(first)).map(|w| w.rule.as_str()),
+        Some(Rule::NoreturnBody.code())
+    );
+    for k in [1, 4] {
+        let mut sliced = blob.load(Some(0));
+        let mut runner = Scheduler::new();
+        while runner
+            .run(&mut sliced, Until::Full, &mut Fuel::new(k))
+            .expect("a slice")
+            .state
+            != RunState::Complete
+        {}
+        assert_eq!(sliced.analysis(), p.analysis(), "slices of {k}");
+    }
 }
 
 #[test]
