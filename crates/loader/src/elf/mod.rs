@@ -98,10 +98,19 @@ pub fn load(
     b.identity.build_id = notes::build_id(&b.notes);
     b.entry_points = entries::collect(&cx, &map, h.entry, &d, &b.sections, &b.relocs);
     b.dynamic = d.entries;
+    extras(&mut cx, &map, &mut b);
     let (diagnostics, dropped) = cx.diags.into_parts();
     b.diagnostics = diagnostics;
     b.diagnostics_dropped = dropped;
     Ok((b, map))
+}
+
+/// Fills the parts of the loader extras: imports, PLT stubs, FDEs and protections.
+fn extras(cx: &mut Cx<'_>, map: &MemoryMap, b: &mut Binary) {
+    b.imports = crate::imports::load(b, &mut cx.budget, &mut cx.diags);
+    crate::stubs::apply(b, map, &cx.budget, &mut cx.diags);
+    b.fdes = crate::ehframe::load(b, map, &cx.budget.limits, &mut cx.diags);
+    b.protections = crate::checksec::protections(b);
 }
 
 /// Gives the symbols of both tables in section order: the table whose section comes first
