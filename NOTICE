@@ -1,0 +1,9 @@
+ghidorah
+Copyright 2026 the ghidorah authors
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+The build uses the Rust standard library only. It contains no third-party crate.
+
+Vendored data files: none at this time.
+docs/licenses.md lists each vendored data file with its source and license.

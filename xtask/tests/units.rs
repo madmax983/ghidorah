@@ -34,7 +34,7 @@ fn json_rejects_bad_text() {
         r#""\ud800""#,
         r#"{"a":1,"a":2}"#,
         "[1] x",
-        "{a:1}",
+        "{'a':1}",
         "tru",
         "-",
         "[1 2]",
@@ -122,19 +122,20 @@ fn ci_args_and_commands() {
         assert_eq!(Step::parse(step.name()), Some(step));
     }
     let root = Path::new("/w");
-    let args = |step: Step, tier2: bool| -> Vec<String> {
-        ci::command(root, step, tier2)
+    let args = |step: Step| -> Vec<String> {
+        ci::command(root, step)
             .get_args()
             .map(|a| a.to_string_lossy().into_owned())
             .collect()
     };
-    assert_eq!(args(Step::Fmt, false), ["fmt", "--all", "--", "--check"]);
-    assert!(args(Step::Clippy, false).ends_with(&strings(&["-D", "warnings"])));
-    assert!(args(Step::Tier2, true).contains(&"--include-ignored".to_owned()));
-    assert!(args(Step::TestTimes, false).contains(&"--test-threads=1".to_owned()));
-    assert!(args(Step::TestTimes, true).contains(&"--include-ignored".to_owned()));
+    assert_eq!(args(Step::Fmt), ["fmt", "--all", "--", "--check"]);
+    assert!(args(Step::Clippy).ends_with(&strings(&["-D", "warnings"])));
+    assert!(args(Step::Tier2).contains(&"--include-ignored".to_owned()));
+    assert!(args(Step::TestTimes).contains(&"--test-threads=1".to_owned()));
+    // The 15 s cap applies to tier-1 tests, so the timed run never includes tier-2 tests.
+    assert!(!args(Step::TestTimes).contains(&"--include-ignored".to_owned()));
     let env = |step: Step, key: &str| -> Option<String> {
-        ci::command(root, step, false)
+        ci::command(root, step)
             .get_envs()
             .find(|(k, _)| *k == key)
             .and_then(|(_, v)| v.map(|v| v.to_string_lossy().into_owned()))

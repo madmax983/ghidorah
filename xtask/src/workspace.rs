@@ -3,7 +3,8 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-use crate::{Error, Finding};
+use crate::json::{self, Value};
+use crate::{Error, Finding, proc};
 
 /// The kind of a package.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -76,8 +77,12 @@ pub fn root() -> PathBuf {
 /// Gives `path` relative to `root`, with `/` separators.
 #[must_use]
 pub fn rel(root: &Path, path: &Path) -> String {
-    let _ = (root, path);
-    String::new()
+    let relative = path.strip_prefix(root).unwrap_or(path);
+    relative
+        .components()
+        .map(|c| c.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/")
 }
 
 /// The kind of a dependency edge.
@@ -169,8 +174,78 @@ impl Metadata {
 ///
 /// Returns an error when cargo fails or the output has a bad form.
 pub fn load_metadata(root: &Path) -> Result<Metadata, Error> {
-    let _ = root;
-    Err(Error::data("cargo metadata", "loader missing"))
+    let mut cmd = proc::cargo_cmd(&["metadata", "--format-version", "1", "--offline", "--locked"]);
+    cmd.current_dir(root);
+    let out = proc::run_ok(&mut cmd)?;
+    parse_metadata(root, &out.stdout)
+}
+
+fn text_of(value: &Value, key: &str) -> Option<String> {
+    value.get(key).and_then(Value::as_str).map(str::to_owned)
+}
+
+fn need_text(value: &Value, key: &str) -> Result<String, Error> {
+    text_of(value, key).ok_or_else(|| Error::data("cargo metadata", format!("no `{key}` text")))
+}
+
+fn parse_dep(value: &Value) -> Result<Dep, Error> {
+    let kind = match value.get("kind").and_then(Value::as_str) {
+        None => DepKind::Normal,
+        Some("dev") => DepKind::Dev,
+        Some("build") => DepKind::Build,
+        Some(other) => {
+            return Err(Error::data(
+                "cargo metadata",
+                format!("unknown dependency kind `{other}`"),
+            ));
+        }
+    };
+    Ok(Dep {
+        name: need_text(value, "name")?,
+        kind,
+        path: text_of(value, "path").map(PathBuf::from),
+        source: text_of(value, "source"),
+    })
+}
+
+fn parse_target(value: &Value) -> Result<Target, Error> {
+    let kinds = value
+        .get("kind")
+        .and_then(Value::as_array)
+        .unwrap_or_default()
+        .iter()
+        .filter_map(Value::as_str)
+        .map(str::to_owned)
+        .collect();
+    Ok(Target {
+        name: need_text(value, "name")?,
+        kinds,
+        src_path: PathBuf::from(need_text(value, "src_path")?),
+        edition: need_text(value, "edition")?,
+    })
+}
+
+fn parse_package(value: &Value) -> Result<Package, Error> {
+    let list = |key: &str| value.get(key).and_then(Value::as_array).unwrap_or_default();
+    let publish_false = value
+        .get("publish")
+        .and_then(Value::as_array)
+        .is_some_and(<[Value]>::is_empty);
+    Ok(Package {
+        name: need_text(value, "name")?,
+        manifest_path: PathBuf::from(need_text(value, "manifest_path")?),
+        edition: need_text(value, "edition")?,
+        license: text_of(value, "license"),
+        publish_false,
+        deps: list("dependencies")
+            .iter()
+            .map(parse_dep)
+            .collect::<Result<_, _>>()?,
+        targets: list("targets")
+            .iter()
+            .map(parse_target)
+            .collect::<Result<_, _>>()?,
+    })
 }
 
 /// Parses the JSON text of `cargo metadata`.
@@ -179,41 +254,132 @@ pub fn load_metadata(root: &Path) -> Result<Metadata, Error> {
 ///
 /// Returns [`Error::Data`] when the text is not valid metadata.
 pub fn parse_metadata(root: &Path, text: &str) -> Result<Metadata, Error> {
-    let _ = (root, text);
-    Err(Error::data("cargo metadata", "parser missing"))
+    let value = json::parse(text).map_err(|e| Error::data("cargo metadata", e.to_string()))?;
+    let mut packages = value
+        .get("packages")
+        .and_then(Value::as_array)
+        .ok_or_else(|| Error::data("cargo metadata", "no `packages` array"))?
+        .iter()
+        .map(parse_package)
+        .collect::<Result<Vec<_>, _>>()?;
+    packages.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(Metadata {
+        root: root.to_path_buf(),
+        packages,
+    })
 }
+
+const AC_001A: &str = "AC-001a";
 
 /// AC-001a: every package is a row of [`PACKAGES`] at its listed directory.
 #[must_use]
 pub fn check_packages(meta: &Metadata) -> Vec<Finding> {
-    let _ = meta;
-    Vec::new()
+    let mut found = Vec::new();
+    for package in &meta.packages {
+        let dir = package.dir(&meta.root);
+        let manifest = format!("{dir}/Cargo.toml");
+        match spec(&package.name) {
+            None => found.push(Finding::new(
+                AC_001A,
+                manifest,
+                0,
+                format!("package `{}` is not in design Section 2.1", package.name),
+            )),
+            Some(row) if row.dir != dir => found.push(Finding::new(
+                AC_001A,
+                manifest,
+                0,
+                format!("package `{}` must live in `{}`", package.name, row.dir),
+            )),
+            Some(_) => {}
+        }
+    }
+    found
 }
 
 /// AC-001c: every dependency is a workspace package at a local path.
 #[must_use]
 pub fn check_workspace_deps(meta: &Metadata) -> Vec<Finding> {
-    let _ = meta;
-    Vec::new()
+    let mut found = Vec::new();
+    for package in &meta.packages {
+        let manifest = format!("{}/Cargo.toml", package.dir(&meta.root));
+        for dep in &package.deps {
+            let local = dep
+                .path
+                .as_ref()
+                .is_some_and(|p| spec(&dep.name).is_some_and(|row| rel(&meta.root, p) == row.dir));
+            if dep.source.is_some() || !local {
+                found.push(Finding::new(
+                    "AC-001c",
+                    manifest.clone(),
+                    0,
+                    format!("dependency `{}` is not a workspace package", dep.name),
+                ));
+            }
+        }
+    }
+    found
 }
 
 /// AC-001e: every package sets `publish = false` and `license = "Apache-2.0"`.
 #[must_use]
 pub fn check_publish_license(meta: &Metadata) -> Vec<Finding> {
-    let _ = meta;
-    Vec::new()
+    let mut found = Vec::new();
+    for package in &meta.packages {
+        let manifest = format!("{}/Cargo.toml", package.dir(&meta.root));
+        if !package.publish_false {
+            let detail = format!("package `{}` must set `publish = false`", package.name);
+            found.push(Finding::new("AC-001e", manifest.clone(), 0, detail));
+        }
+        if package.license.as_deref() != Some("Apache-2.0") {
+            let detail = format!(
+                "package `{}` must set `license = \"Apache-2.0\"`",
+                package.name
+            );
+            found.push(Finding::new("AC-001e", manifest, 0, detail));
+        }
+    }
+    found
 }
 
 /// AC-007b: every package and every target uses edition 2024.
 #[must_use]
 pub fn check_edition(meta: &Metadata) -> Vec<Finding> {
-    let _ = meta;
-    Vec::new()
+    let mut found = Vec::new();
+    for package in &meta.packages {
+        let manifest = format!("{}/Cargo.toml", package.dir(&meta.root));
+        if package.edition != "2024" {
+            let detail = format!(
+                "package `{}` uses edition {}",
+                package.name, package.edition
+            );
+            found.push(Finding::new("AC-007b", manifest.clone(), 0, detail));
+        }
+        for target in package.targets.iter().filter(|t| t.edition != "2024") {
+            let detail = format!("target `{}` uses edition {}", target.name, target.edition);
+            found.push(Finding::new("AC-007b", manifest.clone(), 0, detail));
+        }
+    }
+    found
 }
 
 /// Gives the names of `name` and of every package that it reaches through normal and build edges.
 #[must_use]
 pub fn closure(meta: &Metadata, name: &str) -> BTreeSet<String> {
-    let _ = (meta, name);
-    BTreeSet::new()
+    let mut seen = BTreeSet::new();
+    let mut work = vec![name.to_owned()];
+    while let Some(next) = work.pop() {
+        let Some(package) = meta.package(&next) else {
+            continue;
+        };
+        if !seen.insert(next) {
+            continue;
+        }
+        for dep in package.deps.iter().filter(|d| d.kind != DepKind::Dev) {
+            if !seen.contains(&dep.name) {
+                work.push(dep.name.clone());
+            }
+        }
+    }
+    seen
 }

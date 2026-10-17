@@ -1,6 +1,10 @@
 //! Workspace gate tests. Each test proves one AC that WP-01 closes.
 //!
 //! Each test checks the real repository and a synthetic bad input.
+#![allow(
+    clippy::expect_used,
+    reason = "test helpers stop at the first failure with a message"
+)]
 
 use std::sync::OnceLock;
 
@@ -156,7 +160,7 @@ fn ac_002_offline_config() {
     assert_eq!(manifest::offline("[net]\noffline = false\n").len(), 1);
     assert_eq!(manifest::offline("").len(), 1);
     let root = workspace::root();
-    let cmd = ci::command(&root, Step::OfflineBuild, false);
+    let cmd = ci::command(&root, Step::OfflineBuild);
     let args: Vec<String> = cmd
         .get_args()
         .map(|a| a.to_string_lossy().into_owned())
@@ -429,7 +433,7 @@ fn ac_013_coverage_gate() {
             ..Counts::default()
         };
         Coverage {
-            crates: [(dir.to_owned(), counts)].into_iter().collect(),
+            crates: std::iter::once((dir.to_owned(), counts)).collect(),
         }
     };
     let ok = |c: &Coverage| cov::gate(c).get("ok").and_then(Value::as_bool);
