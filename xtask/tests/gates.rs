@@ -593,6 +593,13 @@ fn regress_verus_build_is_online() {
 }
 
 #[test]
+fn regress_verus_checkout_is_outside_the_workspace() {
+    let yaml = repo().read(workflow::PATH).expect("ci.yml reads");
+    let inside = yaml.replace("${{ runner.temp }}/verus-src", "verus-src");
+    assert!(!workflow::check(&inside).is_empty());
+}
+
+#[test]
 fn ac_223_no_set_var() {
     assert_clean("AC-223");
     let rel = "crates/cli/tests/x.rs";

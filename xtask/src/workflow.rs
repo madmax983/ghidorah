@@ -42,6 +42,9 @@ pub const VERUS_NEEDS: &[&str] = &[
     // The workspace sets `net.offline`, and Cargo reads it in subdirectories.
     // The Verus build needs the network, so its step turns offline mode off.
     "CARGO_NET_OFFLINE: \"false\"",
+    // The Verus checkout must be outside the workspace. Inside it, Cargo
+    // treats the Verus crates as members of the ghidorah workspace.
+    "${{ runner.temp }}/verus-src",
 ];
 
 /// Text that the tier-2 job must hold.
