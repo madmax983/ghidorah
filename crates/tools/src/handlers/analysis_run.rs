@@ -8,9 +8,17 @@
 //! `notifications/cancelled` stops the run at the next fuel checkpoint (AC-172).
 //!
 //! [`Engine`] is the analysis engine of the shipped tools: one [`Scheduler`] per open binary.
-//! A session with no engine gets one at the first call.
+//! A session with no engine gets one at the first call. A binary with no scheduler gets one
+//! by its analysis state:
+//!
+//! | Analysis state | Scheduler |
+//! |---|---|
+//! | none: the first analysis after a load | [`Scheduler::new`]: a publish after each run |
+//! | `complete`, from a project | none: the analysis is current, so the run does no work |
+//! | `budget_stopped` or `stale`, from a project | [`Scheduler::shadow`]: one publish at completion |
 
 use std::collections::BTreeMap;
+use std::collections::btree_map::Entry;
 
 use ghidorah_analysis::{AnalyzerRow, Changed, RunState, Scheduler, Until as Band};
 use ghidorah_base::{BinaryId, ErrorCode, Fuel};
@@ -85,7 +93,24 @@ impl AnalysisEngine for Engine {
             Until::Triage => Band::Triage,
             Until::Full => Band::Full,
         };
-        let scheduler = self.schedulers.entry(binary.id).or_default();
+        let scheduler = match self.schedulers.entry(binary.id) {
+            Entry::Occupied(found) => found.into_mut(),
+            Entry::Vacant(slot) => match binary.analysis.map(|a| a.state) {
+                // The first analysis after a load publishes after each run.
+                None => slot.insert(Scheduler::new()),
+                // A project with a current analysis needs no new run.
+                Some(AnalysisState::Complete) => {
+                    return Ok(RunReport {
+                        state: AnalysisState::Complete,
+                        steps_used: 0,
+                    });
+                }
+                // A project with a partial or stale set keeps it until a shadow completes.
+                Some(AnalysisState::BudgetStopped | AnalysisState::Stale) => {
+                    slot.insert(Scheduler::shadow())
+                }
+            },
+        };
         drive(scheduler, binary, band, fuel)
     }
 

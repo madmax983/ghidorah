@@ -281,3 +281,50 @@ fn reopen_with_changed_inputs_runs_the_engine() {
         "{history}"
     );
 }
+
+#[test]
+fn regress_reopen_keeps_the_committed_analysis() {
+    let dir = projects("regress_reopen_run");
+    let reopen = format!(r#"{{"binary_id":"{DEMO_ID}"}}"#);
+    let id = BinaryId::parse(DEMO_ID).expect("the ID parses");
+    {
+        let mut s = engine_session(&dir);
+        let load = call(&mut s, "binary_load", r#"{"builtin":"demo"}"#);
+        assert_eq!(text_at(data(&load), "/analysis/state"), "complete");
+    }
+    {
+        // A current analysis needs no new run: analysis_run reports it complete.
+        let mut s = engine_session(&dir);
+        let again = call(&mut s, "binary_load", &reopen);
+        let rev = int(&again, "/rev");
+        let funcs = s.binary(id).expect("open").program.analysis().clone();
+        let run = call(&mut s, "analysis_run", r#"{"max_steps":50}"#);
+        assert_eq!(text_at(data(&run), "/state"), "complete", "{run}");
+        assert_eq!(int(data(&run), "/steps_used"), 0, "{run}");
+        assert_eq!(run.get("partial"), Some(&Value::Bool(false)), "{run}");
+        assert_eq!(run.get("noop"), Some(&Value::Bool(true)), "{run}");
+        assert_eq!(int(&run, "/rev"), rev);
+        assert_eq!(s.binary(id).expect("open").program.analysis(), &funcs);
+        journal_function(&mut s, id);
+    }
+    // A stale analysis resumes as a shadow: reads keep the committed set until it completes.
+    let mut s = engine_session(&dir);
+    let stale = call(
+        &mut s,
+        "binary_load",
+        &format!(r#"{{"binary_id":"{DEMO_ID}","analysis":"none"}}"#),
+    );
+    assert_eq!(text_at(data(&stale), "/analysis/state"), "stale", "{stale}");
+    let rev = int(&stale, "/rev");
+    let funcs = s.binary(id).expect("open").program.analysis().clone();
+    let run = call(&mut s, "analysis_run", r#"{"max_steps":50}"#);
+    assert_eq!(text_at(data(&run), "/state"), "stale", "{run}");
+    assert_eq!(
+        int(&run, "/rev"),
+        rev,
+        "a stopped shadow publishes nothing: {run}"
+    );
+    assert_eq!(s.binary(id).expect("open").program.analysis(), &funcs);
+    let rest = call(&mut s, "analysis_run", "{}");
+    assert_eq!(text_at(data(&rest), "/state"), "complete", "{rest}");
+}
