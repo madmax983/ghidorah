@@ -19,6 +19,9 @@
 //! gives no record. The scan reads at most `Limits::plt_scan_bytes` bytes, and the limit
 //! gives one `E_LIMIT`.
 
+#[cfg(test)]
+mod tests;
+
 use std::collections::BTreeMap;
 
 use ghidorah_base::{BinText, DiagCode, Limits};
@@ -356,11 +359,7 @@ impl Scanner<'_> {
         };
         let want = got.checked_add(8).zip(got.checked_add(16));
         for region in map.regions().filter(|r| r.perms.contains(Perms::EXECUTE)) {
-            let bytes = usize::try_from(region.file_off).ok().and_then(|start| {
-                let len = usize::try_from(region.file_size).ok()?;
-                map.file().get(start..start.checked_add(len)?)
-            });
-            let Some(bytes) = bytes else {
+            let Some(bytes) = file_part(map, region.file_off, region.file_size) else {
                 continue;
             };
             let skew = usize::try_from(region.va.first.wrapping_neg() & 15).unwrap_or(0);
@@ -388,6 +387,16 @@ impl Scanner<'_> {
             }
         }
     }
+}
+
+/// Gives the file bytes `[off, off + len)`, cut at the end of the file.
+fn file_part(map: &MemoryMap, off: u64, len: u64) -> Option<&[u8]> {
+    let file = map.file();
+    let start = usize::try_from(off).ok()?;
+    let end = usize::try_from(off.saturating_add(len))
+        .unwrap_or(usize::MAX)
+        .min(file.len());
+    file.get(start..end)
 }
 
 /// Gives the place of each `DT_JMPREL` entry in table order.
@@ -442,11 +451,7 @@ fn scan(binary: &Binary, map: &MemoryMap, limits: &Limits, diags: &mut Diags) ->
             let Some(va) = sec.va else {
                 continue;
             };
-            let bytes = usize::try_from(sec.file_off).ok().and_then(|start| {
-                let len = usize::try_from(sec.size).ok()?;
-                map.file().get(start..start.checked_add(len)?)
-            });
-            let Some(bytes) = bytes else {
+            let Some(bytes) = file_part(map, sec.file_off, sec.size) else {
                 continue;
             };
             let stride = match sec.entsize {

@@ -1,0 +1,58 @@
+use super::{jump, lazy, padding8, plt0};
+
+#[test]
+fn matchers_read_the_forms() {
+    // jmp [rip+0x10] at 0x1000: slot = 0x1006 + 0x10.
+    assert_eq!(
+        jump(&[0xff, 0x25, 0x10, 0, 0, 0], 0x1000),
+        Some((0x1016, 6))
+    );
+    // endbr64; bnd jmp [rip-0x10].
+    let ibt = [
+        0xf3, 0x0f, 0x1e, 0xfa, 0xf2, 0xff, 0x25, 0xf0, 0xff, 0xff, 0xff,
+    ];
+    assert_eq!(jump(&ibt, 0x1000), Some((0x100b - 0x10, 11)));
+    assert_eq!(
+        jump(&[0xff, 0x15, 0, 0, 0, 0], 0x1000),
+        None,
+        "a call is no stub"
+    );
+    assert_eq!(jump(&[0xff, 0x25, 0, 0], 0x1000), None, "a cut field");
+    assert_eq!(
+        jump(&[0xff, 0x25, 0, 0, 0, 0x80], u64::MAX - 2),
+        None,
+        "an overflow"
+    );
+    // push 3; jmp rel32 to 0x1000 from 0x1010.
+    let lazy_bytes = [0x68, 3, 0, 0, 0, 0xe9, 0xf6, 0xff, 0xff, 0xff];
+    assert_eq!(lazy(&lazy_bytes, 0x1000), Some((3, 0x1000)));
+    let lazy_ibt = [
+        0xf3, 0x0f, 0x1e, 0xfa, 0x68, 1, 0, 0, 0, 0xf2, 0xe9, 0, 0, 0, 0,
+    ];
+    assert_eq!(lazy(&lazy_ibt, 0x2000), Some((1, 0x200f)));
+    assert_eq!(
+        lazy(&[0x68, 1, 0, 0, 0, 0xeb, 0], 0x2000),
+        None,
+        "a short jmp"
+    );
+    assert_eq!(lazy(&[0x6a, 1], 0x2000), None);
+    // push [rip+8]; jmp [rip+0x10].
+    let p0 = [0xff, 0x35, 0x08, 0, 0, 0, 0xff, 0x25, 0x10, 0, 0, 0];
+    assert_eq!(plt0(&p0, 0x1000), Some((0x100e, 0x101c)));
+    assert_eq!(plt0(&p0[..8], 0x1000), None);
+    assert_eq!(plt0(&[0xff, 0x35, 0, 0, 0, 0, 0x90], 0x1000), None);
+}
+
+#[test]
+fn padding_forms() {
+    assert!(padding8(&[0x90; 8]));
+    assert!(padding8(&[0xcc; 3]), "a short block at the end");
+    assert!(padding8(&[0; 8]));
+    assert!(padding8(&[0x66, 0x0f, 0x1f, 0x44, 0x00, 0x00, 0x66, 0x90]));
+    assert!(padding8(&[
+        0x0f, 0x1f, 0x40, 0x00, 0x0f, 0x1f, 0x00, 0x90, 0xff
+    ]));
+    assert!(!padding8(&[]));
+    assert!(!padding8(&[0x90, 0x55, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90]));
+    assert!(!padding8(&[0x0f, 0x1f, 0x44, 0x00, 0x01, 0, 0, 0]));
+}

@@ -3,7 +3,7 @@
 use ghidorah_base::{DiagCode, Limits};
 use ghidorah_loader::ehframe::{EhFrame, Place, parse, parse_bytes};
 use ghidorah_loader::{Binary, CfaRow, Fde};
-use ghidorah_testkit::elf::{self, ElfBuilder, Fde as BuilderFde, Loc, Section, Symbol};
+use ghidorah_testkit::elf::{self, ElfBuilder, Fde as BuilderFde, Loc, Malformed, Section, Symbol};
 
 use crate::frames::{self, GoldenFde};
 use crate::support::{codes, fixture, fixture_names, golden_body, has_fixture, load_ok};
@@ -602,4 +602,143 @@ fn limits_stop_the_walk() {
     assert_eq!(diag_codes(&got), vec![DiagCode::Limit]);
     assert_eq!(got.fdes.len(), 1);
     assert!(got.fdes[0].cfa_rows.is_empty());
+}
+
+#[test]
+fn header_view_errors() {
+    let base = || {
+        ElfBuilder::exec()
+            .section(Section::code(".text", &[0xc3; 16]))
+            .symbol(Symbol::func("f", Loc::section(".text", 0), 16))
+            .fde(BuilderFde::frame_pointer(Loc::symbol("f"), 16))
+            .strip_section_headers()
+    };
+    let (_, layout) = base().build_with_layout();
+    let hdr = layout
+        .section(".eh_frame_hdr")
+        .expect(".eh_frame_hdr")
+        .offset;
+    let patch = |at: u64, bytes: Vec<u8>| {
+        let file = base().malformed(Malformed::Patch(hdr + at, bytes)).build();
+        load_ok(&file).0
+    };
+    let b = patch(0, vec![2]);
+    assert_eq!(codes(&b), vec![DiagCode::BadMagic], "version 2");
+    assert!(b.fdes.is_empty());
+    let b = patch(1, vec![0x23]);
+    assert_eq!(
+        codes(&b),
+        vec![DiagCode::BadMagic],
+        "a textrel eh_frame_ptr"
+    );
+    let b = patch(1, vec![0xff]);
+    assert!(
+        b.fdes.is_empty() && b.diagnostics.is_empty(),
+        "an omitted eh_frame_ptr"
+    );
+    let b = patch(4, 0x4000_0000i32.to_le_bytes().to_vec());
+    assert_eq!(codes(&b), vec![DiagCode::Oob], "an unmapped eh_frame_ptr");
+    assert!(b.fdes.is_empty());
+}
+
+#[test]
+fn cie_errors() {
+    let cases: Vec<(&str, Vec<u8>, DiagCode)> = vec![
+        ("no version", vec![], DiagCode::Oob),
+        (
+            "augmentation with no end",
+            vec![1, b'z', b'R', b'x'],
+            DiagCode::Oob,
+        ),
+        ("cut header", vec![1, 0, 1, 0x78], DiagCode::Oob),
+        (
+            "augmentation data past the CIE",
+            vec![1, b'z', b'R', 0, 1, 0x78, 16, 0x20, 0x1b],
+            DiagCode::Oob,
+        ),
+        (
+            "personality encoding",
+            vec![
+                1, b'z', b'P', b'R', 0, 1, 0x78, 16, 6, 0x23, 0, 0, 0, 0, 0x1b,
+            ],
+            DiagCode::BadMagic,
+        ),
+        (
+            "omitted FDE encoding",
+            vec![1, b'z', b'R', 0, 1, 0x78, 16, 1, 0xff],
+            DiagCode::BadMagic,
+        ),
+    ];
+    for (what, body, code) in cases {
+        let mut eh = Eh::default();
+        let cie = eh.record(0, &body);
+        eh.fde(cie, 0x400, 0x10, &[0x41, 0x0e, 0x10]);
+        let got = eh.parse();
+        assert_eq!(diag_codes(&got), vec![code], "{what}");
+        assert!(got.fdes.is_empty(), "{what}");
+    }
+}
+
+#[test]
+fn cie_program_stop_keeps_the_ranges() {
+    let mut eh = Eh::default();
+    let cie = eh.cie("zR", &[0x1b], &[0x0f, 0x01, 0x30]);
+    eh.fde(cie, 0x400, 0x10, &[0x41, 0x0e, 0x10]);
+    eh.fde(cie, 0x410, 0x10, &[]);
+    let got = eh.parse();
+    assert_eq!(
+        diag_codes(&got),
+        vec![DiagCode::CfaOpcode],
+        "one diagnostic for the CIE"
+    );
+    assert_eq!(got.fdes.len(), 2);
+    assert!(got.fdes.iter().all(|f| f.cfa_rows.is_empty()));
+}
+
+#[test]
+fn cie_version_4() {
+    let mut eh = Eh::default();
+    let body = [
+        4, b'z', b'R', 0, 8, 0, 1, 0x78, 16, 1, 0x1b, 0x0c, 0x07, 0x08,
+    ];
+    let cie = eh.record(0, &body);
+    eh.fde(cie, 0x400, 0x10, &[0x41, 0x0e, 0x10]);
+    let got = eh.parse();
+    assert!(got.diagnostics.is_empty(), "{:?}", got.diagnostics);
+    assert_eq!(
+        got.fdes[0].cfa_rows,
+        vec![row(0x400, 7, 8), row(0x401, 7, 16)]
+    );
+}
+
+#[test]
+fn fde_errors() {
+    // The PC range field is cut.
+    let mut eh = Eh::default();
+    let cie = eh.gcc_cie();
+    let id_field = eh.buf.len() as u64 + 4;
+    eh.record(u32::try_from(id_field - cie).expect("ptr"), &[0x10, 0]);
+    let got = eh.parse();
+    assert_eq!(diag_codes(&got), vec![DiagCode::Oob], "a cut range");
+    assert!(got.fdes.is_empty());
+    // The augmentation data runs past the FDE.
+    let mut eh = Eh::default();
+    let cie = eh.gcc_cie();
+    let id_field = eh.buf.len() as u64 + 4;
+    let mut body = 0x10u32.to_le_bytes().to_vec();
+    body.extend_from_slice(&0x10u32.to_le_bytes());
+    body.push(0x40);
+    eh.record(u32::try_from(id_field - cie).expect("ptr"), &body);
+    let got = eh.parse();
+    assert_eq!(
+        diag_codes(&got),
+        vec![DiagCode::Oob],
+        "long augmentation data"
+    );
+    // The indirect form of a pointer has no memory in a byte walk.
+    let mut eh = Eh::default();
+    let cie = eh.cie("zR", &[0x9b], &[]);
+    eh.fde(cie, 0x400, 0x10, &[]);
+    let got = eh.parse();
+    assert_eq!(diag_codes(&got), vec![DiagCode::Oob], "an indirect pointer");
 }

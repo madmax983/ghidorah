@@ -14,6 +14,9 @@
 //! The x86 feature bits count only for x86-64 files. `DT_BIND_NOW` is the old form of
 //! `DF_BIND_NOW` (gABI), so it counts too.
 
+#[cfg(test)]
+mod tests;
+
 use ghidorah_kernel::{Endian, Reader};
 
 use crate::binary::{

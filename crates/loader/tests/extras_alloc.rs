@@ -1,13 +1,15 @@
-//! The heap of the `.eh_frame` walk on hostile bytes stays inside the bound of AC-055.
+//! The heap of the loader extras on hostile bytes stays inside the bound of AC-055.
 //!
-//! This binary installs the counting allocator of `ghidorah-oracle`. Each walk runs in
+//! This binary installs the counting allocator of `ghidorah-oracle`. Each run is in
 //! [`CountingAlloc::measure`], which counts only the heap of the calling thread.
 
 #![allow(clippy::expect_used, reason = "test helpers fail through expect")]
 
 use ghidorah_base::Limits;
 use ghidorah_loader::ehframe::{Place, parse_bytes};
+use ghidorah_loader::{LoadOpts, load};
 use ghidorah_oracle::alloc::CountingAlloc;
+use ghidorah_testkit::elf::{ElfBuilder, ImportKind, PltStyle, Section};
 
 #[global_allocator]
 static ALLOC: CountingAlloc = CountingAlloc::new();
@@ -95,6 +97,57 @@ fn eh_frame_bounded_allocation() {
                 stats.peak_bytes,
                 bytes.len()
             ));
+        }
+    }
+    assert!(problems.is_empty(), "{}", problems.join("\n"));
+}
+
+/// A file with many imports, each with a slot, a stub and a lazy stub.
+fn many_imports(style: PltStyle, strip: bool) -> Vec<u8> {
+    let mut b = ElfBuilder::dyn_object()
+        .section(Section::code(".text", &[0xc3; 16]))
+        .needed("libc.so.6")
+        .plt_style(style);
+    for i in 0..4000 {
+        let kind = match i % 3 {
+            0 => ImportKind::Plt,
+            1 => ImportKind::PltGot,
+            _ => ImportKind::Got,
+        };
+        b = b.import(&format!("import_{i}"), kind);
+    }
+    if strip {
+        b = b.strip_section_headers();
+    }
+    b.build()
+}
+
+#[test]
+fn imports_and_stubs_bounded_allocation() {
+    let mut problems = Vec::new();
+    for style in [PltStyle::Lazy, PltStyle::Ibt] {
+        for strip in [false, true] {
+            let bytes = many_imports(style, strip);
+            let (result, stats) = ALLOC.measure(|| {
+                load(&bytes, &LoadOpts::AUTO, &Limits::DEFAULT).map(|(b, _)| {
+                    let stubs = b.imports.iter().filter(|i| i.stub.is_some()).count();
+                    (b.imports.len(), stubs)
+                })
+            });
+            let (imports, stubs) = result.expect("load");
+            if imports != 4000 || stubs < 2600 {
+                problems.push(format!(
+                    "{style:?} {strip}: {imports} imports, {stubs} stubs"
+                ));
+            }
+            let limit = bound(bytes.len());
+            if stats.peak_bytes > limit {
+                problems.push(format!(
+                    "{style:?} {strip}: peak {} above {limit} for {} bytes",
+                    stats.peak_bytes,
+                    bytes.len()
+                ));
+            }
         }
     }
     assert!(problems.is_empty(), "{}", problems.join("\n"));
