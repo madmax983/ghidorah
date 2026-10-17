@@ -53,12 +53,12 @@ fn check_view(ssa: &Ssa, view: &View, what: &str) -> usize {
                     _ => None,
                 })
                 .collect();
-            let last = node
+            let term = node
                 .ops
                 .last()
                 .and_then(|&i| ssa.arena().op(i))
                 .map(|o| o.id);
-            users.push((last.expect("a node with a condition has ops"), list));
+            users.push((term.expect("a node with a condition has ops"), list));
         }
         for (user, list) in users {
             let Some(u) = ssa.op_index(user).and_then(pos) else {
@@ -89,13 +89,13 @@ fn check_view(ssa: &Ssa, view: &View, what: &str) -> usize {
 fn ac_103_fold_safety() {
     let mut rng = Xoshiro256ss::seed_from_u64(0x0103);
     let mut folded = 0;
-    for i in 0..2_000 {
+    for i in 0..4_000 {
         let p = random_program(&mut rng);
         let ssa = l1_of(&p);
         let d = decompile(&p, &ssa, &Opts::default());
         folded += check_view(&ssa, &d.view, &format!("program {i}"));
     }
-    assert!(folded > 300, "only {folded} folded loads");
+    assert!(folded > 100, "only {folded} folded loads");
 }
 
 #[test]

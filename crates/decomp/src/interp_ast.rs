@@ -17,14 +17,19 @@ use std::collections::BTreeMap;
 use ghidorah_ir::{Config, Image, Loc, Node, OpId, StopReason};
 
 use crate::Decomp;
-use crate::shape::Shape;
+use crate::shape::{Exit, Shape};
 use crate::tree::Tree;
+
+mod lower;
+mod value;
+
+pub(crate) use lower::{Step, lower};
 
 /// A branch oracle: it chooses each branch and each switch case.
 pub trait Oracle {
     /// Gives the branch of the `visit`-th run of `node`: `true` goes to `t`.
     fn branch(&self, node: Node, visit: u32) -> bool;
-    /// Gives the case of the `visit`-th run of `node` with `count` cases.
+    /// Gives the case of the `visit`-th run of `node` with `count` cases, below `count`.
     fn case(&self, node: Node, visit: u32, count: usize) -> usize;
 }
 
@@ -32,15 +37,25 @@ pub trait Oracle {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Seeded(pub u64);
 
+impl Seeded {
+    /// Gives the hash of one choice (the `SplitMix64` finalizer).
+    fn mix(self, node: Node, visit: u32) -> u64 {
+        let key = (u64::from(node.0) << 32) | u64::from(visit);
+        let mut z = self.0 ^ key.wrapping_mul(0x9e37_79b9_7f4a_7c15);
+        z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+        z ^ (z >> 31)
+    }
+}
+
 impl Oracle for Seeded {
     fn branch(&self, node: Node, visit: u32) -> bool {
-        let _ = (node, visit);
-        false
+        self.mix(node, visit) & 1 == 1
     }
 
     fn case(&self, node: Node, visit: u32, count: usize) -> usize {
-        let _ = (node, visit, count);
-        0
+        let n = u64::try_from(count).unwrap_or(u64::MAX).max(1);
+        usize::try_from(self.mix(node, visit) % n).unwrap_or(0)
     }
 }
 
@@ -64,24 +79,143 @@ pub struct Trace {
     pub end: End,
 }
 
+/// The visit counts of the nodes of one walk.
+struct Visits(Vec<u32>);
+
+impl Visits {
+    fn new(shape: &Shape) -> Self {
+        Self(vec![0; shape.len()])
+    }
+
+    /// Counts one more visit of `n`. Gives the new count.
+    fn bump(&mut self, n: Node) -> u32 {
+        match self.0.get_mut(n.index()) {
+            Some(c) => {
+                *c = c.saturating_add(1);
+                *c
+            }
+            None => 0,
+        }
+    }
+
+    fn get(&self, n: Node) -> u32 {
+        self.0.get(n.index()).copied().unwrap_or(0)
+    }
+}
+
 /// Walks the CFG of `shape` from its entry with `oracle`, for at most `limit` blocks.
 #[must_use]
 pub fn cfg_trace(shape: &Shape, oracle: &dyn Oracle, limit: usize) -> Trace {
-    let _ = (shape, oracle, limit);
-    Trace {
-        blocks: Vec::new(),
-        end: End::Stuck,
+    let mut blocks = Vec::new();
+    if !shape.is_valid() {
+        return Trace {
+            blocks,
+            end: End::Stuck,
+        };
+    }
+    let mut visits = Visits::new(shape);
+    let mut cur = shape.entry;
+    loop {
+        if blocks.len() >= limit {
+            return Trace {
+                blocks,
+                end: End::Limit,
+            };
+        }
+        blocks.push(cur);
+        let visit = visits.bump(cur);
+        cur = match shape.exit(cur) {
+            Exit::Fall(n) => *n,
+            Exit::Cond { t, f } => {
+                if oracle.branch(cur, visit) {
+                    *t
+                } else {
+                    *f
+                }
+            }
+            Exit::Switch(list) if !list.is_empty() => {
+                let i = oracle.case(cur, visit, list.len());
+                list.get(i).copied().unwrap_or(cur)
+            }
+            Exit::Switch(_) | Exit::Stop => {
+                return Trace {
+                    blocks,
+                    end: End::Halt,
+                };
+            }
+        };
     }
 }
 
 /// Runs `tree` over `shape` with `oracle`, for at most `limit` blocks.
 #[must_use]
 pub fn tree_trace(tree: &Tree, shape: &Shape, oracle: &dyn Oracle, limit: usize) -> Trace {
-    let _ = (tree, shape, oracle, limit);
-    Trace {
-        blocks: Vec::new(),
-        end: End::Stuck,
-    }
+    let code = lower(tree, shape);
+    let mut blocks = Vec::new();
+    let mut visits = Visits::new(shape);
+    let mut pc = 0usize;
+    let mut idle = 0usize;
+    let idle_cap = code.steps.len().saturating_add(4);
+    let end = loop {
+        let Some(step) = code.steps.get(pc) else {
+            break End::Stuck;
+        };
+        idle = idle.saturating_add(1);
+        if idle > idle_cap {
+            break End::Stuck;
+        }
+        let mut exec = |n: Node, blocks: &mut Vec<Node>| -> bool {
+            if blocks.len() >= limit {
+                return false;
+            }
+            blocks.push(n);
+            let _ = visits.bump(n);
+            true
+        };
+        pc = match step {
+            Step::Exec(n) => {
+                if !exec(*n, &mut blocks) {
+                    break End::Limit;
+                }
+                idle = 0;
+                pc.saturating_add(1)
+            }
+            Step::Test {
+                node,
+                neg,
+                exec: run,
+                t,
+                f,
+            } => {
+                if *run {
+                    if !exec(*node, &mut blocks) {
+                        break End::Limit;
+                    }
+                    idle = 0;
+                }
+                if oracle.branch(*node, visits.get(*node)) == *neg {
+                    *f
+                } else {
+                    *t
+                }
+            }
+            Step::Dispatch { node, table } => {
+                let count = match shape.exit(*node) {
+                    Exit::Switch(list) => list.len(),
+                    _ => 0,
+                };
+                if count == 0 || table.len() != count {
+                    break End::Stuck;
+                }
+                let i = oracle.case(*node, visits.get(*node), count);
+                table.get(i).copied().unwrap_or(usize::MAX)
+            }
+            Step::Jump(t) => *t,
+            Step::Halt => break End::Halt,
+            Step::Bad => break End::Stuck,
+        };
+    };
+    Trace { blocks, end }
 }
 
 /// The end of a value run.
@@ -105,7 +239,8 @@ impl Outcome {
     }
 }
 
-/// Runs the tree of `decomp` with values. `setup` gives the entry value of each location.
+/// Runs the tree of `decomp` with values. `setup` gives the entry value of each location, and
+/// a location without a value reads as 0.
 ///
 /// Each statement and each expression node takes one unit of `fuel`.
 #[must_use]
@@ -116,11 +251,5 @@ pub fn run(
     setup: &[(Loc, u128)],
     fuel: u64,
 ) -> Outcome {
-    let _ = (decomp, image, config, setup, fuel);
-    Outcome {
-        reason: StopReason::BadIr,
-        at: OpId { addr: 0, seq: 0 },
-        uses: Vec::new(),
-        writes: BTreeMap::new(),
-    }
+    value::run(decomp, image, config, setup, fuel)
 }

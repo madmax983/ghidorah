@@ -21,12 +21,19 @@ use std::fmt;
 
 use ghidorah_base::{Fuel, VarId};
 use ghidorah_ir::ssa::Ssa;
-use ghidorah_ir::{Arena, Loc};
+use ghidorah_ir::{Arena, Loc, Node, OpId};
 use ghidorah_types::CallConv;
 
 use crate::expr::{Expr, Stmt};
 use crate::shape::Shape;
-use crate::{Elided, Warning};
+use crate::{ElideReason, Elided, Warning, fold, vars};
+
+mod assemble;
+pub(crate) mod facts;
+pub(crate) mod stmts;
+
+use facts::Facts;
+use stmts::{Ex, Raw};
 
 /// The facts outside the L1 form that a view reads.
 pub trait Env {
@@ -106,6 +113,8 @@ pub struct NodeView {
     pub target: Option<Expr>,
     /// The block address of each case of a `Switch` exit.
     pub cases: Vec<u64>,
+    /// The flow op that ends a block node: a jump, a branch or an indirect jump.
+    pub term: Option<OpId>,
     /// The L1 ops of a block node in run order. An added node has none.
     pub ops: Vec<u32>,
     /// The address range `[start, end)` of the instructions of a block node.
@@ -123,12 +132,22 @@ pub struct View {
     pub nodes: Vec<NodeView>,
     /// The variables. Variable `i` is `vars[i]`.
     pub vars: Vec<Var>,
+    /// The address and the length of each instruction of the reachable blocks, in address
+    /// order.
+    pub insns: Vec<(u64, u8)>,
 }
 
 impl View {
+    /// Gives the length of the instruction at `addr`, or `None`.
+    #[must_use]
+    pub fn insn_len(&self, addr: u64) -> Option<u8> {
+        let i = self.insns.binary_search_by_key(&addr, |x| x.0).ok()?;
+        self.insns.get(i).map(|x| x.1)
+    }
+
     /// Gives the view of a node.
     #[must_use]
-    pub fn node(&self, n: ghidorah_ir::Node) -> Option<&NodeView> {
+    pub fn node(&self, n: Node) -> Option<&NodeView> {
         self.nodes.get(n.index())
     }
 
@@ -175,7 +194,7 @@ impl std::error::Error for ViewError {}
 
 /// Builds the view of `input`. With `fold`, single-use values go into their use.
 ///
-/// Each op of the view takes one unit of `fuel`.
+/// Each op of the L1 form takes one unit of `fuel`.
 ///
 /// # Errors
 ///
@@ -187,6 +206,54 @@ pub fn build(
     fold: bool,
     fuel: &mut Fuel,
 ) -> Result<Built, ViewError> {
-    let _ = (input, env, fold, fuel);
-    Err(ViewError::NoEntry)
+    let ssa = input.ssa;
+    let count = u64::try_from(ssa.arena().ops().len()).map_err(|_| ViewError::TooLarge)?;
+    fuel.take(count).map_err(|_| ViewError::OutOfFuel)?;
+    if u32::try_from(ssa.blocks().len()).is_err() {
+        return Err(ViewError::TooLarge);
+    }
+    let f = Facts::collect(ssa);
+    let first = *f.reach.first().ok_or(ViewError::NoEntry)?;
+    let entry = ssa.block_addr(first).ok_or(ViewError::NoEntry)?;
+    let plan = fold::plan(&f, fold);
+    let ex = Ex {
+        f: &f,
+        plan: &plan,
+        env,
+        tails: input.tail_calls,
+    };
+    let mut raws: Vec<Raw> = f.reach.iter().map(|&b| stmts::block(&ex, b)).collect();
+    let cx = vars::Ctx {
+        f: &f,
+        raws: &raws,
+        l0: input.l0,
+        conv: input.conv,
+        entry,
+    };
+    let assigned = vars::assign(&cx);
+    let mut warnings = Vec::new();
+    for raw in &mut raws {
+        assemble::remap_raw(raw, &assigned.of);
+        warnings.append(&mut raw.warnings);
+    }
+    let view = assemble::shape(&f, &mut raws, &assigned, entry);
+    let reached: BTreeSet<Node> = f.reach.iter().copied().collect();
+    let elided = (0..ssa.blocks().len())
+        .filter_map(|i| u32::try_from(i).ok().map(Node))
+        .filter(|b| !reached.contains(b))
+        .filter_map(|b| {
+            let start = ssa.block_addr(b)?;
+            let end = ssa.last_insn(b)?.next_addr()?;
+            Some(Elided {
+                start,
+                size: end.saturating_sub(start),
+                reason: ElideReason::Unreachable,
+            })
+        })
+        .collect();
+    Ok(Built {
+        view,
+        elided,
+        warnings,
+    })
 }

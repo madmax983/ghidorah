@@ -165,7 +165,7 @@ fn ac_101_expression_oracle() {
                 continue;
             }
             let got = run_ast(&prog, &d, &image);
-            assert_eq!(got, want, "program {i} with {passes:?}: {d:#?}");
+            assert_eq!(got, want, "program {i} with {passes:?}");
             compared += 1;
         }
     }

@@ -33,9 +33,9 @@ pub enum Cond {
         exec: bool,
     },
     /// Both conditions are true. The second one runs only when the first one is true.
-    And(Box<Cond>, Box<Cond>),
+    And(Box<Self>, Box<Self>),
     /// One condition is true. The second one runs only when the first one is false.
-    Or(Box<Cond>, Box<Cond>),
+    Or(Box<Self>, Box<Self>),
 }
 
 impl Cond {
@@ -121,15 +121,15 @@ pub enum Tree {
     /// The statements of a shape node.
     Block(Node),
     /// Trees in order.
-    Seq(Vec<Tree>),
+    Seq(Vec<Self>),
     /// `if (cond) then else els`.
     If {
         /// The condition.
         cond: Cond,
         /// The branch when the condition is true.
-        then: Box<Tree>,
+        then: Box<Self>,
         /// The branch when the condition is false.
-        els: Option<Box<Tree>>,
+        els: Option<Box<Self>>,
     },
     /// A loop.
     Loop {
@@ -138,7 +138,7 @@ pub enum Tree {
         /// The condition of a `While` or `DoWhile` loop.
         cond: Option<Cond>,
         /// The body.
-        body: Box<Tree>,
+        body: Box<Self>,
         /// The header node: the target of `continue`.
         head: Node,
         /// The node after the loop: the target of `break`.

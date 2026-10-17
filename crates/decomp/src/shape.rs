@@ -1,8 +1,9 @@
 //! The CFG that the structurer reads (design Section 8.1).
 //!
-//! A [`Shape`] has one node for each reachable block of the L1 form, plus the nodes that the
-//! out-of-SSA step adds: a `Start` node for the copies at the function entry, and an `Edge`
-//! node for the copies on a critical edge. Each node has an [`Exit`].
+//! A [`Shape`] has one node for each reachable block of the L1 form, plus added nodes: a
+//! `Start` node for the copies at the function entry, an `Edge` node for the copies on a
+//! critical edge, and a `Tail` node for a return after a branch in one instruction. Each node
+//! has an [`Exit`].
 //!
 //! | Exit | Meaning |
 //! |---|---|
@@ -34,6 +35,16 @@ pub enum Exit {
 }
 
 impl Exit {
+    /// Tells if the exit ends the run: `Stop`, or a switch with no case.
+    #[must_use]
+    pub fn is_stop(&self) -> bool {
+        match self {
+            Self::Stop => true,
+            Self::Switch(list) => list.is_empty(),
+            Self::Fall(_) | Self::Cond { .. } => false,
+        }
+    }
+
     /// Gives the successors in edge order. A successor can come more than once.
     #[must_use]
     pub fn succs(&self) -> Vec<Node> {
@@ -53,6 +64,9 @@ pub enum NodeKind {
     Block(Node),
     /// The copies of the phis of the entry block, before the entry block.
     Start,
+    /// The ops after a branch in the last instruction of a block, for example a return. The
+    /// node is the shape node of the block.
+    Tail(Node),
     /// The copies of the phis of `to` on the critical edge from `from`. Both are shape nodes.
     Edge {
         /// The node at the start of the edge.

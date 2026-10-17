@@ -14,17 +14,25 @@
 //! | [`flat`] | [`flat::tree`]: the FLAT output | Section 8.6 |
 //! | [`sailr`] | The SAILR-lite passes: canary removal, per-call-site noreturn, tail calls | Section 8.2 |
 //! | [`interp_ast`] | The CFG walker and the AST interpreter: block traces and values | Sections 8.2, 13.4 |
+//! | `fold` | Safe folding: the fold plan of each block | Section 8.2 |
+//! | `vars`, `vars_names` | Out-of-SSA variables with storage-based identity | Section 8.2 |
+//! | `schemas`, `loops` | The acyclic and cyclic schemas of the structurer | Section 8.1 |
 //!
 //! [`decompile`] runs the steps in order: the L1 form, the view (with safe folding and the
 //! out-of-SSA variables), the SAILR-lite passes and the structurer.
 
 pub mod expr;
 pub mod flat;
+mod fold;
 pub mod interp_ast;
+mod loops;
 pub mod sailr;
+mod schemas;
 pub mod shape;
 pub mod structure;
 pub mod tree;
+mod vars;
+mod vars_names;
 pub mod view;
 
 use std::fmt;
@@ -46,6 +54,10 @@ pub use view::{Env, Input, NoEnv, NodeView, Var, VarKind, View, ViewError};
 pub const DEFAULT_MAX_NODES: usize = 500;
 
 /// The switches of the decompiler passes (`passes` in `decomp_opts`).
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "one switch for each pass of decomp_opts"
+)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Passes {
     /// Safe folding of single-use values into their use.

@@ -160,16 +160,15 @@ pub fn lift(
     switches: &Switches,
     fuel: &mut Fuel,
 ) -> Result<L1Ir, L1Error> {
-    let _ = (
+    let (arena, tail_calls) = rewrite_tail_jumps(&l0);
+    let mut ssa = ssa::build(arena, l0.body.clone(), &ssa_opts(conv), fuel)?;
+    let report = passes::run(&mut ssa, switches, fuel)?;
+    Ok(L1Ir {
         l0,
-        conv,
-        switches,
-        fuel,
-        rewrite_tail_jumps,
-        passes::run,
-        ssa::build,
-    );
-    Err(L1Error::Ssa(SsaError::Full))
+        ssa,
+        report,
+        tail_calls,
+    })
 }
 
 /// Builds the L1 form of the published function `id` with the convention of its format.

@@ -282,10 +282,10 @@ fn l1_tail_jump_becomes_call() {
         "the tail call reads rdi"
     );
     assert!(violations(&ir).is_empty());
-    let opts = l1::ssa_opts(&SYSV_X86_64);
-    assert!(opts.ret_uses.contains(ghidorah_ir::Loc::RAX));
-    assert!(!opts.call_defs.contains(ghidorah_ir::Loc::RBX));
-    assert!(opts.call_defs.contains(ghidorah_ir::Loc::Flags));
+    let sets = l1::ssa_opts(&SYSV_X86_64);
+    assert!(sets.ret_uses.contains(ghidorah_ir::Loc::RAX));
+    assert!(!sets.call_defs.contains(ghidorah_ir::Loc::RBX));
+    assert!(sets.call_defs.contains(ghidorah_ir::Loc::Flags));
     let err = l1::L1Error::Ssa(ghidorah_ir::SsaError::OutOfFuel);
     assert!(err.to_string().contains("fuel"));
 }

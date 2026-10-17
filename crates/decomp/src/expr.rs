@@ -61,7 +61,7 @@ pub enum Expr {
         /// The width in bits.
         w: u8,
         /// The address.
-        addr: Box<Expr>,
+        addr: Box<Self>,
         /// The `Load` op.
         at: OpId,
     },
@@ -74,7 +74,7 @@ pub enum Expr {
         /// The aux byte of the op.
         sub: u8,
         /// The input.
-        x: Box<Expr>,
+        x: Box<Self>,
         /// The op.
         at: OpId,
     },
@@ -87,9 +87,9 @@ pub enum Expr {
         /// The aux byte of the op.
         sub: u8,
         /// The first input.
-        x: Box<Expr>,
+        x: Box<Self>,
         /// The second input.
-        y: Box<Expr>,
+        y: Box<Self>,
         /// The op.
         at: OpId,
     },
@@ -102,11 +102,11 @@ pub enum Expr {
         /// The aux byte of the op.
         sub: u8,
         /// The first input.
-        a: Box<Expr>,
+        a: Box<Self>,
         /// The second input.
-        b: Box<Expr>,
+        b: Box<Self>,
         /// The third input.
-        c: Box<Expr>,
+        c: Box<Self>,
         /// The op.
         at: OpId,
     },
