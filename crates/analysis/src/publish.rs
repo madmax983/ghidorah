@@ -10,6 +10,8 @@
 //! - A premise that is not in the set and not an input of the binary goes.
 //! - The creation order puts each premise before its fact. A premise that closes a cycle goes.
 //! - A set equal to the committed set gives a no-op commit with no event (AC-093).
+//! - The data references, the pointer slots and the strings come from `References` and
+//!   `Strings` (WP-17a).
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -113,6 +115,7 @@ struct Facts {
     units: Vec<Value>,
     refs: Vec<Ref>,
     whys: BTreeMap<FactKey, Why>,
+    kept: BTreeSet<u64>,
 }
 
 /// Collects the facts of `work` that go into the set.
@@ -123,6 +126,7 @@ fn collect(work: &Work) -> Facts {
         units: Vec::new(),
         refs: Vec::new(),
         whys: BTreeMap::new(),
+        kept: BTreeSet::new(),
     };
     let mut kept = BTreeSet::new();
     for (entry, f) in &work.funcs {
@@ -178,6 +182,7 @@ fn collect(work: &Work) -> Facts {
             out.whys.insert(FactKey::Ref(*key), why.clone());
         }
     }
+    out.kept = kept;
     out
 }
 
@@ -246,7 +251,15 @@ fn member(edit: &Edit, name: &str) -> Value {
 ///
 /// Returns [`AnalysisError::Codec`] when a row breaks a table rule.
 pub(crate) fn analysis_set(program: &Program, work: &Work) -> Result<AnalysisSet, AnalysisError> {
-    let facts = collect(work);
+    let mut facts = collect(work);
+    let data = crate::analyzers::refs::collect(
+        program,
+        work,
+        &facts.kept,
+        &mut facts.refs,
+        &mut facts.whys,
+    );
+    let strings = crate::analyzers::strings::collect(work, &mut facts.whys);
     let origin = Origin::analysis();
     let ordered = order(program, &facts.whys);
     let mut why_rows = Vec::with_capacity(ordered.len());
@@ -291,12 +304,12 @@ pub(crate) fn analysis_set(program: &Program, work: &Work) -> Result<AnalysisSet
     let empty = || Value::Array(Vec::new());
     let value = Value::object([
         ("comments", empty()),
-        ("data", empty()),
+        ("data", Value::Array(data)),
         ("funcs", Value::Array(funcs)),
         ("jumptables", empty()),
         ("overrides", empty()),
         ("refs", Value::Array(refs)),
-        ("strings", empty()),
+        ("strings", Value::Array(strings)),
         ("symbols", empty()),
         ("units", Value::Array(facts.units)),
         ("vars", empty()),

@@ -6,7 +6,7 @@
 
 use ghidorah_kernel::RangeSet;
 
-use crate::analyzers::{calls, disasm, endbr, entry, fde, noreturn, stubs, symbols};
+use crate::analyzers::{calls, disasm, endbr, entry, fde, noreturn, refs, strings, stubs, symbols};
 use crate::ctx::AnalysisCtx;
 use crate::spec::{AnalyzerSpec, Step};
 
@@ -31,6 +31,10 @@ pub enum AnalyzerId {
     CallTargets,
     /// `EndbrSeeds` (440): `endbr64` heads.
     EndbrSeeds,
+    /// `References` (600): data references of operands, relocations and address tables.
+    References,
+    /// `Strings` (650): ASCII, UTF-8 and UTF-16LE strings.
+    Strings,
 }
 
 /// The analyzers in the order of design Section 7.1.
@@ -58,6 +62,8 @@ pub fn run(id: AnalyzerId, ctx: &mut AnalysisCtx<'_>, ranges: &RangeSet) -> Step
         AnalyzerId::NoReturnDiscovered => noreturn::run_discovered(ctx, ranges),
         AnalyzerId::CallTargets => calls::run(ctx, ranges),
         AnalyzerId::EndbrSeeds => endbr::run(ctx, ranges),
+        AnalyzerId::References => refs::run(ctx, ranges),
+        AnalyzerId::Strings => strings::run(ctx, ranges),
     }
 }
 

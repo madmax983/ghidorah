@@ -127,6 +127,11 @@ impl<'a> AnalysisCtx<'a> {
         (self.events, self.requeue, self.changed)
     }
 
+    /// Records that the step changes the work state.
+    pub(crate) const fn touch(&mut self) {
+        self.changed = true;
+    }
+
     /// Gives the program: the input bytes and the facts of the base layer.
     #[must_use]
     pub const fn program(&self) -> &'a Program {

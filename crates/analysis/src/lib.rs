@@ -13,7 +13,7 @@
 //! | [`mod@cfg`] | The CFG of a function and its invariant check | Section 7.4 |
 //! | [`callgraph`] | The call graph of the published facts | Section 7.11 |
 //! | [`inputs`] | `analysis_inputs_hash` | Section 3.9 |
-//! | [`analyzers`] | The discovery analyzers of bands 100 to 440 | Sections 7.3, 7.7 |
+//! | [`analyzers`] | The analyzers of bands 100 to 650, and the derived views `gaps`, `lang` and `metrics` | Sections 7.3, 7.5 to 7.7, 7.11, 9.6 |
 //!
 //! The analyzers write into a work state. A publish step makes the analysis set of the
 //! program from the work state. So a read sees one consistent set after each fuel slice.
