@@ -7,7 +7,7 @@ use ghidorah_json::Value;
 use ghidorah_tools::ToolError;
 
 use crate::support::{
-    addr_of, all_items, call, data, fixture, items, json, program, str_of, text_at,
+    addr_of, all_items, call, code, data, fixture, items, json, program, str_of, text_at,
 };
 
 /// Gives the IDs of the items of a list envelope.
@@ -184,4 +184,30 @@ fn func_list_pages_with_cursor() {
         assert_eq!(paged, one, "{sort}");
         assert_eq!(paged.len(), full.len(), "{sort}");
     }
+}
+
+#[test]
+fn func_list_filters_the_code_pointer_reasons() {
+    let (mut session, _) = fixture("func_ptrs.clang-O2.noeh");
+    let all = all_items(&mut session, "func_list", &json("{}"), 1000);
+    let mut seeded = 0;
+    for reason in ["data_ptr", "addr_taken"] {
+        let args = json(&format!(
+            r#"{{"filter":{{"start_reason":["{reason}"]}},"limit":1000}}"#
+        ));
+        let envelope = crate::support::call_value(&mut session, "func_list", args);
+        assert!(
+            code(&envelope).is_empty(),
+            "the filter accepts {reason}: {envelope}"
+        );
+        let got = items(&envelope);
+        let want = all
+            .iter()
+            .filter(|i| str_of(i, "start_reason") == reason)
+            .count();
+        assert_eq!(got.len(), want, "{reason}");
+        assert!(got.iter().all(|i| str_of(i, "start_reason") == reason));
+        seeded += want;
+    }
+    assert!(seeded > 0, "the noeh build has code-pointer seeds");
 }

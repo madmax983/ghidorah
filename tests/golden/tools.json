@@ -326,7 +326,9 @@
                   "call",
                   "tail_call",
                   "endbr",
-                  "agent"
+                  "agent",
+                  "data_ptr",
+                  "addr_taken"
                 ],
                 "description": "One start reason."
               },
