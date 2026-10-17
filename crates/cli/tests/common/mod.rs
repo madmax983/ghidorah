@@ -40,8 +40,14 @@ pub fn tmp(name: &str) -> PathBuf {
 }
 
 /// Gives the environment of an in-process run: a fixed time and the temp directory `name`.
+///
+/// Tests that run in parallel can share `name`, so the directory keeps its content.
 pub fn env(name: &str) -> Env {
-    let mut env = Env::new(tmp(name));
+    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+        .join("cli")
+        .join(name);
+    std::fs::create_dir_all(&dir).expect("the temp directory exists");
+    let mut env = Env::new(dir);
     env.run = RunConfig {
         fixed_time: Some(FIXED_TIME),
         eval_mode: false,
