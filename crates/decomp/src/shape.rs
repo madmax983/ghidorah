@@ -1,9 +1,12 @@
 //! The CFG that the structurer reads (design Section 8.1).
 //!
-//! A [`Shape`] has one node for each reachable block of the L1 form, plus added nodes: a
-//! `Start` node for the copies at the function entry, an `Edge` node for the copies on a
-//! critical edge, and a `Tail` node for a return after a branch in one instruction. Each node
-//! has an [`Exit`].
+//! A [`Shape`] has one node for each reachable block of the L1 form, plus added nodes:
+//!
+//! - a `Start` node for the copies at the function entry,
+//! - an `Edge` node for the copies on a critical edge,
+//! - a `Tail` node for a return after a branch in one instruction.
+//!
+//! Each node has an [`Exit`].
 //!
 //! | Exit | Meaning |
 //! |---|---|

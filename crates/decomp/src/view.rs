@@ -1,7 +1,8 @@
 //! The expression view of an L1 form (design Section 8.2).
 //!
-//! [`build`] reads an L1 form and gives a [`View`]: the statements of each shape node, the
-//! branch condition and the switch target of each node, the variables and the [`Shape`].
+//! [`build`] reads an L1 form and gives a [`View`]. The view holds the statements, the branch
+//! condition and the switch target of each shape node. It also holds the variables and the
+//! [`Shape`].
 //!
 //! The build has four steps:
 //!
@@ -96,7 +97,7 @@ pub struct Var {
     pub w: u8,
     /// The kind.
     pub kind: VarKind,
-    /// The location of the values of the variable, when one is known.
+    /// The location of the values of the variable, when the view knows one.
     pub home: Option<Loc>,
     /// The location whose entry value the variable holds at the function start.
     pub input: Option<Loc>,

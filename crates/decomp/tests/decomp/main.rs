@@ -9,6 +9,7 @@
 )]
 #![allow(clippy::panic, reason = "a test fails through a panic")]
 
+mod corpus;
 mod fixtures;
 mod fold;
 mod goto;
@@ -16,3 +17,4 @@ mod oracle;
 mod progs;
 mod shapes;
 mod structure;
+mod units;

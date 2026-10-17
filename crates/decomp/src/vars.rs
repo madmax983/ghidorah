@@ -3,8 +3,8 @@
 //! Each L1 value that does not fold becomes a member of one variable:
 //!
 //! 1. Liveness over the reachable blocks gives the interference of the values. A phi argument
-//!    is live at the end of its predecessor, and a phi is defined at the start of its block.
-//!    The entry values are defined at the function start.
+//!    is live at the end of its predecessor, and the def of a phi is at the start of its
+//!    block. The defs of the entry values are at the function start.
 //! 2. A phi and each of its arguments share a variable when no two members interfere. Then the
 //!    values of one stack slot share a variable on the same rule.
 //! 3. Each phi argument in another variable gets a copy on its edge. The copies of one edge
@@ -309,8 +309,8 @@ impl Classes {
     }
 }
 
-/// Gives the values that need a variable, in def order: the used entry values, then for each
-/// reachable block its phis and the values of its statements.
+/// Gives the values that need a variable, in def order. The used entry values come first.
+/// Then each reachable block gives its phis and the values of its statements.
 fn members_in_order(cx: &Ctx<'_>) -> Vec<Val> {
     let mut out = inputs_of(cx.f);
     for raw in cx.raws {

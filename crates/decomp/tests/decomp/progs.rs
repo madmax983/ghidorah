@@ -1,7 +1,8 @@
 //! Random L0 programs and their L1 forms, and the L0 runs that the value oracle compares.
 //!
-//! The generator follows the generator of the `ghidorah-ir` SSA tests: 1 to 7 blocks of
-//! random ops over a pool of locations, with loads, stores, flags, calls and effect ops.
+//! The generator follows the generator of the `ghidorah-ir` SSA tests. A program has 1 to 7
+//! blocks of random ops over a pool of locations, with loads, stores, flags, calls and effect
+//! ops.
 
 #![allow(
     clippy::many_single_char_names,

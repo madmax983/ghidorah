@@ -1,5 +1,5 @@
-//! The facts of an L1 form that the view reads: the reachable blocks, the ops of each block,
-//! the kind of each value and its uses.
+//! The facts of an L1 form that the view reads. The facts are the reachable blocks, the ops of
+//! each block, the kind of each value and its uses.
 
 use std::collections::BTreeMap;
 

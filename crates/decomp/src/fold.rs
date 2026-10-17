@@ -5,8 +5,8 @@
 //! 1. The value has exactly one use, and the use is not a phi.
 //! 2. The use is in the same block, after the def. So the def never leaves a loop body.
 //! 3. No store, call, system call or opaque instruction runs between the def and the use.
-//! 4. No other op that can stop a run runs between a value that can stop a run and its use,
-//!    so the run stops at the same op as L0. A load and a division can stop a run.
+//! 4. A load and a division can stop a run. Between such a value and its use, no other op
+//!    that can stop a run runs. So the run stops at the same op as L0.
 //!
 //! The plan walks each block once. A deferred value runs at the place of its use. A barrier
 //! makes each deferred value that conflicts with it run at its own place: such a value becomes

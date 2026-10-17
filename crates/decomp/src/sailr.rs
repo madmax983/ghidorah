@@ -2,13 +2,14 @@
 //!
 //! | Pass | Switches | Effect |
 //! |---|---|---|
-//! | Stack-canary removal | `sailr`, `canary` | The check of the `fs:0x28` value and the `__stack_chk_fail` branch go. Their instructions are elided. |
+//! | Stack-canary removal | `sailr`, `canary` | The check of the `fs:0x28` value and the `__stack_chk_fail` branch go. The output leaves out their instructions. |
 //! | Per-call-site noreturn | `sailr` | A call at the end of a node that stops does not return. A callee without a noreturn fact gives `W_NORETURN_ASSUMED`. |
 //! | Tail calls | `sailr`, `tailcall` | A tail jump prints as `return f(..);`. Without the switches, it prints as a call. |
 //!
-//! A canary value is a 64-bit load of `fs:0x28`, a variable or a stack store of such a value,
-//! or the difference (`-` or `^`) of two canary values. A canary check is a branch on a
-//! compare where one side holds a canary value, and one branch calls `__stack_chk_fail`.
+//! A canary value is a 64-bit load of `fs:0x28`. A variable or a stack store of a canary
+//! value holds a canary value too, and so does the difference (`-` or `^`) of two canary
+//! values. A canary check is a branch on a compare where one side holds a canary value, and
+//! one branch calls `__stack_chk_fail`.
 //!
 //! Each pass edits the view. No pass edits L1.
 

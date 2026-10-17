@@ -482,7 +482,7 @@ fn drop_labels(t: Tree, used: &BTreeSet<Node>) -> Tree {
 }
 
 /// Cleans a structured tree (see the module doc). The tree depth is at most
-/// [`crate::structure::MAX_DEPTH`], so the recursion is bounded.
+/// [`crate::structure::MAX_DEPTH`], so [`crate::structure::MAX_DEPTH`] limits the recursion.
 pub(crate) fn finish(tree: Tree, shape: &Shape) -> Tree {
     let fixed = fix_jumps(tree, &mut Vec::new());
     let converted = seq_of(convert_all(fixed, shape));
