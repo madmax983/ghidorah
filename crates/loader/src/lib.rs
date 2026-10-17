@@ -13,17 +13,25 @@
 //! | [`raw`] | The raw loader | Section 4.1 |
 //! | [`limits`] | The caps of a load | Section 4.7 |
 //! | [`diag`] | [`Diagnostic`] and [`LoadError`] | Section 4.8 |
+//! | [`ehframe`] | `.eh_frame` FDEs and CFA rows | Section 4.4 |
+//! | [`imports`] | Imports and the import slot map | Section 4.5 |
+//! | [`stubs`] | PLT stubs and their names | Section 4.5 |
+//! | [`checksec`] | The protections of a file | Section 4.6 |
 //!
 //! The crate denies `indexing_slicing` and `arithmetic_side_effects`. Hostile input never
 //! causes a panic.
 
 pub mod binary;
+pub mod checksec;
 pub mod diag;
+pub mod ehframe;
 pub mod elf;
+pub mod imports;
 pub mod limits;
 pub mod memmap;
 pub mod probe;
 pub mod raw;
+pub mod stubs;
 
 use std::sync::Arc;
 

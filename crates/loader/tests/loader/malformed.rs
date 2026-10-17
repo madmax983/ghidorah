@@ -12,11 +12,6 @@ use ghidorah_testkit::elf::{
 
 use crate::support::{codes_of, fixture, load_ok, try_load};
 
-/// Variants whose expected code comes from a stage that the core load does not run.
-///
-/// `cfa_opcode` needs the `.eh_frame` CFA interpreter of the loader extras.
-const LATER_STAGE: &[&str] = &["cfa_opcode"];
-
 #[test]
 fn ac_054_elf_malformed_variants() {
     let variants = malformed_variants();
@@ -28,12 +23,6 @@ fn ac_054_elf_malformed_variants() {
             problems.push(format!("{}: panic", v.name));
             continue;
         };
-        if LATER_STAGE.contains(&v.name) {
-            if try_load(&v.bytes).is_err() {
-                problems.push(format!("{}: the load fails", v.name));
-            }
-            continue;
-        }
         let want = DiagCode::from_name(v.expect).expect("catalog code");
         if !codes.contains(&want) {
             problems.push(format!("{}: want {}, got {codes:?}", v.name, v.expect));
