@@ -10,6 +10,7 @@
 //! | K1 Reader | [`reader`] | [`Reader`]: fixed-width reads, LEB128, C strings, `take`, `skip`, `seek` |
 //! | K2 Range math | [`range`] | [`range_last`], [`Range`], [`va_to_file`] |
 //! | K3 `RangeSet` | [`rangeset`] | [`RangeSet`]: `contains`, `find`, `insert`, `remove`, set operations |
+//! | K5 Flag fusion | [`flags`] | [`fused_pred`], [`eval_pred`], [`fused_rhs`] and the `Sub`, `Add` and `Logic` flags |
 //! | K6 Budget fit | [`budget`] | [`fit_prefix`] |
 //! | K7 Provenance | [`source`] | [`may_overwrite`] |
 //!
@@ -17,12 +18,14 @@
 //! Each exception names the reason "bound proved by Verus".
 
 pub mod budget;
+pub mod flags;
 pub mod range;
 pub mod rangeset;
 pub mod reader;
 pub mod source;
 
 pub use budget::fit_prefix;
+pub use flags::{FuseOp, Pred, eval_pred, fused_pred, fused_rhs};
 pub use range::{Mapping, Range, range_last, va_to_file};
 pub use rangeset::RangeSet;
 pub use reader::{Endian, ReadError, Reader};

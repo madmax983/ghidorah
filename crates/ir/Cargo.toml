@@ -1,0 +1,24 @@
+[package]
+name = "ghidorah-ir"
+description = "L0 op arena, locations, flag semantics, fusion through kernel K5, interpreter and graph algorithms."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# The crate has no unit tests. Its tests are in the test binary `tests/ir/main.rs`.
+[lib]
+name = "ghidorah_ir"
+path = "src/lib.rs"
+test = false
+
+[dependencies]
+ghidorah-base = { path = "../base" }
+ghidorah-kernel = { path = "../kernel" }
+
+[dev-dependencies]
+ghidorah-testkit = { path = "../testkit" }
+
+[lints]
+workspace = true

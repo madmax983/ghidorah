@@ -69,6 +69,10 @@ pub const KERNELS: &[Kernel] = &[
         module: "rangeset",
     },
     Kernel {
+        name: "K5",
+        module: "flags",
+    },
+    Kernel {
         name: "K6",
         module: "budget",
     },
