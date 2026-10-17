@@ -353,6 +353,31 @@ fn golden_changes_count_per_area() {
 }
 
 #[test]
+fn golden_x86_runs_the_x86_tests_with_tier2() {
+    let args = golden::X86_ARGS;
+    let package = args
+        .iter()
+        .position(|a| *a == "-p")
+        .expect("a package flag");
+    assert_eq!(args.get(package + 1), Some(&"ghidorah-x86"));
+    assert_eq!(args.first(), Some(&"test"));
+    assert!(!args.contains(&"--workspace"), "{args:?}");
+    let split = args
+        .iter()
+        .position(|a| *a == "--")
+        .expect("test binary arguments");
+    assert_eq!(args.get(split + 1..), Some(&["--include-ignored"][..]));
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("the workspace root");
+    let extra = golden::run(root, &["x86".to_owned(), "extra".to_owned()]);
+    assert!(
+        matches!(&extra, Err(xtask::Error::Usage(u)) if u.ends_with("|headers|x86>")),
+        "{extra:?}"
+    );
+}
+
+#[test]
 fn pretty_json_is_stable() {
     let value =
         json::parse(r#"{"b":[1,2],"a":{"x":[{"k":"v"}],"e":[],"o":{}},"s":"t\n"}"#).expect("json");

@@ -4,6 +4,7 @@
 //! |---|---|
 //! | `xtask golden bless [cargo test args]` | Runs `cargo test --workspace` with `GHIDORAH_BLESS=1`. Prints the count of changed golden files per area. |
 //! | `xtask golden headers` | Checks the golden headers against `fixtures/manifest.json` (AC-022). |
+//! | `xtask golden x86` | Runs the `ghidorah-x86` golden tests and their tier-2 oracle tests with `GHIDORAH_BLESS=1` (Section 13.8). |
 //!
 //! An area is the first directory under `tests/golden`, for example `loader`. A file at the top
 //! of `tests/golden` has the area `.`. The command sets the bless variable only for its child
@@ -20,6 +21,20 @@ use crate::{Error, Finding, proc};
 
 /// The golden root, relative to the workspace root.
 pub const ROOT: &str = "tests/golden";
+
+/// The cargo arguments of `xtask golden x86`.
+///
+/// The `x86` test binary writes `tests/golden/x86_text` again. Its tier-2 tests compare
+/// `tests/golden/x86_len` and `tests/data/x86_spec.txt` with `llvm-objdump` and GNU `objdump`.
+pub const X86_ARGS: &[&str] = &[
+    "test",
+    "-p",
+    "ghidorah-x86",
+    "--test",
+    "x86",
+    "--",
+    "--include-ignored",
+];
 
 /// The depth limit of the directory walk.
 const MAX_DEPTH: usize = 8;
@@ -81,10 +96,14 @@ pub fn changes(before: &Snapshot, after: &Snapshot) -> BTreeMap<String, u64> {
 }
 
 fn bless(root: &Path, extra: &[String]) -> Result<Value, Error> {
-    let before = snapshot(root)?;
     let mut args = vec!["test", "--workspace"];
     args.extend(extra.iter().map(String::as_str));
-    let mut cmd = proc::cargo_cmd(&args);
+    bless_run(root, &args)
+}
+
+fn bless_run(root: &Path, args: &[&str]) -> Result<Value, Error> {
+    let before = snapshot(root)?;
+    let mut cmd = proc::cargo_cmd(args);
     cmd.current_dir(root)
         .env(ghidorah_testkit::golden::BLESS_ENV, "1");
     let out = proc::run(&mut cmd)?;
@@ -100,7 +119,7 @@ fn bless(root: &Path, extra: &[String]) -> Result<Value, Error> {
     ]))
 }
 
-/// Runs `xtask golden <bless|headers>`.
+/// Runs `xtask golden <bless|headers|x86>`.
 ///
 /// # Errors
 ///
@@ -108,6 +127,7 @@ fn bless(root: &Path, extra: &[String]) -> Result<Value, Error> {
 pub fn run(root: &Path, args: &[String]) -> Result<Value, Error> {
     match args.split_first() {
         Some((cmd, rest)) if cmd == "bless" => bless(root, rest),
+        Some((cmd, [])) if cmd == "x86" => bless_run(root, X86_ARGS),
         Some((cmd, [])) if cmd == "headers" => {
             let found = manifest::check_goldens(root, &manifest::read(root)?)?;
             Ok(Value::object([
@@ -119,7 +139,7 @@ pub fn run(root: &Path, args: &[String]) -> Result<Value, Error> {
             ]))
         }
         _ => Err(Error::Usage(
-            "cargo xtask golden <bless [cargo test args]|headers>".to_owned(),
+            "cargo xtask golden <bless [cargo test args]|headers|x86>".to_owned(),
         )),
     }
 }

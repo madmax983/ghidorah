@@ -174,11 +174,12 @@ fn fixtures_and_golden_commands() {
 #[test]
 fn fixtures_and_golden_are_commands_of_the_binary() {
     // Each row: the arguments, the exit code and a part of the error text.
-    let cases: [(&[&str], i32, &str); 5] = [
+    let cases: [(&[&str], i32, &str); 6] = [
         (&["fixtures", "check"], 0, ""),
         (&["golden", "headers"], 0, ""),
         (&["fixtures", "bogus"], 2, "cargo xtask fixtures <"),
         (&["golden"], 2, "cargo xtask golden <"),
+        (&["golden", "x86", "extra"], 2, "|headers|x86>"),
         (&["no-such-command"], 2, "|fixtures|golden>"),
     ];
     for (args, code, error) in cases {
