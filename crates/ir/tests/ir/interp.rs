@@ -341,3 +341,59 @@ fn each_stop_reason() {
     assert_eq!(stop.reason, StopReason::NoCode(0x9999));
     assert_eq!(stop.steps, 0);
 }
+
+/// Draws one argument: a value, a constant, a location or nothing.
+fn random_arg(g: &mut ghidorah_testkit::pbt::Gen) -> Arg {
+    match g.draw(4) {
+        0 => Arg::V(Val(u32::try_from(g.draw(12)).unwrap_or(0))),
+        1 => Arg::k(g.u64()),
+        2 => Arg::L(
+            *g.pick(&[
+                Loc::RAX,
+                Loc::RSP,
+                Loc::Flags,
+                Loc::Stack(-8),
+                Loc::Reg(300),
+            ])
+            .expect("not empty"),
+        ),
+        _ => Arg::Nil,
+    }
+}
+
+#[test]
+fn interp_never_panics_on_random_ops() {
+    use ghidorah_testkit::pbt::check;
+    check("interp_never_panics_on_random_ops", 3_000, |g| {
+        let count = g.range(1, 12);
+        let mut b = ghidorah_ir::Builder::new();
+        for i in 0..count {
+            b.begin(0x1000 + 4 * i, 4).map_err(|e| e.to_string())?;
+            b.flow(Opc::Nop, NIL, NIL).map_err(|e| e.to_string())?;
+            b.flow(Opc::Nop, NIL, NIL).map_err(|e| e.to_string())?;
+        }
+        let mut arena = b.finish();
+        for op in arena.ops_mut() {
+            let code = u8::try_from(g.draw(64)).unwrap_or(0);
+            op.opc = Opc::from_code(code).unwrap_or(Opc::Nop);
+            op.w = g.u8();
+            op.sub = g.u8();
+            op.out = g
+                .bool()
+                .then(|| Val(u32::try_from(g.draw(16)).unwrap_or(0)));
+            op.a = [random_arg(g), random_arg(g), random_arg(g)];
+        }
+        let image = FlatImage::new(0, vec![0x5a; 64], g.bool());
+        let config = Config {
+            mem_cap: g.draw(32),
+            externals: BTreeSet::from([0x4000]),
+        };
+        let mut interp = Interp::new(&arena, &image, config);
+        interp.set_loc(Loc::RSP, 32);
+        let stop = interp.run(0x1000, &mut Fuel::new(g.draw(200)));
+        if stop.steps > 200 {
+            return Err(format!("{stop:?} takes more than its fuel"));
+        }
+        Ok(())
+    });
+}

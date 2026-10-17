@@ -280,7 +280,7 @@ impl<'a> Interp<'a> {
                 if fuel.tick().is_err() {
                     return stop(StopReason::FuelExhausted, at, steps);
                 }
-                steps += 1;
+                steps = steps.saturating_add(1);
             }
             let mut jump = None;
             for op in ops {
@@ -288,7 +288,7 @@ impl<'a> Interp<'a> {
                 if fuel.tick().is_err() {
                     return stop(StopReason::FuelExhausted, at, steps);
                 }
-                steps += 1;
+                steps = steps.saturating_add(1);
                 match self.step(op) {
                     Flow::Next => {}
                     Flow::Goto(addr) => {

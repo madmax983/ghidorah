@@ -2,6 +2,7 @@
 
 use ghidorah_ir::sem::{AF, CF, OF, PF, SF, STATUS, ZF};
 use ghidorah_ir::{Cc, FlagOp, undefined_mask, x86_cond, x86_flags};
+use ghidorah_testkit::pbt::check;
 
 /// `(op, w, a, b, c, flags)`: rows from the Intel SDM rules. The test masks undefined flags.
 const ROWS: &[(FlagOp, u8, u64, u64, u64, u16)] = &[
@@ -164,4 +165,177 @@ fn conditions_read_the_flag_bits() {
     assert_eq!(Cc::x86(16), None);
     let names: Vec<&str> = (0..16).filter_map(Cc::x86).map(Cc::name).collect();
     assert_eq!(names.join(" "), "o no b ae e ne be a s ns p np l ge le g");
+}
+
+/// The ZF, SF and PF flags of a model result.
+fn model_result(res: u128, w: u32) -> u16 {
+    let mut flags = 0;
+    if res == 0 {
+        flags |= ZF;
+    }
+    if (res >> (w - 1)) & 1 == 1 {
+        flags |= SF;
+    }
+    if (res & 0xff).count_ones().is_multiple_of(2) {
+        flags |= PF;
+    }
+    flags
+}
+
+/// The signed value of the low `w` bits.
+fn model_signed(x: u128, w: u32) -> i128 {
+    let shift = 128 - w;
+    (x << shift).cast_signed() >> shift
+}
+
+/// Gives `value` when `set` is true, else 0.
+const fn bit(set: bool, value: u16) -> u16 {
+    if set { value } else { 0 }
+}
+
+/// The model of the shifts at a count from 1 to `w - 1`.
+fn model_shift(op: FlagOp, w: u32, lhs: u128, cnt: u32) -> u16 {
+    let low = (1u128 << w) - 1;
+    let (res, cf, of) = match op {
+        FlagOp::X86Shl => {
+            let wide = lhs << cnt;
+            let cf = (wide >> w) & 1 == 1;
+            (wide & low, cf, ((wide >> (w - 1)) & 1 == 1) != cf)
+        }
+        FlagOp::X86Shr => (
+            lhs >> cnt,
+            (lhs >> (cnt - 1)) & 1 == 1,
+            (lhs >> (w - 1)) & 1 == 1,
+        ),
+        _ => (
+            (model_signed(lhs, w) >> cnt).cast_unsigned() & low,
+            (lhs >> (cnt - 1)) & 1 == 1,
+            false,
+        ),
+    };
+    bit(cf, CF) | bit(of, OF) | model_result(res, w)
+}
+
+/// The model of the rotates. A masked count of 0 keeps the old flags.
+fn model_rotate(op: FlagOp, w: u32, lhs: u128, cnt: u128, old: u16) -> u16 {
+    if cnt == 0 {
+        return old;
+    }
+    let low = (1u128 << w) - 1;
+    let turn = u32::try_from(cnt % u128::from(w)).unwrap_or(0);
+    let res = if turn == 0 {
+        lhs
+    } else if op == FlagOp::X86Rol {
+        ((lhs << turn) | (lhs >> (w - turn))) & low
+    } else {
+        ((lhs >> turn) | (lhs << (w - turn))) & low
+    };
+    let top = (res >> (w - 1)) & 1 == 1;
+    let (cf, of) = if op == FlagOp::X86Rol {
+        (res & 1 == 1, top != (res & 1 == 1))
+    } else {
+        (top, top != ((res >> (w - 2)) & 1 == 1))
+    };
+    (old & !(CF | OF)) | bit(cf, CF) | bit(of, OF)
+}
+
+/// The `u128` model of the flags of the operations outside K5. `old` is the old flags word.
+fn model_flags(op: FlagOp, w: u32, a: u64, b: u64, old: u16) -> u16 {
+    let low = (1u128 << w) - 1;
+    let (lhs, rhs) = (u128::from(a) & low, u128::from(b) & low);
+    let (slhs, srhs) = (model_signed(lhs, w), model_signed(rhs, w));
+    let (min, max) = (-(1i128 << (w - 1)), (1i128 << (w - 1)) - 1);
+    let out = |exact: i128| exact < min || exact > max;
+    let cin = u128::from(old & CF);
+    let cnt = u128::from(b) & if w == 64 { 63 } else { 31 };
+    match op {
+        FlagOp::X86Adc => {
+            let full = lhs + rhs + cin;
+            bit(full > low, CF)
+                | bit(out(slhs + srhs + cin.cast_signed()), OF)
+                | bit((lhs & 0xf) + (rhs & 0xf) + cin > 0xf, AF)
+                | model_result(full & low, w)
+        }
+        FlagOp::X86Sbb => {
+            let full = lhs.cast_signed() - rhs.cast_signed() - cin.cast_signed();
+            bit(full < 0, CF)
+                | bit(out(slhs - srhs - cin.cast_signed()), OF)
+                | bit((lhs & 0xf) < (rhs & 0xf) + cin, AF)
+                | model_result(full.cast_unsigned() & low, w)
+        }
+        FlagOp::X86Inc => {
+            (old & CF)
+                | bit(out(slhs + 1), OF)
+                | bit(lhs & 0xf == 0xf, AF)
+                | model_result((lhs + 1) & low, w)
+        }
+        FlagOp::X86Dec => {
+            (old & CF)
+                | bit(out(slhs - 1), OF)
+                | bit(lhs.trailing_zeros() >= 4, AF)
+                | model_result(lhs.wrapping_sub(1) & low, w)
+        }
+        FlagOp::X86Neg => {
+            bit(lhs != 0, CF)
+                | bit(out(-slhs), OF)
+                | bit(lhs & 0xf != 0, AF)
+                | model_result(lhs.wrapping_neg() & low, w)
+        }
+        FlagOp::X86UMul => bit((lhs * rhs) >> w != 0, CF | OF),
+        FlagOp::X86SMul => bit(out(slhs * srhs), CF | OF),
+        FlagOp::X86Bt => bit((lhs >> (u128::from(b) % u128::from(w))) & 1 == 1, CF) | (old & ZF),
+        FlagOp::X86Shl | FlagOp::X86Shr | FlagOp::X86Sar => {
+            model_shift(op, w, lhs, u32::try_from(cnt).unwrap_or(0))
+        }
+        _ => model_rotate(op, w, lhs, cnt, old),
+    }
+}
+
+#[test]
+fn flag_operations_against_u128_model() {
+    let ops = [
+        FlagOp::X86Adc,
+        FlagOp::X86Sbb,
+        FlagOp::X86Inc,
+        FlagOp::X86Dec,
+        FlagOp::X86Neg,
+        FlagOp::X86UMul,
+        FlagOp::X86SMul,
+        FlagOp::X86Bt,
+        FlagOp::X86Shl,
+        FlagOp::X86Shr,
+        FlagOp::X86Sar,
+        FlagOp::X86Rol,
+        FlagOp::X86Ror,
+    ];
+    check("flag_operations_against_u128_model", 4_000, |g| {
+        let a = g.u64();
+        let old = u16::try_from(g.draw(0x1000)).unwrap_or(0) & STATUS;
+        for w in [8u32, 16, 32, 64] {
+            for op in ops {
+                let shift = matches!(op, FlagOp::X86Shl | FlagOp::X86Shr | FlagOp::X86Sar);
+                let rotate = matches!(op, FlagOp::X86Rol | FlagOp::X86Ror);
+                // A shift count from 1 to w - 1: the other counts leave CF undefined.
+                let b = if shift {
+                    g.range(1, u64::from(w) - 1)
+                } else {
+                    g.u64()
+                };
+                let cnt = b & if w == 64 { 63 } else { 31 };
+                let mut keep = !undefined_mask(op);
+                if (shift || rotate) && cnt == 1 {
+                    keep |= OF;
+                }
+                let width = u8::try_from(w).unwrap_or(64);
+                let got = x86_flags(op, width, a, b, u64::from(old));
+                let want = model_flags(op, w, a, b, old);
+                if got & keep != want & keep {
+                    return Err(format!(
+                        "{op:?} w={w} a={a:#x} b={b:#x} old={old:#x}: {got:#x}, model {want:#x}"
+                    ));
+                }
+            }
+        }
+        Ok(())
+    });
 }
