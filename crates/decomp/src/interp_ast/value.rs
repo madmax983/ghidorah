@@ -369,13 +369,18 @@ pub(super) fn run(
     }
 }
 
-/// Walks the lowered steps until a stop.
+/// Walks the lowered steps until a stop. Each step takes one unit of fuel, so a loop of pure
+/// nodes ends on fuel.
 fn walk(m: &mut Machine<'_>, steps: &[Step]) -> Stop {
     let mut pc = 0usize;
     loop {
         let Some(step) = steps.get(pc) else {
             return stop(StopReason::BadIr, m.last);
         };
+        let at = m.last;
+        if let Err(s) = m.tick(at) {
+            return s;
+        }
         let next = match step {
             Step::Exec(n) => m.node(*n).map(|()| pc.saturating_add(1)),
             Step::Test {
@@ -392,10 +397,7 @@ fn walk(m: &mut Machine<'_>, steps: &[Step]) -> Stop {
             Step::Dispatch { node, table } => m
                 .case(*node)
                 .map(|i| table.get(i).copied().unwrap_or(usize::MAX)),
-            Step::Jump(t) => {
-                let at = m.last;
-                m.tick(at).map(|()| *t)
-            }
+            Step::Jump(t) => Ok(*t),
             Step::Halt => Err(m.halt()),
             Step::Bad => Err(stop(StopReason::BadIr, m.last)),
         };

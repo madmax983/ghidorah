@@ -15,6 +15,7 @@ mod fold;
 mod goto;
 mod oracle;
 mod progs;
+mod regress;
 mod shapes;
 mod structure;
 mod units;

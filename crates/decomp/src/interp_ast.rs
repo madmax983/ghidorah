@@ -242,7 +242,8 @@ impl Outcome {
 /// Runs the tree of `decomp` with values. `setup` gives the entry value of each location, and
 /// a location without a value reads as 0.
 ///
-/// Each statement and each expression node takes one unit of `fuel`.
+/// Each step of the lowered code, each statement and each expression node takes one unit of
+/// `fuel`.
 #[must_use]
 pub fn run(
     decomp: &Decomp,
