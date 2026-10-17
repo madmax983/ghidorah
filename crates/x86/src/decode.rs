@@ -20,7 +20,7 @@ use crate::tables::map0::MAP0;
 use crate::tables::map1::MAP1;
 use crate::tables::mnem::Mnem;
 use crate::tables::ops::{
-    ACCESS, ADDR, D64, Entry, F64, IV, K, Kind, LOCK, MOVQ, REGF, RW1, RW2, S, UNDEF, W1,
+    ACCESS, ADDR, D64, Entry, F64, IV, K, Kind, LOCK, MEMF, MOVQ, REGF, RW1, RW2, S, UNDEF, W1,
 };
 
 /// Builds the instruction of a scanned layout.
@@ -105,6 +105,7 @@ fn lookup(lay: &Layout) -> Result<(Entry, bool), DecodeError> {
         let rm_mem = lay.modrm.is_some_and(|m| m >> 6 != 3);
         match cols.get(usize::from(col)) {
             Some(e) if e.flags & REGF != 0 && rm_mem => (cols[0], false),
+            Some(e) if e.flags & MEMF != 0 && !rm_mem => (cols[0], false),
             Some(e) if col != 0 && e.kind != Kind::Undef => (*e, true),
             _ => (cols[0], false),
         }

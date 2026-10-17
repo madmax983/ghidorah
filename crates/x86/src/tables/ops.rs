@@ -162,6 +162,8 @@ pub(crate) const REP: u16 = 1 << 7;
 pub(crate) const REPZ: u16 = 1 << 8;
 /// The prefix column has only a register form. With memory the no-prefix column applies.
 pub(crate) const REGF: u16 = 1 << 9;
+/// The prefix column has only a memory form. With a register the no-prefix column applies.
+pub(crate) const MEMF: u16 = 1 << 10;
 
 /// No operand.
 pub(crate) const NO: Spec = Spec {

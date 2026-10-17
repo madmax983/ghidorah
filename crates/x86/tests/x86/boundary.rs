@@ -303,7 +303,11 @@ fn length_reads_at_most_15_bytes() {
 #[test]
 fn regress_rex2_map1_opcodes_40_to_4f_and_66() {
     // In map 1 the bytes 40 to 4F (cmovcc) and 66, F2 and F3 are opcodes, not prefixes.
-    for (text, n) in [("d5 80 4e 49 a5", 5), ("d5 80 66 f8", 4), ("d5 80 f2 d3", 4)] {
+    for (text, n) in [
+        ("d5 80 4e 49 a5", 5),
+        ("d5 80 66 f8", 4),
+        ("d5 80 f2 d3", 4),
+    ] {
         let insn = dec(&hex(text), 0).unwrap_or_else(|e| panic!("{text}: {e}"));
         assert!(insn.is_opaque(), "{text}");
         assert_eq!(insn.len(), n, "{text}");
@@ -341,4 +345,16 @@ fn regress_jcc_rel32_with_rep_and_66() {
     assert_eq!(length(&hex("66 f2 0f 84 00 00 00 00")), Ok(8));
     assert_eq!(length(&hex("66 0f 84 00 00")), Ok(5));
     assert_eq!(length(&hex("66 f3 e9 00 00")), Ok(5));
+}
+
+#[test]
+fn regress_movlpd_register_form_is_movhlps() {
+    // `66 0F 12` and `66 0F 16` have only a memory form. With a register the LLVM rule
+    // decodes the no-prefix form.
+    let insn = dec(&hex("66 0f 12 c1"), 0).expect("movhlps");
+    assert_eq!((insn.mnem(), insn.len()), (Mnem::Movhlps, 4));
+    let insn = dec(&hex("66 0f 16 c1"), 0).expect("movlhps");
+    assert_eq!((insn.mnem(), insn.len()), (Mnem::Movlhps, 4));
+    let insn = dec(&hex("66 0f 16 00"), 0).expect("movhpd");
+    assert_eq!(insn.mnem(), Mnem::Movhpd);
 }
