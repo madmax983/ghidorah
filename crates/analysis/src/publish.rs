@@ -116,7 +116,7 @@ struct Facts {
 }
 
 /// Collects the facts of `work` that go into the set.
-fn collect(work: &Work) -> Facts {
+fn collect(program: &Program, work: &Work) -> Facts {
     let origin = Origin::analysis();
     let mut out = Facts {
         funcs: Vec::new(),
@@ -148,6 +148,7 @@ fn collect(work: &Work) -> Facts {
             .map(|r| Part { range: *r, kind })
             .collect();
         func.flags.thunk = thunk;
+        crate::irfacts::decorate(program, work, *entry, &mut func);
         out.whys.insert(FactKey::Func(id), why.clone());
         if let Some(w) = work.known.get(entry).or_else(|| work.found.get(entry)) {
             func.flags.noreturn = Some(origin.fact(true));
@@ -246,7 +247,8 @@ fn member(edit: &Edit, name: &str) -> Value {
 ///
 /// Returns [`AnalysisError::Codec`] when a row breaks a table rule.
 pub(crate) fn analysis_set(program: &Program, work: &Work) -> Result<AnalysisSet, AnalysisError> {
-    let facts = collect(work);
+    let mut facts = collect(program, work);
+    let extra = crate::irfacts::rows(program, work, &facts.funcs, &mut facts.whys);
     let origin = Origin::analysis();
     let ordered = order(program, &facts.whys);
     let mut why_rows = Vec::with_capacity(ordered.len());
@@ -306,6 +308,7 @@ pub(crate) fn analysis_set(program: &Program, work: &Work) -> Result<AnalysisSet
             Value::from(u64::try_from(ordered.len()).unwrap_or(u64::MAX)),
         ),
     ]);
+    let value = extra.merge(value);
     Ok(tables_from_json(&value)?)
 }
 

@@ -17,6 +17,7 @@ use ghidorah_db::{FlowKind, Program, RefKey, StartReason};
 use ghidorah_kernel::RangeSet;
 
 use crate::ctx::{Body, Summary, UnitRec};
+use crate::irfacts::IrFacts;
 use crate::why::Why;
 
 /// One function of the work state.
@@ -116,6 +117,8 @@ pub(crate) struct Work {
     pub import_slots: Option<BTreeMap<u64, SlotImport>>,
     /// The PLT area of the binary. The first step fills it.
     pub plt: Option<RangeSet>,
+    /// The facts of the IR-based analyzers.
+    pub ir: IrFacts,
 }
 
 /// Gives the import of each import slot of `program`: the ELF slot map, then the slots of

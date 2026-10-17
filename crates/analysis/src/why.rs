@@ -18,6 +18,13 @@
 //! | `R_NORETURN_KNOWN` | the noreturn flag of a PLT stub | the stub and its import |
 //! | `R_NORETURN_BODY` | the noreturn flag of a function with no return path | the function and the noreturn callees |
 //! | `R_NORETURN_FALLTHROUGH` | the noreturn flag of a callee with 3 unsafe call sites | the function and the call sites |
+//! | `R_AGENT_FUNCTION` | a function at an agent function | the agent function |
+//! | `R_AGENT_CALL_TARGET` | a function at a target of an agent indirect call override | the override |
+//! | `R_AGENT_REF` | a function at the target of an agent call reference | the reference |
+//! | `R_JUMPTABLE_SLICE` | a jump table of method A | the code unit of the jump and the function |
+//! | `R_TAILCALL` | a function at a tail-call target | the code unit of the jump and the function |
+//! | `R_MAIN_FROM_LIBC_START` | `main` and its name from the first argument of `__libc_start_main` | the call site and the entry function |
+//! | `R_SYSCALL_NUMBER` | the syscall note of a `syscall` site | the code unit of the site |
 
 use std::fmt;
 
@@ -50,11 +57,25 @@ pub enum Rule {
     NoreturnBody,
     /// `R_NORETURN_FALLTHROUGH`.
     NoreturnFallthrough,
+    /// `R_AGENT_FUNCTION`.
+    AgentFunction,
+    /// `R_AGENT_CALL_TARGET`.
+    AgentCallTarget,
+    /// `R_AGENT_REF`.
+    AgentRef,
+    /// `R_JUMPTABLE_SLICE`.
+    JumptableSlice,
+    /// `R_TAILCALL`.
+    Tailcall,
+    /// `R_MAIN_FROM_LIBC_START`.
+    MainFromLibcStart,
+    /// `R_SYSCALL_NUMBER`.
+    SyscallNumber,
 }
 
 impl Rule {
     /// All rules in catalog order.
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 18] = [
         Self::Entry,
         Self::SymbolFunc,
         Self::PltRelocSlot,
@@ -66,6 +87,13 @@ impl Rule {
         Self::NoreturnKnown,
         Self::NoreturnBody,
         Self::NoreturnFallthrough,
+        Self::AgentFunction,
+        Self::AgentCallTarget,
+        Self::AgentRef,
+        Self::JumptableSlice,
+        Self::Tailcall,
+        Self::MainFromLibcStart,
+        Self::SyscallNumber,
     ];
 
     /// Gives the rule code, for example `R_FDE_START`.
@@ -83,6 +111,13 @@ impl Rule {
             Self::NoreturnKnown => "R_NORETURN_KNOWN",
             Self::NoreturnBody => "R_NORETURN_BODY",
             Self::NoreturnFallthrough => "R_NORETURN_FALLTHROUGH",
+            Self::AgentFunction => "R_AGENT_FUNCTION",
+            Self::AgentCallTarget => "R_AGENT_CALL_TARGET",
+            Self::AgentRef => "R_AGENT_REF",
+            Self::JumptableSlice => "R_JUMPTABLE_SLICE",
+            Self::Tailcall => "R_TAILCALL",
+            Self::MainFromLibcStart => "R_MAIN_FROM_LIBC_START",
+            Self::SyscallNumber => "R_SYSCALL_NUMBER",
         }
     }
 
@@ -103,6 +138,19 @@ impl Rule {
             Self::NoreturnFallthrough => {
                 "Three or more call sites fall through into bad code or into a function."
             }
+            Self::AgentFunction => "An agent function starts a function.",
+            Self::AgentCallTarget => {
+                "A target of an agent indirect call override starts a function."
+            }
+            Self::AgentRef => "The target of an agent call reference starts a function.",
+            Self::JumptableSlice => "The slice of method A gives the targets of the jump table.",
+            Self::Tailcall => {
+                "A jump with a stack height of 0 leaves the function for a function start."
+            }
+            Self::MainFromLibcStart => {
+                "The first argument of the call to __libc_start_main is main."
+            }
+            Self::SyscallNumber => "The value of rax at the syscall site gives the syscall.",
         }
     }
 

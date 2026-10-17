@@ -133,6 +133,11 @@ impl<'a> AnalysisCtx<'a> {
         self.program
     }
 
+    /// Marks a change of the work state, so the publish step runs.
+    pub(crate) fn mark_changed(&mut self) {
+        self.changed = true;
+    }
+
     /// Records an event over `ranges`.
     pub fn emit(&mut self, trigger: Trigger, ranges: RangeSet) {
         if !ranges.is_empty() {

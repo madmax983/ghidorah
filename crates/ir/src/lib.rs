@@ -17,6 +17,7 @@
 //! | [`passes`] | [`Pass`], [`Switches`] and [`passes::run`]: the L1 passes | Section 6.4 |
 //! | [`check`](mod@check) | [`check()`]: the SSA checker | Section 6.4 |
 //! | [`print`](mod@print) | The IR text and JSON printers | Sections 6.1, 10.4 |
+//! | [`local`] | [`LocalValue`] and [`local::value_at`]: block-local value evaluation | Section 6.6 |
 
 pub mod arena;
 pub mod check;
@@ -26,6 +27,7 @@ pub mod fuse;
 pub mod graph;
 pub mod interp;
 pub mod loc;
+pub mod local;
 pub mod op;
 pub mod passes;
 pub mod print;
@@ -39,6 +41,7 @@ pub use fuse::{Pred, fuse, pred_opc};
 pub use graph::{Cfg, DomTree, GraphError, Loop, Node, dominators, irreducible, loops, rpo, sccs};
 pub use interp::{Config, EvalError, FlatImage, Image, Interp, NoImage, Stop, StopReason, eval};
 pub use loc::{Loc, LocSet};
+pub use local::{LocalValue, Memory, NoMemory};
 pub use op::{Arg, Cc, Effect, FlagOp, Imm, IntrinsicId, MemEffect, Op, OpId, Opc, Val};
 pub use passes::{Pass, PassRun, Report, Switches};
 pub use print::{IntrinsicNames, NoNames};

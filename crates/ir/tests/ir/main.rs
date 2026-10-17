@@ -9,6 +9,7 @@ mod fusion;
 mod graph;
 mod interp;
 mod l1;
+mod local;
 mod ops;
 mod passes;
 mod print;
