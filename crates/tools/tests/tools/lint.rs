@@ -11,9 +11,19 @@ use ghidorah_tools::{
 use crate::common::json;
 use crate::test_registry::{TestHost, registry};
 
-/// Every registry of the registry-wide tests: the test registry and the shipped registry.
-fn registries() -> Vec<Registry<TestHost>> {
-    vec![registry(), shipped::<TestHost>()]
+/// Runs `$body` with `$name` bound to each registry of the registry-wide tests: the test
+/// registry, then the shipped registry. Their host types differ, so a plain loop does not work.
+macro_rules! each_registry {
+    (|$name:ident| $body:block) => {{
+        {
+            let $name = registry();
+            $body
+        }
+        {
+            let $name = shipped();
+            $body
+        }
+    }};
 }
 
 fn nothing(_: &mut TestHost, _: &Args, _: &mut Ctx) -> Result<Payload, ToolError> {
@@ -273,7 +283,7 @@ fn name_ok(name: &str) -> bool {
 
 #[test]
 fn ac_129_registry_selftest() {
-    for registry in registries() {
+    each_registry!(|registry| {
         let found = lint(&registry);
         assert!(found.is_empty(), "lint findings: {found:?}");
         for tool in registry.tools() {
@@ -286,7 +296,7 @@ fn ac_129_registry_selftest() {
                 Some(tool.name)
             );
         }
-    }
+    });
     assert_eq!(registry().names().len(), registry().tools().len());
     assert_eq!(rules(&[&GOOD]), Vec::<LintRule>::new());
     let broken: [(&'static [&'static ToolSpec<TestHost>], LintRule); 6] = [
@@ -304,11 +314,11 @@ fn ac_129_registry_selftest() {
 
 #[test]
 fn ac_129a_tool_name_regex() {
-    for registry in registries() {
+    each_registry!(|registry| {
         for tool in registry.tools() {
             assert!(name_ok(tool.name), "bad tool name {}", tool.name);
         }
-    }
+    });
     assert!(rules(&[&BAD_NAME]).contains(&LintRule::Name));
     assert!(rules(&[&LONG_NAME]).contains(&LintRule::Name));
     assert!(rules(&[&GOOD, &GOOD]).contains(&LintRule::Name));
@@ -316,7 +326,7 @@ fn ac_129a_tool_name_regex() {
 
 #[test]
 fn ac_129b_schema_root() {
-    for registry in registries() {
+    each_registry!(|registry| {
         for tool in registry.tools() {
             let schema = input_schema(tool);
             assert_eq!(schema.get("type").and_then(Value::as_str), Some("object"));
@@ -335,7 +345,7 @@ fn ac_129b_schema_root() {
             }
             assert_eq!(schema_root_problem(&schema), None);
         }
-    }
+    });
     let bad = json(r#"{"type":"object","properties":{},"additionalProperties":false,"oneOf":[]}"#);
     assert!(schema_root_problem(&bad).is_some());
     let open = json(r#"{"type":"object","properties":{}}"#);
@@ -346,7 +356,7 @@ fn ac_129b_schema_root() {
 
 #[test]
 fn ac_129c_annotations() {
-    for registry in registries() {
+    each_registry!(|registry| {
         for tool in registry.tools() {
             let entry = tool_entry(tool);
             for key in [
@@ -367,19 +377,19 @@ fn ac_129c_annotations() {
                 Some(&Value::Bool(false))
             );
         }
-    }
+    });
     assert!(rules(&[&OPEN_WORLD]).contains(&LintRule::Annotations));
     assert!(rules(&[&READ_ONLY_EDIT]).contains(&LintRule::Annotations));
 }
 
 #[test]
 fn ac_129d_description_length() {
-    for registry in registries() {
+    each_registry!(|registry| {
         for tool in registry.tools() {
             assert!(tool.description.chars().count() <= 1_000, "{}", tool.name);
             assert!(!tool.title.is_empty());
         }
-    }
+    });
     assert!(LONG_TEXT.chars().count() > 1_000);
     assert!(rules(&[&LONG_DESC]).contains(&LintRule::Description));
     assert!(rules(&[&NO_TITLE]).contains(&LintRule::Description));
@@ -395,21 +405,21 @@ fn ac_129e_first_sentence_keyword() {
         "Read 0x10.5 bytes?"
     );
     assert_eq!(first_sentence("No end mark"), "No end mark");
-    for registry in registries() {
+    each_registry!(|registry| {
         for tool in registry.tools() {
             let first = first_sentence(tool.description);
             assert_eq!(first, tool.summary, "{}", tool.name);
             let word = resource_word(tool.name).to_ascii_lowercase();
             assert!(first.to_ascii_lowercase().contains(&word), "{}", tool.name);
         }
-    }
+    });
     assert!(rules(&[&NO_KEYWORD]).contains(&LintRule::FirstSentence));
     assert!(rules(&[&WRONG_SUMMARY]).contains(&LintRule::FirstSentence));
 }
 
 #[test]
 fn ac_129f_action_lines() {
-    for registry in registries() {
+    each_registry!(|registry| {
         for tool in registry.tools() {
             let Some(selector) = tool.selector() else {
                 assert!(tool.actions.is_empty(), "{}", tool.name);
@@ -431,7 +441,7 @@ fn ac_129f_action_lines() {
                 assert_eq!(tool.action(action.value), Some(action));
             }
         }
-    }
+    });
     assert!(rules(&[&NO_ACTIONS]).contains(&LintRule::Actions));
     assert!(rules(&[&BAD_ACTIONS]).contains(&LintRule::Actions));
     assert!(rules(&[&ACTION_NOT_RUN]).contains(&LintRule::Actions));
@@ -449,13 +459,13 @@ fn ac_222_vocabulary_lint() {
             .iter()
             .any(|f| f.tool == "widget_set" && f.detail.contains("kind"))
     );
-    for registry in registries() {
+    each_registry!(|registry| {
         assert!(
             lint(&registry)
                 .iter()
                 .all(|f| f.rule != LintRule::Vocabulary)
         );
-    }
+    });
 }
 
 #[test]

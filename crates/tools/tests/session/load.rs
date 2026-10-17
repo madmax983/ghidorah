@@ -476,3 +476,34 @@ fn binary_required_and_unknown_binary() {
         Some(ErrorCode::BinaryRequired)
     );
 }
+
+#[test]
+fn binary_required_gives_a_repair_call() {
+    let mut s = Session::with_registry(
+        binding_registry(),
+        config(),
+        Box::new(ghidorah_base::FixedClock::new(0)),
+    );
+    let demo_id = load(&mut s, "crates/tools/data/demo.elf");
+    let helpers = load(&mut s, "fixtures/bin/two_helpers.gcc-O2");
+    let envelope = call(&mut s, "symbol_count", r#"{"format":"detailed"}"#);
+    assert_eq!(code(&envelope), "BINARY_REQUIRED", "{envelope}");
+    assert_eq!(text_at(&envelope, "/next/0/tool"), "symbol_count");
+    assert_eq!(text_at(&envelope, "/next/0/args/binary_id"), helpers);
+    assert_eq!(
+        text_at(&envelope, "/next/0/args/format"),
+        "detailed",
+        "the repair call keeps the arguments: {envelope}"
+    );
+    assert_eq!(
+        text_at(&envelope, "/next/0/why"),
+        ghidorah_tools::hints::WHY_BINARY
+    );
+    let next = envelope
+        .pointer("/next/0/args")
+        .cloned()
+        .expect("a repair call");
+    let envelope = call_value(&mut s, "symbol_count", next);
+    assert_eq!(text_at(&envelope, "/binary_id"), helpers, "{envelope}");
+    assert_ne!(demo_id, helpers);
+}

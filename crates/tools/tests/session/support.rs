@@ -23,15 +23,10 @@ pub const DEMO_ID: &str = "467a43b75d95c826";
 /// The address of `main` in the demo binary.
 pub const DEMO_MAIN: u64 = 0x1080;
 
-/// The registry of the tests: the shipped registry when it lists tools, else the tools of
-/// WP-13b. So the registry-wide tests cover every registered tool after the register commit.
+/// The registry of the tests: the shipped registry. So the registry-wide tests cover every
+/// registered tool.
 pub fn registry() -> Registry<Session> {
-    let shipped = <Session as Host>::registry();
-    if shipped.tools().is_empty() {
-        Registry::new(WP13B)
-    } else {
-        shipped
-    }
+    <Session as Host>::registry()
 }
 
 /// Gives the workspace root.

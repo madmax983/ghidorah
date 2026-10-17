@@ -31,8 +31,8 @@ use crate::content::result_chars;
 use crate::envelope::{Body, Envelope, Frame, Mutation, Warning};
 use crate::errors::{Candidate, ToolError, int};
 use crate::hints::{
-    Call, WHY_ANALYSIS, WHY_BRIEF, WHY_FIRST_PAGE, WHY_REV, WHY_SCHEMA, WHY_SEARCH, check,
-    keep_valid,
+    Call, WHY_ANALYSIS, WHY_BINARY, WHY_BRIEF, WHY_FIRST_PAGE, WHY_REV, WHY_SCHEMA, WHY_SEARCH,
+    check, keep_valid,
 };
 use crate::registry::Registry;
 use crate::spec::{ArgKind, ToolSpec};
@@ -263,6 +263,23 @@ fn with_arg(args: &Value, key: &str, value: Option<Value>) -> Value {
     Value::Object(object)
 }
 
+/// Adds the repair call of a `BINARY_REQUIRED` error that has `details.binary_id`: the same
+/// call with that `binary_id`. Other errors and errors with a repair call stay the same.
+fn binary_repair(tool: &str, args: &Value, error: ToolError) -> ToolError {
+    let id = error
+        .details
+        .as_ref()
+        .and_then(|details| details.get("binary_id"))
+        .cloned();
+    match id {
+        Some(id) if error.code == ErrorCode::BinaryRequired && error.next.is_empty() => {
+            let call = Call::new(tool, with_arg(args, "binary_id", Some(id)), WHY_BINARY);
+            error.next(call)
+        }
+        _ => error,
+    }
+}
+
 /// Gives the failure envelope of `error`, with helper calls for the codes of class H.
 fn failure<S: Host>(
     registry: &Registry<S>,
@@ -345,7 +362,10 @@ pub(crate) fn run<S: Host>(registry: &Registry<S>, host: &mut S, request: &Reque
     let globals = parsed.args.globals();
     let frame = match host.frame(tool, globals, request.session.as_deref()) {
         Ok(frame) => frame,
-        Err(error) => return failure(registry, host, bare, tool.name, &error),
+        Err(error) => {
+            let error = binary_repair(tool.name, parsed.args.canonical(), error);
+            return failure(registry, host, bare, tool.name, &error);
+        }
     };
     if let (true, Some(expected)) = (tool.mutating, globals.expected_rev)
         && expected != frame.rev

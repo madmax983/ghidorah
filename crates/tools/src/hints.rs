@@ -39,6 +39,9 @@ pub const WHY_FIRST_PAGE: &str = "Start again at the first page.";
 /// The `why` of an `analysis_run` call on a partial result.
 pub const WHY_ANALYSIS: &str = "Finish the analysis of the binary.";
 
+/// The `why` of a repair call with the most recent `binary_id` after `BINARY_REQUIRED`.
+pub const WHY_BINARY: &str = "Send the call with the most recent binary_id.";
+
 /// The `why` of a `session_brief` call when no binary is open.
 pub const WHY_BRIEF: &str = "List the projects on disk and the open binaries.";
 
@@ -50,7 +53,7 @@ pub const HINT_TOO_BIG: &str =
     "The next item does not fit in max_chars. Raise max_chars, or add fields for smaller items.";
 
 /// Every fixed text that the pipeline sends to an agent. Test `ac_024` checks them.
-pub const TEXTS: [&str; 11] = [
+pub const TEXTS: [&str; 12] = [
     WHY_NAMES,
     WHY_CLAMP,
     WHY_HEX,
@@ -59,6 +62,7 @@ pub const TEXTS: [&str; 11] = [
     WHY_REV,
     WHY_FIRST_PAGE,
     WHY_ANALYSIS,
+    WHY_BINARY,
     WHY_BRIEF,
     HINT_NEXT_PAGE,
     HINT_TOO_BIG,

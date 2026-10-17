@@ -1,6 +1,6 @@
 //! [`Bare`]: a backend with no session state.
 //!
-//! A bare backend holds no binary and no project. It serves the shipped registry, the
+//! A bare backend holds no binary and no project. It serves an empty registry, the
 //! profile filter and the protocol. A call of a tool that needs a binary gives
 //! `NO_BINARY_OPEN`, or `UNKNOWN_BINARY` when the call names a `binary_id`.
 
@@ -58,7 +58,7 @@ fn parse_part(text: &str) -> Option<KeyPart> {
 
 impl Host for Bare {
     fn registry() -> Registry<Self> {
-        ghidorah_tools::registry::shipped()
+        Registry::new(&[])
     }
 
     fn in_profile(&self, name: &str) -> bool {

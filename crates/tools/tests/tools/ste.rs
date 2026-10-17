@@ -4,9 +4,9 @@ use ghidorah_base::{ErrorCode, WarningCode};
 use ghidorah_testkit::ste::check_agent_text;
 use ghidorah_tools::args::globals_of;
 use ghidorah_tools::registry::shipped;
-use ghidorah_tools::{ArgKind, ArgSpec, ToolError};
+use ghidorah_tools::{ArgKind, ArgSpec, Registry, ToolError};
 
-use crate::test_registry::{TestHost, registry};
+use crate::test_registry::registry;
 
 fn arg_docs(spec: &ArgSpec, out: &mut Vec<(String, String)>) {
     out.push((format!("argument {}", spec.name), spec.doc.to_owned()));
@@ -21,30 +21,35 @@ fn arg_docs(spec: &ArgSpec, out: &mut Vec<(String, String)>) {
     }
 }
 
+/// Adds the agent text of each tool of `registry`: summaries, descriptions, action lines and
+/// argument docs.
+fn tool_texts<S: 'static>(registry: &Registry<S>, out: &mut Vec<(String, String)>) {
+    for tool in registry.tools() {
+        out.push((format!("{} summary", tool.name), tool.summary.to_owned()));
+        out.push((
+            format!("{} description", tool.name),
+            tool.description.to_owned(),
+        ));
+        for action in tool.actions {
+            out.push((
+                format!("{} action {}", tool.name, action.value),
+                action.line.to_owned(),
+            ));
+        }
+        for spec in tool.args {
+            arg_docs(spec, out);
+        }
+        for spec in &globals_of(tool) {
+            arg_docs(spec, out);
+        }
+    }
+}
+
 #[test]
 fn ac_024_ste_agent_text() {
     let mut texts: Vec<(String, String)> = Vec::new();
-    for registry in [registry(), shipped::<TestHost>()] {
-        for tool in registry.tools() {
-            texts.push((format!("{} summary", tool.name), tool.summary.to_owned()));
-            texts.push((
-                format!("{} description", tool.name),
-                tool.description.to_owned(),
-            ));
-            for action in tool.actions {
-                texts.push((
-                    format!("{} action {}", tool.name, action.value),
-                    action.line.to_owned(),
-                ));
-            }
-            for spec in tool.args {
-                arg_docs(spec, &mut texts);
-            }
-            for spec in &globals_of(tool) {
-                arg_docs(spec, &mut texts);
-            }
-        }
-    }
+    tool_texts(&registry(), &mut texts);
+    tool_texts(&shipped(), &mut texts);
     for code in ErrorCode::ALL {
         let error = ToolError::new(code)
             .var("field", "target")

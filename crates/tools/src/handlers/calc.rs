@@ -22,8 +22,8 @@ use crate::resolve::{Site, resolve_text, value_of};
 use crate::session::Session;
 use crate::spec::{ArgKind, ArgSpec, BinaryArg, Example, Profile, Role, ToolSpec};
 
-/// The `why` of the repair call of `BINARY_REQUIRED`.
-pub const WHY_BINARY: &str = "Send the call with the most recent binary_id.";
+/// The `why` of the repair call of `BINARY_REQUIRED`: the text of the pipeline.
+pub const WHY_BINARY: &str = crate::hints::WHY_BINARY;
 
 /// The `why` of the `addr_info` hint on a mapped value.
 pub const WHY_ADDR: &str = "Tell what is at the address.";

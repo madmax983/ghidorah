@@ -25,6 +25,7 @@ use std::fmt;
 pub use lint::lint;
 
 use crate::schema::ROOT_COMBINATORS;
+use crate::session::Session;
 use crate::spec::ToolSpec;
 
 /// The largest number of characters in a description.
@@ -87,12 +88,19 @@ impl<S: 'static> Registry<S> {
     }
 }
 
-/// Gives the shipped registry: the plain list of the shipped tools.
+/// The shipped tools in the fixed `tools/list` order (design Section 10.4).
 ///
-/// The list is empty until the handler WPs register their tools.
+/// Each handler WP adds its `SPEC` items at their catalog positions: one line per tool.
+static SHIPPED: &[&ToolSpec<Session>] = &[
+    &crate::handlers::load::SPEC,
+    &crate::handlers::calc::SPEC,
+    &crate::handlers::tool_search::SPEC,
+];
+
+/// Gives the shipped registry: the plain list of the shipped tools.
 #[must_use]
-pub fn shipped<S: 'static>() -> Registry<S> {
-    Registry::new(&[])
+pub fn shipped() -> Registry<Session> {
+    Registry::new(SHIPPED)
 }
 
 /// One rule of the registry lint.
