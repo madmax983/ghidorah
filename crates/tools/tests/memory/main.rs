@@ -14,6 +14,7 @@
 mod brief;
 mod comments;
 mod cursors;
+mod edges;
 mod notes;
 mod registry;
 mod rename;

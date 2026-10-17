@@ -5,11 +5,13 @@
 //! | [`commit`] | runs the edits of one call in one transaction and writes its journal line. A dry run rolls back and gives the planned edits. |
 //! | [`edit_error`] | gives the tool error of a refused edit. A write that `force` allows gets the repair call with `force: true`. |
 //! | [`with_force`] | gives the call again with `force: true` |
+//! | [`invalid`], [`missing`], [`not_with_items`] | give the argument errors of the edit tools |
+//! | [`address_at`], [`texts`] | read an address input and a list of strings |
 //!
 //! A commit sets the envelope members `tx` and `noop` and the new rev of the frame. A dry run
 //! sets `noop: true` and `diff: [{ op, key, old, new }]`.
 
-use ghidorah_base::ErrorCode;
+use ghidorah_base::{Address, ErrorCode};
 use ghidorah_db::codec::{edit_to_json, key_to_json};
 use ghidorah_db::{Applied, EditError, Tx};
 use ghidorah_json::Value;
@@ -19,8 +21,9 @@ use crate::args::Args;
 use crate::dispatch::Ctx;
 use crate::envelope::Mutation;
 use crate::errors::ToolError;
-use crate::handlers::func_sections::safe;
+use crate::handlers::func_sections::{safe, site};
 use crate::hints::Call;
+use crate::resolve;
 use crate::session::{Session, session_label};
 
 /// The commit facts of one call.
@@ -121,6 +124,49 @@ pub(crate) fn commit<T>(
             tx,
         },
     ))
+}
+
+/// Gives the strings of a list value.
+pub(crate) fn texts(value: Option<&Value>) -> Vec<String> {
+    value
+        .and_then(Value::as_array)
+        .unwrap_or_default()
+        .iter()
+        .filter_map(Value::as_str)
+        .map(str::to_owned)
+        .collect()
+}
+
+/// Gives the `INVALID_ARGUMENT` error of the argument at `path` with `details.expected`.
+pub(crate) fn invalid(path: &str, expected: &str) -> ToolError {
+    ToolError::new(ErrorCode::InvalidArgument)
+        .var("field", path.trim_start_matches('/'))
+        .path(path)
+        .detail("expected", Value::from(expected))
+}
+
+/// Gives the `MISSING_ARGUMENT` error of the argument `field`.
+pub(crate) fn missing(field: &str) -> ToolError {
+    ToolError::new(ErrorCode::MissingArgument)
+        .var("field", field)
+        .path(&format!("/{field}"))
+}
+
+/// Gives the `INVALID_ARGUMENT` error of an argument that a call with `items` does not take.
+pub(crate) fn not_with_items(field: &str) -> ToolError {
+    invalid(
+        &format!("/{field}"),
+        "no value: each item of items holds its own value",
+    )
+}
+
+/// Gives the address of an address input on the program of a transaction.
+///
+/// # Errors
+///
+/// Returns the errors of [`resolve::address`] with the field path `path`.
+pub(crate) fn address_at(tx: &Tx<'_>, input: &Value, path: &str) -> Result<Address, ToolError> {
+    resolve::address(tx.program(), input, &site(path)).map(|(a, _)| a)
 }
 
 /// Gives the call of `args` again with `force: true`.

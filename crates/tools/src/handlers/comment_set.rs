@@ -15,8 +15,7 @@ use ghidorah_db::{CommentKind, Edit, Tx};
 use ghidorah_json::{Object, Value};
 
 use super::func_sections as fs;
-use super::symbol_rename::edits;
-use super::symbol_rename::{address_at, missing, not_with_items};
+use super::symbol_rename::edits::{self, address_at, missing, not_with_items};
 use crate::args::Args;
 use crate::dispatch::{Ctx, Payload};
 use crate::errors::ToolError;

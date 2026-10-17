@@ -10,19 +10,12 @@
 //! `start`, `size` and `end` are `0x` hex texts or JSON integers. One operand holds IDs or
 //! addresses, not both. An empty operand takes the kind of the old members.
 
-use ghidorah_base::{ErrorCode, Id, Range, hex};
+use ghidorah_base::{Id, Range, hex};
 use ghidorah_db::{SetMembers, SetOp};
 use ghidorah_json::Value;
 
 use crate::errors::ToolError;
-
-/// Gives the `INVALID_ARGUMENT` error of the member list at `path`.
-fn bad(path: &str, expected: &str) -> ToolError {
-    ToolError::new(ErrorCode::InvalidArgument)
-        .var("field", path.trim_start_matches('/'))
-        .path(path)
-        .detail("expected", Value::from(expected))
-}
+use crate::handlers::symbol_rename::edits::invalid as bad;
 
 /// Gives the number of a member part: a `0x` hex text or a JSON integer.
 fn number(value: Option<&Value>) -> Option<u64> {

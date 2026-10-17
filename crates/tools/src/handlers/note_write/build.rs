@@ -19,21 +19,12 @@ use ghidorah_json::{Object, Value};
 use super::members;
 use crate::args::Args;
 use crate::errors::ToolError;
-use crate::handlers::symbol_rename::edits::edit_error;
-use crate::handlers::symbol_rename::{address_at, missing};
+use crate::handlers::symbol_rename::edits::{address_at, edit_error, invalid, missing, texts};
 
 /// The arguments that a delete call does not take.
-pub(super) const NOT_WITH_DELETE: [&str; 8] = [
+const NOT_WITH_DELETE: [&str; 8] = [
     "kind", "text", "at", "status", "tags", "evidence", "claims", "set",
 ];
-
-/// Gives the `INVALID_ARGUMENT` error of the argument at `path`.
-pub(super) fn invalid(path: &str, expected: &str) -> ToolError {
-    ToolError::new(ErrorCode::InvalidArgument)
-        .var("field", path.trim_start_matches('/'))
-        .path(path)
-        .detail("expected", Value::from(expected))
-}
 
 /// Gives the `NOT_FOUND` error of a missing entity of `kind` at `path`.
 fn not_found(kind: &str, path: &str) -> ToolError {
@@ -41,17 +32,6 @@ fn not_found(kind: &str, path: &str) -> ToolError {
         .var("kind", kind)
         .path(path)
         .detail("kind", Value::from(kind))
-}
-
-/// Gives the strings of a list value.
-fn texts(value: Option<&Value>) -> Vec<String> {
-    value
-        .and_then(Value::as_array)
-        .unwrap_or_default()
-        .iter()
-        .filter_map(Value::as_str)
-        .map(str::to_owned)
-        .collect()
 }
 
 /// Gives the note ID of `target`, or `None` for a call with no target.
@@ -153,8 +133,8 @@ fn start(tx: &Tx<'_>, args: &Args, name: Option<&SetName>) -> Result<(Note, bool
 ///
 /// # Errors
 ///
-/// Returns `NOT_FOUND` for a target or a `from_set` that does not exist, `MISSING_ARGUMENT`
-/// for a new note with no text, and `INVALID_ARGUMENT` for a bad value.
+/// Returns `NOT_FOUND` for a target or a `from_set` that does not exist. Returns
+/// `MISSING_ARGUMENT` for a new note with no text, and `INVALID_ARGUMENT` for a bad value.
 pub(super) fn build(tx: &Tx<'_>, args: &Args) -> Result<Note, ToolError> {
     let name = set_name(args)?;
     let (mut note, existing) = start(tx, args, name.as_ref())?;

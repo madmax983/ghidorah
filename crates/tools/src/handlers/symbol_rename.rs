@@ -21,7 +21,7 @@
 
 pub(crate) mod edits;
 
-use ghidorah_base::{Address, ErrorCode, FuncId, Id, VarId};
+use ghidorah_base::{ErrorCode, FuncId, Id, VarId};
 use ghidorah_db::{Edit, SymKind, Tx, VarField};
 use ghidorah_json::{Object, Value};
 
@@ -31,11 +31,11 @@ use crate::dispatch::{Ctx, Payload};
 use crate::errors::ToolError;
 use crate::hints::Call;
 use crate::outshape::{Field, OutputShape};
-use crate::resolve;
 use crate::session::Session;
 use crate::spec::{
     Annotations, ArgKind, ArgSpec, Example, Group, GroupRule, Profile, Role, ToolSpec,
 };
+use edits::{address_at, invalid, missing, not_with_items, texts};
 
 /// The largest number of items in one call.
 pub const MAX_ITEMS: usize = 100;
@@ -192,17 +192,6 @@ struct Rename<'a> {
     retry: Option<Call>,
 }
 
-/// Gives the strings of a list argument.
-fn texts(value: Option<&Value>) -> Vec<String> {
-    value
-        .and_then(Value::as_array)
-        .unwrap_or_default()
-        .iter()
-        .filter_map(Value::as_str)
-        .map(str::to_owned)
-        .collect()
-}
-
 /// Gives the evidence of a rename: `own` or else `call`, and then the confidence entry.
 fn evidence(own: Option<&Value>, call: &[String], confidence: Option<&str>) -> Vec<String> {
     let mut out = if own.is_some() {
@@ -217,42 +206,12 @@ fn evidence(own: Option<&Value>, call: &[String], confidence: Option<&str>) -> V
 /// Checks a new name: 1 to [`MAX_NAME_CHARS`] characters and no control character.
 fn check_name(name: &str, path: &str) -> Result<(), ToolError> {
     if name.is_empty() || name.chars().any(char::is_control) {
-        return Err(ToolError::new(ErrorCode::InvalidArgument)
-            .var("field", path.trim_start_matches('/'))
-            .path(path)
-            .detail(
-                "expected",
-                Value::from("a name of 1 to 256 characters with no control character"),
-            ));
+        return Err(invalid(
+            path,
+            "a name of 1 to 256 characters with no control character",
+        ));
     }
     Ok(())
-}
-
-/// Gives the `MISSING_ARGUMENT` error of the argument `field`.
-pub(crate) fn missing(field: &str) -> ToolError {
-    ToolError::new(ErrorCode::MissingArgument)
-        .var("field", field)
-        .path(&format!("/{field}"))
-}
-
-/// Gives the `INVALID_ARGUMENT` error of an argument that the call with `items` does not take.
-pub(crate) fn not_with_items(field: &str) -> ToolError {
-    ToolError::new(ErrorCode::InvalidArgument)
-        .var("field", field)
-        .path(&format!("/{field}"))
-        .detail(
-            "expected",
-            Value::from("no value: each item of items holds its own value"),
-        )
-}
-
-/// Gives the address of an address input on the program of a transaction.
-///
-/// # Errors
-///
-/// Returns the errors of [`resolve::address`] with the field path `path`.
-pub(crate) fn address_at(tx: &Tx<'_>, input: &Value, path: &str) -> Result<Address, ToolError> {
-    resolve::address(tx.program(), input, &fs::site(path)).map(|(a, _)| a)
 }
 
 /// Gives the ID, the old name and the edit of a variable rename.

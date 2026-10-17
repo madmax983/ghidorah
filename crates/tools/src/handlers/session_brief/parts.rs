@@ -8,8 +8,8 @@
 //! | weak names | the frozen priority order of design Section 7.11 |
 //! | orphans | address, then kind, then ID |
 //!
-//! An orphan is an agent or user fact whose function does not exist: a function name at an
-//! address with no function, or a variable fact of a function that does not exist.
+//! An orphan is an agent or user fact whose function does not exist. It is a function name at
+//! an address with no function, or a variable fact of a function that is not there.
 
 use ghidorah_analysis::analyzers::metrics;
 use ghidorah_base::{FuncId, Rev};
