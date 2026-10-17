@@ -48,6 +48,8 @@ pub use dym::{Suggestion, did_you_mean};
 pub use fnv::{Fnv1a64, fnv1a64};
 pub use fuel::{Fuel, OutOfFuel};
 pub use ghidorah_kernel::Range;
+/// The K6 budget fit rule. `ghidorah-tools` reaches the kernel through this crate (Section 2.2).
+pub use ghidorah_kernel::fit_prefix;
 pub use glob::{Glob, GlobError};
 pub use id::{
     BinaryId, BlockId, ExportId, FileOffset, FuncId, Id, IdError, IdKind, ImportId, JumpTableId,

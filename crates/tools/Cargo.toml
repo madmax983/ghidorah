@@ -1,0 +1,27 @@
+[package]
+name = "ghidorah-tools"
+description = "Tool registry and dispatcher pipeline: specs, argument parser, schemas, output shapes, envelope, budgets, errors and hints."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# The crate has no unit tests. Its tests are in the test binary `tests/tools/main.rs`.
+# The test registry of WP-13a is `tests/support/test_registry.rs`.
+[lib]
+name = "ghidorah_tools"
+path = "src/lib.rs"
+test = false
+
+[dependencies]
+ghidorah-base = { path = "../base" }
+# `ToolSpec.reads_tables` names the tables of `ghidorah_db::Table`.
+ghidorah-db = { path = "../db" }
+ghidorah-json = { path = "../json" }
+
+[dev-dependencies]
+ghidorah-testkit = { path = "../testkit" }
+
+[lints]
+workspace = true

@@ -69,6 +69,16 @@ name = "ghidorah-testkit"
 version = "0.1.0"
 
 [[package]]
+name = "ghidorah-tools"
+version = "0.1.0"
+dependencies = [
+ "ghidorah-base",
+ "ghidorah-db",
+ "ghidorah-json",
+ "ghidorah-testkit",
+]
+
+[[package]]
 name = "ghidorah-types"
 version = "0.1.0"
 dependencies = [
