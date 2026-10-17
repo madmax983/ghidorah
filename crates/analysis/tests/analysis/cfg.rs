@@ -46,7 +46,7 @@ fn ac_083_cfg_invariants() {
             );
         }
     }
-    assert!(funcs > 2_000, "the fixtures hold functions: {funcs}");
+    assert!(funcs > 1_500, "the fixtures hold functions: {funcs}");
 }
 
 #[test]

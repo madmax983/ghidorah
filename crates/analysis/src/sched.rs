@@ -4,8 +4,8 @@
 //! Each analyzer of [`ANALYZERS`] has a pending [`RangeSet`]. One step picks the analyzer with
 //! the lowest `(priority, name)` that has pending work. It takes the whole pending set or the
 //! first range, by the grain of the spec. Then it runs the analyzer and queues the event
-//! ranges for the analyzers that listen to their triggers. A run stops at a fixpoint or at
-//! the first fuel checkpoint after the fuel is used. One step is atomic, so the steps and
+//! ranges for the analyzers that listen to their triggers. A run stops at a fixpoint, or at
+//! the first fuel checkpoint when no fuel remains. One step is atomic, so the steps and
 //! their order do not depend on the fuel slices (AC-092).
 //!
 //! | Mode | Publish |
@@ -20,7 +20,8 @@ use ghidorah_db::{AnalysisSet, Commit, Program};
 use ghidorah_kernel::RangeSet;
 
 use crate::AnalysisError;
-use crate::registry::{ANALYZERS, AnalyzerId};
+use crate::ctx::AnalysisCtx;
+use crate::registry::{self, ANALYZERS, AnalyzerId};
 use crate::spec::{AnalyzerSpec, BAND_TRIAGE, Grain, Trigger};
 use crate::work::Work;
 
@@ -140,8 +141,13 @@ impl Default for Scheduler {
 /// work up to the band `last`.
 #[must_use]
 pub fn pick(specs: &[&AnalyzerSpec], pending: &[RangeSet], last: u16) -> Option<usize> {
-    let _ = (specs, pending, last);
-    None
+    specs
+        .iter()
+        .zip(pending)
+        .enumerate()
+        .filter(|(_, (spec, set))| spec.priority <= last && !set.is_empty())
+        .min_by_key(|(_, (spec, _))| (spec.priority, spec.name))
+        .map(|(i, _)| i)
 }
 
 /// Gives the ranges of one step of `spec` from its pending set.
@@ -159,13 +165,31 @@ pub fn unit(spec: &AnalyzerSpec, pending: &RangeSet) -> RangeSet {
     }
 }
 
+/// Gives the set of every RAM offset.
+fn all() -> RangeSet {
+    let mut set = RangeSet::new();
+    set.insert(ALL);
+    set
+}
+
 impl Scheduler {
-    /// Makes the scheduler of the first analysis after a load.
+    /// Makes the scheduler of the first analysis after a load. Each analyzer that listens to
+    /// `Bytes` gets every address.
     #[must_use]
     pub fn new() -> Self {
+        let pending = ANALYZERS
+            .iter()
+            .map(|s| {
+                if s.listens(Trigger::Bytes) {
+                    all()
+                } else {
+                    RangeSet::new()
+                }
+            })
+            .collect();
         Self {
             work: Work::default(),
-            pending: vec![RangeSet::new(); ANALYZERS.len()],
+            pending,
             runs: vec![0; ANALYZERS.len()],
             steps: 0,
             mode: Mode::First,
@@ -173,18 +197,33 @@ impl Scheduler {
         }
     }
 
-    /// Makes a shadow scheduler of a re-analysis with no earlier work state. It runs every
-    /// band, whatever the start band `band`, and publishes once at completion.
+    /// Makes a shadow scheduler of a re-analysis with no earlier work state. A shadow with no
+    /// work state knows no lower band, so it runs every band. It publishes once at completion.
     #[must_use]
-    pub fn shadow(band: u16) -> Self {
-        let _ = band;
-        Self::new()
+    pub fn shadow() -> Self {
+        let mut s = Self::new();
+        s.mode = Mode::Shadow;
+        s
     }
 
     /// Starts a re-analysis at the start band `band` in shadow mode. The work of the bands
-    /// below `band` stays. Each analyzer at `band` or above gets every address again.
+    /// below `band` stays. Each analyzer at `band` or above gets every address again. A band
+    /// at or below the first band starts with an empty work state.
     pub fn restart(&mut self, band: u16) {
-        let _ = (band, Trigger::Bytes, ALL);
+        let first = ANALYZERS.iter().map(|s| s.priority).min().unwrap_or(0);
+        if band <= first {
+            let fresh = Self::new();
+            self.work = fresh.work;
+            self.pending = fresh.pending;
+        } else {
+            for (spec, set) in ANALYZERS.iter().zip(self.pending.iter_mut()) {
+                if spec.priority >= band {
+                    *set = all();
+                }
+            }
+        }
+        self.mode = Mode::Shadow;
+        self.dirty = true;
     }
 
     /// Gives the mode.
@@ -202,20 +241,58 @@ impl Scheduler {
     /// Tells if no analyzer up to the last band of `until` has pending work.
     #[must_use]
     pub fn is_done(&self, until: Until) -> bool {
-        let _ = until;
-        false
+        pick(ANALYZERS, &self.pending, until.last_band()).is_none()
     }
 
     /// Gives one row for each analyzer in registry order.
     #[must_use]
     pub fn rows(&self) -> Vec<AnalyzerRow> {
-        Vec::new()
+        ANALYZERS
+            .iter()
+            .zip(&self.pending)
+            .zip(&self.runs)
+            .map(|((spec, set), runs)| AnalyzerRow {
+                name: spec.name,
+                priority: spec.priority,
+                pending: u64::try_from(set.len()).unwrap_or(u64::MAX),
+                runs: *runs,
+            })
+            .collect()
     }
 
     /// Runs one step. Gives `None` at a fixpoint of the bands of `until`.
     pub fn step(&mut self, program: &Program, until: Until) -> Option<Ran> {
-        let _ = (program, until);
-        None
+        let i = pick(ANALYZERS, &self.pending, until.last_band())?;
+        let spec = ANALYZERS.get(i)?;
+        let current = self.pending.get_mut(i)?;
+        let ranges = unit(spec, current);
+        *current = current.subtract(&ranges);
+        let mut ctx = AnalysisCtx::new(program, &mut self.work);
+        let step = registry::run(spec.id, &mut ctx, &ranges);
+        let (events, requeue, changed) = ctx.finish();
+        for (trigger, set) in events {
+            for (s, p) in ANALYZERS.iter().zip(self.pending.iter_mut()) {
+                if s.listens(trigger) {
+                    *p = p.union(&set);
+                }
+            }
+        }
+        for (id, set) in requeue {
+            if let Some(p) = registry::index(id).and_then(|j| self.pending.get_mut(j)) {
+                *p = p.union(&set);
+            }
+        }
+        let work = step.work.max(1);
+        if let Some(runs) = self.runs.get_mut(i) {
+            *runs = runs.saturating_add(1);
+        }
+        self.steps = self.steps.saturating_add(work);
+        self.dirty |= changed;
+        Some(Ran {
+            analyzer: spec.id,
+            ranges,
+            work,
+        })
     }
 
     /// Runs steps until a fixpoint of the bands of `until` or until `fuel` is empty, then
@@ -231,12 +308,32 @@ impl Scheduler {
         until: Until,
         fuel: &mut Fuel,
     ) -> Result<RunOutcome, AnalysisError> {
-        let _ = (program, until, fuel, self.dirty);
+        let start = self.steps;
+        while !fuel.is_empty() {
+            let Some(ran) = self.step(program, until) else {
+                break;
+            };
+            let _ = fuel.take(ran.work.min(fuel.remaining()));
+        }
+        let done = self.is_done(Until::Full);
+        let publish = self.dirty && (self.mode == Mode::First || done);
+        let commit = if publish {
+            let commit = crate::publish::publish(program, &self.work)?;
+            self.dirty = false;
+            Some(commit)
+        } else {
+            None
+        };
+        let state = match (done, self.mode) {
+            (true, _) => RunState::Complete,
+            (false, Mode::First) => RunState::BudgetStopped,
+            (false, Mode::Shadow) => RunState::Stale,
+        };
         Ok(RunOutcome {
-            state: RunState::BudgetStopped,
-            steps_used: 0,
-            resume: true,
-            commit: None,
+            state,
+            steps_used: self.steps.saturating_sub(start),
+            resume: !done,
+            commit,
         })
     }
 

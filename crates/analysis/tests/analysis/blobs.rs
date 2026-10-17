@@ -83,11 +83,6 @@ impl Blob {
         self.raw(&[0xf4])
     }
 
-    /// `nop`.
-    pub fn nop(self) -> Self {
-        self.raw(&[0x90])
-    }
-
     /// `endbr64`.
     pub fn endbr(self) -> Self {
         self.raw(&[0xf3, 0x0f, 0x1e, 0xfa])
@@ -98,11 +93,6 @@ impl Blob {
         let mut b = vec![0xb8];
         b.extend_from_slice(&imm.to_le_bytes());
         self.raw(&b)
-    }
-
-    /// Gives the bytes.
-    pub fn bytes(&self) -> &[u8] {
-        &self.bytes
     }
 
     /// Loads the blob at [`BASE`] with the entry at `entry` (relative to [`BASE`]).

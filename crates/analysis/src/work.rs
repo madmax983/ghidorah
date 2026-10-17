@@ -12,11 +12,11 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use ghidorah_base::{ImportId, Range};
-use ghidorah_db::{FlowKind, RefKey, StartReason};
+use ghidorah_base::{Address, ImportId, Range};
+use ghidorah_db::{FlowKind, Program, RefKey, StartReason};
 use ghidorah_kernel::RangeSet;
 
-use crate::ctx::Summary;
+use crate::ctx::{Body, Summary, UnitRec};
 use crate::why::Why;
 
 /// One function of the work state.
@@ -84,6 +84,9 @@ pub(crate) struct Extent {
     pub owner: u64,
 }
 
+/// The import of an import slot and its EXTERNAL address.
+pub(crate) type SlotImport = (ImportId, Address);
+
 /// The work state.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub(crate) struct Work {
@@ -108,7 +111,34 @@ pub(crate) struct Work {
     /// The indirect call sites of each import slot.
     pub slot_callers: BTreeMap<u64, BTreeSet<u64>>,
     /// The number of body changes of each function entry.
-    pub changes: BTreeMap<u64, u32>,
+    pub changes: BTreeMap<u64, u64>,
+    /// The import of each import slot of the binary. The first step fills it.
+    pub import_slots: Option<BTreeMap<u64, SlotImport>>,
+    /// The PLT area of the binary. The first step fills it.
+    pub plt: Option<RangeSet>,
+}
+
+/// Gives the import of each import slot of `program`: the ELF slot map, then the slots of
+/// the import rows.
+pub(crate) fn import_slots(program: &Program) -> BTreeMap<u64, SlotImport> {
+    let by_index: BTreeMap<usize, SlotImport> = program
+        .imports()
+        .values()
+        .map(|row| (row.index, (row.id.clone(), row.ext)))
+        .collect();
+    let mut out = BTreeMap::new();
+    for (slot, s) in ghidorah_loader::imports::slots(program.binary()) {
+        if let Some(import) = by_index.get(&s.import) {
+            out.insert(slot, import.clone());
+        }
+    }
+    for row in program.imports().values() {
+        if let Some(slot) = row.slot.filter(Address::is_ram) {
+            out.entry(slot.off)
+                .or_insert_with(|| (row.id.clone(), row.ext));
+        }
+    }
+    out
 }
 
 impl Work {
@@ -121,6 +151,24 @@ impl Work {
     /// Gives the owner of the code unit that holds `at`.
     pub fn owner(&self, at: u64) -> Option<u64> {
         self.unit_at(at).map(|(_, u)| u.owner)
+    }
+
+    /// Gives the starts and the owners of the code units that overlap `range`.
+    pub fn overlapping(&self, range: Range) -> Vec<(u64, u64)> {
+        let mut out = Vec::new();
+        if let Some((start, unit)) = self.unit_at(range.first) {
+            out.push((start, unit.owner));
+        }
+        if let Some(next) = range.first.checked_add(1)
+            && next <= range.last
+        {
+            out.extend(
+                self.units
+                    .range(next..=range.last)
+                    .map(|(a, u)| (*a, u.owner)),
+            );
+        }
+        out
     }
 
     /// Gives the body of the function `entry`: its code units, or its entry byte alone.
@@ -144,9 +192,161 @@ impl Work {
         self.known.contains_key(&entry) || self.found.contains_key(&entry)
     }
 
-    /// Gives the extent that holds `at`: the one with the last start at or below `at`.
-    pub fn extent_at(&self, at: u64) -> Option<Extent> {
-        let (_, e) = self.extents.range(..=at).next_back()?;
-        (at <= e.last).then_some(*e)
+    /// Gives the start and the extent that holds `at`: the one with the last start at or
+    /// below `at`.
+    pub fn extent_at(&self, at: u64) -> Option<(u64, Extent)> {
+        let (start, e) = self.extents.range(..=at).next_back()?;
+        (at <= e.last).then_some((*start, *e))
+    }
+
+    /// Removes the code unit at `at` with its references and its call-site indexes.
+    /// Gives its range.
+    pub fn drop_unit(&mut self, at: u64) -> Option<Range> {
+        let unit = self.units.remove(&at)?;
+        let range = unit.range(at);
+        let Some(f) = self.funcs.get_mut(&unit.owner) else {
+            return range;
+        };
+        f.units.remove(&at);
+        let gone: Vec<RefKey> = f
+            .refs
+            .iter()
+            .filter(|k| k.from == Address::ram(at))
+            .copied()
+            .collect();
+        for key in gone {
+            f.refs.remove(&key);
+            self.refs.remove(&key);
+        }
+        if let Some(s) = &f.summary {
+            if let Some(t) = s.calls.get(&at) {
+                remove_from(&mut self.callers, *t, at);
+            }
+            if let Some(slot) = s.slot_calls.get(&at) {
+                remove_from(&mut self.slot_callers, *slot, at);
+            }
+        }
+        range
+    }
+
+    /// Removes the body of the function `entry`: its units, references and indexes.
+    pub fn clear_body(&mut self, entry: u64) {
+        let units: Vec<u64> = self
+            .funcs
+            .get(&entry)
+            .map(|f| f.units.iter().copied().collect())
+            .unwrap_or_default();
+        for at in units {
+            let _ = self.drop_unit(at);
+        }
+        let Some(f) = self.funcs.get_mut(&entry) else {
+            return;
+        };
+        if let Some(s) = f.summary.take() {
+            for x in &s.exits {
+                remove_from(&mut self.exits, *x, entry);
+            }
+        }
+    }
+
+    /// Puts the units and references of `body` for the function `entry`. A unit that
+    /// overlaps a unit of a lower entry stays out. A unit of a higher entry that overlaps a
+    /// new unit goes. Gives the owners of the units that go, with their ranges.
+    pub fn put_body(&mut self, entry: u64, body: Body) -> Vec<(u64, Range)> {
+        let mut evicted = Vec::new();
+        let mut kept = BTreeSet::new();
+        for (at, rec) in body.units {
+            let Some(range) = Range::with_len(at, u64::from(rec.len)) else {
+                continue;
+            };
+            let others = self.overlapping(range);
+            if others.iter().any(|(_, o)| *o < entry) {
+                continue;
+            }
+            for (start, owner) in others {
+                if let Some(r) = self.drop_unit(start) {
+                    evicted.push((owner, r));
+                }
+            }
+            let UnitRec {
+                len,
+                flow,
+                flags,
+                why,
+            } = rec;
+            self.units.insert(
+                at,
+                WUnit {
+                    len,
+                    flow,
+                    flags,
+                    owner: entry,
+                    why,
+                },
+            );
+            kept.insert(at);
+        }
+        let Some(f) = self.funcs.get_mut(&entry) else {
+            return evicted;
+        };
+        for (key, why) in body.refs {
+            if kept.contains(&key.from.off) {
+                f.refs.insert(key);
+                self.refs.insert(key, why);
+            }
+        }
+        for x in &body.summary.exits {
+            self.exits.entry(*x).or_default().insert(entry);
+        }
+        for (site, target) in &body.summary.calls {
+            if kept.contains(site) {
+                self.callers.entry(*target).or_default().insert(*site);
+            }
+        }
+        for (site, slot) in &body.summary.slot_calls {
+            if kept.contains(site) {
+                self.slot_callers.entry(*slot).or_default().insert(*site);
+            }
+        }
+        f.units = kept;
+        f.summary = Some(body.summary);
+        evicted
+    }
+
+    /// Tells if `body` equals the current body of the function `entry`.
+    pub fn same_body(&self, entry: u64, body: &Body) -> bool {
+        let Some(f) = self.funcs.get(&entry) else {
+            return false;
+        };
+        if f.summary.as_ref() != Some(&body.summary)
+            || f.units.len() != body.units.len()
+            || f.refs.len() != body.refs.len()
+        {
+            return false;
+        }
+        let units = body.units.iter().all(|(at, rec)| {
+            self.units.get(at).is_some_and(|u| {
+                u.owner == entry
+                    && u.len == rec.len
+                    && u.flow == rec.flow
+                    && u.flags == rec.flags
+                    && u.why == rec.why
+            })
+        });
+        units
+            && body
+                .refs
+                .iter()
+                .all(|(k, why)| f.refs.contains(k) && self.refs.get(k) == Some(why))
+    }
+}
+
+/// Removes `item` from the set of `key`. An empty set goes.
+fn remove_from(map: &mut BTreeMap<u64, BTreeSet<u64>>, key: u64, item: u64) {
+    if let Some(set) = map.get_mut(&key) {
+        set.remove(&item);
+        if set.is_empty() {
+            map.remove(&key);
+        }
     }
 }

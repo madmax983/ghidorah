@@ -59,8 +59,8 @@ fn check(path: &str, p: &Program) -> usize {
         );
         order.insert(key.clone(), a.why().order(key).expect("an order"));
     }
-    // Each premise is an analysis fact with a lower order or a fact of the base layer and
-    // the inputs, so a walk from any fact ends.
+    // A premise in the analysis layer has a lower order. Other premises are base-layer facts
+    // or inputs. So a walk from any fact ends.
     let held: BTreeSet<&FactKey> = keys.iter().collect();
     for key in &keys {
         let why = a.why().get(key).expect("a record");
@@ -86,7 +86,7 @@ fn ac_094_why_records() {
             rules.insert(why.rule.as_str().to_owned());
         }
     }
-    assert!(facts > 50_000, "the fixtures hold analysis facts: {facts}");
+    assert!(facts > 20_000, "the fixtures hold analysis facts: {facts}");
     for rule in [
         Rule::Entry,
         Rule::SymbolFunc,

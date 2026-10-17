@@ -2,6 +2,7 @@
 
 use ghidorah_base::Address;
 use ghidorah_db::{Program, RefType, StartReason};
+use ghidorah_loader::EntryKind;
 
 use crate::support::{analyzed, fid, named, truth, truth_addr};
 
@@ -21,7 +22,13 @@ fn calls(p: &Program, caller: u64, to: Address) -> bool {
 #[test]
 fn seeds_of_an_unstripped_file() {
     let p = analyzed("fixtures/bin/hello.gcc-O2");
-    let entry = p.binary().entry_points.first().expect("an entry").addr;
+    let entry = p
+        .binary()
+        .entry_points
+        .iter()
+        .find(|e| e.kind == EntryKind::Entry)
+        .expect("an entry")
+        .addr;
     assert_eq!(reason(&p, entry), Some(StartReason::Entry));
     let main = named(&p, "main");
     assert_eq!(reason(&p, main), Some(StartReason::Symbol));
@@ -97,7 +104,10 @@ fn every_truth_function_is_found() {
                 .and_then(ghidorah_base::hex::parse_u64)
                 .expect("an address");
             let fname = f.get("name").and_then(|n| n.as_str()).unwrap_or_default();
-            let size = f.get("size").and_then(|s| s.as_u64()).unwrap_or_default();
+            let size = f
+                .get("size")
+                .and_then(ghidorah_json::Value::as_u64)
+                .unwrap_or_default();
             if size == 0 && tail_targets.contains(&fname) {
                 continue;
             }

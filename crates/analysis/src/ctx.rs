@@ -13,7 +13,8 @@
 //! | a lost function | `Functions` at the entry and `Instructions` over its body |
 //!
 //! A new body takes the code units of a function with a higher entry where they overlap. That
-//! function then runs again. So the lower entry always keeps shared code.
+//! function then runs again. So the lower entry always keeps shared code. When a body lets an
+//! address go, each function whose flow stops there runs again.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -24,7 +25,7 @@ use ghidorah_kernel::RangeSet;
 use crate::registry::AnalyzerId;
 use crate::spec::Trigger;
 use crate::why::Why;
-use crate::work::{Extent, WFunc, WUnit, Work};
+use crate::work::{Extent, WFunc, Work, import_slots};
 
 /// The code unit flag of a call to a noreturn function.
 pub const UNIT_NORETURN_CALL: u8 = 0x1;
@@ -94,9 +95,24 @@ fn one(range: Range) -> RangeSet {
     set
 }
 
+/// Gives the set of single addresses.
+fn points(items: impl IntoIterator<Item = u64>) -> RangeSet {
+    let mut set = RangeSet::new();
+    for at in items {
+        set.insert(Range::single(at));
+    }
+    set
+}
+
 impl<'a> AnalysisCtx<'a> {
-    /// Makes the context of one step.
+    /// Makes the context of one step. The first step fills the import slot index.
     pub(crate) fn new(program: &'a Program, work: &'a mut Work) -> Self {
+        if work.import_slots.is_none() {
+            work.import_slots = Some(import_slots(program));
+        }
+        if work.plt.is_none() {
+            work.plt = Some(crate::code::plt_area(program));
+        }
         Self {
             program,
             work,
@@ -127,6 +143,25 @@ impl<'a> AnalysisCtx<'a> {
     /// Queues `range` for the analyzer `id`.
     pub fn requeue(&mut self, id: AnalyzerId, range: Range) {
         self.requeue.push((id, one(range)));
+    }
+
+    /// Queues `Disasm` for each function whose flow stops in `ranges`.
+    fn release(&mut self, ranges: &RangeSet) {
+        let mut found = BTreeSet::new();
+        for r in ranges.ranges() {
+            for funcs in self.work.exits.range(r.first..=r.last).map(|(_, f)| f) {
+                found.extend(funcs.iter().copied());
+            }
+        }
+        for f in found {
+            self.requeue(AnalyzerId::Disasm, Range::single(f));
+        }
+    }
+
+    /// Tells if `at` is in the PLT area: a PLT section or a stub that the loader finds.
+    #[must_use]
+    pub fn in_plt(&self, at: u64) -> bool {
+        self.work.plt.as_ref().is_some_and(|r| r.contains(at))
     }
 
     /// Tells if a function starts at `at`.
@@ -160,26 +195,83 @@ impl<'a> AnalysisCtx<'a> {
         confidence: u8,
         why: Why,
     ) -> bool {
-        let _ = (entry, reason, confidence, why);
-        false
+        let f = self.work.funcs.entry(entry).or_default();
+        let new = (confidence.min(100), why);
+        if f.reasons.get(&reason) == Some(&new) {
+            return false;
+        }
+        f.reasons.insert(reason, new);
+        self.changed = true;
+        self.emit(Trigger::Functions, points([entry]));
+        true
     }
 
     /// Removes the start reason `reason` of the function `entry`. The last reason removes the
     /// function with its body and its flags. Gives `true` for a change.
     pub fn remove_reason(&mut self, entry: u64, reason: StartReason) -> bool {
-        let _ = (entry, reason);
-        false
+        let Some(f) = self.work.funcs.get_mut(&entry) else {
+            return false;
+        };
+        if f.reasons.remove(&reason).is_none() {
+            return false;
+        }
+        let last = f.reasons.is_empty();
+        self.changed = true;
+        self.emit(Trigger::Functions, points([entry]));
+        if last {
+            self.remove_func(entry);
+        }
+        true
     }
 
-    /// Adds the declared extent `range` of the function `entry`.
+    /// Removes the function `entry` with its body, its extents and its flags.
+    fn remove_func(&mut self, entry: u64) {
+        let old = self.work.body(entry);
+        let _ = self.set_known(entry, None);
+        let _ = self.set_found(entry, None);
+        self.work.clear_body(entry);
+        self.work.funcs.remove(&entry);
+        self.work.extents.retain(|_, e| e.owner != entry);
+        self.emit(Trigger::Instructions, old.clone());
+        self.release(&old);
+    }
+
+    /// Adds the declared extent `range` of the function `entry`. The function must exist.
     pub fn add_extent(&mut self, entry: u64, range: Range) {
-        let _ = (entry, range, Extent { last: 0, owner: 0 });
+        let Some(f) = self.work.funcs.get_mut(&entry) else {
+            return;
+        };
+        if f.extents.contains(&range) {
+            return;
+        }
+        f.extents.push(range);
+        let slot = self.work.extents.entry(range.first).or_insert(Extent {
+            last: range.last,
+            owner: entry,
+        });
+        if range.last > slot.last {
+            *slot = Extent {
+                last: range.last,
+                owner: entry,
+            };
+        }
+        self.changed = true;
     }
 
     /// Gives the owner of the declared extent that holds `at`.
     #[must_use]
     pub fn extent_owner(&self, at: u64) -> Option<u64> {
-        self.work.extent_at(at).map(|e| e.owner)
+        self.work.extent_at(at).map(|(_, e)| e.owner)
+    }
+
+    /// Gives the owner of a declared extent of another function that holds `at` and not the
+    /// entry of the function `entry`. An extent that holds both, for example the FDE of a PLT
+    /// section, does not stop the flow. An extent of `entry` itself does not either.
+    #[must_use]
+    pub fn foreign_extent(&self, entry: u64, at: u64) -> Option<u64> {
+        let (start, e) = self.work.extent_at(at)?;
+        let holds_entry = start <= entry && entry <= e.last;
+        (e.owner != entry && !holds_entry && !self.in_own_extent(entry, at)).then_some(e.owner)
     }
 
     /// Tells if `at` is in a declared extent of the function `entry`.
@@ -202,22 +294,48 @@ impl<'a> AnalysisCtx<'a> {
 
     /// Gives the number of body changes of the function `entry`.
     #[must_use]
-    pub fn changes(&self, entry: u64) -> u32 {
+    pub fn changes(&self, entry: u64) -> u64 {
         self.work.changes.get(&entry).copied().unwrap_or_default()
     }
 
-    /// Gives the functions that a change in `ranges` touches: the entries in the ranges, the
-    /// owners of code units in the ranges and the functions that stop at an address in them.
+    /// Gives the functions that a change in `ranges` touches. These are the entries in the
+    /// ranges and the owners of code units in them. The functions that stop at an address in
+    /// them are also in the set.
     #[must_use]
     pub fn touching(&self, ranges: &RangeSet) -> BTreeSet<u64> {
-        let _ = ranges;
-        BTreeSet::new()
+        let mut out = BTreeSet::new();
+        for r in ranges.ranges() {
+            out.extend(self.work.funcs.range(r.first..=r.last).map(|(e, _)| *e));
+            out.extend(self.work.overlapping(*r).into_iter().map(|(_, o)| o));
+            for funcs in self.work.exits.range(r.first..=r.last).map(|(_, f)| f) {
+                out.extend(funcs.iter().copied());
+            }
+        }
+        out.retain(|e| self.work.funcs.contains_key(e));
+        out
     }
 
     /// Puts `body` in place of the body of the function `entry`. Gives `true` for a change.
     pub fn set_body(&mut self, entry: u64, body: Body) -> bool {
-        let _ = (entry, body, WUnit::range);
-        false
+        if !self.work.funcs.contains_key(&entry) || self.work.same_body(entry, &body) {
+            return false;
+        }
+        let old = self.work.body(entry);
+        self.work.clear_body(entry);
+        let evicted = self.work.put_body(entry, body);
+        let count = self.work.changes.entry(entry).or_default();
+        *count = count.saturating_add(1);
+        let new = self.work.body(entry);
+        self.changed = true;
+        self.emit(Trigger::Instructions, old.union(&new));
+        self.release(&old.subtract(&new));
+        let mut gone = RangeSet::new();
+        for (owner, range) in evicted {
+            gone.insert(range);
+            self.requeue(AnalyzerId::Disasm, Range::single(owner));
+        }
+        self.emit(Trigger::Instructions, gone);
+        true
     }
 
     /// Tells if the function at `target` is noreturn. A fact of the base layer wins over the
@@ -249,31 +367,80 @@ impl<'a> AnalysisCtx<'a> {
         self.work.slots.contains_key(&slot)
     }
 
-    /// Gives the import of the noreturn slot `slot`.
+    /// Gives the import of the import slot `slot` with its EXTERNAL address.
     #[must_use]
-    pub fn slot_import(&self, slot: u64) -> Option<&ImportId> {
-        self.work.slots.get(&slot)
+    pub fn slot_target(&self, slot: u64) -> Option<(&ImportId, Address)> {
+        self.work
+            .import_slots
+            .as_ref()?
+            .get(&slot)
+            .map(|(id, ext)| (id, *ext))
+    }
+
+    /// Gives the import slots of the binary with their imports, in slot order.
+    #[must_use]
+    pub fn import_slots(&self) -> Vec<(u64, ImportId)> {
+        self.work
+            .import_slots
+            .iter()
+            .flatten()
+            .map(|(slot, (id, _))| (*slot, id.clone()))
+            .collect()
     }
 
     /// Sets or removes the noreturn flag of the known list for the function `entry`.
     /// Gives `true` for a change.
     pub fn set_known(&mut self, entry: u64, why: Option<Why>) -> bool {
-        let _ = (entry, why);
-        false
+        let old = self.work.known.get(&entry).cloned();
+        if old == why || (why.is_some() && !self.work.funcs.contains_key(&entry)) {
+            return false;
+        }
+        match why {
+            Some(w) => self.work.known.insert(entry, w),
+            None => self.work.known.remove(&entry),
+        };
+        self.flag_changed(entry);
+        true
     }
 
     /// Sets or removes the noreturn flag of the flow for the function `entry`.
     /// Gives `true` for a change.
     pub fn set_found(&mut self, entry: u64, why: Option<Why>) -> bool {
-        let _ = (entry, why);
-        false
+        let old = self.work.found.get(&entry).cloned();
+        if old == why || (why.is_some() && !self.work.funcs.contains_key(&entry)) {
+            return false;
+        }
+        match why {
+            Some(w) => self.work.found.insert(entry, w),
+            None => self.work.found.remove(&entry),
+        };
+        self.flag_changed(entry);
+        true
+    }
+
+    /// Records the `FunctionModifiers` event of a new flag of `entry` at its call sites.
+    fn flag_changed(&mut self, entry: u64) {
+        self.changed = true;
+        let sites = self.call_sites(entry);
+        self.emit(Trigger::FunctionModifiers, points(sites));
     }
 
     /// Marks the import slot `slot` as a slot of the noreturn import `import`.
     /// Gives `true` for a change.
     pub fn set_slot(&mut self, slot: u64, import: ImportId) -> bool {
-        let _ = (slot, import);
-        false
+        if self.work.slots.get(&slot) == Some(&import) {
+            return false;
+        }
+        self.work.slots.insert(slot, import);
+        self.changed = true;
+        let sites: Vec<u64> = self
+            .work
+            .slot_callers
+            .get(&slot)
+            .map(|s| s.iter().copied().collect())
+            .unwrap_or_default();
+        self.emit(Trigger::FunctionModifiers, points(sites));
+        true
     }
 
     /// Gives the direct call sites of `target` in address order.
@@ -286,7 +453,7 @@ impl<'a> AnalysisCtx<'a> {
             .unwrap_or_default()
     }
 
-    /// Gives the functions with the flow summary of each, in entry order.
+    /// Gives the functions in entry order.
     pub(crate) fn funcs(&self) -> impl Iterator<Item = (u64, &WFunc)> {
         self.work.funcs.iter().map(|(e, f)| (*e, f))
     }

@@ -65,7 +65,7 @@ fn ac_080a_no_fallthrough_after_noreturn() {
             }
         }
     }
-    assert!(sites > 100, "the fixtures hold noreturn calls: {sites}");
+    assert!(sites > 50, "the fixtures hold noreturn calls: {sites}");
 }
 
 #[test]

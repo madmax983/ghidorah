@@ -20,11 +20,19 @@ use crate::common::{env, root};
 /// The fixture of the tests: large enough for many fuel slices.
 const FIXTURE: &str = "fixtures/bin/large.gcc-O2";
 
+/// The initialize request of the tests.
+const INIT: &str = r#"{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"t","version":"1"}}}"#;
+
+/// Gives an initialized server over the shipped backend with the workspace root.
 fn server(name: &str) -> Server<Shipped> {
     let mut options = Options::new(&env(name), "mcp-1");
     options.roots = vec![root()];
     let backend = <Shipped as Backend>::open(&options).expect("the backend opens");
-    Server::new(backend, ContentMode::Plain, Box::new(FixedClock::new(0)))
+    let mut s = Server::new(backend, ContentMode::Plain, Box::new(FixedClock::new(0)));
+    let no = Arc::new(AtomicBool::new(false));
+    let reply = s.handle(&request(INIT), &no, &|_| {}).expect("a reply");
+    assert!(reply.get("result").is_some(), "{reply}");
+    s
 }
 
 fn request(line: &str) -> Request {

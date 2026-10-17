@@ -36,8 +36,40 @@ impl CallGraph {
     /// Builds the call graph of `program`.
     #[must_use]
     pub fn build(program: &Program) -> Self {
-        let _ = program;
-        Self::default()
+        let mut imports: BTreeMap<Address, &ImportId> = BTreeMap::new();
+        for row in program.imports().values() {
+            imports.insert(row.ext, &row.id);
+            if let Some(stub) = row.stub {
+                imports.insert(stub, &row.id);
+            }
+        }
+        let mut out = Self::default();
+        for layer in [program.base(), program.analysis()] {
+            for r in layer.refs().iter() {
+                let key = r.value.key;
+                if !key.kind.is_call() {
+                    continue;
+                }
+                let Some(from) = program.owner_of(key.from) else {
+                    continue;
+                };
+                let callee = if let Some(id) = imports.get(&key.to) {
+                    Callee::Import((*id).clone())
+                } else if program.func(FuncId(key.to)).is_some() {
+                    Callee::Func(FuncId(key.to))
+                } else {
+                    continue;
+                };
+                out.callers.entry(callee.clone()).or_default().insert(from);
+                out.calls
+                    .entry(from)
+                    .or_default()
+                    .entry(callee)
+                    .or_default()
+                    .insert(key.from);
+            }
+        }
+        out
     }
 
     /// Gives the callees of `func` in callee order.

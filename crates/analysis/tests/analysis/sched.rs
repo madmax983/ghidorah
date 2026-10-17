@@ -286,7 +286,7 @@ fn shadow_publishes_once_at_completion() {
     agent_noreturn(&mut p, check);
     let committed = p.analysis().clone();
     let rev = p.rev();
-    let mut shadow = Scheduler::shadow(BAND_FULL);
+    let mut shadow = Scheduler::shadow();
     assert_eq!(shadow.mode(), Mode::Shadow);
     let mut commits = 0;
     loop {
@@ -310,6 +310,7 @@ fn shadow_publishes_once_at_completion() {
         "the agent flag changes the analysis"
     );
     let mut fresh = program("fixtures/bin/noreturn_wrappers.gcc-O2");
+    let _ = analyze(&mut fresh);
     agent_noreturn(&mut fresh, check);
     let _ = analyze(&mut fresh);
     assert_eq!(

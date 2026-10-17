@@ -104,3 +104,15 @@ fn analysis_run_triage_and_an_installed_engine() {
         "binary_load runs the installed engine"
     );
 }
+
+#[test]
+fn analysis_run_texts_are_ste() {
+    let spec = &analysis_run::SPEC;
+    let mut texts = vec![spec.summary, spec.description];
+    texts.extend(analysis_run::TEXTS);
+    texts.extend(spec.args.iter().map(|a| a.doc));
+    for text in texts {
+        let found = ghidorah_testkit::ste::check_agent_text(text);
+        assert!(found.is_empty(), "{text}: {found:?}");
+    }
+}
