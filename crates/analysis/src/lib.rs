@@ -14,20 +14,39 @@
 //! | [`callgraph`] | The call graph of the published facts | Section 7.11 |
 //! | [`inputs`] | `analysis_inputs_hash` | Section 3.9 |
 //! | [`analyzers`] | The analyzers of bands 100 to 650, and the derived views `gaps`, `lang` and `metrics` | Sections 7.3, 7.5 to 7.7, 7.11, 9.6 |
+//! | [`fir`] | [`FuncIr`]: the L0 function IR builder | Section 7.12 |
+//! | [`stack`] | [`Frame`]: stack tracking, frames and the escape rule | Section 7.9 |
+//! | [`overrides`] | `Overrides` (160): the seeds of the agent facts | Sections 3.6, 7.1 |
+//! | [`jumptable`] | `JumpTables` (410): method A | Section 7.8 |
+//! | [`tailcall`] | `TailCallsAndParts` (420): FETCH tail calls and cold parts | Section 7.3 |
+//! | [`main_discovery`] | `MainDiscovery` (430) | Section 7.11 |
+//! | [`cc`] | `CallingConvention` (800): parameters and varargs | Section 7.10 |
+//! | [`syscalls`] | `Syscalls` (810) | Section 7.11 |
+//! | [`callargs`] | The argument values of a call site | Section 7.11 |
 //!
 //! The analyzers write into a work state. A publish step makes the analysis set of the
 //! program from the work state. So a read sees one consistent set after each fuel slice.
 
 pub mod analyzers;
+pub mod callargs;
 pub mod callgraph;
+pub mod cc;
 pub mod cfg;
 pub mod code;
 pub mod ctx;
+pub mod fir;
 pub mod inputs;
+mod irfacts;
+pub mod jumptable;
+pub mod main_discovery;
+pub mod overrides;
 pub mod publish;
 pub mod registry;
 pub mod sched;
 pub mod spec;
+pub mod stack;
+pub mod syscalls;
+pub mod tailcall;
 pub mod why;
 mod work;
 
@@ -38,11 +57,13 @@ use ghidorah_db::{CodecError, EditError, Invalid, TxError};
 pub use callgraph::{CallGraph, Callee};
 pub use cfg::{Block, CfgViolation, Edge, EdgeKind, FuncCfg};
 pub use ctx::{AnalysisCtx, Body, Summary, UnitRec};
+pub use fir::{FirError, FuncIr};
 pub use inputs::inputs_hash;
 pub use publish::Changed;
 pub use registry::{ANALYZERS, AnalyzerId};
 pub use sched::{AnalyzerRow, Mode, Ran, RunOutcome, RunState, Scheduler, Until};
 pub use spec::{AnalyzerSpec, BAND_FULL, BAND_SIGNATURES, BAND_TRIAGE, Grain, Opt, Step, Trigger};
+pub use stack::Frame;
 pub use why::{Rule, Why};
 
 /// The error of a publish step.

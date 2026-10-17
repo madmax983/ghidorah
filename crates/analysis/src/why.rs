@@ -23,6 +23,13 @@
 //! | `R_ADDR_TABLE` | a pointer slot of an array or an address table, and its reference | none for the slot, the slot for the reference |
 //! | `R_STRING_REF` | a string at the target of a reference | the references to the string |
 //! | `R_STRING_SCAN` | a string in read-only data | none: the bytes |
+//! | `R_AGENT_FUNCTION` | a function at an agent function | the agent function |
+//! | `R_AGENT_CALL_TARGET` | a function at a target of an agent indirect call override | the override |
+//! | `R_AGENT_REF` | a function at the target of an agent call reference | the reference |
+//! | `R_JUMPTABLE_SLICE` | a jump table of method A | the code unit of the jump and the function |
+//! | `R_TAILCALL` | a function at a tail-call target | the code unit of the jump and the function |
+//! | `R_MAIN_FROM_LIBC_START` | `main` and its name from the first argument of `__libc_start_main` | the call site and the entry function |
+//! | `R_SYSCALL_NUMBER` | the syscall note of a `syscall` site | the code unit of the site |
 
 use std::fmt;
 
@@ -65,11 +72,25 @@ pub enum Rule {
     StringRef,
     /// `R_STRING_SCAN`.
     StringScan,
+    /// `R_AGENT_FUNCTION`.
+    AgentFunction,
+    /// `R_AGENT_CALL_TARGET`.
+    AgentCallTarget,
+    /// `R_AGENT_REF`.
+    AgentRef,
+    /// `R_JUMPTABLE_SLICE`.
+    JumptableSlice,
+    /// `R_TAILCALL`.
+    Tailcall,
+    /// `R_MAIN_FROM_LIBC_START`.
+    MainFromLibcStart,
+    /// `R_SYSCALL_NUMBER`.
+    SyscallNumber,
 }
 
 impl Rule {
     /// All rules in catalog order.
-    pub const ALL: [Self; 16] = [
+    pub const ALL: [Self; 23] = [
         Self::Entry,
         Self::SymbolFunc,
         Self::PltRelocSlot,
@@ -86,6 +107,13 @@ impl Rule {
         Self::AddrTable,
         Self::StringRef,
         Self::StringScan,
+        Self::AgentFunction,
+        Self::AgentCallTarget,
+        Self::AgentRef,
+        Self::JumptableSlice,
+        Self::Tailcall,
+        Self::MainFromLibcStart,
+        Self::SyscallNumber,
     ];
 
     /// Gives the rule code, for example `R_FDE_START`.
@@ -108,6 +136,13 @@ impl Rule {
             Self::AddrTable => "R_ADDR_TABLE",
             Self::StringRef => "R_STRING_REF",
             Self::StringScan => "R_STRING_SCAN",
+            Self::AgentFunction => "R_AGENT_FUNCTION",
+            Self::AgentCallTarget => "R_AGENT_CALL_TARGET",
+            Self::AgentRef => "R_AGENT_REF",
+            Self::JumptableSlice => "R_JUMPTABLE_SLICE",
+            Self::Tailcall => "R_TAILCALL",
+            Self::MainFromLibcStart => "R_MAIN_FROM_LIBC_START",
+            Self::SyscallNumber => "R_SYSCALL_NUMBER",
         }
     }
 
@@ -135,6 +170,19 @@ impl Rule {
             }
             Self::StringRef => "A reference points to text that ends with a terminator.",
             Self::StringScan => "Read-only data holds text that ends with a terminator.",
+            Self::AgentFunction => "An agent function starts a function.",
+            Self::AgentCallTarget => {
+                "A target of an agent indirect call override starts a function."
+            }
+            Self::AgentRef => "The target of an agent call reference starts a function.",
+            Self::JumptableSlice => "The slice of method A gives the targets of the jump table.",
+            Self::Tailcall => {
+                "A jump with a stack height of 0 leaves the function for a function start."
+            }
+            Self::MainFromLibcStart => {
+                "The first argument of the call to __libc_start_main is main."
+            }
+            Self::SyscallNumber => "The value of rax at the syscall site gives the syscall.",
         }
     }
 

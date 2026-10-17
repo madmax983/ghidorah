@@ -18,6 +18,7 @@ use ghidorah_kernel::RangeSet;
 
 use crate::analyzers::refs::DataRefs;
 use crate::ctx::{Body, Summary, UnitRec};
+use crate::irfacts::IrFacts;
 use crate::why::Why;
 
 /// One function of the work state.
@@ -121,6 +122,8 @@ pub(crate) struct Work {
     pub data: DataRefs,
     /// The strings by start, each with its why-record.
     pub strings: BTreeMap<u64, (StrInfo, Why)>,
+    /// The facts of the IR-based analyzers.
+    pub ir: IrFacts,
 }
 
 /// Gives the import of each import slot of `program`: the ELF slot map, then the slots of
