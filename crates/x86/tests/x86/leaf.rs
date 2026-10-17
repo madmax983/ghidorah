@@ -1,8 +1,8 @@
 //! The leaf-function vectors of the T1 `O0` and `O2nv` builds (AC-072).
 //!
 //! Each leaf function of a truth file lifts over its body. Each vector of its leaf-driver
-//! file sets the arguments, runs the L0 interpreter from the entry and compares the return
-//! value in `rax` with the native result.
+//! file sets the arguments and runs the L0 interpreter from the entry. The test compares
+//! the return value in `rax` with the native result.
 
 use std::path::PathBuf;
 

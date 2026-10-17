@@ -1,8 +1,8 @@
 //! The native semantic vectors of `tests/golden/semantics/x86` (AC-069a, AC-069b, AC-208).
 //!
-//! Each form lifts once. Each vector sets the registers, the flags and the buffer, runs the
-//! L0 interpreter and compares the registers, the defined flags and the buffer with the
-//! host CPU result.
+//! Each form lifts once. Each vector sets the registers, the flags and the buffer, then it
+//! runs the L0 interpreter. The test compares the registers, the defined flags and the
+//! buffer with the host CPU result.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;

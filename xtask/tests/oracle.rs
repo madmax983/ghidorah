@@ -67,6 +67,18 @@ fn oracle_files_group_forms() {
 }
 
 #[test]
+fn oracle_header_cpu() {
+    let files = oracle::render_files(
+        "Some CPU",
+        &[("a".to_owned(), "f".to_owned())],
+        &["H\n".to_owned()],
+    );
+    assert_eq!(oracle::header_cpu(&files["a"]).as_deref(), Some("Some_CPU"));
+    assert_eq!(oracle::header_cpu("no header\n"), None);
+    assert_eq!(oracle::header_cpu(""), None);
+}
+
+#[test]
 fn oracle_bash_record() {
     let stdout = format!(
         "running 1 test\n{RESULT_PREFIX}{{\"objdump\":\"GNU objdump 2.42\",\"bash\":{{\"insns\":3,\"agree\":3}}}}\ntest ok\n"

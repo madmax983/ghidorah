@@ -1,8 +1,8 @@
 //! The form tables of the native oracle, one module for each vector file.
 //!
 //! [`harness!`] makes the harness of one form. The harness saves `rbx`, `rbp` and the stack
-//! pointer, loads the state that `r15` points to, runs the pre bytes, the instruction bytes
-//! and the tail bytes, and stores the state again. No form uses `r15`.
+//! pointer. It loads the state that `r15` points to. Then it runs the pre bytes, the
+//! instruction bytes and the tail bytes, and it stores the state again. No form uses `r15`.
 
 use super::Form;
 

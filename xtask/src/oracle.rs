@@ -3,7 +3,7 @@
 //! | Command | Effect |
 //! |---|---|
 //! | `xtask oracle semantics` | Runs each form of `ghidorah-oracle` in a child process and writes `tests/golden/semantics/x86/<file>.jsonl`. |
-//! | `xtask oracle semantics --check` | Runs the forms and compares the result with the checked-in files. Writes no file. |
+//! | `xtask oracle semantics --check` | Runs the forms and compares the result with the checked-in files. Writes no file. Skips a file whose header names another CPU. |
 //! | `xtask oracle bash` | Runs the tier-2 host boundary test of `ghidorah-x86` on host bash and libc and writes `verify/oracle-results.json` (AC-066). |
 //!
 //! The vector files hold host evidence. Their header names the CPU model, so a run on
@@ -129,6 +129,14 @@ pub fn render_files(
         .collect()
 }
 
+/// Gives the CPU field of the header line of a vector file, or `None`.
+#[must_use]
+pub fn header_cpu(text: &str) -> Option<String> {
+    let line = text.lines().next()?;
+    let header = Header::parse(line, Format::Json).ok()?;
+    header.field("cpu").map(str::to_owned)
+}
+
 /// Makes the record of the host boundary oracle from the output of its test.
 ///
 /// # Errors
@@ -187,10 +195,21 @@ fn semantics(root: &Path, check: bool) -> Result<Value, Error> {
     let cpu = cpu_model(&std::fs::read_to_string("/proc/cpuinfo").unwrap_or_default());
     let files = render_files(&cpu, &list, &outputs);
     let dir = root.join(SEMANTICS_DIR);
-    let mut changed = Vec::new();
+    let (mut changed, mut skipped) = (Vec::new(), Vec::new());
     for (name, text) in &files {
         let path = dir.join(format!("{name}.jsonl"));
-        if std::fs::read_to_string(&path).ok().as_deref() != Some(text.as_str()) {
+        let old = std::fs::read_to_string(&path).ok();
+        if old.as_deref() == Some(text.as_str()) {
+            continue;
+        }
+        // A check on another CPU skips the file: undefined flags can differ.
+        if check
+            && old
+                .as_deref()
+                .is_some_and(|o| header_cpu(o) != header_cpu(text))
+        {
+            skipped.push(Value::from(name.as_str()));
+        } else {
             changed.push(Value::from(name.as_str()));
             if !check {
                 std::fs::create_dir_all(&dir).map_err(|e| Error::io(&dir, e))?;
@@ -210,6 +229,7 @@ fn semantics(root: &Path, check: bool) -> Result<Value, Error> {
         ("forms", Value::from(list.len())),
         ("vectors", Value::from(vectors)),
         ("changed", Value::from(changed)),
+        ("skipped", Value::from(skipped)),
     ]))
 }
 

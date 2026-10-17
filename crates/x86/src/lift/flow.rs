@@ -93,8 +93,9 @@ fn advance(cx: &mut Cx<'_>, loc: Loc, at: Arg, n: u64) -> Res<()> {
 
 /// `movs`, `stos`, `lods`, `scas` and `cmps` with `rep`, `repe` or `repne`.
 ///
-/// A `rep` form is a loop on its own address: it leaves when `rcx` is 0, runs the body once,
-/// takes 1 from `rcx`, and for `cmps` and `scas` leaves on the ZF condition of the prefix.
+/// A `rep` form is a loop on its own address. It leaves when `rcx` is 0. Else it runs the
+/// body once and takes 1 from `rcx`. A `cmps` or `scas` form also leaves on the ZF
+/// condition of its prefix.
 pub(super) fn string(cx: &mut Cx<'_>, row: Row) -> Res<()> {
     let m = row.mnem;
     let w = cx

@@ -229,8 +229,7 @@ fn fits(row: Row, insn: &Insn) -> bool {
         }
         Template::Stack => {
             let short_leave = row.mnem == Mnem::Leave && insn.prefixes().osz();
-            let narrow_flags = matches!(row.mnem, Mnem::Pushf | Mnem::Popf) && insn.n_ops() > 0;
-            !short_leave && !narrow_flags && operands_ok(insn, false)
+            !short_leave && operands_ok(insn, false)
         }
         Template::String => insn.ops().all(|op| match op {
             Operand::Mem(m) => {
@@ -322,8 +321,8 @@ fn intrinsic(cx: &mut Cx<'_>) -> Res<()> {
 ///
 /// # Errors
 ///
-/// Returns [`LiftError::Build`] when the builder refuses the instruction or an op, for
-/// example an address that is not above the address of the instruction before it.
+/// Returns [`LiftError::Build`] when the builder refuses the instruction or an op. An
+/// example is an address that is not above the address of the instruction before it.
 pub fn lift(insn: &Insn, b: &mut Builder) -> Result<(), LiftError> {
     b.begin(insn.addr(), insn.len())?;
     let mut cx = Cx { b, insn };
@@ -331,7 +330,7 @@ pub fn lift(insn: &Insn, b: &mut Builder) -> Result<(), LiftError> {
         LiftKind::Template(r) => template(&mut cx, *r),
         LiftKind::Syscall => Ok(cx.b.effect_op(Opc::Syscall, syscall_effect(), Arg::Nil)?),
         LiftKind::Intrinsic => intrinsic(&mut cx),
-        LiftKind::Unimpl => Err(Fail::Operand),
+        LiftKind::Unimpl => Ok(cx.b.flow(Opc::Unimpl, Arg::Nil, Arg::Nil)?),
     };
     match done {
         Ok(()) => Ok(()),
@@ -344,8 +343,8 @@ pub fn lift(insn: &Insn, b: &mut Builder) -> Result<(), LiftError> {
 /// writes and reads, and its memory effect.
 ///
 /// The defs and uses hold the general and XMM registers of [`Insn::regs_written`] and
-/// [`Insn::regs_read`], the flags word when the instruction writes or reads a status flag,
-/// and the `fs` or `gs` base of a memory operand. An opaque form also writes and reads the
+/// [`Insn::regs_read`]. They hold the flags word when the instruction writes or reads a
+/// status flag. The uses hold the `fs` or `gs` base of a memory operand. An opaque form also writes and reads the
 /// flags word. The memory effect comes from the first memory operand. A size of 0 means an
 /// unknown size.
 #[must_use]
