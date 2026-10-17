@@ -217,10 +217,11 @@ pub(crate) fn scan(bytes: &[u8], opts: Opts) -> Result<Layout, DecodeError> {
             let p = cur.next()?;
             let map = if p & 0x80 != 0 { Map::M0F } else { Map::One };
             let op = cur.next()?;
-            let bad = is_legacy_prefix(op)
-                || op & 0xf0 == 0x40
-                || (map == Map::One && op == 0x0f)
-                || (map == Map::M0F && matches!(op, 0x38 | 0x3a));
+            // In map 0 a prefix, a REX byte or `0F` cannot follow REX2.
+            let bad = match map {
+                Map::One => is_legacy_prefix(op) || op & 0xf0 == 0x40 || op == 0x0f,
+                _ => matches!(op, 0x38 | 0x3a),
+            };
             if bad {
                 return Err(cur.invalid(InvalidReason::BadRex2));
             }
@@ -273,6 +274,7 @@ fn finish(cur: &Cur<'_>, mut lay: Layout, imm_size: u8) -> Result<Layout, Decode
 /// Gives the size of an immediate kind of the attribute tables.
 fn imm_size(kind: u8, lay: &Layout, osz16: bool, opts: Opts) -> u8 {
     let reg = lay.modrm.map_or(0, |m| (m >> 3) & 7);
+    let md = lay.modrm.map_or(0, |m| m >> 6);
     let z = if osz16 { 2 } else { 4 };
     let pick = |yes: bool, a: u8, b: u8| if yes { a } else { b };
     match kind {
@@ -281,11 +283,14 @@ fn imm_size(kind: u8, lay: &Layout, osz16: bool, opts: Opts) -> u8 {
         attr::I_W => 2,
         attr::I_WB => 3,
         attr::I_V if lay.w() => 8,
+        // The LLVM rule: with `F2` or `F3`, a `0F 8x` jump keeps its 32-bit offset.
+        attr::I_JZ if lay.map == Map::M0F && lay.pfx.rep != 0 => 4,
         attr::I_Z | attr::I_JZ | attr::I_V => z,
         attr::I_JCALL => pick(opts.amd_branch_osz, z, 4),
         attr::I_MOFFS => pick(lay.pfx.asz, 4, 8),
         attr::I_GRP3V => pick(reg < 2, z, 0),
-        attr::I_BB => pick(matches!(lay.pfx.column(), 1 | 3), 2, 0),
+        // Only the register forms of `66 0F 78` and `F2 0F 78` have two immediates.
+        attr::I_BB => pick(matches!(lay.pfx.column(), 1 | 3) && md == 3, 2, 0),
         _ => 0,
     }
 }

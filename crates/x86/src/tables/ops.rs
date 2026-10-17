@@ -160,6 +160,8 @@ pub(crate) const MOVQ: u16 = 1 << 6;
 pub(crate) const REP: u16 = 1 << 7;
 /// A string compare: `F3` is `repz` and `F2` is `repnz`.
 pub(crate) const REPZ: u16 = 1 << 8;
+/// The prefix column has only a register form. With memory the no-prefix column applies.
+pub(crate) const REGF: u16 = 1 << 9;
 
 /// No operand.
 pub(crate) const NO: Spec = Spec {

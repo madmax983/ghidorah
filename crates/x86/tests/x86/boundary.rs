@@ -299,3 +299,46 @@ fn length_reads_at_most_15_bytes() {
     imm.extend_from_slice(&[0x48, 0x05, 0, 0, 0, 0]);
     assert!(too_long(&imm));
 }
+
+#[test]
+fn regress_rex2_map1_opcodes_40_to_4f_and_66() {
+    // In map 1 the bytes 40 to 4F (cmovcc) and 66, F2 and F3 are opcodes, not prefixes.
+    for (text, n) in [("d5 80 4e 49 a5", 5), ("d5 80 66 f8", 4), ("d5 80 f2 d3", 4)] {
+        let insn = dec(&hex(text), 0).unwrap_or_else(|e| panic!("{text}: {e}"));
+        assert!(insn.is_opaque(), "{text}");
+        assert_eq!(insn.len(), n, "{text}");
+    }
+    for text in ["d5 00 48 89 c0", "d5 00 66 89 c0", "d5 00 0f 05"] {
+        assert!(
+            matches!(
+                dec(&hex(text), 0),
+                Err(DecodeError::Invalid {
+                    reason: InvalidReason::BadRex2,
+                    ..
+                })
+            ),
+            "{text}"
+        );
+    }
+}
+
+#[test]
+fn regress_insertq_memory_form_is_vmread() {
+    // The `66` and `F2` forms of `0F 78` need a register. With memory the LLVM rule
+    // decodes `vmread` without immediates.
+    let insn = dec(&hex("f2 0f 78 4a 8e"), 0).expect("vmread");
+    assert_eq!((insn.mnem(), insn.len()), (Mnem::Vmread, 5));
+    let insn = dec(&hex("66 0f 78 00"), 0).expect("vmread");
+    assert_eq!((insn.mnem(), insn.len()), (Mnem::Vmread, 4));
+    let insn = dec(&hex("f2 0f 78 c1 01 02"), 0).expect("insertq");
+    assert_eq!((insn.mnem(), insn.len()), (Mnem::Insertq, 6));
+}
+
+#[test]
+fn regress_jcc_rel32_with_rep_and_66() {
+    // The LLVM rule: an `F2` or `F3` prefix keeps the 32-bit displacement of `0F 8x`.
+    assert_eq!(length(&hex("66 f3 0f 89 ed c4 2e a5")), Ok(8));
+    assert_eq!(length(&hex("66 f2 0f 84 00 00 00 00")), Ok(8));
+    assert_eq!(length(&hex("66 0f 84 00 00")), Ok(5));
+    assert_eq!(length(&hex("66 f3 e9 00 00")), Ok(5));
+}
