@@ -20,6 +20,11 @@ pub struct Tools {
     pub clang: String,
     /// The binutils version, for example `2.42`.
     pub binutils: String,
+    /// The GCC installation that gcc uses, for example `/usr/lib/gcc/x86_64-linux-gnu/13`.
+    ///
+    /// clang takes the newest GCC installation that it finds. A host with several GCC
+    /// versions then gives other crt and libgcc bytes. The build pins clang to this one.
+    pub gcc_dir: String,
 }
 
 impl Tools {
@@ -57,6 +62,29 @@ fn tool_version(program: &str, args: &[&str]) -> Result<String, Error> {
     version_word(&out.stdout).ok_or_else(|| Error::data(program, "no version in the output"))
 }
 
+/// Gives the extra driver flags of a compiler.
+///
+/// clang gets `--gcc-install-dir` with the GCC installation of gcc, so both drivers link the
+/// same crt files and libgcc.
+#[must_use]
+pub fn driver_flags(compiler: Compiler, gcc_dir: &str) -> Vec<String> {
+    match compiler {
+        Compiler::Gcc => Vec::new(),
+        Compiler::Clang => vec![format!("--gcc-install-dir={gcc_dir}")],
+    }
+}
+
+/// Finds the GCC installation directory of gcc from the path of its libgcc.
+fn gcc_install_dir() -> Result<String, Error> {
+    let out = proc::run_ok(Command::new("gcc").arg("-print-libgcc-file-name"))?;
+    let lib = out.stdout.trim();
+    Path::new(lib)
+        .parent()
+        .map(|d| d.display().to_string())
+        .filter(|d| !d.is_empty())
+        .ok_or_else(|| Error::data("gcc", "no directory in the libgcc path"))
+}
+
 /// Finds the build tools and their versions.
 ///
 /// # Errors
@@ -73,6 +101,7 @@ pub fn detect() -> Result<Tools, Error> {
         binutils: tool_version("readelf", &["--version"])?
             .trim_end_matches(')')
             .to_owned(),
+        gcc_dir: gcc_install_dir()?,
     })
 }
 

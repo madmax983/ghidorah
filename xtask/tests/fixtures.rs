@@ -225,3 +225,13 @@ fn fixtures_build_reproduces_checked_in_files() {
         );
     }
 }
+
+#[test]
+fn regress_clang_uses_the_gcc_installation_of_gcc() {
+    let dir = "/usr/lib/gcc/x86_64-linux-gnu/13";
+    assert_eq!(
+        fixtures::toolchain::driver_flags(spec::Compiler::Clang, dir),
+        vec![format!("--gcc-install-dir={dir}")]
+    );
+    assert!(fixtures::toolchain::driver_flags(spec::Compiler::Gcc, dir).is_empty());
+}

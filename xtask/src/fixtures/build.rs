@@ -92,9 +92,11 @@ fn compile(
     program: &Program,
     build: &Build,
     name: &str,
+    gcc_dir: &str,
 ) -> Result<(Vec<String>, String), Error> {
     let cc = build.compiler.program();
-    let mut cflags = strings(build.cflags);
+    let mut cflags = toolchain::driver_flags(build.compiler, gcc_dir);
+    cflags.extend(strings(build.cflags));
     cflags.extend(strings(program.cflags));
     let mut objects = Vec::new();
     for src in program.sources {
@@ -175,6 +177,7 @@ fn leaf_vectors(
     build: &Build,
     objects: &[String],
     fns: &[LeafFn],
+    gcc_dir: &str,
 ) -> Result<String, Error> {
     let cc = build.compiler.program();
     let mut leaf_objects = Vec::new();
@@ -185,7 +188,8 @@ fn leaf_vectors(
         leaf_objects.push(renamed);
     }
     write_file(&dir.join("leaf_list.h"), leaf::list_header(fns).as_bytes())?;
-    let mut args = strings(build.cflags);
+    let mut args = toolchain::driver_flags(build.compiler, gcc_dir);
+    args.extend(strings(build.cflags));
     args.extend(strings(program.cflags));
     args.push("-DLEAF_LIST=\"leaf_list.h\"".to_owned());
     args.extend(strings(&[spec::LEAF_DRIVER, "-o", "leaf_driver"]));
@@ -348,7 +352,7 @@ impl Run<'_> {
         sha: &str,
     ) -> Result<(), Error> {
         let name = spec::build_name(program, build);
-        let lines = leaf_vectors(dir, program, build, objects, fns)?;
+        let lines = leaf_vectors(dir, program, build, objects, fns, &self.tools.gcc_dir)?;
         let cc = format!(
             "{}-{}",
             build.compiler.program(),
@@ -429,7 +433,7 @@ impl Run<'_> {
             let bytes = read_file(&src_root.join(file))?;
             write_file(&dir.join(file), &bytes)?;
         }
-        let (objects, map) = compile(&dir, program, build, &name)?;
+        let (objects, map) = compile(&dir, program, build, &name, &self.tools.gcc_dir)?;
         check_runs(&dir.join(&name), facts_in)?;
         let bytes = read_file(&dir.join(&name))?;
         let (binaries, sha) = self.emit_all(program, build, &dir, &bytes)?;
