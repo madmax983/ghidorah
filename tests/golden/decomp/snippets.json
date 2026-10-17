@@ -5,36 +5,48 @@
       "fixture": "hello.gcc-O0",
       "function": "finish",
       "max_gotos": 0,
-      "snippets": ["puts(\"Goodbye.\")", "return "]
+      "snippets": ["puts(\"Goodbye.\");", "return "]
     },
     {
       "fixture": "hello.gcc-O2",
       "function": "run",
       "max_gotos": 0,
-      "snippets": ["greet(", "return finish("]
+      "snippets": ["greet(2 <= (int32_t)param_1 ? \"friend\" : \"world\");", "return finish("]
     },
     {
       "fixture": "loops.gcc-O0",
+      "function": "sum_squares",
+      "max_gotos": 0,
+      "snippets": ["while (local_10 < ", "local_18 = local_18 + local_10 * local_10;", "local_10 = local_10 + 1;", "return local_18;"]
+    },
+    {
+      "fixture": "loops.gcc-O2",
       "function": "gcd",
       "max_gotos": 0,
-      "snippets": ["while (", "% "]
+      "snippets": ["if (param_2 == 0) {", "while (true) {", "% v2", "param_1 = param_2;", "break;"]
     },
     {
       "fixture": "switch.gcc-O2",
       "function": "run_command",
       "max_gotos": 0,
-      "snippets": ["switch (", "puts(\"start\")"]
+      "snippets": ["switch (", "case 5:", "return puts(\"start\");", "return puts(\"unknown command\");"]
     },
     {
       "fixture": "socket_client.gcc-O0",
       "function": "connect_to",
       "max_gotos": 0,
-      "snippets": ["socket(2, 1, 0)", "connect(", "close("]
+      "snippets": ["socket(2, 1, 0);", "memset(", "htons(", "inet_pton(2, param_1, ", "connect(", "close("]
+    },
+    {
+      "fixture": "socket_client.gcc-O0",
+      "function": "main",
+      "max_gotos": 0,
+      "snippets": ["connect_to(\"127.0.0.1\", 0x1f90)", "puts(\"connect failed\");", "send_hello(", "close("]
     },
     {
       "fixture": "recursion.gcc-O0",
       "function": "main",
-      "max_gotos": 0,
+      "max_gotos": 1,
       "snippets": ["return "]
     }
   ]

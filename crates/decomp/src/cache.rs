@@ -9,7 +9,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use ghidorah_base::{Fuel, FuncId, Rev};
+use ghidorah_base::{Fnv1a64, Fuel, FuncId, Rev};
 use ghidorah_db::Program;
 use ghidorah_ir::IntrinsicNames;
 
@@ -32,18 +32,26 @@ pub struct Key {
 /// Gives the FNV-1a 64 hash of the options.
 #[must_use]
 pub fn opts_hash(opts: &Opts) -> u64 {
-    let _ = opts;
-    0
+    let mut h = Fnv1a64::new();
+    h.write(
+        &u64::try_from(opts.max_nodes)
+            .unwrap_or(u64::MAX)
+            .to_le_bytes(),
+    );
+    let p = opts.passes;
+    for flag in [p.fold, p.sailr, p.canary, p.tailcall] {
+        h.write_u8(u8::from(flag));
+    }
+    h.finish()
 }
 
 /// Gives the key of a decompile of `func` in `program` with `opts`.
 #[must_use]
 pub fn key(program: &Program, func: FuncId, opts: &Opts) -> Key {
-    let _ = (program, opts);
     Key {
         func,
-        epoch: Rev(0),
-        opts: 0,
+        epoch: program.func_epoch(func),
+        opts: opts_hash(opts),
     }
 }
 
@@ -70,7 +78,7 @@ impl Cache {
     #[must_use]
     pub fn new(capacity: usize) -> Self {
         Self {
-            capacity,
+            capacity: capacity.max(1),
             tick: 0,
             entries: BTreeMap::new(),
             stats: Stats::default(),
@@ -80,7 +88,7 @@ impl Cache {
     /// Gives the number of entries.
     #[must_use]
     pub fn len(&self) -> usize {
-        0
+        self.entries.len()
     }
 
     /// Tells if the cache has no entry.
@@ -95,16 +103,45 @@ impl Cache {
         self.stats
     }
 
+    /// Gives the next use count.
+    const fn next_tick(&mut self) -> u64 {
+        self.tick = self.tick.saturating_add(1);
+        self.tick
+    }
+
     /// Gives the output of `key` and counts a hit, or counts a miss.
     pub fn get(&mut self, key: &Key) -> Option<Arc<Output>> {
-        let _ = key;
+        let tick = self.next_tick();
+        if let Some((used, out)) = self.entries.get_mut(key) {
+            *used = tick;
+            self.stats.hits = self.stats.hits.saturating_add(1);
+            return Some(Arc::clone(out));
+        }
+        self.stats.misses = self.stats.misses.saturating_add(1);
         None
     }
 
     /// Puts the output of `key`. A full cache drops the entry with the oldest use first.
     pub fn put(&mut self, key: Key, output: Output) -> Arc<Output> {
-        let _ = key;
-        Arc::new(output)
+        let tick = self.next_tick();
+        if !self.entries.contains_key(&key) {
+            while self.entries.len() >= self.capacity {
+                let oldest = self
+                    .entries
+                    .iter()
+                    .min_by_key(|(k, (used, _))| (*used, **k))
+                    .map(|(k, _)| *k);
+                match oldest {
+                    Some(k) => {
+                        let _ = self.entries.remove(&k);
+                    }
+                    None => break,
+                }
+            }
+        }
+        let out = Arc::new(output);
+        self.entries.insert(key, (tick, Arc::clone(&out)));
+        out
     }
 
     /// Gives the output of `func` from the cache, or renders and puts it. The flag tells if
@@ -121,7 +158,11 @@ impl Cache {
         names: &dyn IntrinsicNames,
         fuel: &mut Fuel,
     ) -> Result<(Arc<Output>, bool), DecompError> {
+        let key = key(program, func, opts);
+        if let Some(out) = self.get(&key) {
+            return Ok((out, true));
+        }
         let out = crate::render(program, func, opts, names, fuel)?;
-        Ok((Arc::new(out), false))
+        Ok((self.put(key, out), false))
     }
 }

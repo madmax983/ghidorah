@@ -25,10 +25,12 @@ const BUDGET_ENTRY: u64 = 96;
 const CURSOR_FREE: [&str; 3] = ["cursors", "disasm_limit", "include"];
 
 /// The section cursors of the call: the function entry and the last row address of each.
+/// The decompile cursor holds the entry and the number of the next line.
 #[derive(Debug, Default)]
 pub struct Cursors {
     disasm: Option<(u64, u64)>,
     ir: Option<(u64, u64)>,
+    decomp: Option<(u64, u64)>,
 }
 
 /// Gives the `(entry, after)` pair of a cursor key.
@@ -59,6 +61,10 @@ pub struct Job<'a> {
     pub mode: ContentMode,
     /// `true` for the detailed format: each function gets its `budgets` member.
     pub detailed: bool,
+    /// The window and the passes of the `decomp` section.
+    pub decomp: fs::DecompOpts,
+    /// `true` when `ir_opts.level` is `l1`.
+    pub ir_l1: bool,
 }
 
 impl Job<'_> {
@@ -81,12 +87,71 @@ impl Job<'_> {
 
     /// Gives the address after which the rows of `entry` start in `section`.
     fn after(&self, section: &str, entry: u64) -> Option<u64> {
-        let found = if section == "ir" {
-            self.cursors.ir
-        } else {
-            self.cursors.disasm
+        let found = match section {
+            "ir" => self.cursors.ir,
+            "decomp" => self.cursors.decomp,
+            _ => self.cursors.disasm,
         };
         found.filter(|(e, _)| *e == entry).map(|(_, a)| a)
+    }
+
+    /// Renders the `decomp` section of `func` within `share`: the most lines of the window
+    /// that fit. Gives the value or the omitted entry, the need and the use.
+    fn decomp(
+        &self,
+        func: FuncId,
+        share: u64,
+        fuel: &mut Fuel,
+    ) -> (Result<Value, Value>, u64, u64) {
+        let p = self.render.program;
+        let entry = func.0.off;
+        let out = match fs::decomp_output(p, func, &self.decomp.opts, fuel) {
+            Ok(out) => out,
+            Err(text) => {
+                let value = Value::object([("error", Value::from(text))]);
+                let need = self.member("decomp", &value);
+                return (Ok(value), need, need);
+            }
+        };
+        let start = self
+            .after("decomp", entry)
+            .and_then(|n| usize::try_from(n).ok())
+            .unwrap_or(self.decomp.start);
+        let scope = self.scope(fs::DECOMP);
+        let cursor = |next: usize| {
+            let key = SortKey(vec![
+                KeyPart::Int(entry),
+                KeyPart::Int(u64::try_from(next).unwrap_or(u64::MAX)),
+            ]);
+            scope.encode(key)
+        };
+        let caps = self.render.caps;
+        let window = |k: usize| fs::decomp_value(p, &out, start, k, caps, &cursor);
+        let whole = window(self.decomp.count);
+        let need = self.member("decomp", &whole);
+        if need <= share {
+            return (Ok(whole), need, need);
+        }
+        let (mut lo, mut hi) = (0usize, self.decomp.count);
+        let mut best: Option<(Value, u64)> = None;
+        while lo < hi {
+            let mid = lo + (hi - lo).div_ceil(2);
+            let value = window(mid);
+            let used = self.member("decomp", &value);
+            if used <= share {
+                lo = mid;
+                best = Some((value, used));
+            } else {
+                hi = mid - 1;
+            }
+        }
+        match best {
+            Some((value, used)) if lo > 0 => (Ok(value), need, used),
+            _ => {
+                let omitted = Value::object([("chars", Value::from(fs::size(&whole)))]);
+                (Err(omitted), need, 0)
+            }
+        }
     }
 }
 
@@ -149,8 +214,13 @@ fn row_section(
         }
         "ir" => {
             let mut head = Object::new();
-            head.push("level", Value::from("l0"));
-            let (rows, more) = match fs::ir_rows(p, func, after, job.limit, fuel) {
+            head.push("level", Value::from(if job.ir_l1 { "l1" } else { "l0" }));
+            let rows = if job.ir_l1 {
+                fs::l1_rows(p, func, after, job.limit, fuel)
+            } else {
+                fs::ir_rows(p, func, after, job.limit, fuel)
+            };
+            let (rows, more) = match rows {
                 Ok(ir) => {
                     head.push("lift_ver", Value::from(ir.lift_ver));
                     if ir.intrinsic {
@@ -310,6 +380,9 @@ fn render_section(
     fuel: &mut Fuel,
     marks: &mut Marks,
 ) -> (Result<Value, Value>, u64, u64) {
+    if name == "decomp" {
+        return job.decomp(func, share, fuel);
+    }
     let entry = func.0.off;
     let (whole, section) = match row_section(job, name, func, fuel, marks) {
         Some(rs) => (rs.value(job, entry, rs.rows.len()), Some(rs)),
@@ -388,7 +461,11 @@ pub fn one(
             used,
         });
     }
-    if job.include.iter().any(|s| *s == "disasm" || *s == "ir") {
+    if job
+        .include
+        .iter()
+        .any(|s| matches!(*s, "disasm" | "ir" | "decomp"))
+    {
         marks.visited.push(func);
     }
     if !omitted.is_empty() {
@@ -428,14 +505,18 @@ pub fn cursors(job: &Job<'_>) -> Result<Cursors, ToolError> {
     let Some(given) = job.args.get("cursors") else {
         return Ok(out);
     };
-    for (name, section) in [("disasm", fs::DISASM), ("ir", fs::IR)] {
+    for (name, section) in [
+        ("disasm", fs::DISASM),
+        ("ir", fs::IR),
+        ("decomp", fs::DECOMP),
+    ] {
         if let Some(text) = given.get(name).and_then(Value::as_str) {
             let key = job.scope(section).decode(text)?;
             let found = pair(&key).ok_or_else(|| ToolError::new(ErrorCode::CursorInvalid))?;
-            if name == "ir" {
-                out.ir = Some(found);
-            } else {
-                out.disasm = Some(found);
+            match name {
+                "ir" => out.ir = Some(found),
+                "decomp" => out.decomp = Some(found),
+                _ => out.disasm = Some(found),
             }
         }
     }

@@ -1,12 +1,15 @@
 //! The shape of the `decomp` section, the IR level `l1`, the budget cut and the agent texts.
 
+use ghidorah_base::Fuel;
+use ghidorah_decomp::Opts;
 use ghidorah_json::Value;
 use ghidorah_testkit::ste::check_agent_text;
 use ghidorah_tools::registry::lint;
 use ghidorah_tools::{ArgKind, ArgSpec, handlers};
 
 use crate::support::{
-    call, call_value, chars, data, decomp, fixture, json, registry, session, text_at, text_of,
+    call, call_value, chars, data, decomp, fixture, json, program, registry, session, text_at,
+    text_of,
 };
 
 #[test]
@@ -164,32 +167,62 @@ fn ir_level_l1_gives_the_ssa_form() {
         .collect();
     assert!(ops.iter().any(|o| o.contains("Phi")), "{ops:?}");
     assert!(
-        ops.iter().all(|o| !o.contains(" Get.")),
-        "L1 has no Get: {ops:?}"
+        ops.iter().all(|o| !o.contains(" Put.")),
+        "L1 has no Put: {ops:?}"
     );
     let l0 = call(&mut s, "func_get", r#"{"target":"gcd","include":["ir"]}"#);
     assert_eq!(text_at(data(&l0), "/ir/level"), "l0");
+    let l0_ops = chars(data(&l0));
+    assert!(l0_ops > chars(ir), "the L1 form is smaller than L0");
 }
+
+/// The characters that the cut test takes from the budget of the full window.
+const CUT: u64 = 400;
 
 #[test]
 fn a_small_budget_cuts_the_window() {
-    let (mut s, _) = fixture("large.gcc-O2");
-    let full = decomp(
-        &mut s,
-        "main",
-        r#"{"decomp_opts":{"lines":{"count":1000}}}"#,
-    );
+    let (mut s, id) = fixture("large.gcc-O2");
+    let p = program(&s, id);
+    let longest = p
+        .funcs()
+        .iter()
+        .map(|f| f.id())
+        .max_by_key(|f| {
+            ghidorah_decomp::render(
+                p,
+                *f,
+                &Opts::default(),
+                &ghidorah_x86::lift::Names,
+                &mut Fuel::new(50_000_000),
+            )
+            .map_or(0, |o| o.lines.len())
+        })
+        .expect("a function");
+    let target = longest.to_string();
+    let args = Value::object([
+        ("target", Value::from(target.as_str())),
+        ("include", json(r#"["decomp"]"#)),
+    ]);
+    let whole = call_value(&mut s, "func_get", args);
+    let full = data(&whole).get("decomp").expect("a decomp section");
     let total = full
         .get("total_lines")
         .and_then(Value::as_u64)
         .expect("total");
-    assert!(total > 40, "main has {total} lines");
-    let envelope = call_value(
-        &mut s,
-        "func_get",
-        json(r#"{"target":"main","include":["decomp"],"max_chars":4000}"#),
+    assert!(total > 20, "{target} has {total} lines");
+    assert!(full.get("next_cursor").is_none(), "{full}");
+    let small = u64::try_from(chars(&whole)).expect("small") - CUT;
+    let args = Value::object([
+        ("target", Value::from(target.as_str())),
+        ("include", json(r#"["decomp"]"#)),
+        ("max_chars", Value::from(small)),
+    ]);
+    let envelope = call_value(&mut s, "func_get", args);
+    assert!(
+        u64::try_from(chars(&envelope)).expect("small") <= small,
+        "{}",
+        chars(&envelope)
     );
-    assert!(chars(&envelope) <= 4_000, "{}", chars(&envelope));
     let cut = data(&envelope).get("decomp").expect("a decomp section");
     let count = cut
         .get("line_count")
@@ -199,9 +232,9 @@ fn a_small_budget_cuts_the_window() {
     let cursor = text_at(cut, "/next_cursor");
     assert!(!cursor.is_empty(), "{cut}");
     let args = Value::object([
-        ("target", Value::from("main")),
+        ("target", Value::from(target.as_str())),
         ("include", json(r#"["decomp"]"#)),
-        ("max_chars", Value::from(4000)),
+        ("max_chars", Value::from(small)),
         (
             "cursors",
             Value::object([("decomp", Value::from(cursor.as_str()))]),
@@ -215,7 +248,7 @@ fn a_small_budget_cuts_the_window() {
         "{second}"
     );
     let bad = Value::object([
-        ("target", Value::from("main")),
+        ("target", Value::from(target.as_str())),
         ("include", json(r#"["decomp"]"#)),
         ("cursors", Value::object([("decomp", Value::from("00"))])),
     ]);

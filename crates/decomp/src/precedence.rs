@@ -2,8 +2,8 @@
 //!
 //! The printer uses precedence climbing. A higher number binds tighter. A child expression
 //! gets parentheses when its number is lower than the number of its parent operator. The right
-//! operand of a binary operator also gets parentheses when the numbers are equal, because the
-//! binary operators of C group from left to right.
+//! operand of a binary operator also gets parentheses when the numbers are equal. The binary
+//! operators of C group from left to right.
 //!
 //! | Group | Operators | Number |
 //! |---|---|---|
@@ -70,20 +70,50 @@ pub struct Binary {
     pub signed: bool,
 }
 
+/// Gives a binary operator.
+const fn op(text: &'static str, prec: u8, signed: bool) -> Option<Binary> {
+    Some(Binary { text, prec, signed })
+}
+
 /// Gives the C operator of a binary L1 opcode. An opcode that prints as a call, for example
 /// `Rol`, gives `None`.
 #[must_use]
-pub const fn binary(op: Opc) -> Option<Binary> {
-    let _ = op;
-    None
+pub const fn binary(opc: Opc) -> Option<Binary> {
+    match opc {
+        Opc::Mul => op("*", MUL, false),
+        Opc::UDiv => op("/", MUL, false),
+        Opc::SDiv => op("/", MUL, true),
+        Opc::URem => op("%", MUL, false),
+        Opc::SRem => op("%", MUL, true),
+        Opc::Add => op("+", ADD, false),
+        Opc::Sub => op("-", ADD, false),
+        Opc::Shl => op("<<", SHIFT, false),
+        Opc::LShr => op(">>", SHIFT, false),
+        Opc::AShr => op(">>", SHIFT, true),
+        Opc::ULt => op("<", REL, false),
+        Opc::ULe => op("<=", REL, false),
+        Opc::SLt => op("<", REL, true),
+        Opc::SLe => op("<=", REL, true),
+        Opc::Eq => op("==", EQ, false),
+        Opc::Ne => op("!=", EQ, false),
+        Opc::And => op("&", BIT_AND, false),
+        Opc::Xor => op("^", BIT_XOR, false),
+        Opc::Or => op("|", BIT_OR, false),
+        _ => None,
+    }
 }
 
 /// Gives the operator text of the negation of the compare `op`: `ULt` gives `>=`. Another
 /// opcode gives `None`.
 #[must_use]
 pub const fn negated(op: Opc) -> Option<&'static str> {
-    let _ = op;
-    None
+    match op {
+        Opc::Eq => Some("!="),
+        Opc::Ne => Some("=="),
+        Opc::ULt | Opc::SLt => Some(">="),
+        Opc::ULe | Opc::SLe => Some(">"),
+        _ => None,
+    }
 }
 
 /// Tells if a child with the number `child` needs parentheses under an operator with the
@@ -91,6 +121,5 @@ pub const fn negated(op: Opc) -> Option<&'static str> {
 /// operand of a prefix operator.
 #[must_use]
 pub const fn parens(child: u8, parent: u8, right: bool) -> bool {
-    let _ = (child, parent, right);
-    false
+    child < parent || (right && child == parent)
 }

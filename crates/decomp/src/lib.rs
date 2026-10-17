@@ -424,8 +424,7 @@ pub fn finish(
     let mut elided = decomp.elided.clone();
     let flow = print::flow_addrs(&decomp.view);
     linemap::cover(&printed.lines, &decomp.view.insns, &flow, body, &mut elided);
-    elided.sort_unstable();
-    elided.dedup();
+    let elided = linemap::merge(elided);
     let mut all = decomp.warnings.clone();
     all.extend(printed.warnings);
     Output {
@@ -437,4 +436,54 @@ pub fn finish(
         elided,
         vars: printed.vars,
     }
+}
+
+/// The L1 form of a function as text rows (design Section 6.4, `ir_opts.level: l1`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct L1Rows {
+    /// One row for each address in address order: the texts of its live ops in run order.
+    /// The phis of a block are at the address of the block.
+    pub rows: Vec<(u64, Vec<String>)>,
+    /// `true` when an op is an `Intrinsic`.
+    pub intrinsic: bool,
+    /// The lifter version.
+    pub lift_ver: u32,
+}
+
+/// Gives the text rows of the L1 form of the published function `id`. Each text is the op ID
+/// and the op, with the phi arguments.
+///
+/// # Errors
+///
+/// Returns [`DecompError::L1`] when the L1 form does not build.
+pub fn l1_rows(
+    program: &Program,
+    id: FuncId,
+    names: &dyn IntrinsicNames,
+    fuel: &mut Fuel,
+) -> Result<L1Rows, DecompError> {
+    let ir = l1::build(program, id, &FirOpts::DEFAULT, &Switches::all(), fuel)?;
+    let arena = ir.ssa.arena();
+    let mut by_addr: std::collections::BTreeMap<u64, Vec<String>> =
+        std::collections::BTreeMap::new();
+    let mut intrinsic = false;
+    for i in ir.ssa.order() {
+        let Some(op) = arena.op(i) else {
+            continue;
+        };
+        if op.opc == ghidorah_ir::Opc::Nop {
+            continue;
+        }
+        intrinsic |= op.opc == ghidorah_ir::Opc::Intrinsic;
+        let text = ghidorah_ir::print::op_text(arena, op, names);
+        by_addr
+            .entry(op.id.addr)
+            .or_default()
+            .push(format!("{} {text}", op.id));
+    }
+    Ok(L1Rows {
+        rows: by_addr.into_iter().collect(),
+        intrinsic,
+        lift_ver: ir.l0.lift_ver,
+    })
 }

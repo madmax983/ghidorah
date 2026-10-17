@@ -8,8 +8,8 @@ use ghidorah_tools::Session;
 
 use crate::support::{call_value, chars, data, fixture, json, program, t2_fixtures, text_at};
 
-/// The budget of the pages of the test.
-const MAX_CHARS: u64 = 6_000;
+/// The budget of the pages: the default `max_chars` of `func_get`.
+const MAX_CHARS: u64 = 24_000;
 
 /// Pages through the decompile of `func` with windows of `count` lines. Gives the text of
 /// the pages and the number of pages.

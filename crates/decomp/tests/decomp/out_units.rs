@@ -298,7 +298,7 @@ fn warning_rows_sort_and_name_remedies() {
     );
 }
 
-/// Gives a two-way branch whose tree swaps the branches when `wrong` is set.
+/// Gives a two-way branch. With `wrong`, its tree swaps the branches.
 fn branchy(wrong: bool) -> ghidorah_decomp::Decomp {
     let cond = crate::out_print::bin(
         Opc::Eq,

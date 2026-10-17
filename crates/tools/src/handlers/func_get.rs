@@ -433,6 +433,12 @@ fn run(session: &mut Session, args: &Args, ctx: &mut Ctx) -> Result<Payload, Too
             args,
             mode: ctx.budget.mode,
             detailed: ctx.format == Format::Detailed,
+            decomp: fs::decomp_opts(args),
+            ir_l1: args
+                .get("ir_opts")
+                .and_then(|o| o.get("level"))
+                .and_then(Value::as_str)
+                == Some("l1"),
         };
         job.cursors = cursors(&job).map_err(|e| first_rows(args, e))?;
         let room = fs::room(ctx);

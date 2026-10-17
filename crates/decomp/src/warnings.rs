@@ -15,6 +15,7 @@
 use ghidorah_base::WarningCode;
 
 use crate::Warning;
+use crate::expr::{Callee, Stmt};
 use crate::view::View;
 
 /// A remedy call of a warning.
@@ -41,6 +42,39 @@ pub struct WarningRow {
 /// The view gives the callee of a call site and the entry.
 #[must_use]
 pub fn rows(warnings: &[Warning], view: &View) -> Vec<WarningRow> {
-    let _ = (warnings, view);
-    Vec::new()
+    let mut out: Vec<WarningRow> = warnings
+        .iter()
+        .map(|w| WarningRow {
+            at: w.at,
+            code: w.code,
+            remedy: remedy(w, view),
+        })
+        .collect();
+    out.sort_unstable_by_key(|r| (r.at, r.code.num()));
+    out.dedup_by_key(|r| (r.at, r.code));
+    out
+}
+
+/// Gives the remedy of one warning.
+fn remedy(w: &Warning, view: &View) -> Option<Remedy> {
+    match w.code {
+        WarningCode::NoreturnAssumed => callee_at(view, w.at).map(Remedy::Disasm),
+        WarningCode::LiftUnsupported => Some(Remedy::Insn(w.at)),
+        WarningCode::StructureSelfcheck => Some(Remedy::Disasm(view.entry)),
+        _ => None,
+    }
+}
+
+/// Gives the target of the direct call at the instruction `at`.
+fn callee_at(view: &View, at: u64) -> Option<u64> {
+    view.nodes
+        .iter()
+        .flat_map(|n| &n.stmts)
+        .find_map(|s| match s {
+            Stmt::Call(c) if c.at.addr == at => match c.callee {
+                Callee::Direct(t) => Some(t),
+                _ => None,
+            },
+            _ => None,
+        })
 }

@@ -9,7 +9,7 @@
 //! | `fallback_mode` | `none`, or `flat` for FLAT output |
 //! | `validation` | `ok`, or `repaired` after a self-check mismatch |
 
-use crate::print::Line;
+use crate::print::{Line, LineKind};
 use crate::selfcheck::Validation;
 use crate::structure::Mode;
 
@@ -33,12 +33,14 @@ pub struct Metrics {
 /// Measures `lines`.
 #[must_use]
 pub fn measure(lines: &[Line], mode: Mode, validation: Validation) -> Metrics {
-    let _ = lines;
+    let count = |kind: LineKind| {
+        u32::try_from(lines.iter().filter(|l| l.kind == kind).count()).unwrap_or(u32::MAX)
+    };
     Metrics {
-        goto_count: 0,
-        label_count: 0,
-        max_nesting: 0,
-        stmt_count: 0,
+        goto_count: count(LineKind::Goto),
+        label_count: count(LineKind::Label),
+        max_nesting: lines.iter().map(|l| u32::from(l.depth)).max().unwrap_or(0),
+        stmt_count: count(LineKind::Stmt),
         mode,
         validation,
     }

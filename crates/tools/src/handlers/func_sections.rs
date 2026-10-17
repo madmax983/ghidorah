@@ -26,7 +26,10 @@ use ghidorah_base::{Caps, FuncId};
 use ghidorah_db::Program;
 use ghidorah_json::Value;
 
-pub use decomp::{DECOMP, DecompOpts, WHY_DISASM, WHY_INSN, l1_rows};
+pub use decomp::{
+    DECOMP, DecompOpts, WHY_DISASM, WHY_INSN, l1_rows, opts as decomp_opts,
+    output as decomp_output, value as decomp_value,
+};
 pub use lists::{func_ref, jump_table, table_ids, type_text};
 pub use rows::{
     CursorScope, DISASM, IR, IrRows, SWEEP, bad_row, body_rows, body_units, decode, ir_rows, row,

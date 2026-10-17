@@ -30,35 +30,47 @@ impl<'a> Window<'a> {
     /// line. A start past the last line gives an empty window.
     #[must_use]
     pub fn new(output: &'a Output, start: usize, count: usize) -> Self {
+        let start = start.max(1);
+        let left = output.lines.len().saturating_sub(start.saturating_sub(1));
         Self {
             output,
             start,
-            count: count.min(0),
+            count: count.min(left),
         }
     }
 
     /// Gives the number of lines of the output.
     #[must_use]
     pub fn total(&self) -> usize {
-        0
+        self.output.lines.len()
     }
 
     /// Gives the lines of the window.
     #[must_use]
     pub fn lines(&self) -> &'a [Line] {
-        &[]
+        let first = self.start.saturating_sub(1);
+        self.output
+            .lines
+            .get(first..first.saturating_add(self.count))
+            .unwrap_or_default()
     }
 
     /// Gives the text of the window: the lines with a newline after each one.
     #[must_use]
     pub fn text(&self) -> String {
-        String::new()
+        let mut out = String::new();
+        for line in self.lines() {
+            out.push_str(&line.text);
+            out.push('\n');
+        }
+        out
     }
 
     /// Gives the number of the first line after the window, or `None` at the end.
     #[must_use]
     pub fn next(&self) -> Option<usize> {
-        None
+        let next = self.start.saturating_add(self.count);
+        (self.count > 0 && next <= self.total()).then_some(next)
     }
 
     /// Gives the line map rows of the window.
@@ -70,12 +82,25 @@ impl<'a> Window<'a> {
     /// Gives the calls of the window with their line numbers.
     #[must_use]
     pub fn calls(&self) -> Vec<(usize, &'a CallRow)> {
-        Vec::new()
+        self.numbered()
+            .flat_map(|(n, l)| l.calls.iter().map(move |c| (n, c)))
+            .collect()
     }
 
     /// Gives the string literals of the window with their line numbers.
     #[must_use]
     pub fn strings(&self) -> Vec<(usize, u64)> {
-        Vec::new()
+        self.numbered()
+            .flat_map(|(n, l)| l.strings.iter().map(move |s| (n, *s)))
+            .collect()
+    }
+
+    /// Gives the lines of the window with their numbers.
+    fn numbered(&self) -> impl Iterator<Item = (usize, &'a Line)> + 'a {
+        let start = self.start;
+        self.lines()
+            .iter()
+            .enumerate()
+            .map(move |(i, l)| (start.saturating_add(i), l))
     }
 }
