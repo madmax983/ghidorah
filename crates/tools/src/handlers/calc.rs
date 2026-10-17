@@ -1,8 +1,8 @@
 //! `calc`: calculate numbers and addresses (design Section 10.4, tool 10).
 //!
-//! The expression grammar is in [`crate::calc`]. Name and ID terms use the resolver of
-//! [`crate::resolve`] with the address rules, so a symbol, a section, a default name or an
-//! ID is a value. With no open binary, only number terms work.
+//! The expression grammar is in [`crate::calc`]. Name and ID terms go to the resolver of
+//! [`crate::resolve`]. So a symbol, a section, a default name or an ID is a value. With no
+//! open binary, only number terms work.
 //!
 //! Output: `{ value, unsigned, signed, views, address? }`. `value` is hex text. `unsigned`,
 //! `signed` and each view are decimal text, because output has no JSON integer above 2^53.

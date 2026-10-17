@@ -13,9 +13,9 @@
 //! | 4 | The check: the high 4 bytes of FNV-1a 64 over the bytes before it |
 //!
 //! A key part is `0` and a `u64`, or `1`, a `u32` length and UTF-8 bytes. Numbers are
-//! little-endian. A cursor above [`MAX_CURSOR_CHARS`] characters keeps its key in the [`Spill`]
-//! store of the session instead: the part count is [`SPILLED`], and the FNV-1a 64 hash of the
-//! key bytes follows it.
+//! little-endian. A key that makes the cursor longer than [`MAX_CURSOR_CHARS`] characters goes
+//! into the [`Spill`] store of the session. Its part count is then [`SPILLED`], and the FNV-1a
+//! 64 hash of the key bytes follows the count.
 //!
 //! Decode errors:
 //!

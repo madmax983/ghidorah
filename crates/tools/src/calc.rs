@@ -290,8 +290,9 @@ impl Machine {
 /// # Errors
 ///
 /// Returns `INVALID_ARGUMENT` for a syntax error, a nesting depth above [`MAX_DEPTH`] or a
-/// division by zero, `ADDRESS_INVALID` for a bad `0x` term, `ADDRESS_BASE_AMBIGUOUS` for a
-/// term of digits only, and the error of `term` for a name that does not resolve.
+/// division by zero. Returns `ADDRESS_INVALID` for a bad `0x` term and
+/// `ADDRESS_BASE_AMBIGUOUS` for a term of digits only. A name that does not resolve gives
+/// the error of `term`.
 pub fn eval(text: &str, mut term: TermFn<'_>) -> Result<u64, ToolError> {
     if text.chars().count() > MAX_EXPR_CHARS {
         return Err(syntax(

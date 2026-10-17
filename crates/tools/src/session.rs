@@ -300,8 +300,9 @@ impl Session {
             .collect()
     }
 
-    /// Gives the `UNKNOWN_BINARY` error of `text`.
-    fn unknown_binary(&self) -> ToolError {
+    /// Gives the `UNKNOWN_BINARY` error with the open binaries as candidates.
+    #[must_use]
+    pub fn unknown_binary(&self) -> ToolError {
         ToolError::new(ErrorCode::UnknownBinary)
             .path("/binary_id")
             .candidates(self.candidates())
@@ -361,9 +362,8 @@ impl Session {
     ///
     /// # Errors
     ///
-    /// Returns `NO_BINARY_OPEN` when the frame binds no binary and the session has none,
-    /// `BINARY_REQUIRED` when it binds none and the session has several, and
-    /// `UNKNOWN_BINARY` when the bound binary is not open.
+    /// A frame with no binary gives `NO_BINARY_OPEN` when the session has no binary, else
+    /// `BINARY_REQUIRED`. A frame binary that is not open gives `UNKNOWN_BINARY`.
     pub fn bound(&self, frame: &Frame) -> Result<&OpenBinary, ToolError> {
         let Some(text) = &frame.binary_id else {
             return Err(match self.binaries.len() {

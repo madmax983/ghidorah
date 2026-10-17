@@ -26,7 +26,7 @@ use crate::args::Args;
 use crate::demo::builtin;
 use crate::dispatch::{Ctx, Payload};
 use crate::envelope::{Mutation, Warning};
-use crate::errors::{Candidate, ToolError};
+use crate::errors::ToolError;
 use crate::hints::Call;
 use crate::outshape::{Field, OutputShape};
 use crate::session::{OpenBinary, Session, Until};
@@ -360,19 +360,7 @@ fn open_by_id(session: &Session, text: &str) -> Result<BinaryId, ToolError> {
     BinaryId::parse(text)
         .ok()
         .filter(|id| session.binary(*id).is_some())
-        .ok_or_else(|| {
-            let candidates = session
-                .binaries()
-                .map(|b| {
-                    let mut c = Candidate::text(&b.id.to_string(), &b.file_name);
-                    c.kind = Some("binary".to_owned());
-                    c
-                })
-                .collect();
-            ToolError::new(ErrorCode::UnknownBinary)
-                .path("/binary_id")
-                .candidates(candidates)
-        })
+        .ok_or_else(|| session.unknown_binary())
 }
 
 /// Sets the frame of the call to the loaded binary and gives the payload.

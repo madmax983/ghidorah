@@ -80,8 +80,8 @@ pub const fn accepted(family: Family) -> &'static [&'static str] {
 /// # Errors
 ///
 /// Returns `INVALID_ARGUMENT` with `details.accepted` for an input kind that the family does
-/// not accept, `NOT_IN_FUNCTION` for an address outside every function and `ADDRESS_UNMAPPED`
-/// for an unmapped address of the address family.
+/// not accept. Returns `NOT_IN_FUNCTION` for an address outside every function and
+/// `ADDRESS_UNMAPPED` for an address that no region maps.
 pub fn target(program: &Program, resolved: &Resolved, family: Family) -> Result<Target, ToolError> {
     target_at(program, resolved, family, &Site::default())
 }
