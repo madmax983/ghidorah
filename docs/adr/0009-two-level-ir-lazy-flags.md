@@ -1,6 +1,6 @@
 # ADR-0009: Two-level IR (L0 and L1) with a lazy flag thunk
 
-Status: Accepted (amended 2026-10-17)
+Status: Accepted (amended 2026-10-17, revision 3)
 Date: 2026-10-16
 Verified by: AC-031, AC-067, AC-068a, AC-068b, AC-069a, AC-070, AC-071, AC-207, AC-208
 
@@ -21,7 +21,7 @@ Verified by: AC-031, AC-067, AC-068a, AC-068b, AC-069a, AC-070, AC-071, AC-207, 
 - One semantic module (`x86_flags`, `x86_cond`, `undefined_mask`) serves the lifter, the interpreter, materialization and fusion.
 - The lifter handles the SSE move and zeroing subset (`movd`, `movq`, `movaps`, `movups`, `movdqa`, `movdqu`, `movss`, `movsd`, and `pxor`, `xorps`, `xorpd` with one register) as 128-bit loads, stores and copies. The interpreter uses `u128` values.
 - Other unsupported instructions lift to `Intrinsic` with declared def and use sets and a memory effect. An `Intrinsic` with a memory operand makes the stack slots that it can touch escape.
-- CFG, jump tables, stack tracking and block-local evaluation run on L0. L1 (Braun SSA with SCC phi cleanup, SCCP, copy propagation, DCE) is part of Increment D. Memory is not in SSA. A load never moves across a store, a call or a memory `Intrinsic`.
+- CFG, jump tables, stack tracking and block-local evaluation run on L0. L1 (Braun SSA with SCC phi cleanup, SCCP, copy propagation, DCE) is part of the MVP (WP-18). Memory is not in SSA. A load never moves across a store, a call or a memory `Intrinsic`.
 - The x86 lifter is template-driven (about 14 templates and a mnemonic table).
 - `FlagOp::A64*` and `Cc::A64` are reserved, so a later AArch64 crate changes no `ir` pass. ISA crates do not share a carry bit.
 
@@ -41,3 +41,7 @@ Verified by: AC-031, AC-067, AC-068a, AC-068b, AC-069a, AC-070, AC-071, AC-207, 
 ## Amendment 2026-10-17
 
 - The kernel owns the fusion table. The SSE move subset, `u128` values and the `Intrinsic` escape rule are new. L1 moved to Increment D.
+
+## Amendment 2026-10-17 (revision 3)
+
+- L1 is in the MVP. WP-18 builds it right after the IR core, and AC-256 checks that SSA and every pass keep the interpreter result on random L0 programs. Analyzers keep L0 and block-local evaluation, so analysis facts do not depend on L1.

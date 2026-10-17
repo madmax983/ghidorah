@@ -1,6 +1,6 @@
 # ADR-0027: Coverage measurement
 
-Status: Accepted
+Status: Accepted (amended 2026-10-17, revision 3)
 Date: 2026-10-17
 Verified by: AC-013
 
@@ -17,7 +17,7 @@ Verified by: AC-013
 - Objects: every test binary from `cargo test --no-run --message-format=json`, plus the `ghidorah` binary for CLI subprocess tests.
 - Merge: `llvm-profdata merge -sparse`. Report: `llvm-cov export --summary-only` with the object list.
 - Exclusions: `tests.rs` files, `crates/*/tests/` and the dev crates (`testkit`, `oracle`, `eval`, `xtask`).
-- Gate (AC-013): line coverage per crate from `docs/budget.json`: 85% for the workspace, 90% for `json`, `loader`, `x86`, `ir`, `db`, `analysis` and `tools`, and 95% for `kernel`. The gate applies from the first WP that adds code to a crate.
+- Gate (AC-013): line coverage per crate from the coverage table in `xtask/src/cov.rs`: 85% for the workspace, 90% for `json`, `loader`, `x86`, `ir`, `db`, `analysis`, `decomp` and `tools`, and 95% for `kernel`. The gate applies from the first WP that adds code to a crate.
 - `xtask cov` reports region coverage but does not gate it.
 
 ## Alternatives
@@ -30,3 +30,7 @@ Verified by: AC-013
 
 - One command gives per-crate JSON totals that `xtask ac` reads.
 - CLI subprocess tests count toward coverage.
+
+## Amendment 2026-10-17 (revision 3)
+
+- `docs/budget.json` is removed (ADR-0018). The coverage table moved to `xtask/src/cov.rs`. `decomp` is a core crate, because the decompiler is in the MVP.

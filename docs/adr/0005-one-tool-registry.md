@@ -1,6 +1,6 @@
 # ADR-0005: One tool registry for all surfaces
 
-Status: Accepted (amended 2026-10-17)
+Status: Accepted (amended 2026-10-17, revision 3)
 Date: 2026-10-16
 Verified by: AC-129a to AC-129f, AC-130a to AC-130c, AC-131a to AC-131c, AC-132a, AC-132b, AC-149a, AC-149b, AC-222
 
@@ -15,7 +15,7 @@ Verified by: AC-129a to AC-129f, AC-130a to AC-130c, AC-131a to AC-131c, AC-132a
 
 - One registry of `ToolSpec` and `ArgSpec` items in `ghidorah-tools` is the single source. Its outputs: the JSON Schema subset, the argument parser, lenient coercion, CLI help, MCP `tools/list`, `ghidorah tools --json`, `tool_search`, the server instructions, the schema fuzzer, the eval lints and the registry lint. Handlers are `fn` pointers.
 - Registration per item: each handler file exports `pub const SPEC: ToolSpec`. `registry.rs` is a plain list. A WP appends to it in one register commit.
-- The full profile has 22 merged `resource_verb` tools in a fixed order (design Section 10.3). Every target argument takes the shared address grammar, so there are no `by_name` and `by_address` twins.
+- The full profile has 23 merged `resource_verb` tools in a fixed order (design Section 10.3). Every target argument takes the shared address grammar, so there are no `by_name` and `by_address` twins.
 - One vocabulary: `target`, `targets`, `at`, `in`, `max_steps`, `max_chars`. A registry lint enforces it. Aliases live only in each `ArgSpec`.
 - Selector tools list their actions with one description line, one example and the required and forbidden arguments of each action.
 - `OutputShape` is a typed tree per tool. Examples must fit it, and `batch_run` types references with it. No tool declares `outputSchema` (ADR-0006).
@@ -40,3 +40,9 @@ Verified by: AC-129a to AC-129f, AC-130a to AC-130c, AC-131a to AC-131c, AC-132a
 
 - The catalog has 22 tools: `patch_apply` (S26) and `emu_run` (S8) moved to the stretch list. The `lazy` profile (S21) and the legacy alias table (S15) moved to the stretch list.
 - Registration per item, the vocabulary lint, actions, `OutputShape` and `dispatch_with` are new.
+
+## Amendment 2026-10-17 (revision 3)
+
+- Tool 23 `func_similar` (ADR-0028) joins the `full` and `readonly` profiles. `mini` keeps its 10 tools.
+- `func_get` has the `decomp` section and IR level `l1` in the MVP.
+- `binary_load` accepts `format: "pe"` (ADR-0029).

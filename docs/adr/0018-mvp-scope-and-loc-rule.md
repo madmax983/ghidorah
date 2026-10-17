@@ -1,41 +1,40 @@
-# ADR-0018: MVP scope, deferrals and the line budget
+# ADR-0018: MVP scope and deferrals
 
-Status: Accepted (amended 2026-10-17)
+Status: Accepted (amended 2026-10-17, revision 3)
 Date: 2026-10-16
-Verified by: AC-015a, AC-015b, AC-015c, AC-015d
+Verified by: AC-018a, AC-018b
 
 ## Context
 
-- The owner budget is "about 25,000-35,000 lines of production Rust plus tests", for one long session of AI coding agents.
-- Revision 1 took the most generous reading and planned 33,200 production lines (95% of the 35,000 ceiling), with no line for tests.
-- A file-by-file review found three low estimates: `tools` (4,300 against 7-9k), `db` (3,200 against 4.5-5k) and `analysis` (4,400 against 6k or more).
-- Reference sizes also suggest low estimates (Phoenix 3,766 lines, LuaJIT C parser 1,934, Itanium demangler 6-12k).
-- Revision 1 tied its large cut list to an owner answer that cannot arrive during the session.
+- The owner gave a size guide of "about 25,000-35,000 lines of production Rust plus tests" for one long session of AI coding agents.
+- Revision 2 turned the guide into a gate: a line ledger (`docs/budget.json`, `xtask loc`, AC-015a to AC-015d), measured triggers, a cut list (Y1 to Y4) and a gate for SSA and the decompiler (Increment D).
+- On 2026-10-17 the owner decided (revision 3): SSA and the decompiler, a PE32+ x86-64 loader and function similarity are part of the MVP, and the line count is not a gate.
 - The MVP must be complete with no stubs.
 
 ## Decision
 
-- Reading: the budget counts production lines. Test lines have their own capped line in `docs/budget.json`: at most 1.0 times the production lines (target 0.8). Tables and data: at most 4,500. Tooling: at most 6,000.
-- Plan: at most 27,000 production lines, more than 20% under the 35,000 ceiling. The ceiling stays a hard gate. Each crate has a plan value and an upper value (design Section 2.1). Each WP has at most 1,800 production lines.
-- Counting rule: non-blank, non-comment lines under `crates/*/src` of production crates. `tests.rs` files and `crates/*/tests` count as tests. `tables/*.rs` and embedded data files count as tables. Dev crates count as tooling.
-- Scope cuts in revision 2: the decompiler and L1 SSA form Increment D. Items S8 to S31 of design Section 1.3 move to the stretch list. Examples: patching, `emu_run`, etags, idempotency keys and the skeleton view.
-- Measured triggers: at M3 and M5, `xtask loc` projects the total from measured lines. Trigger 1: the M3 burn is above 110% of its plan (21,800 lines). Trigger 2: the projection is above 32,000. A trigger applies cuts Y1 to Y4 in order (design Section 1.6). No trigger waits for an owner answer.
-- Increment D gate: at M5, Increment D starts only when the projection plus its 4,650 planned lines (times the measured overrun ratio) is at most 33,000.
-- The owner can later rule that tests count inside 35,000. Then an ADR amendment drops Increment D, applies Y1 to Y4 and caps tests at 0.6 times production.
-- Stretch items need their own ADR and free budget after M7.
+- MVP scope: design Section 1.2. It includes SSA and the decompiler (WP-18, WP-21, WP-23), the PE32+ x86-64 loader (WP-30, ADR-0029) and function similarity (WP-29, ADR-0028).
+- Stretch items: design Section 1.3. No MVP AC depends on them. Each needs its own ADR, and work on one starts only after the last milestone (M9).
+- Deferred items: design Section 1.4. Each names its seam in the MVP. No MVP code has a stub for a deferred item.
+- Line counts are information only. Design Sections 1.6 and 2.1 keep plan and upper values per crate and per WP for scheduling. No test, xtask command, milestone or WP definition of done checks a line count. There is no `docs/budget.json` and no `xtask loc`.
+- AC-015a to AC-015d keep their numbers with the status "Removed in revision 3".
 
 ## Alternatives
 
-- Count production and tests together against 35,000 now. Rejected for the plan: about 19,000 production lines leave no decompiler, no C types and no claims. The amendment path above keeps this option open.
-- Keep the 33,200-line plan and cut on an owner answer. Rejected: it blocks on an answer and has no slack.
-- Keep the decompiler in the MVP and cut the agent surface. Rejected: the agent surface is the owner's first priority.
+- Keep the line ledger as a gate with the cut list. Rejected by the owner in revision 3: the gate could remove the decompiler and agent features to meet a number.
+- Keep SSA and the decompiler behind a gate (Increment D). Rejected by the owner in revision 3: agents need pseudo-C in the MVP.
+- Count production and tests together against 35,000. Rejected in revision 2, and moot in revision 3.
 
 ## Consequences
 
-- No MVP AC depends on a stretch item or on Increment D.
-- The plan has slack for estimate error, and the triggers act on measurement.
-- Breadth order after the MVP: Increment D (if its gate failed), PE with `.pdata`, `binary_diff`, Rust v0 demangler, Go pclntab, Itanium demangler, AArch64, FunctionID, Mach-O, BSim-lite.
+- The plan is about 34,350 production lines (upper 41,530), near the top of the owner range. The numbers inform the pair schedule only.
+- No MVP AC depends on a stretch or deferred item.
+- Breadth order after the MVP: `binary_diff`, Rust v0 demangler, Go pclntab, Itanium demangler, AArch64, FunctionID, Mach-O, learned similarity embeddings (ADR-0028).
 
-## Amendment 2026-10-17
+## Amendment 2026-10-17 (revision 2)
 
 - New rules replace the revision 1 rules: the reading, the 27,000 plan, the ledger lines, the file-level re-estimates, the stretch moves, Increment D, the measured triggers and the Y cut list.
+
+## Amendment 2026-10-17 (revision 3)
+
+- The owner decisions of revision 3 replace the revision 2 rules. The line ledger, the measured triggers, the Y1 to Y4 cut list and the Increment D gate are gone. SSA and the decompiler, PE32+ and function similarity are in the MVP. This ADR now records MVP scope only.

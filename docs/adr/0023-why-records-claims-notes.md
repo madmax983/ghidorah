@@ -1,6 +1,6 @@
 # ADR-0023: Why-records, three-valued claims and one note store
 
-Status: Accepted (amended 2026-10-17)
+Status: Accepted (amended 2026-10-17, revision 3)
 Date: 2026-10-16
 Verified by: AC-094, AC-159a, AC-159b, AC-204a, AC-204b
 
@@ -31,8 +31,13 @@ Verified by: AC-094, AC-159a, AC-159b, AC-204a, AC-204b
 
 - Agents can ask "why does this function exist" and get a machine-readable answer.
 - The relation catalog is the seam for a later conjunctive query engine.
-- About 600 LOC for why-records, claims and notes. These are never cut (cut Y4 removes only claims).
+- About 600 LOC for why-records, claims and notes. Revision 3 removed the cut list, so no cut can remove them.
 
 ## Amendment 2026-10-17
 
 - `set_call_targets`, the 10-atom catalog (`returns_const` moves to Increment D, `emu_returns` to stretch S8) and the stretch moves of living hypotheses and value slices are new.
+
+## Amendment 2026-10-17 (revision 3)
+
+- `returns_const` is stretch S32. SCCP is in the MVP, but no WP owned the relation, and the 10-atom catalog covers the eval scenarios.
+- New rule codes: `R_PDATA_START` and `R_IAT_THUNK` (ADR-0029).

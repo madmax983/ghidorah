@@ -1,6 +1,6 @@
 # ADR-0008: Stable ID grammar
 
-Status: Accepted (amended 2026-10-17)
+Status: Accepted (amended 2026-10-17, revision 3)
 Date: 2026-10-16
 Verified by: AC-045
 
@@ -16,7 +16,7 @@ Verified by: AC-045
 - The ID kinds and text forms in design Section 3.5 are frozen: `fn:`, `bb:`, `op:<addr>:<seq>`, `var:<entry>/<storage>`, `imp:<name>`, `exp:`, `sym:<exact name>`, `ext:<hex>`, `sys:`, `sec:<index>:<name>`, `seg:`, `str:`, `jt:`, `ref:<from>><to>:<kind>`, `t:<name>` or `t:#<fnv64>`, `note:`, `set:`, `tx:`.
 - `binary_id` is the first 16 hex digits of the file SHA-256. Metadata holds the full hash.
 - Function IDs are entry addresses. Variable IDs are storage-based. A rename never changes an ID.
-- `imp:<lib>!<name>` is reserved for formats that bind a library (PE, Mach-O).
+- `imp:<lib>!<name>` is for formats that bind a library. PE uses `imp:<dll>!<name>` and `imp:<dll>!#<ordinal>` with the DLL name in ASCII lowercase, and the parser splits at the first `!`. A PE export without a name is `exp:#<ordinal>`. Mach-O keeps the form reserved.
 - OpIds carry `lift_ver` in metadata. A read with another `lift_ver` reports `W_STALE_OP_ID`.
 - One parser in `ghidorah-base` reads every kind. A property test checks `parse(display(id)) == id`.
 
@@ -34,3 +34,7 @@ Verified by: AC-045
 ## Amendment 2026-10-17
 
 - `sym:` (an input escape for exact names) and `ext:` (EXTERNAL addresses as input) are new kinds.
+
+## Amendment 2026-10-17 (revision 3)
+
+- The PE forms of `imp:` and `exp:` are in use (ADR-0029). They are forms of existing kinds, not new kinds, and the round-trip property covers them.
