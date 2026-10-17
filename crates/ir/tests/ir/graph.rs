@@ -241,3 +241,31 @@ fn ac_075a_deep_cfg_small_stack() {
         .join()
         .expect("the deep graph walks finish in a 256 KiB stack");
 }
+
+#[test]
+fn irreducible_inside_a_loop() {
+    // 0 -> 1 (the loop header), 1 -> 2, 1 -> 3, 2 <-> 3 (two entries), 2 -> 4, 4 -> 1, 4 -> 5.
+    let cfg = graph(
+        6,
+        &[
+            (0, 1),
+            (1, 2),
+            (1, 3),
+            (2, 3),
+            (3, 2),
+            (2, 4),
+            (4, 1),
+            (4, 5),
+        ],
+    );
+    let dom = dominators(&cfg);
+    let found = loops(&cfg, &dom);
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].header, Node(1));
+    assert_eq!(found[0].body, nodes(&[1, 2, 3, 4]));
+    assert_eq!(found[0].latches, nodes(&[4]));
+    assert_eq!(irreducible(&cfg, &dom), vec![nodes(&[2, 3])]);
+    assert!(!dom.dominates(Node(2), Node(3)) && !dom.dominates(Node(3), Node(2)));
+    assert_eq!(dom.idom(Node(4)), Some(Node(2)));
+    assert_eq!(dom.idom(Node(5)), Some(Node(4)));
+}
