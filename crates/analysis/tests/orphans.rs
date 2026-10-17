@@ -121,12 +121,12 @@ fn ac_126_orphans_of_a_lost_function() {
     assert!(p.analysis().funcs().get(FuncId(at(0x20))).is_none());
     let found = find(&p);
     let kinds: Vec<OrphanKind> = found.iter().map(|o| o.kind).collect();
-    assert_eq!(kinds, [OrphanKind::Var, OrphanKind::Name], "{found:?}");
-    let var_orphan = found.first().expect("the variable");
+    assert_eq!(kinds, [OrphanKind::Name, OrphanKind::Var], "{found:?}");
+    let var_orphan = found.get(1).expect("the variable");
     assert_eq!(var_orphan.key, FactKey::Var(var()));
     assert_eq!(var_orphan.id(), var().to_string());
     assert!(var_orphan.lost_function());
-    let name = found.get(1).expect("the name");
+    let name = found.first().expect("the name");
     assert_eq!(name.at, at(0x20));
     assert_eq!(name.id(), at(0x20).to_string());
     assert_eq!(name.source, Source::Agent);

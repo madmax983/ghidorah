@@ -16,8 +16,8 @@
 
 use std::fmt;
 
-use ghidorah_base::Address;
-use ghidorah_db::{FactKey, Program, Source};
+use ghidorah_base::{Address, FuncId};
+use ghidorah_db::{FactKey, Program, Source, SymKind};
 
 /// The kind of an orphaned fact.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -68,20 +68,89 @@ impl Orphan {
     /// Gives the ID text of the fact: `fn:`, `var:` or `ref:`, or the address of a name.
     #[must_use]
     pub fn id(&self) -> String {
-        self.at.to_string()
+        match &self.key {
+            FactKey::Func(f) => f.to_string(),
+            FactKey::Var(v) => v.to_string(),
+            FactKey::Ref(r) => r
+                .id()
+                .map_or_else(|_| self.at.to_string(), |id| id.to_string()),
+            _ => self.at.to_string(),
+        }
     }
 
     /// Tells if the fact lost its function, so `func_edit create` at [`Orphan::at`] puts it
     /// back.
     #[must_use]
     pub const fn lost_function(&self) -> bool {
-        false
+        !matches!(self.kind, OrphanKind::Ref)
     }
 }
 
+/// Tells if a fact of `source` counts: an agent fact or a user fact.
+const fn counts(source: Source) -> bool {
+    matches!(source, Source::Agent | Source::User)
+}
+
 /// Gives the orphaned agent facts of `program` in key order.
+///
+/// Run it on a complete analysis. Between an edit and its re-analysis, the analysis layer
+/// can lack a new agent function, so the function shows as an orphan.
 #[must_use]
 pub fn find(program: &Program) -> Vec<Orphan> {
-    let _ = program;
-    Vec::new()
+    let base = program.base();
+    let analysis = program.analysis().funcs();
+    let lost = |entry: Address| analysis.get(FuncId(entry)).is_none();
+    let mut out = Vec::new();
+    for f in base.funcs().iter() {
+        if counts(f.source) && lost(f.entry) {
+            out.push(Orphan {
+                key: FactKey::Func(f.id()),
+                kind: OrphanKind::Function,
+                at: f.entry,
+                source: f.source,
+            });
+        }
+    }
+    for (var, facts) in base.vars().iter() {
+        let source = facts
+            .name
+            .as_ref()
+            .map(|n| n.source)
+            .or_else(|| facts.ty.as_ref().map(|t| t.source));
+        if let Some(source) = source.filter(|s| counts(*s))
+            && lost(var.func.0)
+        {
+            out.push(Orphan {
+                key: FactKey::Var(var.clone()),
+                kind: OrphanKind::Var,
+                at: var.func.0,
+                source,
+            });
+        }
+    }
+    for s in base.symbols().iter() {
+        if s.kind == SymKind::Function && counts(s.name.source) && lost(s.addr) {
+            out.push(Orphan {
+                key: FactKey::Symbol(s.addr, s.key),
+                kind: OrphanKind::Name,
+                at: s.addr,
+                source: s.name.source,
+            });
+        }
+    }
+    for r in base.refs().iter() {
+        let from = r.value.key.from;
+        let code = from.is_ram()
+            && (program.code_unit(from.off).is_some() || program.data_def(from.off).is_some());
+        if counts(r.source) && !code {
+            out.push(Orphan {
+                key: FactKey::Ref(r.value.key),
+                kind: OrphanKind::Ref,
+                at: from,
+                source: r.source,
+            });
+        }
+    }
+    out.sort();
+    out
 }
