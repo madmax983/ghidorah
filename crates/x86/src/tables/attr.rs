@@ -29,8 +29,6 @@ pub(crate) const I_GRP3V: u8 = 10;
 pub(crate) const I_BB: u8 = 11;
 /// A 32-bit call displacement. The AMD rule takes 16 bits with `66`.
 pub(crate) const I_JCALL: u8 = 12;
-/// A 32-bit immediate.
-pub(crate) const I_D: u8 = 13;
 
 /// The opcode has a `ModRM` byte.
 pub(crate) const MODRM: u8 = 1 << 4;
@@ -155,26 +153,30 @@ const MAP1_ROWS: &[(u8, u8, u8)] = &[
     (0xd0, 0xff, M),
 ];
 
-const fn build(rows: &[(u8, u8, u8)]) -> [u8; 256] {
-    let mut table = [0; 256];
-    let mut i = 0;
-    while i < rows.len() {
-        let (lo, hi, attr) = rows[i];
-        let mut op = lo as usize;
-        while op <= hi as usize {
-            table[op] = attr;
-            op += 1;
+/// Fills a table of 256 attributes from `(first, last, attribute)` rows.
+macro_rules! ranges {
+    ($rows:expr) => {{
+        let rows: &[(u8, u8, u8)] = $rows;
+        let mut table = [0; 256];
+        let mut i = 0;
+        while i < rows.len() {
+            let (lo, hi, attr) = rows[i];
+            let mut op = lo as usize;
+            while op <= hi as usize {
+                table[op] = attr;
+                op += 1;
+            }
+            i += 1;
         }
-        i += 1;
-    }
-    table
+        table
+    }};
 }
 
 /// The attributes of the one-byte map.
-pub(crate) const MAP0: [u8; 256] = build(MAP0_ROWS);
+pub(crate) const MAP0: [u8; 256] = ranges!(MAP0_ROWS);
 
 /// The attributes of the `0F` map.
-pub(crate) const MAP1: [u8; 256] = build(MAP1_ROWS);
+pub(crate) const MAP1: [u8; 256] = ranges!(MAP1_ROWS);
 
 /// Gives the attribute of an opcode in the one-byte map or the `0F` map.
 pub(crate) fn of(map1: bool, opcode: u8) -> u8 {

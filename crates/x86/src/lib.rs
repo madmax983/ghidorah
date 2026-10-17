@@ -21,6 +21,7 @@
 
 mod decode;
 mod error;
+mod fields;
 mod flags;
 mod flow;
 mod implicit;
@@ -93,8 +94,8 @@ pub fn length_with(bytes: &[u8], opts: &Opts) -> Result<u8, DecodeError> {
 /// # Errors
 ///
 /// Returns the errors of [`length`]. It also returns [`DecodeError::Invalid`] for an
-/// undefined opcode, a bad `lock` prefix or a register operand where only memory is
-/// valid, and [`DecodeError::Unsupported`] for a valid form outside the tables.
+/// undefined opcode, a bad `lock` prefix or a register in place of memory.
+/// It returns [`DecodeError::Unsupported`] for a valid form outside the tables.
 pub fn decode(bytes: &[u8], addr: u64, opts: &Opts) -> Result<Insn, DecodeError> {
     let layout = len::scan(bytes, *opts)?;
     decode::build(bytes, addr, &layout)

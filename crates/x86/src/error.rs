@@ -26,7 +26,7 @@ pub enum DecodeError {
         /// The length of the prefixes and the opcode.
         len: u8,
     },
-    /// The instruction is valid, and its length is known, but the tables do not cover it.
+    /// The instruction is valid and has a known length, but the tables do not cover it.
     Unsupported {
         /// The feature of the instruction.
         feature: Feature,
@@ -115,7 +115,7 @@ pub enum InvalidReason {
     BadEvex,
     /// A VEX, EVEX or XOP prefix follows a legacy prefix (strict option only).
     VexAfterPrefix,
-    /// A REX2 prefix is followed by a prefix or by the `0F` escape.
+    /// A prefix or the `0F` escape comes after a REX2 prefix.
     BadRex2,
 }
 

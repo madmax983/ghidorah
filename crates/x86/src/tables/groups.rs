@@ -7,86 +7,105 @@
     reason = "the table rows use the spec constants"
 )]
 
-use crate::tables::mnem::Mnem::{self, *};
+use crate::tables::mnem::Mnem::*;
 use crate::tables::ops::*;
 use crate::tables::{g, s};
 
-const fn alu(a: Spec, b: Spec) -> [Entry; 8] {
-    let ops = [Add, Or, Adc, Sbb, And, Sub, Xor];
-    let mut out = [UNDEF; 8];
-    let mut i = 0;
-    while i < 7 {
-        out[i] = op2(ops[i], a, b, RW1 | LOCK);
-        i += 1;
-    }
-    out[7] = op2(Cmp, a, b, 0);
-    out
+/// The arithmetic group: `add` to `cmp` with the operands `a` and `b`.
+macro_rules! alu {
+    ($a:expr, $b:expr) => {
+        [
+            op!(Add, $a, $b; RW1 | LOCK),
+            op!(Or, $a, $b; RW1 | LOCK),
+            op!(Adc, $a, $b; RW1 | LOCK),
+            op!(Sbb, $a, $b; RW1 | LOCK),
+            op!(And, $a, $b; RW1 | LOCK),
+            op!(Sub, $a, $b; RW1 | LOCK),
+            op!(Xor, $a, $b; RW1 | LOCK),
+            op!(Cmp, $a, $b; 0),
+        ]
+    };
 }
 
-const fn shift(a: Spec, b: Spec) -> [Entry; 8] {
-    let ops: [Mnem; 8] = [Rol, Ror, Rcl, Rcr, Shl, Shr, Shl, Sar];
-    let mut out = [UNDEF; 8];
-    let mut i = 0;
-    while i < 8 {
-        out[i] = op2(ops[i], a, b, RW1);
-        i += 1;
-    }
-    out
+/// The shift group: `rol` to `sar`. `/6` is the `shl` alias.
+macro_rules! shift {
+    ($a:expr, $b:expr) => {
+        [
+            op!(Rol, $a, $b; RW1),
+            op!(Ror, $a, $b; RW1),
+            op!(Rcl, $a, $b; RW1),
+            op!(Rcr, $a, $b; RW1),
+            op!(Shl, $a, $b; RW1),
+            op!(Shr, $a, $b; RW1),
+            op!(Shl, $a, $b; RW1),
+            op!(Sar, $a, $b; RW1),
+        ]
+    };
 }
 
-const fn unary(a: Spec, imm: Spec) -> [Entry; 8] {
-    [
-        op2(Test, a, imm, 0),
-        op2(Test, a, imm, 0),
-        op1(Not, a, RW1 | LOCK),
-        op1(Neg, a, RW1 | LOCK),
-        op1(Mul, a, 0),
-        op1(Imul, a, 0),
-        op1(Div, a, 0),
-        op1(Idiv, a, 0),
-    ]
+/// The unary group: `test` (twice), `not`, `neg`, `mul`, `imul`, `div` and `idiv`.
+macro_rules! unary {
+    ($a:expr, $imm:expr) => {
+        [
+            op!(Test, $a, $imm; 0),
+            op!(Test, $a, $imm; 0),
+            op!(Not, $a; RW1 | LOCK),
+            op!(Neg, $a; RW1 | LOCK),
+            op!(Mul, $a; 0),
+            op!(Imul, $a; 0),
+            op!(Div, $a; 0),
+            op!(Idiv, $a; 0),
+        ]
+    };
 }
 
-const fn only(first: Entry, last: Entry) -> [Entry; 8] {
-    [first, UNDEF, UNDEF, UNDEF, UNDEF, UNDEF, UNDEF, last]
+/// A group with rows only at `/0` and `/7`.
+macro_rules! only {
+    ($first:expr, $last:expr) => {
+        [$first, UNDEF, UNDEF, UNDEF, UNDEF, UNDEF, UNDEF, $last]
+    };
 }
 
 /// A packed shift by an immediate.
-const fn ps(m: Mnem, reg: Spec) -> Entry {
-    op2(m, reg, IB, RW1)
+macro_rules! ps {
+    ($m:expr, $reg:expr) => {
+        op!($m, $reg, IB; RW1)
+    };
 }
 
 /// The rows of a packed shift group: `/2`, `/4` and `/6`.
-const fn pshift(r2: Mnem, r4: Mnem, r6: Mnem, reg: Spec) -> [Entry; 8] {
-    [
-        UNDEF,
-        UNDEF,
-        ps(r2, reg),
-        UNDEF,
-        ps(r4, reg),
-        UNDEF,
-        ps(r6, reg),
-        UNDEF,
-    ]
+macro_rules! pshift {
+    ($r2:expr, $r4:expr, $r6:expr, $reg:expr) => {
+        [
+            UNDEF,
+            UNDEF,
+            ps!($r2, $reg),
+            UNDEF,
+            ps!($r4, $reg),
+            UNDEF,
+            ps!($r6, $reg),
+            UNDEF,
+        ]
+    };
 }
 
 /// The groups, indexed by the numbers of [`g`].
 pub(crate) const GROUPS: [[Entry; 8]; g::COUNT] = [
-    alu(EB, IB),
-    alu(EV, IZ),
-    alu(EV, IBS),
-    only(op1(Pop, EV, D64 | W1), UNDEF),
-    shift(EB, IB),
-    shift(EV, IB),
-    shift(EB, ONE),
-    shift(EV, ONE),
-    shift(EB, CL),
-    shift(EV, CL),
-    unary(EB, IB),
-    unary(EV, IZ),
+    alu!(EB, IB),
+    alu!(EV, IZ),
+    alu!(EV, IBS),
+    only!(op!(Pop, EV; D64 | W1), UNDEF),
+    shift!(EB, IB),
+    shift!(EV, IB),
+    shift!(EB, ONE),
+    shift!(EV, ONE),
+    shift!(EB, CL),
+    shift!(EV, CL),
+    unary!(EB, IB),
+    unary!(EV, IZ),
     [
-        op1(Inc, EB, RW1 | LOCK),
-        op1(Dec, EB, RW1 | LOCK),
+        op!(Inc, EB; RW1 | LOCK),
+        op!(Dec, EB; RW1 | LOCK),
         UNDEF,
         UNDEF,
         UNDEF,
@@ -95,69 +114,69 @@ pub(crate) const GROUPS: [[Entry; 8]; g::COUNT] = [
         UNDEF,
     ],
     [
-        op1(Inc, EV, RW1 | LOCK),
-        op1(Dec, EV, RW1 | LOCK),
-        op1(Call, EV, F64),
-        op1(Call, MP, 0),
-        op1(Jmp, EV, F64),
-        op1(Jmp, MP, 0),
-        op1(Push, EV, D64),
+        op!(Inc, EV; RW1 | LOCK),
+        op!(Dec, EV; RW1 | LOCK),
+        op!(Call, EV; F64),
+        op!(Call, MP; 0),
+        op!(Jmp, EV; F64),
+        op!(Jmp, MP; 0),
+        op!(Push, EV; D64),
         UNDEF,
     ],
-    only(op2(Mov, EB, IB, W1), special(s::XABORT)),
-    only(op2(Mov, EV, IZ, W1), special(s::XBEGIN)),
+    only!(op!(Mov, EB, IB; W1), special!(s::XABORT)),
+    only!(op!(Mov, EV, IZ; W1), special!(s::XBEGIN)),
     [
-        op1(Sldt, EWV, W1),
-        op1(Str, EWV, W1),
-        op1(Lldt, EWV, 0),
-        op1(Ltr, EWV, 0),
-        op1(Verr, EWV, 0),
-        op1(Verw, EWV, 0),
+        op!(Sldt, EWV; W1),
+        op!(Str, EWV; W1),
+        op!(Lldt, EWV; 0),
+        op!(Ltr, EWV; 0),
+        op!(Verr, EWV; 0),
+        op!(Verw, EWV; 0),
         UNDEF,
-        UNDEF,
-    ],
-    [
-        UNDEF,
-        UNDEF,
-        UNDEF,
-        UNDEF,
-        op2(Bt, EV, IB, 0),
-        op2(Bts, EV, IB, RW1 | LOCK),
-        op2(Btr, EV, IB, RW1 | LOCK),
-        op2(Btc, EV, IB, RW1 | LOCK),
-    ],
-    pshift(Psrlw, Psraw, Psllw, N),
-    pshift(Psrlw, Psraw, Psllw, U),
-    pshift(Psrld, Psrad, Pslld, N),
-    pshift(Psrld, Psrad, Pslld, U),
-    [
-        UNDEF,
-        UNDEF,
-        ps(Psrlq, N),
-        UNDEF,
-        UNDEF,
-        UNDEF,
-        ps(Psllq, N),
         UNDEF,
     ],
     [
         UNDEF,
         UNDEF,
-        ps(Psrlq, U),
-        ps(Psrldq, U),
         UNDEF,
         UNDEF,
-        ps(Psllq, U),
-        ps(Pslldq, U),
+        op!(Bt, EV, IB; 0),
+        op!(Bts, EV, IB; RW1 | LOCK),
+        op!(Btr, EV, IB; RW1 | LOCK),
+        op!(Btc, EV, IB; RW1 | LOCK),
+    ],
+    pshift!(Psrlw, Psraw, Psllw, N),
+    pshift!(Psrlw, Psraw, Psllw, U),
+    pshift!(Psrld, Psrad, Pslld, N),
+    pshift!(Psrld, Psrad, Pslld, U),
+    [
+        UNDEF,
+        UNDEF,
+        ps!(Psrlq, N),
+        UNDEF,
+        UNDEF,
+        UNDEF,
+        ps!(Psllq, N),
+        UNDEF,
     ],
     [
-        op1(Prefetch, MB, ADDR),
-        op1(Prefetchw, MB, ADDR),
-        op1(Prefetchwt1, MB, ADDR),
-        op1(Prefetch, MB, ADDR),
-        op1(Prefetch, MB, ADDR),
-        op1(Prefetch, MB, ADDR),
-        op1(Prefetch, MB, ADDR),
-        op1(Prefetch, MB, ADDR),
+        UNDEF,
+        UNDEF,
+        ps!(Psrlq, U),
+        ps!(Psrldq, U),
+        UNDEF,
+        UNDEF,
+        ps!(Psllq, U),
+        ps!(Pslldq, U),
+    ],
+    [
+        op!(Prefetch, MB; ADDR),
+        op!(Prefetchw, MB; ADDR),
+        op!(Prefetchwt1, MB; ADDR),
+        op!(Prefetch, MB; ADDR),
+        op!(Prefetch, MB; ADDR),
+        op!(Prefetch, MB; ADDR),
+        op!(Prefetch, MB; ADDR),
+        op!(Prefetch, MB; ADDR),
     ],
 ];

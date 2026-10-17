@@ -1,8 +1,9 @@
 //! Layer 1: the structural length decoder (design Section 5.1).
 //!
-//! The scan reads the legacy prefixes, a REX prefix directly before the opcode, a REX2,
-//! VEX, EVEX or XOP prefix, the opcode, the `ModRM` and SIB bytes, the displacement and the
-//! immediates. It knows no mnemonics. It never reads more than 15 bytes.
+//! The scan reads the legacy prefixes and a REX prefix directly before the opcode.
+//! Then it reads a REX2, VEX, EVEX or XOP prefix, the opcode and the `ModRM` and SIB bytes.
+//! Last it reads the displacement and the immediates. It knows no mnemonics.
+//! It never reads more than 15 bytes.
 
 #![deny(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
@@ -78,7 +79,7 @@ pub(crate) struct Layout {
 }
 
 impl Layout {
-    /// Tells if the REX or REX2 `W` bit is set.
+    /// Tells if the REX or REX2 prefix has the `W` bit.
     pub(crate) const fn w(&self) -> bool {
         match self.enc {
             Encoding::Rex2 => self.payload[0] & 8 != 0,
@@ -161,18 +162,6 @@ impl Cur<'_> {
     }
 }
 
-const fn seg_of(b: u8) -> Option<Seg> {
-    match b {
-        0x26 => Some(Seg::Es),
-        0x2e => Some(Seg::Cs),
-        0x36 => Some(Seg::Ss),
-        0x3e => Some(Seg::Ds),
-        0x64 => Some(Seg::Fs),
-        0x65 => Some(Seg::Gs),
-        _ => None,
-    }
-}
-
 const fn is_legacy_prefix(b: u8) -> bool {
     matches!(
         b,
@@ -192,7 +181,12 @@ pub(crate) fn scan(bytes: &[u8], opts: Opts) -> Result<Layout, DecodeError> {
             0xf2 | 0xf3 => pfx.rep = b,
             0x66 => pfx.n66 = pfx.n66.saturating_add(1),
             0x67 => pfx.asz = true,
-            0x26 | 0x2e | 0x36 | 0x3e | 0x64 | 0x65 => pfx.seg = seg_of(b),
+            0x26 => pfx.seg = Some(Seg::Es),
+            0x2e => pfx.seg = Some(Seg::Cs),
+            0x36 => pfx.seg = Some(Seg::Ss),
+            0x3e => pfx.seg = Some(Seg::Ds),
+            0x64 => pfx.seg = Some(Seg::Fs),
+            0x65 => pfx.seg = Some(Seg::Gs),
             0x40..=0x4f => {
                 rex = b;
                 continue;
@@ -286,7 +280,6 @@ fn imm_size(kind: u8, lay: &Layout, osz16: bool, opts: Opts) -> u8 {
         attr::I_GRP3B => u8::from(reg < 2),
         attr::I_W => 2,
         attr::I_WB => 3,
-        attr::I_D => 4,
         attr::I_V if lay.w() => 8,
         attr::I_Z | attr::I_JZ | attr::I_V => z,
         attr::I_JCALL => pick(opts.amd_branch_osz, z, 4),

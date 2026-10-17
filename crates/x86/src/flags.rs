@@ -40,7 +40,7 @@ impl FlagSet {
     /// The bit of each flag in the EFLAGS register.
     const EFLAGS_BITS: [u16; 7] = [0, 2, 4, 6, 7, 11, 10];
 
-    /// Makes a set from its bits. Bit 7 is ignored.
+    /// Makes a set from its bits. The function ignores bit 7.
     #[must_use]
     pub const fn from_bits(bits: u8) -> Self {
         Self(bits & 0x7f)
@@ -76,8 +76,8 @@ impl FlagSet {
         self.0 == 0
     }
 
-    /// Gives the set as a mask in the EFLAGS layout: CF bit 0, PF 2, AF 4, ZF 6, SF 7,
-    /// DF 10 and OF 11 (design Section 6.2).
+    /// Gives the set as a mask in the EFLAGS layout (design Section 6.2).
+    /// CF is bit 0, PF bit 2, AF bit 4, ZF bit 6, SF bit 7, DF bit 10 and OF bit 11.
     #[must_use]
     pub fn to_eflags(self) -> u16 {
         Self::EFLAGS_BITS

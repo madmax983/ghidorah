@@ -168,15 +168,12 @@ impl Reg {
         Self(((class as u16) << 9) | w | h | n)
     }
 
-    const fn width_code(bits: u16) -> u8 {
+    /// Gives the width code of a general-purpose register width.
+    const fn gpr_width_code(bits: u16) -> u8 {
         match bits {
             8 => 0,
             16 => 1,
             32 => 2,
-            80 => 4,
-            128 => 5,
-            256 => 6,
-            512 => 7,
             _ => 3,
         }
     }
@@ -187,7 +184,12 @@ impl Reg {
     /// `spl`, `bpl`, `sil` or `dil`. Use [`Reg::high_byte`] for `ah` to `bh`.
     #[must_use]
     pub const fn gpr(number: u8, width_bits: u16) -> Self {
-        Self::pack(RegClass::Gpr, number, Self::width_code(width_bits), false)
+        Self::pack(
+            RegClass::Gpr,
+            number,
+            Self::gpr_width_code(width_bits),
+            false,
+        )
     }
 
     /// Makes `ah`, `ch`, `dh` or `bh` from the number of `rax`, `rcx`, `rdx` or `rbx` (0 to 3).

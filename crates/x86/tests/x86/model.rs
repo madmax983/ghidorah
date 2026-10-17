@@ -1,8 +1,8 @@
 //! Tests of the register model, the operand model and the instruction record.
 
 use ghidorah_x86::{
-    Access, DecodeError, Feature, FlagSet, Flow, Insn, InvalidReason, Mnem, Operand, Reg, RegClass,
-    RegSet, Seg,
+    Access, DecodeError, Encoding, Feature, FlagSet, Flow, Insn, InvalidReason, Map, Mnem, Operand,
+    Reg, RegClass, RegSet, Seg,
 };
 
 use crate::common::{dec, hex};
@@ -50,6 +50,19 @@ fn register_names_and_fields() {
     assert_eq!(Reg::gpr(1, 16).bit_range(), (0, 16));
     assert_eq!(Reg::from_bits(Reg::R11.bits()), Some(Reg::R11));
     assert_eq!(Reg::from_bits(0xffff), None);
+    assert_eq!(Reg::EIP.full(), Reg::RIP);
+    assert_eq!(Reg::st(1).full(), Reg::st(1));
+    assert_eq!(Seg::Cs.reg().full(), Seg::Cs.reg());
+    let mask = Reg::from_bits((10 << 9) | (3 << 6) | 3).expect("a mask register");
+    let bnd = Reg::from_bits((11 << 9) | (3 << 6) | 1).expect("a bound register");
+    assert_eq!((mask.name(), mask.class()), ("k3", RegClass::Mask));
+    assert_eq!((bnd.name(), bnd.class()), ("bnd1", RegClass::Bnd));
+    let set: RegSet = [mask, bnd].into_iter().collect();
+    assert_eq!(
+        set.iter().collect::<Vec<_>>(),
+        vec![mask],
+        "bound registers have no bit"
+    );
     assert_eq!(format!("{}", Reg::R8), "r8");
     assert_eq!(format!("{:?}", Reg::R9), "Reg(r9)");
     for n in 0..6 {
@@ -243,6 +256,10 @@ fn operand_access() {
     );
     assert_eq!(insn("e8 00 00 00 00").target(), Some(0x1005));
     assert_eq!(insn("90").target(), None);
+    assert_eq!(insn("89 d8").target(), None);
+    let i = insn("89 d8");
+    assert_eq!((i.addr(), i.len(), i.next_addr()), (0x1000, 2, 0x1002));
+    assert!(!i.is_empty());
 }
 
 #[test]
@@ -274,6 +291,11 @@ fn implicit_registers() {
     );
     assert!(ws("d5 10 89 c0").contains(Reg::gpr(16, 64)));
     assert!(rs("0f 1f 00").is_empty(), "nop reads nothing");
+    assert!(
+        ws("0f 01 f9").contains(Reg::RCX),
+        "rdtscp writes the processor number"
+    );
+    assert!(rs("0f 01 c9").contains(Reg::RCX) && ws("0f 01 c9").is_empty());
 }
 
 #[test]
@@ -324,4 +346,36 @@ fn nop_forms() {
     for t in ["87 c0", "49 90", "f3 90", "89 c0"] {
         assert!(!insn(t).is_nop(), "{t}");
     }
+}
+
+#[test]
+fn encoding_and_map_names() {
+    let encs = [
+        (Encoding::Legacy, "legacy"),
+        (Encoding::Rex2, "rex2"),
+        (Encoding::Vex2, "vex2"),
+        (Encoding::Vex3, "vex3"),
+        (Encoding::Evex, "evex"),
+        (Encoding::Xop, "xop"),
+    ];
+    for (e, name) in encs {
+        assert_eq!(e.name(), name);
+    }
+    let maps = [
+        (Map::One, "map0"),
+        (Map::M0F, "0f"),
+        (Map::M0F38, "0f38"),
+        (Map::M0F3A, "0f3a"),
+        (Map::Map4, "map4"),
+        (Map::Map5, "map5"),
+        (Map::Map6, "map6"),
+        (Map::Map7, "map7"),
+        (Map::Xop8, "xop8"),
+        (Map::Xop9, "xop9"),
+        (Map::XopA, "xopa"),
+    ];
+    for (m, name) in maps {
+        assert_eq!(m.name(), name);
+    }
+    assert_eq!(insn("90").encoding(), Encoding::Legacy);
 }

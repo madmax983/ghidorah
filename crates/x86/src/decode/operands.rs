@@ -37,7 +37,7 @@ impl Ext {
         }
     }
 
-    /// Gives the `index` and `base` extensions of a VEX or XOP prefix. The bits are inverted.
+    /// Gives the `index` and `base` extensions of a VEX or XOP prefix. The prefix stores these bits in inverted form.
     pub(crate) const fn of_vex(lay: &Layout) -> Self {
         match lay.enc {
             Encoding::Vex3 | Encoding::Xop => {

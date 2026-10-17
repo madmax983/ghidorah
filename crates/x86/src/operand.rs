@@ -56,7 +56,7 @@ pub struct Mem {
     pub scale: u8,
     /// The displacement, sign-extended.
     pub disp: i64,
-    /// The width of the access in bytes. Zero means that the width is not known.
+    /// The width of the access in bytes. Zero means an unknown width.
     pub width_bytes: u16,
     /// The address width in bits, 64 or 32.
     pub addr_width: u8,

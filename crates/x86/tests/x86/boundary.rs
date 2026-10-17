@@ -2,7 +2,9 @@
 //! RIP-relative targets at the end of a buffer.
 
 use ghidorah_testkit::pbt;
-use ghidorah_x86::{DecodeError, Insn, Map, Mnem, Operand, Opts, Reg, decode, length, length_with};
+use ghidorah_x86::{
+    DecodeError, Insn, InvalidReason, Map, Mnem, Operand, Opts, Reg, decode, length, length_with,
+};
 
 use crate::common::{SPEC_ADDR, dec, hex, listings, root, spec_lines};
 
@@ -278,11 +280,22 @@ fn length_reads_at_most_15_bytes() {
     bytes.push(0x90);
     assert_eq!(length(&bytes), Ok(15));
     bytes.insert(0, 0x66);
-    assert!(matches!(
-        length(&bytes),
-        Err(DecodeError::Invalid {
-            len_consumed: 15,
-            ..
-        })
-    ));
+    let too_long = |b: &[u8]| {
+        matches!(
+            length(b),
+            Err(DecodeError::Invalid {
+                len_consumed: 15,
+                reason: InvalidReason::TooLong
+            })
+        )
+    };
+    assert!(too_long(&bytes));
+    // The `8F` decision reads one byte past the opcode.
+    let mut xop = vec![0x66; 14];
+    xop.extend_from_slice(&[0x8f, 0xe8]);
+    assert!(too_long(&xop));
+    // The immediate takes the length past 15 bytes.
+    let mut imm = vec![0x66; 12];
+    imm.extend_from_slice(&[0x48, 0x05, 0, 0, 0, 0]);
+    assert!(too_long(&imm));
 }

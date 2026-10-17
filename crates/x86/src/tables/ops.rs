@@ -138,11 +138,11 @@ pub(crate) struct Entry {
     pub(crate) arg: u8,
 }
 
-/// Operand 0 is written. Other operands are read.
+/// The instruction writes operand 0 and reads the other operands.
 pub(crate) const W1: u16 = 1;
-/// Operand 0 is read and written.
+/// The instruction reads and writes operand 0.
 pub(crate) const RW1: u16 = 2;
-/// Operands 0 and 1 are read and written.
+/// The instruction reads and writes operands 0 and 1.
 pub(crate) const RW2: u16 = 3;
 /// The mask of the access pattern.
 pub(crate) const ACCESS: u16 = 3;
@@ -161,80 +161,82 @@ pub(crate) const REP: u16 = 1 << 7;
 /// A string compare: `F3` is `repz` and `F2` is `repnz`.
 pub(crate) const REPZ: u16 = 1 << 8;
 
-const fn sp(k: K, s: S) -> Spec {
-    Spec { k, s }
-}
-
 /// No operand.
-pub(crate) const NO: Spec = sp(K::None, S::U0);
+pub(crate) const NO: Spec = Spec {
+    k: K::None,
+    s: S::U0,
+};
 
-pub(crate) const EB: Spec = sp(K::E, S::B);
-pub(crate) const EW: Spec = sp(K::E, S::W);
-pub(crate) const ED: Spec = sp(K::E, S::D);
-pub(crate) const EQ: Spec = sp(K::E, S::Q);
-pub(crate) const EV: Spec = sp(K::E, S::V);
-pub(crate) const EY: Spec = sp(K::E, S::Y);
-pub(crate) const EWV: Spec = sp(K::E, S::WV);
-pub(crate) const EWD: Spec = sp(K::E, S::WD);
-pub(crate) const GB: Spec = sp(K::G, S::B);
-pub(crate) const GD: Spec = sp(K::G, S::D);
-pub(crate) const GV: Spec = sp(K::G, S::V);
-pub(crate) const GY: Spec = sp(K::G, S::Y);
-pub(crate) const GQ: Spec = sp(K::G, S::Q);
-pub(crate) const M0: Spec = sp(K::M, S::U0);
-pub(crate) const MB: Spec = sp(K::M, S::B);
-pub(crate) const MW: Spec = sp(K::M, S::W);
-pub(crate) const MD: Spec = sp(K::M, S::D);
-pub(crate) const MQ: Spec = sp(K::M, S::Q);
-pub(crate) const MY: Spec = sp(K::M, S::Y);
-pub(crate) const MX: Spec = sp(K::M, S::X);
-pub(crate) const MP: Spec = sp(K::M, S::P);
-pub(crate) const RV: Spec = sp(K::R, S::V);
-pub(crate) const RQ: Spec = sp(K::R, S::Q);
-pub(crate) const RW: Spec = sp(K::R, S::W);
-pub(crate) const IB: Spec = sp(K::I, S::B);
-pub(crate) const IW: Spec = sp(K::I, S::W);
-pub(crate) const IZ: Spec = sp(K::Is, S::Z);
-pub(crate) const IV: Spec = sp(K::I, S::V);
-pub(crate) const IBS: Spec = sp(K::Is, S::B);
-pub(crate) const I2: Spec = sp(K::I2, S::B);
-pub(crate) const JB: Spec = sp(K::J, S::B);
-pub(crate) const JZ: Spec = sp(K::J, S::Z);
-pub(crate) const OB: Spec = sp(K::O, S::B);
-pub(crate) const OV: Spec = sp(K::O, S::V);
-pub(crate) const ZB: Spec = sp(K::Z, S::B);
-pub(crate) const ZV: Spec = sp(K::Z, S::V);
-pub(crate) const ZY: Spec = sp(K::Z, S::Y);
-pub(crate) const AL: Spec = sp(K::Acc, S::B);
-pub(crate) const AX: Spec = sp(K::Acc, S::W);
-pub(crate) const RAX: Spec = sp(K::Acc, S::V);
-pub(crate) const EAXZ: Spec = sp(K::Acc, S::Z);
-pub(crate) const CL: Spec = sp(K::Cl, S::B);
-pub(crate) const DX: Spec = sp(K::Dx, S::W);
-pub(crate) const ONE: Spec = sp(K::One, S::B);
-pub(crate) const SW: Spec = sp(K::Sw, S::W);
-pub(crate) const FS: Spec = sp(K::Fs, S::W);
-pub(crate) const GS: Spec = sp(K::Gs, S::W);
-pub(crate) const CR: Spec = sp(K::Cr, S::Q);
-pub(crate) const DR: Spec = sp(K::Dr, S::Q);
-pub(crate) const XB: Spec = sp(K::X, S::B);
-pub(crate) const XV: Spec = sp(K::X, S::V);
-pub(crate) const XZ: Spec = sp(K::X, S::Z);
-pub(crate) const YB: Spec = sp(K::Y, S::B);
-pub(crate) const YV: Spec = sp(K::Y, S::V);
-pub(crate) const YZ: Spec = sp(K::Y, S::Z);
-pub(crate) const XLAT: Spec = sp(K::Xlat, S::B);
-pub(crate) const V: Spec = sp(K::V, S::X);
-pub(crate) const WX: Spec = sp(K::W, S::X);
-pub(crate) const WQ: Spec = sp(K::W, S::Q);
-pub(crate) const WD: Spec = sp(K::W, S::D);
-pub(crate) const U: Spec = sp(K::U, S::X);
-pub(crate) const P: Spec = sp(K::P, S::Q);
-pub(crate) const QQ: Spec = sp(K::Q, S::Q);
-pub(crate) const QD: Spec = sp(K::Q, S::D);
-pub(crate) const N: Spec = sp(K::N, S::Q);
-pub(crate) const ST0: Spec = sp(K::St0, S::T);
-pub(crate) const STI: Spec = sp(K::Sti, S::T);
+pub(crate) const EB: Spec = Spec { k: K::E, s: S::B };
+pub(crate) const EW: Spec = Spec { k: K::E, s: S::W };
+pub(crate) const ED: Spec = Spec { k: K::E, s: S::D };
+pub(crate) const EQ: Spec = Spec { k: K::E, s: S::Q };
+pub(crate) const EV: Spec = Spec { k: K::E, s: S::V };
+pub(crate) const EY: Spec = Spec { k: K::E, s: S::Y };
+pub(crate) const EWV: Spec = Spec { k: K::E, s: S::WV };
+pub(crate) const EWD: Spec = Spec { k: K::E, s: S::WD };
+pub(crate) const GB: Spec = Spec { k: K::G, s: S::B };
+pub(crate) const GD: Spec = Spec { k: K::G, s: S::D };
+pub(crate) const GV: Spec = Spec { k: K::G, s: S::V };
+pub(crate) const GY: Spec = Spec { k: K::G, s: S::Y };
+pub(crate) const GQ: Spec = Spec { k: K::G, s: S::Q };
+pub(crate) const M0: Spec = Spec { k: K::M, s: S::U0 };
+pub(crate) const MB: Spec = Spec { k: K::M, s: S::B };
+pub(crate) const MW: Spec = Spec { k: K::M, s: S::W };
+pub(crate) const MD: Spec = Spec { k: K::M, s: S::D };
+pub(crate) const MQ: Spec = Spec { k: K::M, s: S::Q };
+pub(crate) const MY: Spec = Spec { k: K::M, s: S::Y };
+pub(crate) const MX: Spec = Spec { k: K::M, s: S::X };
+pub(crate) const MP: Spec = Spec { k: K::M, s: S::P };
+pub(crate) const RV: Spec = Spec { k: K::R, s: S::V };
+pub(crate) const RQ: Spec = Spec { k: K::R, s: S::Q };
+pub(crate) const RW: Spec = Spec { k: K::R, s: S::W };
+pub(crate) const IB: Spec = Spec { k: K::I, s: S::B };
+pub(crate) const IW: Spec = Spec { k: K::I, s: S::W };
+pub(crate) const IZ: Spec = Spec { k: K::Is, s: S::Z };
+pub(crate) const IV: Spec = Spec { k: K::I, s: S::V };
+pub(crate) const IBS: Spec = Spec { k: K::Is, s: S::B };
+pub(crate) const I2: Spec = Spec { k: K::I2, s: S::B };
+pub(crate) const JB: Spec = Spec { k: K::J, s: S::B };
+pub(crate) const JZ: Spec = Spec { k: K::J, s: S::Z };
+pub(crate) const OB: Spec = Spec { k: K::O, s: S::B };
+pub(crate) const OV: Spec = Spec { k: K::O, s: S::V };
+pub(crate) const ZB: Spec = Spec { k: K::Z, s: S::B };
+pub(crate) const ZV: Spec = Spec { k: K::Z, s: S::V };
+pub(crate) const ZY: Spec = Spec { k: K::Z, s: S::Y };
+pub(crate) const AL: Spec = Spec { k: K::Acc, s: S::B };
+pub(crate) const AX: Spec = Spec { k: K::Acc, s: S::W };
+pub(crate) const RAX: Spec = Spec { k: K::Acc, s: S::V };
+pub(crate) const EAXZ: Spec = Spec { k: K::Acc, s: S::Z };
+pub(crate) const CL: Spec = Spec { k: K::Cl, s: S::B };
+pub(crate) const DX: Spec = Spec { k: K::Dx, s: S::W };
+pub(crate) const ONE: Spec = Spec { k: K::One, s: S::B };
+pub(crate) const SW: Spec = Spec { k: K::Sw, s: S::W };
+pub(crate) const FS: Spec = Spec { k: K::Fs, s: S::W };
+pub(crate) const GS: Spec = Spec { k: K::Gs, s: S::W };
+pub(crate) const CR: Spec = Spec { k: K::Cr, s: S::Q };
+pub(crate) const DR: Spec = Spec { k: K::Dr, s: S::Q };
+pub(crate) const XB: Spec = Spec { k: K::X, s: S::B };
+pub(crate) const XV: Spec = Spec { k: K::X, s: S::V };
+pub(crate) const XZ: Spec = Spec { k: K::X, s: S::Z };
+pub(crate) const YB: Spec = Spec { k: K::Y, s: S::B };
+pub(crate) const YV: Spec = Spec { k: K::Y, s: S::V };
+pub(crate) const YZ: Spec = Spec { k: K::Y, s: S::Z };
+pub(crate) const XLAT: Spec = Spec {
+    k: K::Xlat,
+    s: S::B,
+};
+pub(crate) const V: Spec = Spec { k: K::V, s: S::X };
+pub(crate) const WX: Spec = Spec { k: K::W, s: S::X };
+pub(crate) const WQ: Spec = Spec { k: K::W, s: S::Q };
+pub(crate) const WD: Spec = Spec { k: K::W, s: S::D };
+pub(crate) const U: Spec = Spec { k: K::U, s: S::X };
+pub(crate) const P: Spec = Spec { k: K::P, s: S::Q };
+pub(crate) const QQ: Spec = Spec { k: K::Q, s: S::Q };
+pub(crate) const QD: Spec = Spec { k: K::Q, s: S::D };
+pub(crate) const N: Spec = Spec { k: K::N, s: S::Q };
+pub(crate) const ST0: Spec = Spec { k: K::St0, s: S::T };
+pub(crate) const STI: Spec = Spec { k: K::Sti, s: S::T };
 
 /// An undefined row.
 pub(crate) const UNDEF: Entry = Entry {
@@ -245,54 +247,76 @@ pub(crate) const UNDEF: Entry = Entry {
     arg: 0,
 };
 
-/// A row without operands.
-pub(crate) const fn op0(mnem: Mnem, flags: u16) -> Entry {
-    op4(mnem, NO, NO, NO, NO, flags)
+/// Makes a normal row: a mnemonic, up to four operand specs, then `;` and the flags.
+///
+/// The tables use macros, not `const fn` constructors. So the tables hold no function
+/// that runs only at compile time.
+macro_rules! op {
+    (@ $m:expr, [$a:expr, $b:expr, $c:expr, $d:expr], $f:expr) => {
+        $crate::tables::ops::Entry {
+            mnem: $m,
+            ops: [$a, $b, $c, $d],
+            flags: $f,
+            kind: $crate::tables::ops::Kind::Op,
+            arg: 0,
+        }
+    };
+    ($m:expr; $f:expr) => {
+        $crate::tables::ops::op!(@ $m, [
+            $crate::tables::ops::NO,
+            $crate::tables::ops::NO,
+            $crate::tables::ops::NO,
+            $crate::tables::ops::NO
+        ], $f)
+    };
+    ($m:expr, $a:expr; $f:expr) => {
+        $crate::tables::ops::op!(@ $m, [
+            $a,
+            $crate::tables::ops::NO,
+            $crate::tables::ops::NO,
+            $crate::tables::ops::NO
+        ], $f)
+    };
+    ($m:expr, $a:expr, $b:expr; $f:expr) => {
+        $crate::tables::ops::op!(@ $m, [
+            $a,
+            $b,
+            $crate::tables::ops::NO,
+            $crate::tables::ops::NO
+        ], $f)
+    };
+    ($m:expr, $a:expr, $b:expr, $c:expr; $f:expr) => {
+        $crate::tables::ops::op!(@ $m, [$a, $b, $c, $crate::tables::ops::NO], $f)
+    };
+    ($m:expr, $a:expr, $b:expr, $c:expr, $d:expr; $f:expr) => {
+        $crate::tables::ops::op!(@ $m, [$a, $b, $c, $d], $f)
+    };
 }
+pub(crate) use op;
 
-/// A row with one operand.
-pub(crate) const fn op1(mnem: Mnem, a: Spec, flags: u16) -> Entry {
-    op4(mnem, a, NO, NO, NO, flags)
+/// Makes a group row: `ModRM` `reg` selects the row of group `id`.
+macro_rules! grp {
+    ($id:expr) => {
+        $crate::tables::ops::Entry {
+            kind: $crate::tables::ops::Kind::Grp,
+            arg: $id,
+            ..$crate::tables::ops::UNDEF
+        }
+    };
 }
+pub(crate) use grp;
 
-/// A row with two operands.
-pub(crate) const fn op2(mnem: Mnem, a: Spec, b: Spec, flags: u16) -> Entry {
-    op4(mnem, a, b, NO, NO, flags)
+/// Makes a row that needs code: special form `id`.
+macro_rules! special {
+    ($id:expr) => {
+        $crate::tables::ops::Entry {
+            kind: $crate::tables::ops::Kind::Special,
+            arg: $id,
+            ..$crate::tables::ops::UNDEF
+        }
+    };
 }
-
-/// A row with three operands.
-pub(crate) const fn op3(mnem: Mnem, a: Spec, b: Spec, c: Spec, flags: u16) -> Entry {
-    op4(mnem, a, b, c, NO, flags)
-}
-
-/// A row with four operands.
-pub(crate) const fn op4(mnem: Mnem, a: Spec, b: Spec, c: Spec, d: Spec, flags: u16) -> Entry {
-    Entry {
-        mnem,
-        ops: [a, b, c, d],
-        flags,
-        kind: Kind::Op,
-        arg: 0,
-    }
-}
-
-/// A group row: `ModRM` `reg` selects the row of group `id`.
-pub(crate) const fn grp(id: u8) -> Entry {
-    Entry {
-        kind: Kind::Grp,
-        arg: id,
-        ..UNDEF
-    }
-}
-
-/// A row that needs code: special form `id`.
-pub(crate) const fn special(id: u8) -> Entry {
-    Entry {
-        kind: Kind::Special,
-        arg: id,
-        ..UNDEF
-    }
-}
+pub(crate) use special;
 
 /// An opaque row.
 pub(crate) const OPAQUE: Entry = Entry {
@@ -301,13 +325,16 @@ pub(crate) const OPAQUE: Entry = Entry {
 };
 
 /// Fills a table of 256 rows from sparse `(opcode, row)` pairs.
-pub(crate) const fn fill(rows: &[(u8, Entry)]) -> [Entry; 256] {
-    let mut table = [UNDEF; 256];
-    let mut i = 0;
-    while i < rows.len() {
-        let (op, e) = rows[i];
-        table[op as usize] = e;
-        i += 1;
-    }
-    table
+macro_rules! fill {
+    ($rows:expr) => {{
+        let rows: &[(u8, $crate::tables::ops::Entry)] = $rows;
+        let mut table = [$crate::tables::ops::UNDEF; 256];
+        let mut i = 0;
+        while i < rows.len() {
+            table[rows[i].0 as usize] = rows[i].1;
+            i += 1;
+        }
+        table
+    }};
 }
+pub(crate) use fill;

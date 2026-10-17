@@ -1,8 +1,8 @@
 //! The Intel syntax printer (design Section 5.4).
 //!
-//! The text follows GNU objdump in Intel mode, with three changes: lower case size
-//! keywords, a space after each comma, and brackets around absolute memory
-//! (`fs:[0x28]`). A RIP-relative operand gets a note with its target after ` ; `.
+//! The text follows GNU objdump in Intel mode, with three changes.
+//! The size keywords use lower case, a space follows each comma, and absolute memory
+//! has brackets (`fs:[0x28]`). A RIP-relative operand gets a note with its target after ` ; `.
 //! Agents read the canonical mnemonic, not this text.
 
 use std::fmt::Write as _;
@@ -49,8 +49,6 @@ const fn size_word(bytes: u8) -> Option<&'static str> {
         8 => Some("qword"),
         10 => Some("tbyte"),
         16 => Some("xmmword"),
-        32 => Some("ymmword"),
-        64 => Some("zmmword"),
         _ => None,
     }
 }
