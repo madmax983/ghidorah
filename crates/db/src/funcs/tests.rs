@@ -234,7 +234,9 @@ fn start_reason_names() {
             "call",
             "tail_call",
             "endbr",
-            "agent"
+            "agent",
+            "data_ptr",
+            "addr_taken"
         ]
     );
     for r in StartReason::ALL {

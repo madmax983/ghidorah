@@ -30,6 +30,8 @@
 //! | `R_TAILCALL` | a function at a tail-call target | the code unit of the jump and the function |
 //! | `R_MAIN_FROM_LIBC_START` | `main` and its name from the first argument of `__libc_start_main` | the call site and the entry function |
 //! | `R_SYSCALL_NUMBER` | the syscall note of a `syscall` site | the code unit of the site |
+//! | `R_DATA_CODE_PTR` | a function at a code pointer in data | the relocation, or the data slot of a pointer run |
+//! | `R_ADDR_TAKEN` | a function at address-taken code | the code unit of the `lea` or the `mov` |
 
 use std::fmt;
 
@@ -86,11 +88,15 @@ pub enum Rule {
     MainFromLibcStart,
     /// `R_SYSCALL_NUMBER`.
     SyscallNumber,
+    /// `R_DATA_CODE_PTR`.
+    DataCodePtr,
+    /// `R_ADDR_TAKEN`.
+    AddrTaken,
 }
 
 impl Rule {
     /// All rules in catalog order.
-    pub const ALL: [Self; 23] = [
+    pub const ALL: [Self; 25] = [
         Self::Entry,
         Self::SymbolFunc,
         Self::PltRelocSlot,
@@ -114,6 +120,8 @@ impl Rule {
         Self::Tailcall,
         Self::MainFromLibcStart,
         Self::SyscallNumber,
+        Self::DataCodePtr,
+        Self::AddrTaken,
     ];
 
     /// Gives the rule code, for example `R_FDE_START`.
@@ -143,6 +151,8 @@ impl Rule {
             Self::Tailcall => "R_TAILCALL",
             Self::MainFromLibcStart => "R_MAIN_FROM_LIBC_START",
             Self::SyscallNumber => "R_SYSCALL_NUMBER",
+            Self::DataCodePtr => "R_DATA_CODE_PTR",
+            Self::AddrTaken => "R_ADDR_TAKEN",
         }
     }
 
@@ -183,6 +193,10 @@ impl Rule {
                 "The first argument of the call to __libc_start_main is main."
             }
             Self::SyscallNumber => "The value of rax at the syscall site gives the syscall.",
+            Self::DataCodePtr => {
+                "An aligned pointer in data points to code that no function holds."
+            }
+            Self::AddrTaken => "An instruction takes the address of code that no function holds.",
         }
     }
 

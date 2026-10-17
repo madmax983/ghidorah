@@ -7,7 +7,9 @@
 
 use ghidorah_kernel::RangeSet;
 
-use crate::analyzers::{calls, disasm, endbr, entry, fde, noreturn, refs, strings, stubs, symbols};
+use crate::analyzers::{
+    addrtaken, calls, dataptr, disasm, endbr, entry, fde, noreturn, refs, strings, stubs, symbols,
+};
 use crate::ctx::AnalysisCtx;
 use crate::spec::{AnalyzerSpec, Step};
 use crate::{cc, jumptable, main_discovery, overrides, stack, syscalls, tailcall};
@@ -41,6 +43,10 @@ pub enum AnalyzerId {
     MainDiscovery,
     /// `EndbrSeeds` (440): `endbr64` heads.
     EndbrSeeds,
+    /// `DataPtrSeeds` (450): code pointers in data.
+    DataPtrSeeds,
+    /// `AddrTakenSeeds` (460): address-taken code.
+    AddrTakenSeeds,
     /// `References` (600): data references of operands, relocations and address tables.
     References,
     /// `Strings` (650): ASCII, UTF-8 and UTF-16LE strings.
@@ -83,6 +89,8 @@ pub static ANALYZERS: &[&AnalyzerSpec] = &[
     &TAIL_CALLS,
     &MAIN_DISCOVERY,
     &endbr::SPEC,
+    &dataptr::SPEC,
+    &addrtaken::SPEC,
     &refs::SPEC,
     &strings::SPEC,
     &STACK_FRAMES,
@@ -106,6 +114,8 @@ pub fn run(id: AnalyzerId, ctx: &mut AnalysisCtx<'_>, ranges: &RangeSet) -> Step
         AnalyzerId::TailCallsAndParts => tailcall::run(ctx, ranges),
         AnalyzerId::MainDiscovery => main_discovery::run(ctx, ranges),
         AnalyzerId::EndbrSeeds => endbr::run(ctx, ranges),
+        AnalyzerId::DataPtrSeeds => dataptr::run(ctx, ranges),
+        AnalyzerId::AddrTakenSeeds => addrtaken::run(ctx, ranges),
         AnalyzerId::References => refs::run(ctx, ranges),
         AnalyzerId::Strings => strings::run(ctx, ranges),
         AnalyzerId::StackFrames => stack::run(ctx, ranges),

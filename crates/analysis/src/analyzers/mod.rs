@@ -4,7 +4,9 @@
 //! The derived views `gaps`, `lang` and `metrics` read the committed facts and have no spec.
 //! This module is a plain list of the analyzer files.
 
+pub mod addrtaken;
 pub mod calls;
+pub mod dataptr;
 pub mod disasm;
 pub mod endbr;
 pub mod entry;

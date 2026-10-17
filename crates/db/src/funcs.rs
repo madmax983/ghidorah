@@ -61,11 +61,15 @@ pub enum StartReason {
     Endbr,
     /// An agent `func_edit create`.
     Agent,
+    /// A code pointer in data (revision 4).
+    DataPtr,
+    /// Address-taken code: the target of a `lea` or of a `mov` immediate (revision 4).
+    AddrTaken,
 }
 
 impl StartReason {
     /// All reasons in the order of Section 7.3.
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 12] = [
         Self::Entry,
         Self::Symbol,
         Self::PltStub,
@@ -76,6 +80,8 @@ impl StartReason {
         Self::TailCall,
         Self::Endbr,
         Self::Agent,
+        Self::DataPtr,
+        Self::AddrTaken,
     ];
 
     /// Gives the output name, for example `plt_stub`.
@@ -92,6 +98,8 @@ impl StartReason {
             Self::TailCall => "tail_call",
             Self::Endbr => "endbr",
             Self::Agent => "agent",
+            Self::DataPtr => "data_ptr",
+            Self::AddrTaken => "addr_taken",
         }
     }
 
