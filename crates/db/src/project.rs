@@ -551,7 +551,7 @@ impl Project {
         let name = format!("{id}.json");
         let mut text = ghidorah_json::write_pretty(record);
         text.push('\n');
-        disk::put(
+        crate::fs::replace_file(
             self.fs.as_mut(),
             &dir.join(&name),
             &dir.join(format!("{id}.tmp")),

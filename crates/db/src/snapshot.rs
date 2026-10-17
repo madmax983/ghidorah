@@ -29,7 +29,7 @@ use crate::codec::{
     CodecError, Json, Obj, notes_from_json, notes_to_json, progress_from_json, progress_to_json,
     tables_from_json, tables_to_json,
 };
-use crate::fs::{Fs, FsError};
+use crate::fs::{Fs, FsError, replace_file};
 use crate::notes::Notes;
 use crate::program::{AnalysisSet, Program, Tables};
 use crate::progress::Progress;
@@ -250,13 +250,7 @@ pub fn decode(bytes: &[u8]) -> Result<Snapshot, SnapshotError> {
 /// Returns the [`FsError`] of the first failed operation.
 pub fn write(fs: &mut dyn Fs, dir: &Path, text: &str) -> Result<(), FsError> {
     let tmp = dir.join(SNAPSHOT_TMP);
-    if fs.exists(&tmp) {
-        fs.remove(&tmp)?;
-    }
-    fs.create_new(&tmp)?;
-    fs.write_all(&tmp, text.as_bytes())?;
-    fs.sync_file(&tmp)?;
-    fs.rename(&tmp, &dir.join(SNAPSHOT_FILE))?;
+    replace_file(fs, &dir.join(SNAPSHOT_FILE), &tmp, text.as_bytes())?;
     fs.sync_dir(dir)
 }
 

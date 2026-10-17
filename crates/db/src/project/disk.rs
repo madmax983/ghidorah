@@ -10,7 +10,7 @@ use super::{
     PROJECT_FILE, PROJECT_TMP, Project, ProjectError, ProjectMeta, ProjectSummary,
 };
 use crate::codec::{CodecError, Obj};
-use crate::fs::{Fs, FsError};
+use crate::fs::{Fs, FsError, replace_file};
 use crate::history::History;
 use crate::journal::{self, JOURNAL_FILE, JournalError, Line};
 use crate::lock::LockError;
@@ -113,17 +113,6 @@ pub(super) fn meta_from_json(value: &Value) -> Result<ProjectMeta, ProjectError>
     })
 }
 
-/// Puts `bytes` at `path` through a temporary file and a rename.
-pub(super) fn put(fs: &mut dyn Fs, path: &Path, tmp: &Path, bytes: &[u8]) -> Result<(), FsError> {
-    if fs.exists(tmp) {
-        fs.remove(tmp)?;
-    }
-    fs.create_new(tmp)?;
-    fs.write_all(tmp, bytes)?;
-    fs.sync_file(tmp)?;
-    fs.rename(tmp, path)
-}
-
 /// Gives a temporary path next to `path`.
 fn tmp_of(path: &Path) -> PathBuf {
     let mut name = path.file_name().unwrap_or_default().to_os_string();
@@ -142,9 +131,9 @@ pub(super) fn write_new(project: &mut Project, bytes: &[u8]) -> Result<(), Proje
     let dir = project.dir.clone();
     let fs = project.fs.as_mut();
     let ignore = dir.join(GITIGNORE_FILE);
-    put(fs, &ignore, &tmp_of(&ignore), GITIGNORE_TEXT.as_bytes())?;
+    replace_file(fs, &ignore, &tmp_of(&ignore), GITIGNORE_TEXT.as_bytes())?;
     let bin = bin_path(&dir, &project.meta);
-    put(fs, &bin, &tmp_of(&bin), bytes)?;
+    replace_file(fs, &bin, &tmp_of(&bin), bytes)?;
     fs.set_read_only(&bin)?;
     fs.sync_dir(&dir.join(BIN_DIR))?;
     let journal = dir.join(JOURNAL_FILE);
@@ -154,7 +143,7 @@ pub(super) fn write_new(project: &mut Project, bytes: &[u8]) -> Result<(), Proje
     }
     let mut text = ghidorah_json::write_pretty(&project.meta.to_json());
     text.push('\n');
-    put(
+    replace_file(
         fs,
         &dir.join(PROJECT_FILE),
         &dir.join(PROJECT_TMP),
@@ -230,7 +219,7 @@ pub(super) fn load(project: &mut Project, limits: &Limits) -> Result<Loaded, Pro
         .map_err(ProjectError::Replay)?;
     if journal.torn && !project.read_only {
         let valid = text.get(..journal.valid_len).unwrap_or_default();
-        put(fs, &journal_path, &dir.join(JOURNAL_TMP), valid)?;
+        replace_file(fs, &journal_path, &dir.join(JOURNAL_TMP), valid)?;
         fs.sync_dir(&dir)?;
     }
     let lines = u64::try_from(journal.lines.len()).unwrap_or(u64::MAX);

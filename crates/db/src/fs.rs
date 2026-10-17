@@ -173,6 +173,29 @@ pub trait Fs: Send {
     fn boxed(&self) -> Box<dyn Fs>;
 }
 
+/// Puts `bytes` at `path` through the temporary file `tmp` and a rename.
+///
+/// The operations are `remove` of a temporary file of an earlier crash, `create_new` of `tmp`,
+/// `write_all`, `sync_file` and `rename`. The caller syncs the directory.
+///
+/// # Errors
+///
+/// Returns the [`FsError`] of the first failed operation.
+pub(crate) fn replace_file(
+    fs: &mut dyn Fs,
+    path: &Path,
+    tmp: &Path,
+    bytes: &[u8],
+) -> Result<(), FsError> {
+    if fs.exists(tmp) {
+        fs.remove(tmp)?;
+    }
+    fs.create_new(tmp)?;
+    fs.write_all(tmp, bytes)?;
+    fs.sync_file(tmp)?;
+    fs.rename(tmp, path)
+}
+
 /// The file system of the operating system.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct RealFs;
