@@ -2,6 +2,8 @@
 //!
 //! It is independent of the builder code, so the tests check the bytes from outside.
 
+#![allow(dead_code, reason = "each test file uses a part of this reader")]
+
 /// A program header.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Phdr {
