@@ -1,0 +1,20 @@
+{
+  "intents_sha256": "2a97d632c159070a20ddefa355bf0237f7e8f11bea5865cd9368ed06c8241522",
+  "metrics": {
+    "abstain_correctness": { "baseline": null, "floor": 1.00, "tolerance": 0.00 },
+    "answer_correctness": { "baseline": null, "floor": 1.00, "tolerance": 0.00 },
+    "argument_provenance": { "baseline": null, "floor": 1.00, "tolerance": 0.00 },
+    "budget_adherence": { "baseline": null, "floor": 1.00, "tolerance": 0.00 },
+    "context_reset_recall": { "baseline": null, "floor": 0.60, "tolerance": 0.05 },
+    "determinism": { "baseline": null, "floor": 1.00, "tolerance": 0.00 },
+    "discoverability": { "baseline": null, "floor": 0.70, "tolerance": 0.05 },
+    "golden_path_cost": { "baseline": null, "floor": null, "tolerance": 0.10 },
+    "hint_follower_reach": { "baseline": null, "floor": 0.60, "tolerance": 0.05 },
+    "metamorphic": { "baseline": null, "floor": 1.00, "tolerance": 0.00 },
+    "recall_after_edits": { "baseline": null, "floor": 0.60, "tolerance": 0.05 },
+    "repair_rate_r": { "baseline": null, "floor": 1.00, "tolerance": 0.00 },
+    "schema_fuzz_violations": { "baseline": null, "floor": null, "tolerance": 0.00 },
+    "survey_fact_recall": { "baseline": null, "floor": 0.60, "tolerance": 0.05 }
+  },
+  "questions_sha256": "b6bd83fe93688c6f83b06cf4d89532f9807a345d28f0ce9b044ab9a10329d892"
+}
