@@ -5,5 +5,10 @@ This product is licensed under the Apache License, Version 2.0 (see LICENSE).
 
 The build uses the Rust standard library only. It contains no third-party crate.
 
-Vendored data files: none at this time.
+Vendored data files:
+
+- tests/data/jsontestsuite/*.json: the test_parsing files of JSONTestSuite
+  (https://github.com/nst/JSONTestSuite, commit 1ef36fa01286573e846ac449e8683f8833c5b26a).
+  Copyright (c) 2016 Nicolas Seriot. MIT License, full text in tests/data/jsontestsuite/LICENSE.
+
 docs/licenses.md lists each vendored data file with its source and license.
