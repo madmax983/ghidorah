@@ -435,7 +435,7 @@ fn ac_257_codeptr_precision() {
         let t = truth(&f.truth);
         let want: BTreeSet<u64> = truth_funcs(&t).values().copied().collect();
         let p = cached(&f.path);
-        for v in p.funcs().iter() {
+        for v in &p.funcs() {
             if !matches!(
                 v.func.start_reason,
                 StartReason::DataPtr | StartReason::AddrTaken
