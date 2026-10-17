@@ -127,7 +127,7 @@ impl<'a> AnalysisCtx<'a> {
         (self.events, self.requeue, self.changed)
     }
 
-    /// Records that the step changes the work state.
+    /// Records that the step changes the work state, so the publish step runs.
     pub(crate) const fn touch(&mut self) {
         self.changed = true;
     }
@@ -136,11 +136,6 @@ impl<'a> AnalysisCtx<'a> {
     #[must_use]
     pub const fn program(&self) -> &'a Program {
         self.program
-    }
-
-    /// Marks a change of the work state, so the publish step runs.
-    pub(crate) fn mark_changed(&mut self) {
-        self.changed = true;
     }
 
     /// Records an event over `ranges`.

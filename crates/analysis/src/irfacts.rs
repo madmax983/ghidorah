@@ -94,7 +94,7 @@ impl AnalysisCtx<'_> {
     /// Gives the facts of the IR-based analyzers for a change. The call marks the step as a
     /// change, so the publish step runs.
     pub(crate) fn ir_mut(&mut self) -> &mut IrFacts {
-        self.mark_changed();
+        self.touch();
         &mut self.work.ir
     }
 
