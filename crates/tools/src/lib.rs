@@ -2,13 +2,13 @@
 //!
 //! | Module | Content | Design |
 //! |---|---|---|
-//! | [`api`] | [`Request`], [`Envelope`], [`dispatch`], [`dispatch_with`] and the [`Host`] trait | Section 10.1 |
+//! | [`api`] | [`Request`], [`Envelope`], [`dispatch()`], [`dispatch_with`] and the [`Host`] trait | Section 10.1 |
 //! | [`spec`] | [`ToolSpec`], [`ArgSpec`], groups, actions, examples, annotations, profiles | Section 10.1 |
 //! | [`registry`] | [`Registry`], the shipped list and the registry lint | Section 10.1, AC-129, AC-222 |
 //! | [`args`] | The argument parser, the global arguments and [`Args`] | Section 10.2 |
 //! | [`schema`] | The JSON Schema subset and the `tools/list` entry | Section 10.1 |
 //! | [`outshape`] | [`OutputShape`] and its fit check | Section 10.1 |
-//! | [`dispatch`] | The pipeline, [`Ctx`] and [`Payload`] | Sections 10.6, 10.9 |
+//! | [`dispatch`](mod@dispatch) | The pipeline, [`Ctx`] and [`Payload`] | Sections 10.6, 10.9 |
 //! | [`envelope`] | The result envelope, warnings and pages | Section 10.6 |
 //! | [`budget`] | The budget writer: K6 fit, copies and section weights | Section 10.9 |
 //! | [`errors`] | [`ToolError`] and the frozen error object | Section 10.8 |

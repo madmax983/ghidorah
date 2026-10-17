@@ -2,7 +2,7 @@
 //!
 //! Every surface sends one [`Request`] per tool call and gets one [`Envelope`]:
 //! the MCP server, `ghidorah call`, `ghidorah jsonl` and `batch_run` steps.
-//! [`dispatch`] runs the shipped registry of the host. [`dispatch_with`] runs any registry,
+//! [`dispatch()`] runs the shipped registry of the host. [`dispatch_with`] runs any registry,
 //! so tests can inject test tools, for example a tool that panics (AC-148).
 
 use std::sync::Arc;
@@ -68,7 +68,7 @@ impl Request {
 ///
 /// The session type of WP-13b implements it. Tests implement it for small test hosts.
 pub trait Host: Sized + 'static {
-    /// Gives the shipped registry that [`dispatch`] runs.
+    /// Gives the shipped registry that [`dispatch()`] runs.
     fn registry() -> Registry<Self>;
 
     /// Tells if the active profile holds the tool `name`.
