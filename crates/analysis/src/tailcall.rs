@@ -32,6 +32,7 @@ use ghidorah_x86::Mnem;
 use crate::cc::{conv_of, obeys};
 use crate::code::decode_at;
 use crate::ctx::{AnalysisCtx, UNIT_NORETURN_CALL};
+use crate::fir::Unit;
 use crate::irfacts::{func_key, work_ir, work_ir_at};
 use crate::registry::AnalyzerId;
 use crate::spec::{AnalyzerSpec, Grain, Step, Trigger};
@@ -255,8 +256,26 @@ fn conv_at(ctx: &AnalysisCtx<'_>, owner: u64, root: u64) -> bool {
     work_ir_at(ctx, owner, root, &mut Fuel::new(IR_FUEL)).is_ok_and(|ir| obeys(&ir, conv))
 }
 
-/// Gives the candidates of the jumps of `entry` to code of its own body.
-fn body_candidates(ctx: &AnalysisCtx<'_>, entry: u64, heights: &mut Heights) -> Vec<Candidate> {
+/// Tells if a unit of `units` falls through into `at`: a plain unit, a conditional branch or
+/// a call that returns ends at `at`.
+fn falls_into(units: &BTreeMap<u64, Unit>, at: u64) -> bool {
+    units.range(..at).next_back().is_some_and(|(start, u)| {
+        start.checked_add(u64::from(u.len)) == Some(at)
+            && match u.flow {
+                FlowKind::Seq | FlowKind::Jcc | FlowKind::ICall => true,
+                FlowKind::Call => u.flags & UNIT_NORETURN_CALL == 0,
+                _ => false,
+            }
+    })
+}
+
+/// Gives the candidates of the jumps `jumps` of `entry` to code of its own body.
+fn body_candidates(
+    ctx: &AnalysisCtx<'_>,
+    entry: u64,
+    jumps: &Jumps,
+    heights: &mut Heights,
+) -> Vec<Candidate> {
     let program = ctx.program();
     let mut out = Vec::new();
     let no_extent = ctx
@@ -264,7 +283,6 @@ fn body_candidates(ctx: &AnalysisCtx<'_>, entry: u64, heights: &mut Heights) -> 
         .funcs
         .get(&entry)
         .is_none_or(|f| f.extents.is_empty());
-    let jumps = jumps_of(ctx, entry);
     let units = ctx.units_of(entry);
     for (site, t, conditional) in jumps.iter().copied() {
         if conditional || t == entry || ctx.owner(t) != Some(entry) {
@@ -274,15 +292,7 @@ fn body_candidates(ctx: &AnalysisCtx<'_>, entry: u64, heights: &mut Heights) -> 
         let endbr = decode_at(program, t).is_some_and(|i| i.mnem() == Mnem::Endbr64);
         let before_entry = t < entry;
         let other = jumps.iter().any(|(s, x, _)| *x == t && *s != site);
-        let falls = units.range(..t).next_back().is_some_and(|(at, u)| {
-            at.checked_add(u64::from(u.len)) == Some(t)
-                && match u.flow {
-                    FlowKind::Seq | FlowKind::Jcc | FlowKind::ICall => true,
-                    FlowKind::Call => u.flags & UNIT_NORETURN_CALL == 0,
-                    _ => false,
-                }
-        });
-        let jump_only = !other && !falls;
+        let jump_only = !other && !falls_into(&units, t);
         // A site below the entry is code of another function that the descent reached first.
         let head = site > entry && (endbr || before_entry || jump_only);
         if !(outside || no_extent && head) {
@@ -321,9 +331,10 @@ pub fn run(ctx: &mut AnalysisCtx<'_>, ranges: &RangeSet) -> Step {
     let mut cands: BTreeMap<u64, Candidate> = BTreeMap::new();
     for entry in ctx.touching(ranges) {
         work = work.saturating_add(1);
-        let mut targets: BTreeSet<u64> = jumps_of(ctx, entry)
-            .into_iter()
-            .map(|(_, t, _)| t)
+        let jumps = jumps_of(ctx, entry);
+        let mut targets: BTreeSet<u64> = jumps
+            .iter()
+            .map(|(_, t, _)| *t)
             .filter(|t| *t != entry && ctx.is_entry(*t))
             .collect();
         targets.insert(entry);
@@ -332,7 +343,7 @@ pub fn run(ctx: &mut AnalysisCtx<'_>, ranges: &RangeSet) -> Step {
                 cands.insert(t, func_candidate(ctx, t, &mut heights));
             }
         }
-        for c in body_candidates(ctx, entry, &mut heights) {
+        for c in body_candidates(ctx, entry, &jumps, &mut heights) {
             cands.entry(c.target).or_insert(c);
         }
     }

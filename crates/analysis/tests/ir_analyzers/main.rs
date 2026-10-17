@@ -18,6 +18,7 @@ mod fir;
 mod jumptable;
 mod main_discovery;
 mod pipeline;
+mod reanalysis;
 mod stack;
 mod support;
 mod syscalls;

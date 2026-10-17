@@ -274,9 +274,10 @@ fn live_in(fir: &FuncIr, conv: &CallConv, any_push: bool) -> BTreeSet<Loc> {
     live.remove(&fir.body.cfg.entry()).unwrap_or_default()
 }
 
-/// Tells if the code at the entry of `fir` obeys `conv`: each live-in register is an argument
-/// register of `conv` or the stack pointer (the FETCH rule of design Section 7.3). A push of
-/// one register is not a read, because compilers push a scratch register to align the stack.
+/// Tells if the code at the entry of `fir` obeys `conv` (the FETCH rule of design Section 7.3).
+///
+/// Each live-in register must be an argument register of `conv` or the stack pointer. A push
+/// of one register is not a read, because compilers push a scratch register to align the stack.
 #[must_use]
 pub fn obeys(fir: &FuncIr, conv: &CallConv) -> bool {
     let mut allowed: BTreeSet<Loc> = conv
