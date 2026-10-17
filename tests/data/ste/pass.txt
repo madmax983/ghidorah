@@ -1,0 +1,36 @@
+# STE corpus, pass lines (AC-225).
+# Format: <expected rule IDs or -> | <text>
+# The checker reads each text as one plain-text paragraph with the built-in lexicon.
+# Each line of this file expects no finding.
+- | The loader reads the file header.
+- | Run the tests before each commit.
+- | Use `cargo test` to run the tier-1 tests.
+- | Keep comments short.
+- | Make sure that each loop has a fuel check.
+- | Each table iterator stops after its first error.
+- | The checker counts a code span such as `foo::bar::baz(1, 2, 3)` as one word.
+- | The parser reads one byte at a time from the input buffer and stops at the first byte that does not match the grammar rules.
+- | Write the failing test first, then write the smallest code that passes the test and keeps the old tests green.
+- | The scheduler runs each analyzer in a fixed order (by priority, then by analyzer name, then by address, with no other key) so that two runs give equal output.
+- | The base crate holds `Address`, `IntervalMap`, `Limits`, `Fuel`, `BinText`, `Glob`, `Clock`, `Sha256`, `Fnv1a`, `Hex`, `DidYouMean` and `ErrorCode` for all other crates of the workspace and for the tests.
+- | Provides: the reader, the range math, the range set, the budget fit, the provenance order, the spec attributes, the proof macro, the verify command and the negative patches.
+- | The loader has fixed limits for each table.
+- | Signed and unsigned values use the same width.
+- | The value is zero when the table is empty.
+- | Check the size and type of each section header.
+- | The test gives the expected rule IDs for every line.
+- | A failed call leaves the position unchanged.
+- | The reader starts. It reads a byte. It checks the byte. It moves on. It stops at the end. It returns the count.
+- | The `Reader` type (in `kernel/src/reader.rs`) never panics.
+- | Numbers such as 1.97 and 2.1 do not end a sentence.
+- | The checker does not read the text in `e.g.` because it is code.
+- | The tool returns three values: the address, the size and the name.
+- | The parser stops at the first error and returns it.
+- | These files are small.
+- | The shrink step lowers each value.
+- | The file header size is 64 bytes.
+- | The loader is ready.
+- | Tests run in a thread with a 256 KiB stack.
+- | The value is unused.
+- | Each code has reserved numbers.
+- | The table has embedded data.
