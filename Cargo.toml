@@ -1,0 +1,39 @@
+# Temporary root manifest of the WP-02 branch.
+# WP-01 owns the real root manifest. The merge keeps the WP-01 copy.
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+rust-version = "1.97"
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+missing_docs = "deny"
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(verus_only)'] }
+
+[workspace.lints.clippy]
+all = { level = "deny", priority = -1 }
+pedantic = { level = "deny", priority = -1 }
+nursery = { level = "deny", priority = -1 }
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+dbg_macro = "deny"
+allow_attributes_without_reason = "deny"
+print_stdout = "deny"
+print_stderr = "deny"
+option_if_let_else = "allow"
+redundant_pub_crate = "allow"
+significant_drop_tightening = "allow"
+missing_const_for_fn = "allow"
+cognitive_complexity = "allow"
+future_not_send = "allow"
+
+[profile.test]
+opt-level = 1
