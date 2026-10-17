@@ -75,6 +75,7 @@ dependencies = [
  "ghidorah-base",
  "ghidorah-db",
  "ghidorah-json",
+ "ghidorah-loader",
  "ghidorah-testkit",
 ]
 

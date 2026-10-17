@@ -1,0 +1,20 @@
+{"golden":"generator=tools_examples version=1 fixture=crackme.gcc-O2 fixture_sha256=467a43b75d95c826daba8cb216d01d7fd386aa96c5ef5a95c2effffe1780de8f"}
+{
+  "ok": true,
+  "rev": 0,
+  "session": "cli",
+  "partial": false,
+  "data": {
+    "items": [
+      {
+        "topic": "addresses",
+        "text": "Send an address as a 0x hex string such as 0x401000. A JSON integer below 2^53 is a decimal value. A string of digits only is an error, because the server does not guess the base.\n\nThe server reads an address text by the first rule that matches. Rule order: JSON integer, 0x hex, ID, exact symbol name, section name, default name, name@0x<hex>, term with a 0x offset. Use sym:<exact name> for a symbol name that looks like another form.\n\nA name with more than one match gives AMBIGUOUS_NAME. Each candidate value resolves to one match. An unknown name gives NOT_FOUND with the closest names. An address outside the memory regions gives ADDRESS_UNMAPPED with the nearest mapped addresses.\n\nOutput addresses are lower case 0x hex strings. The result field resolved_from tells the rule and the matched text."
+      }
+    ]
+  },
+  "page": {
+    "returned": 1,
+    "total": 1,
+    "truncated": false
+  }
+}
