@@ -16,6 +16,8 @@ path = "src/lib.rs"
 test = false
 
 [dependencies]
+# `analysis_run` runs the scheduler of the analysis crate.
+ghidorah-analysis = { path = "../analysis" }
 ghidorah-base = { path = "../base" }
 # `ToolSpec.reads_tables` names the tables of `ghidorah_db::Table`.
 ghidorah-db = { path = "../db" }

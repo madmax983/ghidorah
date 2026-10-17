@@ -13,6 +13,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "ghidorah-analysis"
+version = "0.1.0"
+dependencies = [
+ "ghidorah-base",
+ "ghidorah-db",
+ "ghidorah-ir",
+ "ghidorah-json",
+ "ghidorah-kernel",
+ "ghidorah-loader",
+ "ghidorah-testkit",
+ "ghidorah-types",
+ "ghidorah-x86",
+]
+
+[[package]]
 name = "ghidorah-base"
 version = "0.1.0"
 dependencies = [
@@ -82,6 +97,7 @@ version = "0.1.0"
 name = "ghidorah-tools"
 version = "0.1.0"
 dependencies = [
+ "ghidorah-analysis",
  "ghidorah-base",
  "ghidorah-db",
  "ghidorah-json",
