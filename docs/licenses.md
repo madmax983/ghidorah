@@ -12,5 +12,4 @@ Rules:
 
 | File | Source | License | Added by |
 |---|---|---|---|
-
-No vendored data file exists at this time.
+| `tests/data/jsontestsuite/*.json` (318 files, license text in `tests/data/jsontestsuite/LICENSE`) | JSONTestSuite, `test_parsing` at commit `1ef36fa0` (<https://github.com/nst/JSONTestSuite>) | MIT | WP-04 |
