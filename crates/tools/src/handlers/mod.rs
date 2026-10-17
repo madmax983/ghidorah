@@ -7,6 +7,7 @@
 pub mod addr_info;
 pub mod analysis_run;
 pub mod calc;
+pub mod comment_set;
 pub mod func_get;
 pub mod func_list;
 pub mod func_sections;
@@ -14,7 +15,10 @@ pub mod history_list;
 pub mod history_undo;
 pub mod load;
 pub mod mem_read;
+pub mod note_write;
 pub mod search;
+pub mod session_brief;
 pub mod survey;
+pub mod symbol_rename;
 pub mod tool_search;
 pub mod xref_list;
