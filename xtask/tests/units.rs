@@ -335,3 +335,12 @@ fn acrun_compare_and_statuses() {
         [Status::Pass, Status::Fail, Status::Skipped, Status::Fail]
     );
 }
+
+#[test]
+fn regress_nested_std_group() {
+    let rel = "crates/json/src/lib.rs";
+    let text = "use std::{collections::{BTreeMap, BTreeSet}, env};\n";
+    assert_eq!(xtask::scan::layering(rel, text).len(), 1);
+    let clean = "use std::{collections::{BTreeMap}, fmt};\n";
+    assert!(xtask::scan::layering(rel, clean).is_empty());
+}

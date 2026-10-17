@@ -178,6 +178,22 @@ pub fn disallowed_exceptions(rel: &str, text: &str) -> Vec<Finding> {
     found
 }
 
+/// Gives the text from the start of `text` to the brace that closes its first `{`.
+///
+/// Nested groups count, so `std::{a::{b}, c}` gives the full group.
+fn brace_group(text: &str) -> &str {
+    let mut depth = 0usize;
+    for (i, c) in text.char_indices() {
+        match c {
+            '{' => depth += 1,
+            '}' if depth <= 1 => return text.get(..i).unwrap_or(text),
+            '}' => depth -= 1,
+            _ => {}
+        }
+    }
+    text
+}
+
 /// AC-017: finds use of file, network, process, environment or wall-clock APIs.
 #[must_use]
 pub fn layering(rel: &str, text: &str) -> Vec<Finding> {
@@ -202,10 +218,7 @@ pub fn layering(rel: &str, text: &str) -> Vec<Finding> {
         "pure core crates do not use `SystemTime`",
     ));
     for (i, _) in code.match_indices("std::{") {
-        let group = code
-            .get(i..)
-            .and_then(|rest| rest.find('}').and_then(|end| rest.get(..end)));
-        let names = group.unwrap_or_default();
+        let names = code.get(i..).map_or("", brace_group);
         for module in ["fs", "net", "process", "env"] {
             if !find_word(names, module).is_empty() {
                 found.push(Finding::new(
