@@ -14,16 +14,31 @@ fn display_texts() {
     let cases: &[(&str, &str)] = &[
         ("48 89 e5", "mov rbp, rsp"),
         ("48 83 ec 08", "sub rsp, 0x8"),
-        ("48 8b 05 10 00 00 00", "mov rax, qword ptr [rip+0x10] ; 0x1017"),
-        ("48 8b 05 f0 ff ff ff", "mov rax, qword ptr [rip-0x10] ; 0xff7"),
+        (
+            "48 8b 05 10 00 00 00",
+            "mov rax, qword ptr [rip+0x10] ; 0x1017",
+        ),
+        (
+            "48 8b 05 f0 ff ff ff",
+            "mov rax, qword ptr [rip-0x10] ; 0xff7",
+        ),
         ("e8 00 00 00 00", "call 0x1005"),
         ("f3 c3", "repz ret"),
         ("f2 c3", "bnd ret"),
         ("3e ff e0", "notrack jmp rax"),
-        ("66 2e 0f 1f 84 00 00 00 00 00", "cs nop word ptr [rax+rax*1+0x0]"),
-        ("66 66 2e 0f 1f 84 00 00 00 00 00", "data16 cs nop word ptr [rax+rax*1+0x0]"),
+        (
+            "66 2e 0f 1f 84 00 00 00 00 00",
+            "cs nop word ptr [rax+rax*1+0x0]",
+        ),
+        (
+            "66 66 2e 0f 1f 84 00 00 00 00 00",
+            "data16 cs nop word ptr [rax+rax*1+0x0]",
+        ),
         ("66 90", "xchg ax, ax"),
-        ("f3 48 a5", "rep movs qword ptr es:[rdi], qword ptr ds:[rsi]"),
+        (
+            "f3 48 a5",
+            "rep movs qword ptr es:[rdi], qword ptr ds:[rsi]",
+        ),
         ("f2 ae", "repnz scas al, byte ptr es:[rdi]"),
         ("f0 0f b1 0a", "lock cmpxchg dword ptr [rdx], ecx"),
         ("64 48 8b 04 25 28 00 00 00", "mov rax, qword ptr fs:[0x28]"),

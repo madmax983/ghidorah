@@ -1,8 +1,8 @@
 //! Tests of the register model, the operand model and the instruction record.
 
 use ghidorah_x86::{
-    Access, DecodeError, Feature, FlagSet, Flow, Insn, InvalidReason, Mnem, Operand, Reg,
-    RegClass, RegSet, Seg,
+    Access, DecodeError, Feature, FlagSet, Flow, Insn, InvalidReason, Mnem, Operand, Reg, RegClass,
+    RegSet, Seg,
 };
 
 use crate::common::{dec, hex};
@@ -13,7 +13,11 @@ fn insn(text: &str) -> Insn {
 
 #[test]
 fn insn_fits_64_bytes() {
-    assert!(size_of::<Insn>() <= 64, "Insn has {} bytes", size_of::<Insn>());
+    assert!(
+        size_of::<Insn>() <= 64,
+        "Insn has {} bytes",
+        size_of::<Insn>()
+    );
     assert_eq!(size_of::<Reg>(), 2);
 }
 
@@ -71,9 +75,16 @@ fn register_sets() {
     assert!(!set.contains(Reg::RCX));
     let regs: Vec<Reg> = set.iter().collect();
     assert_eq!(regs, vec![Reg::RAX, Reg::xmm(2), Reg::RIP]);
-    let other: RegSet = [Reg::RCX, Seg::Fs.reg(), Reg::mmx(1), Reg::st(2), Reg::cr(3), Reg::dr(4)]
-        .into_iter()
-        .collect();
+    let other: RegSet = [
+        Reg::RCX,
+        Seg::Fs.reg(),
+        Reg::mmx(1),
+        Reg::st(2),
+        Reg::cr(3),
+        Reg::dr(4),
+    ]
+    .into_iter()
+    .collect();
     let all = set.union(other);
     assert_eq!(all.len(), 9);
     assert_eq!(all.iter().count(), 9);
@@ -246,12 +257,21 @@ fn implicit_registers() {
     assert!(rs("0f 05").contains(Reg::RDI));
     assert!(ws("0f a2").contains(Reg::RBX));
     assert!(rs("f3 48 ab").contains(Reg::RCX) && ws("f3 48 ab").contains(Reg::RDI));
-    assert!(rs("8b 04 88").contains(Reg::RCX), "an index register is read");
+    assert!(
+        rs("8b 04 88").contains(Reg::RCX),
+        "an index register is read"
+    );
     assert!(ws("89 c8").contains(Reg::RAX) && !rs("89 c8").contains(Reg::RAX));
-    assert!(rs("88 c8").contains(Reg::RAX), "a byte write keeps the other bits");
+    assert!(
+        rs("88 c8").contains(Reg::RAX),
+        "a byte write keeps the other bits"
+    );
     assert!(rs("48 99").contains(Reg::RAX) && ws("48 99").contains(Reg::RDX));
     assert!(ws("e8 00 00 00 00").contains(Reg::RSP));
-    assert!(ws("c5 f8 77").contains(Reg::xmm(0)), "an opaque form writes vector registers");
+    assert!(
+        ws("c5 f8 77").contains(Reg::xmm(0)),
+        "an opaque form writes vector registers"
+    );
     assert!(ws("d5 10 89 c0").contains(Reg::gpr(16, 64)));
     assert!(rs("0f 1f 00").is_empty(), "nop reads nothing");
 }
@@ -291,7 +311,14 @@ fn prefix_fields() {
 
 #[test]
 fn nop_forms() {
-    for t in ["90", "66 90", "0f 1f 00", "66 2e 0f 1f 84 00 00 00 00 00", "0f 19 c0", "48 90"] {
+    for t in [
+        "90",
+        "66 90",
+        "0f 1f 00",
+        "66 2e 0f 1f 84 00 00 00 00 00",
+        "0f 19 c0",
+        "48 90",
+    ] {
         assert!(insn(t).is_nop(), "{t}");
     }
     for t in ["87 c0", "49 90", "f3 90", "89 c0"] {

@@ -1,6 +1,7 @@
 //! Shared helpers: paths, hex, the spec file, objdump listings, ELF sections and text
 //! normalization.
 
+use std::fmt::Write as _;
 use std::path::PathBuf;
 
 use ghidorah_x86::{Insn, NoSymbols, Opts, decode, operand_text};
@@ -117,7 +118,7 @@ pub fn parse_listing(text: &str) -> Listing {
             continue;
         }
         if let Some(rest) = line.strip_prefix("Disassembly of section ") {
-            section = rest.trim_end_matches(':').to_owned();
+            rest.trim_end_matches(':').clone_into(&mut section);
             block += 1;
             continue;
         }
@@ -217,7 +218,11 @@ pub fn sections(file: &[u8]) -> Vec<Section> {
     raw.iter()
         .map(|&(name, kind, addr, offset, size)| {
             let start = to_usize(strtab) + usize::try_from(name).expect("name offset");
-            let end = file[start..].iter().position(|&b| b == 0).expect("name end") + start;
+            let end = file[start..]
+                .iter()
+                .position(|&b| b == 0)
+                .expect("name end")
+                + start;
             Section {
                 name: String::from_utf8_lossy(&file[start..end]).into_owned(),
                 addr,
@@ -233,14 +238,6 @@ pub fn sections(file: &[u8]) -> Vec<Section> {
 pub struct Code<'a> {
     pub addr: u64,
     pub bytes: &'a [u8],
-}
-
-impl Code<'_> {
-    /// Gives the bytes from `addr` to the end of the section.
-    pub fn from(&self, addr: u64) -> &[u8] {
-        let at = to_usize(addr - self.addr);
-        &self.bytes[at..]
-    }
 }
 
 /// Reads a fixture binary.
@@ -267,7 +264,12 @@ pub fn section_code<'a>(file: &'a [u8], name: &str) -> Code<'a> {
 /// write branch targets as `0x..`, write absolute memory as `[0x..]`, write a negative
 /// RIP displacement with `-`, and drop spaces after commas.
 pub fn normalize_objdump(text: &str) -> String {
-    let text = text.split('#').next().unwrap_or_default().trim().to_lowercase();
+    let text = text
+        .split('#')
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_lowercase();
     let text = text.replace("oword ptr", "xmmword ptr");
     let mut words: Vec<String> = Vec::new();
     let mut tokens = text.split(' ').filter(|w| !w.is_empty()).peekable();
@@ -305,9 +307,9 @@ fn absolute_memory(text: &str, seg: &str) -> String {
             .find(|c: char| !c.is_ascii_hexdigit())
             .unwrap_or(tail.len());
         if seg == "ds" {
-            out.push_str(&format!("[0x{}]", &tail[..n]));
+            let _ = write!(out, "[0x{}]", &tail[..n]);
         } else {
-            out.push_str(&format!("{seg}:[0x{}]", &tail[..n]));
+            let _ = write!(out, "{seg}:[0x{}]", &tail[..n]);
         }
         rest = &tail[n..];
     }
@@ -327,12 +329,7 @@ fn negative_rip(text: &str) -> String {
                 && v >= 1 << 63
             {
                 let neg = v.wrapping_neg();
-                return format!(
-                    "{}{}-0x{neg:x}{}",
-                    &text[..at],
-                    &base[..3],
-                    &tail[n..]
-                );
+                return format!("{}{}-0x{neg:x}{}", &text[..at], &base[..3], &tail[n..]);
             }
         }
     }

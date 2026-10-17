@@ -43,20 +43,20 @@ fn corpus() -> Vec<Vec<u8>> {
     out
 }
 
-fn check(input: &[u8], opts: &Opts) -> Outcome {
-    match decode(input, 0x40_1000, opts) {
+fn check(input: &[u8], opts: Opts) -> Outcome {
+    match decode(input, 0x40_1000, &opts) {
         Ok(insn) => {
             let n = usize::from(insn.len());
             if !(1..=15).contains(&n) || n > input.len() {
                 return Outcome::violation(2, format!("length {n}"));
             }
-            if decode(&input[..n], 0x40_1000, opts) != Ok(insn) {
+            if decode(&input[..n], 0x40_1000, &opts) != Ok(insn) {
                 return Outcome::violation(2, "prefix decode differs".to_owned());
             }
             if print(&insn, &NoSymbols).is_empty() {
                 return Outcome::violation(2, "empty text".to_owned());
             }
-            if opts == &Opts::DEFAULT && length(input) != Ok(insn.len()) {
+            if opts == Opts::DEFAULT && length(input) != Ok(insn.len()) {
                 return Outcome::violation(2, "length differs".to_owned());
             }
             let _ = (insn.regs_read(), insn.regs_written(), insn.ops().count());
@@ -74,7 +74,7 @@ fn check(input: &[u8], opts: &Opts) -> Outcome {
 }
 
 fn target(input: &[u8]) -> Outcome {
-    let first = check(input, &Opts::DEFAULT);
+    let first = check(input, Opts::DEFAULT);
     if first.violation.is_some() {
         return first;
     }
@@ -82,7 +82,7 @@ fn target(input: &[u8]) -> Outcome {
         amd_branch_osz: true,
         strict_vex_legacy_prefix: true,
     };
-    let second = check(input, &other);
+    let second = check(input, other);
     if second.violation.is_some() {
         return second;
     }

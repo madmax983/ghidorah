@@ -105,9 +105,9 @@ pub enum InvalidReason {
     Undefined,
     /// The `lock` prefix is on an instruction that cannot take it.
     BadLock,
-    /// The operand must be memory, but the ModRM byte selects a register.
+    /// The operand must be memory, but the `ModRM` byte selects a register.
     RegisterForm,
-    /// The operand must be a register, but the ModRM byte selects memory.
+    /// The operand must be a register, but the `ModRM` byte selects memory.
     MemoryForm,
     /// The VEX, EVEX or XOP map field selects no map.
     BadMap,

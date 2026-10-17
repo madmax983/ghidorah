@@ -63,7 +63,7 @@ impl RegClass {
     ];
 }
 
-/// A segment register in the order of the ModRM `reg` field.
+/// A segment register in the order of the `ModRM` `reg` field.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(u8)]
 pub enum Seg {
@@ -82,7 +82,7 @@ pub enum Seg {
 }
 
 impl Seg {
-    /// Gives the segment of a ModRM `reg` value, 0 to 5.
+    /// Gives the segment of a `ModRM` `reg` value, 0 to 5.
     #[must_use]
     pub const fn from_number(n: u8) -> Option<Self> {
         match n {
@@ -328,7 +328,12 @@ impl Reg {
     /// Gives the name, for example `eax`, `spl`, `xmm1` or `st(2)`.
     #[must_use]
     pub fn name(self) -> &'static str {
-        regnames::name(self.class(), self.number(), self.width_bits(), self.is_high_byte())
+        regnames::name(
+            self.class(),
+            self.number(),
+            self.width_bits(),
+            self.is_high_byte(),
+        )
     }
 }
 

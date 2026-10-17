@@ -4,8 +4,8 @@ use ghidorah_x86::{DecodeError, length};
 
 use crate::common::{SPEC_ADDR, SpecLine, dec, ops_text, spec_lines};
 
-fn error_len(e: &DecodeError) -> u8 {
-    match *e {
+fn error_len(e: DecodeError) -> u8 {
+    match e {
         DecodeError::Truncated { need_at_least, .. } => need_at_least,
         DecodeError::Invalid { len_consumed, .. } => len_consumed,
         DecodeError::InvalidInMode { len } | DecodeError::Unsupported { len, .. } => len,
@@ -20,7 +20,7 @@ fn check(v: &SpecLine) -> Result<(), String> {
             Err(e) => e,
         };
         let kind = format!("!{}", e.kind());
-        if kind != v.mnem || error_len(&e) != v.len {
+        if kind != v.mnem || error_len(e) != v.len {
             return Err(format!("gives {e:?}"));
         }
         return Ok(());

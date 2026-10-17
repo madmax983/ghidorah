@@ -1,0 +1,230 @@
+# golden: generator=x86-print version=1 fixture=switch.gcc-O2-at400000 fixture_sha256=d4e01355b68d012edb31fadda758be20efe8a6497e8a961601d40520d5292c29
+<_init>:
+401000 endbr64
+401004 sub rsp, 0x8
+401008 mov rax, qword ptr [rip+0x2fd1] ; 0x403fe0
+40100f test rax, rax
+401012 je 0x401016
+401014 call rax
+401016 add rsp, 0x8
+40101a ret
+<.plt>:
+401020 push qword ptr [rip+0x2fca] ; 0x403ff0
+401026 jmp qword ptr [rip+0x2fcc] ; 0x403ff8
+40102c nop dword ptr [rax+0x0]
+401030 endbr64
+401034 push 0x0
+401039 jmp .plt
+40103e xchg ax, ax
+401040 endbr64
+401044 push 0x1
+401049 jmp .plt
+40104e xchg ax, ax
+401050 endbr64
+401054 push 0x2
+401059 jmp .plt
+40105e xchg ax, ax
+<puts@plt>:
+401060 endbr64
+401064 jmp qword ptr [rip+0x2f96] ; 0x404000
+40106a nop word ptr [rax+rax*1+0x0]
+<strtol@plt>:
+401070 endbr64
+401074 jmp qword ptr [rip+0x2f8e] ; 0x404008
+40107a nop word ptr [rax+rax*1+0x0]
+<__printf_chk@plt>:
+401080 endbr64
+401084 jmp qword ptr [rip+0x2f86] ; 0x404010
+40108a nop word ptr [rax+rax*1+0x0]
+<main>:
+401090 endbr64
+401094 push rbp
+401095 push rbx
+401096 xor ebx, ebx
+401098 sub rsp, 0x8
+40109c cmp edi, 0x1
+40109f jle 0x4010b3
+4010a1 mov rdi, qword ptr [rsi+0x8]
+4010a5 mov edx, 0xa
+4010aa xor esi, esi
+4010ac call strtol@plt
+4010b1 mov ebx, eax
+4010b3 mov edi, ebx
+4010b5 call run_command
+4010ba mov edi, ebx
+4010bc call sparse_code
+4010c1 movsxd rdi, ebx
+4010c4 mov esi, 0x29
+4010c9 mov ebp, eax
+4010cb call apply_op
+4010d0 mov ecx, ebp
+4010d2 mov esi, 0x4020b5
+4010d7 mov edi, 0x2
+4010dc mov rdx, rax
+4010df xor eax, eax
+4010e1 call __printf_chk@plt
+4010e6 add rsp, 0x8
+4010ea xor eax, eax
+4010ec pop rbx
+4010ed pop rbp
+4010ee ret
+4010ef nop
+<_start>:
+4010f0 endbr64
+4010f4 xor ebp, ebp
+4010f6 mov r9, rdx
+4010f9 pop rsi
+4010fa mov rdx, rsp
+4010fd and rsp, 0xfffffffffffffff0
+401101 push rax
+401102 push rsp
+401103 xor r8d, r8d
+401106 xor ecx, ecx
+401108 mov rdi, 0x401090
+40110f call qword ptr [rip+0x2ec3] ; 0x403fd8
+401115 hlt
+401116 cs nop word ptr [rax+rax*1+0x0]
+<_dl_relocate_static_pie>:
+401120 endbr64
+401124 ret
+401125 cs nop word ptr [rax+rax*1+0x0]
+40112f nop
+<deregister_tm_clones>:
+401130 mov eax, 0x404028
+401135 cmp rax, 0x404028
+40113b je 0x401150
+40113d mov eax, 0x0
+401142 test rax, rax
+401145 je 0x401150
+401147 mov edi, 0x404028
+40114c jmp rax
+40114e xchg ax, ax
+401150 ret
+401151 data16 cs nop word ptr [rax+rax*1+0x0]
+40115c nop dword ptr [rax+0x0]
+<register_tm_clones>:
+401160 mov esi, 0x404028
+401165 sub rsi, 0x404028
+40116c mov rax, rsi
+40116f shr rsi, 0x3f
+401173 sar rax, 0x3
+401177 add rsi, rax
+40117a sar rsi, 1
+40117d je 0x401190
+40117f mov eax, 0x0
+401184 test rax, rax
+401187 je 0x401190
+401189 mov edi, 0x404028
+40118e jmp rax
+401190 ret
+401191 data16 cs nop word ptr [rax+rax*1+0x0]
+40119c nop dword ptr [rax+0x0]
+<__do_global_dtors_aux>:
+4011a0 endbr64
+4011a4 cmp byte ptr [rip+0x2e7d], 0x0 ; 0x404028
+4011ab jne 0x4011c0
+4011ad push rbp
+4011ae mov rbp, rsp
+4011b1 call deregister_tm_clones
+4011b6 mov byte ptr [rip+0x2e6b], 0x1 ; 0x404028
+4011bd pop rbp
+4011be ret
+4011bf nop
+4011c0 ret
+4011c1 data16 cs nop word ptr [rax+rax*1+0x0]
+4011cc nop dword ptr [rax+0x0]
+<frame_dummy>:
+4011d0 endbr64
+4011d4 jmp register_tm_clones
+4011d6 cs nop word ptr [rax+rax*1+0x0]
+<apply_op>:
+4011e0 endbr64
+4011e4 cmp rdi, 0x8
+4011e8 ja 0x401250
+4011ea notrack jmp qword ptr [rdi*8+0x402008]
+4011f2 nop word ptr [rax+rax*1+0x0]
+4011f8 mov rax, rsi
+4011fb imul rax, rsi
+4011ff ret
+401200 lea rax, [rsi+0x7]
+401204 ret
+401205 nop dword ptr [rax]
+401208 lea rax, [rsi+rsi*2]
+40120c ret
+40120d nop dword ptr [rax]
+401210 mov rax, rsi
+401213 xor rax, 0x55aa
+401219 ret
+40121a nop word ptr [rax+rax*1+0x0]
+401220 lea rax, [rsi*8+0x0]
+401228 ret
+401229 nop dword ptr [rax+0x0]
+401230 mov rax, rsi
+401233 shr rax, 0x2
+401237 ret
+401238 nop dword ptr [rax+rax*1+0x0]
+401240 lea rax, [rsi-0x13]
+401244 ret
+401245 nop dword ptr [rax]
+401248 mov rax, rsi
+40124b not rax
+40124e ret
+40124f nop
+401250 xor eax, eax
+401252 ret
+401253 data16 cs nop word ptr [rax+rax*1+0x0]
+40125e xchg ax, ax
+<sparse_code>:
+401260 endbr64
+401264 cmp edi, 0x1000
+40126a je 0x4012a8
+40126c ja 0x401290
+40126e mov eax, 0x1e
+401273 cmp edi, 0x3
+401276 je 0x4012ad
+401278 cmp edi, 0x64
+40127b mov edx, 0x3e8
+401280 mov eax, 0x63
+401285 cmove eax, edx
+401288 ret
+401289 nop dword ptr [rax+0x0]
+401290 cmp edi, 0xffff
+401296 mov edx, 0x1
+40129b mov eax, 0x63
+4012a0 cmove eax, edx
+4012a3 ret
+4012a4 nop dword ptr [rax+0x0]
+4012a8 mov eax, 0x7
+4012ad ret
+4012ae xchg ax, ax
+<run_command>:
+4012b0 endbr64
+4012b4 cmp edi, 0x5
+4012b7 ja 0x401322
+4012b9 mov edi, edi
+4012bb notrack jmp qword ptr [rdi*8+0x402050]
+4012c3 nop dword ptr [rax+rax*1+0x0]
+4012c8 mov edi, 0x402098
+4012cd jmp puts@plt
+4012d2 nop word ptr [rax+rax*1+0x0]
+4012d8 mov edi, 0x40209f
+4012dd jmp puts@plt
+4012e2 nop word ptr [rax+rax*1+0x0]
+4012e8 mov edi, 0x402080
+4012ed jmp puts@plt
+4012f2 nop word ptr [rax+rax*1+0x0]
+4012f8 mov edi, 0x402086
+4012fd jmp puts@plt
+401302 nop word ptr [rax+rax*1+0x0]
+401308 mov edi, 0x40208b
+40130d jmp puts@plt
+401312 nop word ptr [rax+rax*1+0x0]
+401318 mov edi, 0x402091
+40131d jmp puts@plt
+401322 mov edi, 0x4020a5
+401327 jmp puts@plt
+<_fini>:
+40132c endbr64
+401330 sub rsp, 0x8
+401334 add rsp, 0x8
+401338 ret

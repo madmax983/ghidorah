@@ -2,13 +2,13 @@
 //! RIP-relative targets (AC-063a), the printer golden (AC-064) and printer agreement.
 
 use std::collections::BTreeMap;
+use std::fmt::Write as _;
 
 use ghidorah_testkit::golden::{self, Header};
 use ghidorah_x86::{NoSymbols, Symbolizer, length, print};
 
 use crate::common::{
-    Listing, dec, fixture_bytes, listings, normalize_objdump, normalize_printer, root,
-    section_code,
+    Listing, dec, fixture_bytes, listings, normalize_objdump, normalize_printer, root, section_code,
 };
 
 /// Gives the file bytes of a fixture.
@@ -43,7 +43,11 @@ fn ac_060_boundary_agreement() {
     for l in listings() {
         let file = file_of(l);
         let secs = code_sections(&file, l);
-        assert!(l.insns.iter().any(|i| i.section == ".text"), "{} has .text", l.fixture);
+        assert!(
+            l.insns.iter().any(|i| i.section == ".text"),
+            "{} has .text",
+            l.fixture
+        );
         text_sections += 1;
         for (n, i) in l.insns.iter().enumerate() {
             let code = code_at(&secs, &i.section, i.addr);
@@ -97,7 +101,12 @@ fn ac_063a_riprel_targets() {
                     ghidorah_x86::Operand::Mem(m) if m.is_rip_relative() => Some(m),
                     _ => None,
                 })
-                .unwrap_or_else(|| panic!("{} at {:x} ({}) has a RIP operand", l.fixture, i.addr, i.text));
+                .unwrap_or_else(|| {
+                    panic!(
+                        "{} at {:x} ({}) has a RIP operand",
+                        l.fixture, i.addr, i.text
+                    )
+                });
             assert_eq!(
                 mem.abs_target,
                 Some(want),
@@ -138,11 +147,11 @@ fn golden_text(l: &Listing) -> String {
         if i.block != block {
             block = i.block;
             if let Some(name) = label_at.get(&i.addr) {
-                out.push_str(&format!("<{name}>:\n"));
+                let _ = writeln!(out, "<{name}>:");
             }
         }
         let insn = dec(&i.bytes, i.addr).unwrap_or_else(|e| panic!("{:x}: {e}", i.addr));
-        out.push_str(&format!("{:x} {}\n", i.addr, print(&insn, &labels)));
+        let _ = writeln!(out, "{:x} {}", i.addr, print(&insn, &labels));
     }
     out
 }
@@ -166,7 +175,12 @@ fn ac_064_printer_golden() {
         failures.is_empty(),
         "{} printer goldens differ:\n{}",
         failures.len(),
-        failures.iter().take(5).cloned().collect::<Vec<_>>().join("\n")
+        failures
+            .iter()
+            .take(5)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n")
     );
 }
 
@@ -190,6 +204,11 @@ fn printer_matches_objdump() {
         failures.is_empty(),
         "{} of {checked} texts differ:\n{}",
         failures.len(),
-        failures.iter().take(40).cloned().collect::<Vec<_>>().join("\n")
+        failures
+            .iter()
+            .take(40)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n")
     );
 }

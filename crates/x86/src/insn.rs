@@ -220,7 +220,7 @@ pub struct RawFields {
     pub opcode: u8,
     /// The REX byte, or the payload of a REX2 prefix.
     pub rex: Option<u8>,
-    /// The ModRM byte.
+    /// The `ModRM` byte.
     pub modrm: Option<u8>,
     /// The SIB byte.
     pub sib: Option<u8>,
@@ -236,7 +236,6 @@ pub struct RawFields {
 
 /// The operand slot tags.
 pub(crate) mod tag {
-    pub(crate) const NONE: u8 = 0;
     pub(crate) const REG: u8 = 1;
     pub(crate) const IMM: u8 = 2;
     pub(crate) const IMM2: u8 = 3;
@@ -304,7 +303,7 @@ pub struct Insn {
     pub(crate) disp_at: u8,
     /// The immediate offset in bits 4 to 7 and its size in bits 0 to 3.
     pub(crate) imm_at: u8,
-    /// The opcode offset in bits 0 to 3. Bit 4: a ModRM byte. Bit 5: a SIB byte.
+    /// The opcode offset in bits 0 to 3. Bit 4: a `ModRM` byte. Bit 5: a SIB byte.
     pub(crate) hdr: u8,
 }
 
@@ -336,6 +335,12 @@ impl Insn {
     #[must_use]
     pub const fn len(&self) -> u8 {
         self.len
+    }
+
+    /// Tells if the length is zero. A decoded instruction is never empty.
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
+        self.len == 0
     }
 
     /// Gives the address after the instruction.
@@ -531,13 +536,20 @@ impl Insn {
             _ => {
                 let seg = seg.filter(|s| s.has_base());
                 let moffs = slot.kind() == tag::MOFFS;
-                let base = if moffs { None } else { Reg::from_bits(self.base) };
-                let index = if moffs { None } else { Reg::from_bits(self.index) };
+                let base = if moffs {
+                    None
+                } else {
+                    Reg::from_bits(self.base)
+                };
+                let index = if moffs {
+                    None
+                } else {
+                    Reg::from_bits(self.index)
+                };
                 let abs_target = match (base, index, seg) {
-                    (_, _, Some(_)) => None,
-                    (Some(b), None, None) if b == Reg::RIP || b == Reg::EIP => Some(
-                        self.mask_addr(self.next_addr().wrapping_add_signed(self.disp)),
-                    ),
+                    (Some(b), None, None) if b == Reg::RIP || b == Reg::EIP => {
+                        Some(self.mask_addr(self.next_addr().wrapping_add_signed(self.disp)))
+                    }
                     (None, None, None) => Some(self.mask_addr(self.disp.cast_unsigned())),
                     _ => None,
                 };

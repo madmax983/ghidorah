@@ -977,6 +977,7 @@ f0 8b 00|!invalid||3|
 c4 e0 79 10 c0|!invalid||2|
 c4 e4 79 10 c0|!invalid||2|
 62 f0 7c 48 10 c0|!invalid||2|
-66 66 66 66 66 66 66 66 66 66 66 66 66 66 90|!invalid||15|
+66 66 66 66 66 66 66 66 66 66 66 66 66 66 90|xchg|ax,ax|15|seq
+66 66 66 66 66 66 66 66 66 66 66 66 66 66 66 90|!invalid||15|
 0f 01 c0|!unsupported||3|
 0f 01 c1|!unsupported||3|

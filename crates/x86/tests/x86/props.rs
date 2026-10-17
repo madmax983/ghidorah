@@ -100,7 +100,13 @@ fn ac_062c_prefix_equal() {
             let insn = dec(&i.bytes, i.addr).unwrap_or_else(|e| panic!("{:x}: {e}", i.addr));
             let mut longer = i.bytes.clone();
             longer.extend_from_slice(&[0x0f, 0x0f, 0x0f]);
-            assert_eq!(dec(&longer, i.addr), Ok(insn), "{} at {:x}", l.fixture, i.addr);
+            assert_eq!(
+                dec(&longer, i.addr),
+                Ok(insn),
+                "{} at {:x}",
+                l.fixture,
+                i.addr
+            );
         }
     }
 }
@@ -151,7 +157,9 @@ fn length_agrees_with_decode() {
             (
                 Ok(n),
                 Err(
-                    DecodeError::Invalid { len_consumed: m, .. }
+                    DecodeError::Invalid {
+                        len_consumed: m, ..
+                    }
                     | DecodeError::Unsupported { len: m, .. },
                 ),
             ) if n == m => Ok(()),
@@ -180,13 +188,16 @@ fn error_fields_stay_in_range() {
             {
                 Err(format!("{bytes:02x?}: have {have}, need {need_at_least}"))
             }
-            DecodeError::Invalid { len_consumed: 0, .. } => {
-                Err(format!("{bytes:02x?}: zero bytes consumed"))
-            }
+            DecodeError::Invalid {
+                len_consumed: 0, ..
+            } => Err(format!("{bytes:02x?}: zero bytes consumed")),
             e if e.skip() == 0 || e.skip() > 15 => Err(format!("{bytes:02x?}: {e:?}")),
             e if e.to_string().is_empty() => Err("empty text".to_owned()),
             _ => Ok(()),
         }
     });
-    assert!(errors.load(Ordering::Relaxed) > 100, "the generator makes errors");
+    assert!(
+        errors.load(Ordering::Relaxed) > 100,
+        "the generator makes errors"
+    );
 }

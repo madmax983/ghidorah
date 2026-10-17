@@ -2,9 +2,7 @@
 //! RIP-relative targets at the end of a buffer.
 
 use ghidorah_testkit::pbt;
-use ghidorah_x86::{
-    DecodeError, Insn, Map, Mnem, Operand, Opts, Reg, decode, length, length_with,
-};
+use ghidorah_x86::{DecodeError, Insn, Map, Mnem, Operand, Opts, Reg, decode, length, length_with};
 
 use crate::common::{SPEC_ADDR, dec, hex, listings, root, spec_lines};
 
@@ -99,7 +97,9 @@ fn ac_065_vex_evex_length() {
     for (bytes, n, enc, map) in &rows {
         match dec(bytes, SPEC_ADDR) {
             Ok(insn) if insn.is_opaque() && insn.len() == *n && insn.encoding().name() == enc => {}
-            other => failures.push(format!("{bytes:02x?} ({enc} map {map}, len {n}): {other:?}")),
+            other => failures.push(format!(
+                "{bytes:02x?} ({enc} map {map}, len {n}): {other:?}"
+            )),
         }
     }
     for enc in ["vex2", "vex3", "evex", "rex2"] {
@@ -110,7 +110,12 @@ fn ac_065_vex_evex_length() {
         "{} of {} rows fail:\n{}",
         failures.len(),
         rows.len(),
-        failures.iter().take(30).cloned().collect::<Vec<_>>().join("\n")
+        failures
+            .iter()
+            .take(30)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n")
     );
 }
 
@@ -126,7 +131,10 @@ fn legacy_lengths_match_the_oracle() {
             Err(_) => None,
         };
         if got != Some(*n) || length(bytes) != Ok(*n) {
-            failures.push(format!("{bytes:02x?} (map {map}, len {n}): {:?}", dec(bytes, 0)));
+            failures.push(format!(
+                "{bytes:02x?} (map {map}, len {n}): {:?}",
+                dec(bytes, 0)
+            ));
         }
     }
     assert!(
@@ -134,7 +142,12 @@ fn legacy_lengths_match_the_oracle() {
         "{} of {} rows fail:\n{}",
         failures.len(),
         rows.len(),
-        failures.iter().take(30).cloned().collect::<Vec<_>>().join("\n")
+        failures
+            .iter()
+            .take(30)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n")
     );
 }
 
@@ -181,7 +194,9 @@ fn rex_byte_regs_spl_dil() {
 
 fn rip_target(bytes: &[u8], addr: u64) -> u64 {
     let insn = dec(bytes, addr).unwrap_or_else(|e| panic!("{bytes:02x?}: {e}"));
-    let mem = insn.mem().unwrap_or_else(|| panic!("{bytes:02x?} has memory"));
+    let mem = insn
+        .mem()
+        .unwrap_or_else(|| panic!("{bytes:02x?} has memory"));
     assert!(mem.is_rip_relative(), "{bytes:02x?} is RIP-relative");
     mem.abs_target.expect("a RIP-relative target")
 }
@@ -204,7 +219,11 @@ fn riprel_at_buffer_end() {
         assert_eq!(rip_target(&bytes, 0x1000), want, "{text} at the buffer end");
         let mut longer = bytes.clone();
         longer.extend_from_slice(&[0xcc; 8]);
-        assert_eq!(rip_target(&longer, 0x1000), want, "{text} with bytes after it");
+        assert_eq!(
+            rip_target(&longer, 0x1000),
+            want,
+            "{text} with bytes after it"
+        );
         let cut = &bytes[..bytes.len() - 1];
         assert!(
             matches!(dec(cut, 0x1000), Err(DecodeError::Truncated { .. })),
@@ -261,6 +280,9 @@ fn length_reads_at_most_15_bytes() {
     bytes.insert(0, 0x66);
     assert!(matches!(
         length(&bytes),
-        Err(DecodeError::Invalid { len_consumed: 15, .. })
+        Err(DecodeError::Invalid {
+            len_consumed: 15,
+            ..
+        })
     ));
 }

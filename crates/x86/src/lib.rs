@@ -12,7 +12,7 @@
 //! | [`Operand`], [`Mem`] | The operand model | Section 5.3 |
 //! | [`Flow`] | The control flow kind of an instruction | Section 5.3 |
 //!
-//! Layer 1 knows the prefix, ModRM, SIB, displacement and immediate sizes of all maps:
+//! Layer 1 knows the prefix, `ModRM`, SIB, displacement and immediate sizes of all maps:
 //! 1-byte, 0F, 0F38, 0F3A, VEX2, VEX3, EVEX, REX2 and XOP. Layer 2 has semantic tables
 //! for the general-purpose set, x87 and the legacy SSE and SSE2 forms. Other vector
 //! forms decode as opaque forms with the mnemonic `(vector)` (design Section 5.1).
@@ -82,7 +82,7 @@ pub fn length(bytes: &[u8]) -> Result<u8, DecodeError> {
 ///
 /// Returns the errors of [`length`].
 pub fn length_with(bytes: &[u8], opts: &Opts) -> Result<u8, DecodeError> {
-    len::scan(bytes, opts).map(|layout| layout.len)
+    len::scan(bytes, *opts).map(|layout| layout.len)
 }
 
 /// Decodes the instruction at the start of `bytes`. `addr` is the address of the first byte.
@@ -96,6 +96,6 @@ pub fn length_with(bytes: &[u8], opts: &Opts) -> Result<u8, DecodeError> {
 /// undefined opcode, a bad `lock` prefix or a register operand where only memory is
 /// valid, and [`DecodeError::Unsupported`] for a valid form outside the tables.
 pub fn decode(bytes: &[u8], addr: u64, opts: &Opts) -> Result<Insn, DecodeError> {
-    let layout = len::scan(bytes, opts)?;
+    let layout = len::scan(bytes, *opts)?;
     decode::build(bytes, addr, &layout)
 }

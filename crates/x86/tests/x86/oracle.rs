@@ -1,6 +1,7 @@
 //! Tier-2 oracle checks. They need GNU `as`, GNU `objdump` and `llvm-objdump` of the
 //! toolchain `llvm-tools` component.
 
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -17,7 +18,10 @@ fn llvm_objdump() -> PathBuf {
         .args(["--print", "sysroot"])
         .output()
         .expect("run rustc");
-    let host = Command::new("rustc").arg("-vV").output().expect("run rustc");
+    let host = Command::new("rustc")
+        .arg("-vV")
+        .output()
+        .expect("run rustc");
     let host = String::from_utf8_lossy(&host.stdout)
         .lines()
         .find_map(|l| l.strip_prefix("host: ").map(str::to_owned))
@@ -37,7 +41,7 @@ fn object(dir: &Path, name: &str, cands: &[Vec<u8>]) -> PathBuf {
         let mut b = c.clone();
         b.resize(STRIDE, 0xcc);
         let bytes: Vec<String> = b.iter().map(|x| format!("0x{x:02x}")).collect();
-        text.push_str(&format!(".byte {}\n", bytes.join(",")));
+        let _ = writeln!(text, ".byte {}", bytes.join(","));
     }
     std::fs::write(&src, text).expect("write the probe source");
     let ok = Command::new("as")
@@ -57,7 +61,12 @@ fn lines(out: &[u8]) -> Vec<(u64, String)> {
         .filter_map(|l| {
             let (addr, rest) = l.split_once(':')?;
             let addr = u64::from_str_radix(addr.trim(), 16).ok()?;
-            let text = rest.rsplit('\t').next().unwrap_or_default().trim().to_owned();
+            let text = rest
+                .rsplit('\t')
+                .next()
+                .unwrap_or_default()
+                .trim()
+                .to_owned();
             Some((addr, text))
         })
         .collect()
@@ -111,12 +120,20 @@ fn tier2_length_goldens_match_llvm() {
     }
 }
 
+/// The spec vectors where the printer differs from GNU objdump by design.
+///
+/// - `0f 07`: the printer uses the Intel name `sysret`, objdump prints `sysretd`.
+/// - 14 `66` prefixes and `90`: the instruction has 15 bytes and is valid. objdump
+///   stops after 14 prefix bytes.
+const KNOWN: &[&str] = &["0f 07", "66 66 66 66 66 66 66 66 66 66 66 66 66 66 90"];
+
 #[test]
 #[ignore = "tier2"]
 fn tier2_spec_matches_gnu_objdump() {
+    let known: Vec<Vec<u8>> = KNOWN.iter().map(|k| hex(k)).collect();
     let vectors: Vec<_> = spec_lines()
         .into_iter()
-        .filter(|v| !v.is_error() && v.mnem != "(vector)")
+        .filter(|v| !v.is_error() && v.mnem != "(vector)" && !known.contains(&v.bytes))
         .collect();
     let cands: Vec<Vec<u8>> = vectors.iter().map(|v| v.bytes.clone()).collect();
     let obj = object(&scratch(), "spec", &cands);

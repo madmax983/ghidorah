@@ -1,0 +1,220 @@
+# golden: generator=x86-print version=1 fixture=cold_split.gcc-O2 fixture_sha256=60965f8618c714bfb3ac87f66775e859097f2bd99724b4cd1a4430d919046082
+<_init>:
+1000 endbr64
+1004 sub rsp, 0x8
+1008 mov rax, qword ptr [rip+0x2fd9] ; 0x3fe8
+100f test rax, rax
+1012 je 0x1016
+1014 call rax
+1016 add rsp, 0x8
+101a ret
+<.plt>:
+1020 push qword ptr [rip+0x2f8a] ; 0x3fb0
+1026 jmp qword ptr [rip+0x2f8c] ; 0x3fb8
+102c nop dword ptr [rax+0x0]
+1030 endbr64
+1034 push 0x0
+1039 jmp .plt
+103e xchg ax, ax
+1040 endbr64
+1044 push 0x1
+1049 jmp .plt
+104e xchg ax, ax
+1050 endbr64
+1054 push 0x2
+1059 jmp .plt
+105e xchg ax, ax
+<__cxa_finalize@plt>:
+1060 endbr64
+1064 jmp qword ptr [rip+0x2f8e] ; 0x3ff8
+106a nop word ptr [rax+rax*1+0x0]
+<__printf_chk@plt>:
+1070 endbr64
+1074 jmp qword ptr [rip+0x2f46] ; 0x3fc0
+107a nop word ptr [rax+rax*1+0x0]
+<exit@plt>:
+1080 endbr64
+1084 jmp qword ptr [rip+0x2f3e] ; 0x3fc8
+108a nop word ptr [rax+rax*1+0x0]
+<__fprintf_chk@plt>:
+1090 endbr64
+1094 jmp qword ptr [rip+0x2f36] ; 0x3fd0
+109a nop word ptr [rax+rax*1+0x0]
+<report_error>:
+10a0 endbr64
+10a4 mov rcx, rdi
+10a7 mov rdi, qword ptr [rip+0x2f72] ; 0x4020
+10ae mov r8d, esi
+10b1 xor eax, eax
+10b3 lea rdx, [rip+0xf4a] ; 0x2004
+10ba mov esi, 0x2
+10bf jmp __fprintf_chk@plt
+<parse_digit.cold>:
+10c4 push rbx
+10c5 mov esi, edi
+10c7 mov ebx, edi
+10c9 lea rdi, [rip+0xf4d] ; 0x201d
+10d0 call report_error
+10d5 mov rdi, qword ptr [rip+0x2f44] ; 0x4020
+10dc mov ecx, ebx
+10de xor eax, eax
+10e0 lea rdx, [rip+0xf42] ; 0x2029
+10e7 mov esi, 0x2
+10ec call __fprintf_chk@plt
+10f1 or eax, 0xffffffff
+10f4 pop rbx
+10f5 ret
+<parse_number.cold>:
+10f6 mov esi, ebp
+10f8 lea rdi, [rip+0xf41] ; 0x2040
+10ff or ebp, 0xffffffff
+1102 call report_error
+1107 mov rcx, rbx
+110a mov esi, 0x2
+110f xor eax, eax
+1111 mov rdi, qword ptr [rip+0x2f08] ; 0x4020
+1118 lea rdx, [rip+0xf2c] ; 0x204b
+111f call __fprintf_chk@plt
+1124 jmp 0x1301
+1129 nop dword ptr [rax+0x0]
+<main>:
+1130 endbr64
+1134 mov eax, edi
+1136 sub rsp, 0x8
+113a lea rdi, [rip+0xf19] ; 0x205a
+1141 cmp eax, 0x1
+1144 jle 0x114a
+1146 mov rdi, qword ptr [rsi+0x8]
+114a call parse_number
+114f lea rsi, [rip+0xf08] ; 0x205e
+1156 mov edi, 0x2
+115b mov edx, eax
+115d xor eax, eax
+115f call __printf_chk@plt
+1164 xor eax, eax
+1166 add rsp, 0x8
+116a ret
+116b nop dword ptr [rax+rax*1+0x0]
+<_start>:
+1170 endbr64
+1174 xor ebp, ebp
+1176 mov r9, rdx
+1179 pop rsi
+117a mov rdx, rsp
+117d and rsp, 0xfffffffffffffff0
+1181 push rax
+1182 push rsp
+1183 xor r8d, r8d
+1186 xor ecx, ecx
+1188 lea rdi, [rip-0x5f] ; 0x1130 main
+118f call qword ptr [rip+0x2e43] ; 0x3fd8
+1195 hlt
+1196 cs nop word ptr [rax+rax*1+0x0]
+<deregister_tm_clones>:
+11a0 lea rdi, [rip+0x2e69] ; 0x4010
+11a7 lea rax, [rip+0x2e62] ; 0x4010
+11ae cmp rax, rdi
+11b1 je 0x11c8
+11b3 mov rax, qword ptr [rip+0x2e26] ; 0x3fe0
+11ba test rax, rax
+11bd je 0x11c8
+11bf jmp rax
+11c1 nop dword ptr [rax+0x0]
+11c8 ret
+11c9 nop dword ptr [rax+0x0]
+<register_tm_clones>:
+11d0 lea rdi, [rip+0x2e39] ; 0x4010
+11d7 lea rsi, [rip+0x2e32] ; 0x4010
+11de sub rsi, rdi
+11e1 mov rax, rsi
+11e4 shr rsi, 0x3f
+11e8 sar rax, 0x3
+11ec add rsi, rax
+11ef sar rsi, 1
+11f2 je 0x1208
+11f4 mov rax, qword ptr [rip+0x2df5] ; 0x3ff0
+11fb test rax, rax
+11fe je 0x1208
+1200 jmp rax
+1202 nop word ptr [rax+rax*1+0x0]
+1208 ret
+1209 nop dword ptr [rax+0x0]
+<__do_global_dtors_aux>:
+1210 endbr64
+1214 cmp byte ptr [rip+0x2e0d], 0x0 ; 0x4028
+121b jne 0x1248
+121d push rbp
+121e cmp qword ptr [rip+0x2dd2], 0x0 ; 0x3ff8
+1226 mov rbp, rsp
+1229 je 0x1237
+122b mov rdi, qword ptr [rip+0x2dd6] ; 0x4008
+1232 call __cxa_finalize@plt
+1237 call deregister_tm_clones
+123c mov byte ptr [rip+0x2de5], 0x1 ; 0x4028
+1243 pop rbp
+1244 ret
+1245 nop dword ptr [rax]
+1248 ret
+1249 nop dword ptr [rax+0x0]
+<frame_dummy>:
+1250 endbr64
+1254 jmp register_tm_clones
+1259 nop dword ptr [rax+0x0]
+<die>:
+1260 endbr64
+1264 push rax
+1265 pop rax
+1266 lea rdx, [rip+0xda7] ; 0x2014
+126d mov esi, 0x2
+1272 xor eax, eax
+1274 sub rsp, 0x8
+1278 mov rcx, rdi
+127b mov rdi, qword ptr [rip+0x2d9e] ; 0x4020
+1282 call __fprintf_chk@plt
+1287 mov edi, 0x3
+128c call exit@plt
+1291 data16 cs nop word ptr [rax+rax*1+0x0]
+129c nop dword ptr [rax+0x0]
+<parse_digit>:
+12a0 endbr64
+12a4 lea eax, [rdi-0x30]
+12a7 cmp eax, 0x9
+12aa ja parse_digit.cold
+12b0 ret
+12b1 data16 cs nop word ptr [rax+rax*1+0x0]
+12bc nop dword ptr [rax+0x0]
+<parse_number>:
+12c0 endbr64
+12c4 push rbp
+12c5 push rbx
+12c6 sub rsp, 0x8
+12ca test rdi, rdi
+12cd je 0x1310
+12cf mov rbx, rdi
+12d2 movsx edi, byte ptr [rdi]
+12d5 xor ebp, ebp
+12d7 test dil, dil
+12da je 0x1301
+12dc nop dword ptr [rax+0x0]
+12e0 call parse_digit
+12e5 test eax, eax
+12e7 js parse_number.cold
+12ed movsx edi, byte ptr [rbx+0x1]
+12f1 lea edx, [rbp+rbp*4+0x0]
+12f5 add rbx, 0x1
+12f9 lea ebp, [rax+rdx*2]
+12fc test dil, dil
+12ff jne 0x12e0
+1301 add rsp, 0x8
+1305 mov eax, ebp
+1307 pop rbx
+1308 pop rbp
+1309 ret
+130a nop word ptr [rax+rax*1+0x0]
+1310 lea rdi, [rip+0xd20] ; 0x2037
+1317 call die
+<_fini>:
+131c endbr64
+1320 sub rsp, 0x8
+1324 add rsp, 0x8
+1328 ret
