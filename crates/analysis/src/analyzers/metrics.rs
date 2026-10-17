@@ -389,11 +389,17 @@ fn func_items(program: &Program, func: FuncId, out: &mut Vec<WorkItem>) {
             );
         }
     }
-    for caveat in &view.func.caveats {
-        if caveat.code == WarningCode::AgentOverrideConflict {
-            let at = caveat.at.filter(Address::is_ram).unwrap_or(func.0).off;
-            push(ItemKind::OverrideConflict, at, None);
+    let mut conflicts = BTreeSet::new();
+    for layer in [program.base(), program.analysis()] {
+        let caveats = layer.funcs().get(func).map(|f| f.caveats.as_slice());
+        for caveat in caveats.unwrap_or_default() {
+            if caveat.code == WarningCode::AgentOverrideConflict {
+                conflicts.insert(caveat.at.filter(Address::is_ram).unwrap_or(func.0).off);
+            }
         }
+    }
+    for at in conflicts {
+        push(ItemKind::OverrideConflict, at, None);
     }
 }
 

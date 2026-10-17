@@ -6,9 +6,12 @@ use ghidorah_analysis::analyzers::metrics::{
     self, Coverage, FuncMetrics, ItemKind, Ranked, Remedy, WorkItem,
 };
 use ghidorah_analysis::{CallGraph, Scheduler, Until};
-use ghidorah_base::{Address, Fuel, FuncId};
+use ghidorah_base::{Address, Fuel, FuncId, WarningCode};
 use ghidorah_db::meta::{MetaLine, apply};
-use ghidorah_db::{CommentKind, Edit, FuncProgress, Program, SessionLabel, Source, SymKind};
+use ghidorah_db::{
+    Caveat, CommentKind, Edit, FuncProgress, FuncRecord, Function, Program, SessionLabel, Source,
+    StartReason, SymKind,
+};
 use ghidorah_types::Category;
 
 use crate::blobs::{BASE, Blob};
@@ -280,6 +283,43 @@ fn worklist_items() {
             "override_conflict",
             "gap"
         ]
+    );
+}
+
+#[test]
+fn override_conflicts_join_the_worklist() {
+    let mut p = two_funcs();
+    let g = BASE + 0x20;
+    let label = SessionLabel::new("test").expect("a label");
+    let mut tx = p
+        .begin("create", Source::Agent, label)
+        .expect("a transaction");
+    let mut func = Function::new(Address::ram(g), StartReason::Agent, 100, Source::Agent);
+    func.caveats.push(Caveat {
+        code: WarningCode::AgentOverrideConflict,
+        at: None,
+        remedy: None,
+    });
+    let record = FuncRecord {
+        func,
+        vars: Vec::new(),
+        plate: None,
+    };
+    tx.apply(Edit::CreateFunction(Box::new(record)))
+        .expect("an agent function");
+    tx.commit().expect("a commit");
+    let items: Vec<(ItemKind, Address, Option<FuncId>, Option<Remedy>)> = metrics::worklist(&p)
+        .into_iter()
+        .map(|i| (i.kind, i.at, i.func, i.remedy))
+        .collect();
+    assert_eq!(
+        items,
+        [(
+            ItemKind::OverrideConflict,
+            Address::ram(g),
+            Some(fid(g)),
+            None
+        )]
     );
 }
 

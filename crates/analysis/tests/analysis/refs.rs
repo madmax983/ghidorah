@@ -2,15 +2,17 @@
 
 use std::collections::BTreeMap;
 
-use ghidorah_analysis::Rule;
 use ghidorah_analysis::analyzers::refs::{self, MIN_IMM, SLOT_SIZE};
-use ghidorah_base::{Address, ImportId, SpaceId};
+use ghidorah_analysis::{Rule, Until};
+use ghidorah_base::{Address, Fuel, ImportId, SpaceId};
 use ghidorah_db::{Program, RefKey, RefType};
+use ghidorah_loader::{RelocForm, RelocSource, RelocType, SymTable};
+use ghidorah_testkit::elf::consts::EM_AARCH64;
 use ghidorah_testkit::elf::{
     ElfBuilder, FixupKind, ImportKind, Layout, Loc, Reloc, RelocTable, Section, Symbol,
 };
 
-use crate::support::{all_t1_full, analyze_full, built, t1_full};
+use crate::support::{all_t1_full, analyze_full, built, program, t1_full};
 
 /// `R_X86_64_RELATIVE`.
 const RELATIVE: u32 = 8;
@@ -372,4 +374,70 @@ fn relr_refs_exact() {
         p.data_def(slot + 16).is_none(),
         "a place without RELR is no slot"
     );
+}
+
+#[test]
+fn reloc_targets_match_the_slots() {
+    let p = t1_full("hello.gcc-O2");
+    let slots = refs::slots(p);
+    let mut seen = 0;
+    for r in &p.binary().relocs {
+        let to = refs::reloc_target(p, r);
+        match slots.get(&r.offset) {
+            Some(s) => {
+                assert_eq!(to, Some(s.to), "{r:?}");
+                seen += 1;
+            }
+            None => assert_eq!(to, None, "a JUMP_SLOT place is no pointer: {r:?}"),
+        }
+    }
+    assert_eq!(seen, slots.len());
+}
+
+#[test]
+fn other_machines_have_no_code_refs() {
+    let data =
+        Section::data(".data", &[0; 8]).fixup(0, FixupKind::Abs64, Loc::section(".rodata", 0));
+    let b = ElfBuilder::exec()
+        .machine(EM_AARCH64)
+        .section(Section::code(".text", &[0x1f, 0x20, 0x03, 0xd5]))
+        .section(Section::rodata(".rodata", b"survey text\0"))
+        .section(data);
+    let (mut p, layout) = built(&b);
+    let _ = analyze_full(&mut p);
+    assert!(
+        data_refs(&p).is_empty(),
+        "no x86-64 code and no x86-64 relocations"
+    );
+    assert!(refs::slots(&p).is_empty());
+    let ro = sec(&layout, ".rodata");
+    let info = p
+        .string(ro)
+        .expect("the scan reads the data of any machine");
+    assert!(!info.referenced);
+    let r = ghidorah_loader::Reloc {
+        offset: ro,
+        kind: RelocType(RELATIVE),
+        sym: None,
+        sym_table: SymTable::Dynsym,
+        addend: 0,
+        form: RelocForm::Rela,
+        source: RelocSource::DynRela,
+    };
+    assert_eq!(refs::reloc_target(&p, &r), None);
+}
+
+#[test]
+fn restart_keeps_the_references() {
+    let mut p = program("fixtures/bin/socket_client.gcc-O2");
+    let (mut sched, _) = analyze_full(&mut p);
+    let before = p.state_hash().expect("a hash");
+    let rev = p.rev();
+    sched.restart(refs::SPEC.priority);
+    let out = sched
+        .run(&mut p, Until::Full, &mut Fuel::unlimited())
+        .expect("a shadow run");
+    assert!(out.commit.is_none_or(|c| c.noop), "the same facts");
+    assert_eq!(p.state_hash().expect("a hash"), before);
+    assert_eq!(p.rev(), rev);
 }

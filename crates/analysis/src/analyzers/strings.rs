@@ -126,6 +126,11 @@ fn len_of(n: usize) -> Option<u32> {
     u32::try_from(n).ok()
 }
 
+/// Tells if a text of `n` bytes fits in [`MAX_BYTES`].
+fn fits(n: usize) -> bool {
+    u64::try_from(n).is_ok_and(|l| l <= MAX_BYTES)
+}
+
 /// Gives the UTF-16LE code units of `bytes`.
 fn units(bytes: &[u8]) -> impl Iterator<Item = u16> + '_ {
     bytes.chunks_exact(2).map(|c| match c {
@@ -158,8 +163,7 @@ fn wide_at(w: &[u8]) -> Option<StrInfo> {
         all = all.saturating_add(1);
         ok = ok.saturating_add(u64::from(c.is_ok_and(|c| c.is_ascii() && is_text(c))));
     }
-    let fits = u64::try_from(text.len()).is_ok_and(|l| l <= MAX_BYTES);
-    (fits && mostly_text(all, ok)).then_some(StrInfo {
+    (fits(text.len()) && mostly_text(all, ok)).then_some(StrInfo {
         encoding: Encoding::Utf16Le,
         len: len_of(text.len())?,
         referenced: true,
@@ -171,8 +175,7 @@ fn bytes_at(w: &[u8]) -> Option<StrInfo> {
     let n = w.iter().position(|b| *b == 0)?;
     let text = w.get(..n)?;
     let (all, ok) = counts(text);
-    let fits = u64::try_from(n).is_ok_and(|l| l <= MAX_BYTES);
-    (fits && mostly_text(all, ok)).then_some(StrInfo {
+    (fits(n) && mostly_text(all, ok)).then_some(StrInfo {
         encoding: byte_encoding(text),
         len: len_of(n)?,
         referenced: true,
@@ -313,11 +316,6 @@ fn sweep_wide(base: u64, bytes: &[u8], spans: &mut Spans, out: &mut BTreeMap<u64
             spans.add(at, info, out);
         }
     }
-}
-
-/// Tells if a text of `n` bytes fits in [`MAX_BYTES`].
-fn fits(n: usize) -> bool {
-    u64::try_from(n).is_ok_and(|l| l <= MAX_BYTES)
 }
 
 /// Gives the candidate of step 2 in the run `seg` before a 0 byte: its offset in the run.
