@@ -1,3 +1,5 @@
+mod funcs;
+
 use ghidorah_base::{Address, ErrorCode, FuncId, JumpTableId, NoteId, Range, Rev, Storage, VarId};
 use ghidorah_kernel::RangeSet;
 use ghidorah_types::{Prim, TypeId};

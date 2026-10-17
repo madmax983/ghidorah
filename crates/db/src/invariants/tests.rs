@@ -1,3 +1,5 @@
+mod premises;
+
 use std::cell::RefCell;
 
 use ghidorah_base::{Address, FuncId, JumpTableId, NoteId, Range, Rev, SetName, TxId};

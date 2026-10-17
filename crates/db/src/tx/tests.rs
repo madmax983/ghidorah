@@ -541,3 +541,31 @@ fn delete_function_inverse_captures_side_effects() {
             .is_some()
     );
 }
+
+#[test]
+fn counters_at_their_limit_refuse_the_tx() {
+    let mut p = seeded();
+    p.changes_mut().last_tx = TxId(u64::MAX);
+    assert_eq!(
+        p.begin("x", Source::Agent, session("cli")).err(),
+        Some(TxError::Exhausted)
+    );
+    p.changes_mut().last_tx = TxId(0);
+    p.set_rev(Rev(u64::MAX));
+    let before = hash(&p);
+    let mut tx = agent(&mut p);
+    assert_eq!(tx.label().to_string(), "test");
+    let e = rename(&tx, 0x1084, "alpha");
+    tx.apply(e).unwrap();
+    assert_eq!(tx.commit().err(), Some(TxError::Exhausted));
+    assert_eq!(hash(&p), before);
+    for e in [
+        TxError::DefaultSource,
+        TxError::BadLabel,
+        TxError::Poisoned,
+        TxError::Exhausted,
+    ] {
+        assert!(e.to_string().ends_with('.'), "{e}");
+    }
+    assert_eq!(TxError::DefaultSource.code(), ErrorCode::InvalidArgument);
+}

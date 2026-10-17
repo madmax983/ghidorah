@@ -267,7 +267,10 @@ fn slot<'a, T>(
     Ok(new)
 }
 
-/// Applies a `SetName` edit. `new_sym` gives the kind and the primary flag of a new symbol.
+/// Applies a `SetName` edit. The pair gives the kind and the primary flag of a new symbol.
+///
+/// An address without a primary symbol has no symbol (invariant 4), so a new primary symbol
+/// takes the key 0.
 fn set_name(
     p: &mut Program,
     ctx: &Ctx<'_>,
@@ -284,8 +287,7 @@ fn set_name(
     .cloned();
     let slot_key = match (&target, key) {
         (Some(s), _) => s.key,
-        (None, Some(k)) => k,
-        (None, None) => t.symbols.next_key(addr)?,
+        (None, k) => k.unwrap_or(SymKey(0)),
     };
     let fkey = FactKey::Symbol(addr, slot_key);
     let name = slot(ctx, &fkey, name)?;

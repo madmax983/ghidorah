@@ -10,7 +10,7 @@
 use ghidorah_base::{FuncId, VarId};
 
 use super::apply::{Ctx, exact, same_slot, tables, top};
-use super::rules::{gate, own, rule, signature as check_sig};
+use super::rules::{gate, known, own, rule, signature as check_sig};
 use super::{Edit, EditError, FuncRecord, Layer};
 use crate::codec::Json;
 use crate::comments::CommentKind;
@@ -63,7 +63,7 @@ fn own_record(ctx: &Ctx<'_>, p: &Program, r: &FuncRecord) -> Result<(), EditErro
         if let Some(t) = &facts.ty {
             own(ctx, &key, t)?;
             if ctx.forward() {
-                super::rules::known(p, t.value)?;
+                known(p, t.value)?;
             }
         }
     }

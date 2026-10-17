@@ -94,3 +94,13 @@ fn one_event_per_table_in_a_commit() {
     );
     assert_eq!(p.events().since(Rev(0)).map(|v| v.len()), Some(3));
 }
+
+#[test]
+fn an_empty_ring_gives_every_revision() {
+    let mut events = super::Events::default();
+    assert!(events.is_empty());
+    assert_eq!(events.lost(), Rev(0));
+    assert_eq!(events.since(Rev(0)).map(|v| v.len()), Some(0));
+    events.push(Vec::new());
+    assert!(events.is_empty());
+}

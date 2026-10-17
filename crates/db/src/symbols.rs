@@ -303,26 +303,6 @@ impl Symbols {
         old
     }
 
-    /// Gives the key of the next new symbol of `addr`: one above the last key, or 0.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Invalid::TooMany`] when the last key of the address is `u16::MAX`.
-    pub(crate) fn next_key(&self, addr: Address) -> Result<SymKey, Invalid> {
-        match self.table.range(span(addr)).next_back() {
-            None => Ok(SymKey(0)),
-            Some((_, s)) => s
-                .key
-                .0
-                .checked_add(1)
-                .map(SymKey)
-                .ok_or_else(|| Invalid::TooMany {
-                    count: usize::from(u16::MAX) + 1,
-                    max: usize::from(u16::MAX),
-                }),
-        }
-    }
-
     /// Puts a symbol with its exact key, name fact and kind. Gives the old symbol of the key.
     ///
     /// A primary symbol takes the flag from the other symbols of the address. A symbol
