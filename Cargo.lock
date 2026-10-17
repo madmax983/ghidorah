@@ -3,6 +3,18 @@
 version = 4
 
 [[package]]
+name = "ghidorah-kernel"
+version = "0.1.0"
+dependencies = [
+ "ghidorah-spec",
+ "ghidorah-testkit",
+]
+
+[[package]]
+name = "ghidorah-spec"
+version = "0.1.0"
+
+[[package]]
 name = "ghidorah-testkit"
 version = "0.1.0"
 

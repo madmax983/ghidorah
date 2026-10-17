@@ -13,6 +13,7 @@
 //! | `xtask cov` | [`cov`] | Measures line coverage with `llvm-tools` (ADR-0027). |
 //! | `xtask ac` | [`ac`] | Checks the AC table of the design and runs its evidence. |
 //! | `xtask ste` | [`ste`] | Checks the docs and comments with the STE checker of `testkit` (AC-025). |
+//! | `xtask verify` | [`verify`] | Runs the Verus proofs of the kernel and writes `verify/results.json`. |
 
 pub mod ac;
 pub mod acrun;
@@ -28,6 +29,7 @@ pub mod proc;
 pub mod rustsrc;
 pub mod scan;
 pub mod ste;
+pub mod verify;
 pub mod workflow;
 pub mod workspace;
 

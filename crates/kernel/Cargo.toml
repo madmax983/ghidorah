@@ -1,0 +1,17 @@
+[package]
+name = "ghidorah-kernel"
+description = "Verus-verified leaf crate: bounded reader, checked range math, RangeSet, budget fit and provenance order."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+ghidorah-spec = { path = "../spec" }
+
+[dev-dependencies]
+ghidorah-testkit = { path = "../testkit" }
+
+[lints]
+workspace = true
