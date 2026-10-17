@@ -543,3 +543,84 @@ fn calls_strings_and_line_ops() {
     assert_eq!(printed.vars[0].ty, "uint64_t");
     assert_eq!(printed.vars[0].source, "default");
 }
+
+/// Gives a counted loop: `v1 = 0`, a test `v1 < 0xa` in a pure node, then a body that adds
+/// `v1` to `v2` and steps `v1`. With `skip`, the body has a `continue` to the head.
+fn counted(skip: bool) -> Decomp {
+    let init = assign(1, k(0, 64), op(0, 0, 0));
+    let lt = bin(Opc::ULt, 64, v(1, 64), k(10, 64), op(1, 0, 0));
+    let add = assign(
+        2,
+        bin(Opc::Add, 64, v(2, 64), v(1, 64), op(2, 0, 0)),
+        op(2, 0, 0),
+    );
+    let step = assign(
+        1,
+        bin(Opc::Add, 64, v(1, 64), k(1, 64), op(2, 1, 0)),
+        op(2, 1, 0),
+    );
+    let mut body = vec![Tree::Block(node(2))];
+    if skip {
+        body.insert(0, Tree::Continue(node(1)));
+    }
+    decomp(
+        vec![
+            Spec::new(Exit::Fall(node(1)), vec![init]),
+            Spec::branch(2, 3, lt, op(1, 1, 0)),
+            Spec::new(Exit::Fall(node(1)), vec![add, step]),
+            Spec::new(Exit::Stop, vec![ret(v(2, 64), op(3, 0, 0))]),
+        ],
+        vec![
+            param(0, 64),
+            temp("rcx", 0x1000, 64),
+            temp("rax", 0x1000, 64),
+        ],
+        Tree::Seq(vec![
+            Tree::Block(node(0)),
+            Tree::Loop {
+                kind: LoopKind::While,
+                cond: Some(Cond::leaf(node(1))),
+                body: Box::new(Tree::Seq(body)),
+                head: node(1),
+                follow: Some(node(3)),
+            },
+            Tree::Block(node(3)),
+        ]),
+    )
+}
+
+#[test]
+fn prints_a_for_loop_when_its_parts_are_adjacent() {
+    let d = counted(false);
+    let printed = print::print(&d, &NoEnv, &NoNames, "f");
+    let texts: Vec<&str> = printed.lines.iter().map(|l| l.text.as_str()).collect();
+    assert_eq!(
+        texts[2..6],
+        [
+            "    for (v1 = 0; v1 < 0xa; v1 = v1 + 1) {",
+            "        v2 = v2 + v1;",
+            "    }",
+            "    return v2;",
+        ],
+        "{texts:?}"
+    );
+    let head = printed
+        .lines
+        .iter()
+        .find(|l| l.text.contains("for ("))
+        .expect("the for line");
+    for at in [op(0, 0, 0), op(1, 0, 0), op(1, 1, 0), op(2, 1, 0)] {
+        assert!(head.ops.contains(&at), "{at} is on the for line");
+    }
+}
+
+#[test]
+fn a_continue_keeps_the_while_loop() {
+    let texts = text_of(&counted(true));
+    assert!(texts.contains(&"    v1 = 0;".to_owned()), "{texts:?}");
+    assert!(
+        texts.contains(&"    while (v1 < 0xa) {".to_owned()),
+        "{texts:?}"
+    );
+    assert!(!texts.iter().any(|t| t.contains("for (")), "{texts:?}");
+}
