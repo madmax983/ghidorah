@@ -532,3 +532,35 @@ fn merged_reads_prefer_the_base_layer() {
     assert_eq!(p.code_unit(0x10a0).map(CodeUnit::len), Some(1));
     assert_eq!(p.string(0x2010), Some(&info()));
 }
+
+#[test]
+fn regress_refs_from_merge_keeps_key_order() {
+    let mut p = program("hello.gcc-O2.stripped");
+    let from = ram(0x1080);
+    let first = RefKey {
+        from,
+        op_index: 0,
+        to: ram(0x3000),
+        kind: RefType::Read,
+    };
+    let second = RefKey {
+        from,
+        op_index: 1,
+        to: ram(0x2000),
+        kind: RefType::Read,
+    };
+    let analysis = p.layer_mut(Source::Analysis).unwrap();
+    let r = Ref {
+        key: first,
+        primary: true,
+    };
+    analysis.refs.add(r, &Origin::analysis()).unwrap();
+    let base = p.layer_mut(Source::Agent).unwrap();
+    let r = Ref {
+        key: second,
+        primary: true,
+    };
+    base.refs.add(r, &agent()).unwrap();
+    let keys: Vec<RefKey> = p.refs_from(from).iter().map(|f| f.value.key).collect();
+    assert_eq!(keys, [first, second], "refs_from keeps the RefKey order");
+}

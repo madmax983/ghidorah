@@ -16,7 +16,7 @@ use crate::funcs::Function;
 use crate::jumptables::JumpTable;
 use crate::listing::{CodeUnit, DataDef};
 use crate::overrides::FlowOverride;
-use crate::refs::{Ref, RefKey, RefType};
+use crate::refs::{Ref, RefKey};
 use crate::source::Source;
 use crate::strings::StrInfo;
 use crate::symbols::Symbol;
@@ -195,17 +195,15 @@ impl Program {
         })
     }
 
-    /// Merges the reference lists of both layers. The base layer wins for the same key.
-    fn merge_refs<'a>(
+    /// Merges the reference lists of both layers in the order of `order`. The base layer wins
+    /// for the same key.
+    fn merge_refs<'a, K: Ord>(
         base: impl Iterator<Item = &'a Fact<Ref>>,
         analysis: impl Iterator<Item = &'a Fact<Ref>>,
-        order: impl Fn(&RefKey) -> (Address, Address, i8, RefType),
+        order: impl Fn(&RefKey) -> K,
     ) -> Vec<&'a Fact<Ref>> {
-        let mut all: BTreeMap<(Address, Address, i8, RefType), &'a Fact<Ref>> = BTreeMap::new();
-        for r in analysis {
-            all.insert(order(&r.value.key), r);
-        }
-        for r in base {
+        let mut all: BTreeMap<K, &'a Fact<Ref>> = BTreeMap::new();
+        for r in analysis.chain(base) {
             all.insert(order(&r.value.key), r);
         }
         all.into_values().collect()
@@ -218,7 +216,7 @@ impl Program {
         Self::merge_refs(
             self.base.refs.from(from),
             self.analysis.refs.from(from),
-            |k| (k.from, k.to, k.op_index, k.kind),
+            |k| *k,
         )
     }
 
