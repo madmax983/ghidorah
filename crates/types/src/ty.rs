@@ -167,7 +167,7 @@ impl Quals {
         is_restrict: false,
     };
 
-    /// Tells if no qualifier is set.
+    /// Tells if the value holds no qualifier.
     #[must_use]
     pub const fn is_empty(self) -> bool {
         !self.is_const && !self.is_volatile && !self.is_restrict

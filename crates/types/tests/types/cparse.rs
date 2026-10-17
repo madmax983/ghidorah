@@ -1,9 +1,9 @@
 //! C parser spec tables (design Section 9.2).
 
 use ghidorah_base::{DiagCode, ErrorCode};
-use ghidorah_types::{Prim, Type, parse_sig, parse_type};
+use ghidorah_types::{DataModel, LayoutError, Prim, Type, layout, parse_sig, parse_type};
 
-use crate::support::{assert_diag, first, store, ty};
+use crate::support::{assert_diag, first, offset, store, ty};
 
 /// `type` mode inputs and their canonical C text.
 const TYPE_CASES: &[(&str, &str)] = &[
@@ -385,4 +385,85 @@ fn long_lines_give_short_snippets() {
     let d = first(&err);
     assert!(d.snippet.len() <= ghidorah_types::cparse::MAX_SNIPPET);
     assert!(d.snippet.contains('@'), "{d:?}");
+}
+
+#[test]
+fn enum_tags_and_values() {
+    let mut s = store();
+    let color = ty(&mut s, "enum color { RED, GREEN }");
+    assert_eq!(ty(&mut s, "enum color"), color);
+    let err = parse_type(&mut s, "enum colour").expect_err("unknown enum tag");
+    assert_eq!(first(&err).candidates, vec!["enum color".to_string()]);
+    let err = parse_type(&mut s, "struct color").expect_err("an enum tag as a struct");
+    assert_eq!(first(&err).candidates, vec!["enum color".to_string()]);
+    let err = parse_type(&mut s, "union sockaddr { int x; }").expect_err("a struct tag");
+    assert_eq!(first(&err).code, DiagCode::UnknownType);
+    let text = "enum { A = 170141183460469231731687303715884105727, B }";
+    let err = parse_type(&mut s, text).expect_err("enum overflow");
+    assert_diag(text, &err, DiagCode::Overflow, offset(text, "B }"));
+    let m = DataModel::X86_64_SYSV;
+    let huge = ty(&mut s, "enum huge { H = 1 << 100 }");
+    assert_eq!(layout::sysv(&s, huge, &m), Err(LayoutError::Overflow(huge)));
+    let neg = ty(&mut s, "enum neg { N = -1 }");
+    assert_eq!(layout::sysv(&s, neg, &m).map(|l| l.size), Ok(4));
+    let wide = ty(&mut s, "enum wide { W = -0x80000001 }");
+    assert_eq!(layout::sysv(&s, wide, &m).map(|l| l.size), Ok(8));
+    let unsigned = ty(&mut s, "enum u32max { U = 0xffffffff }");
+    assert_eq!(layout::sysv(&s, unsigned, &m).map(|l| l.size), Ok(4));
+    let empty = ty(&mut s, "enum { }");
+    assert_eq!(layout::sysv(&s, empty, &m).map(|l| l.size), Ok(4));
+    let fwd = s
+        .declare(ghidorah_types::TagKind::Enum, "later")
+        .expect("declare");
+    assert_eq!(layout::sysv(&s, fwd, &m), Err(LayoutError::Incomplete(fwd)));
+    let done = ty(&mut s, "enum later { L = 2 }");
+    assert_eq!(done, fwd, "the body completes the declared enum");
+}
+
+/// More failing inputs of the `type` mode: the text, the code and the text from the error place.
+const EDGE_CASES: &[(&str, DiagCode, &str)] = &[
+    (
+        "int * __attribute__((aligned(8)))",
+        DiagCode::Unsupported,
+        "__attribute__((aligned(8)))",
+    ),
+    ("struct { int a;", DiagCode::Syntax, ""),
+    ("int[(1]", DiagCode::Syntax, "]"),
+    ("int[1 ? 2]", DiagCode::Syntax, "]"),
+    ("int[]]", DiagCode::Syntax, "]"),
+    ("int /* no end", DiagCode::Syntax, "/* no end"),
+    ("int[1.5]", DiagCode::Syntax, ".5]"),
+    ("int[0x]", DiagCode::Syntax, "0x]"),
+    ("int[1q]", DiagCode::Syntax, "1q]"),
+    (
+        "int [[deprecated]]",
+        DiagCode::Unsupported,
+        "[[deprecated]]",
+    ),
+    ("enum { A = B }", DiagCode::ConstExpr, "B }"),
+    ("enum { int }", DiagCode::Syntax, "int }"),
+    ("enum { A B }", DiagCode::Syntax, "B }"),
+    ("int[*]", DiagCode::Syntax, "*]"),
+    ("int[", DiagCode::Syntax, ""),
+];
+
+#[test]
+fn edge_error_cases() {
+    for (text, code, tail) in EDGE_CASES {
+        let mut s = store();
+        let err = parse_type(&mut s, text).expect_err(text);
+        assert_diag(text, &err, *code, text.len() - tail.len());
+    }
+    let mut s = store();
+    let got = parse_sig(&mut s, "int f(register int x);").expect("register parameter");
+    assert_eq!(got.sig.params.len(), 1);
+    let err = parse_sig(&mut s, "int f(").expect_err("cut prototype");
+    assert_eq!(first(&err).at.byte as usize, "int f(".len());
+    let err = parse_sig(&mut s, "int f(auto int x)").expect_err("auto parameter");
+    assert_eq!(first(&err).code, DiagCode::Syntax);
+    let err = parse_type(&mut s, "int int2").expect_err("name in type mode");
+    assert!(
+        err.to_string().contains("Expected: the end of the text."),
+        "{err}"
+    );
 }

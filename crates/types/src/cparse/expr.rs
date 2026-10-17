@@ -1,8 +1,8 @@
 //! Integer constant expressions in `i128` with checked operations.
 //!
-//! The grammar is the C grammar of a conditional expression without casts:
-//! literals, enum constants of the same text, parentheses, the unary operators
-//! `- + ~ !`, the binary operators from `*` to `||` and `?:`.
+//! The grammar is the C grammar of a conditional expression without casts.
+//! It has literals, the enum constants of the same text and parentheses.
+//! It has the unary operators `- + ~ !`, the binary operators from `*` to `||` and `?:`.
 //! An error gives `E_CONST_EXPR`, or `E_OVERFLOW` when a value leaves the `i128` range.
 
 use ghidorah_base::DiagCode;
