@@ -6,17 +6,22 @@
 //! |---|---|
 //! | `path` | a file under a root (Section 10.16, AC-147) |
 //! | `builtin` | a built-in binary of [`crate::demo`] with no root check |
-//! | `binary_id` | a binary that is open in the session |
+//! | `binary_id` | a binary that is open in the session, or a project in the projects root |
 //!
 //! The load probes the format, maps the file and makes the program. A binary that is open
-//! already gives `already_loaded: true` and no second copy. With an analysis engine in the
-//! session, the load then runs the analysis within `max_steps`. Without one, the analysis
-//! state is `none`. A dry run loads the file and reports it, but opens nothing.
+//! already gives `already_loaded: true` and no second copy. A session with a projects root
+//! opens the project of the binary, or makes a new one (design Section 3.10). A reopen by
+//! `binary_id` reads only the input copy of the project, with no root check.
+//!
+//! With an analysis engine in the session, the load then runs the analysis within
+//! `max_steps`. A project with a current analysis needs no run. A project with changed
+//! analysis inputs starts a re-analysis. Without an engine, the analysis state is `none`. A
+//! dry run loads the file and reports it, but opens nothing.
 
 use std::collections::BTreeMap;
 
 use ghidorah_base::{BinaryId, DiagCode, ErrorCode, WarningCode, hex};
-use ghidorah_db::Program;
+use ghidorah_db::{LoadSpec, Program};
 use ghidorah_json::{Object, Value};
 use ghidorah_loader::{
     self as loader, Detected, Diagnostic, EntryKind, Kind, LoadError, LoadOpts, probe,
@@ -29,7 +34,7 @@ use crate::envelope::{Mutation, Warning};
 use crate::errors::ToolError;
 use crate::hints::Call;
 use crate::outshape::{Field, OutputShape};
-use crate::session::{OpenBinary, Session, Until};
+use crate::session::{Admitted, OpenBinary, Session, Until};
 use crate::spec::{
     Annotations, ArgKind, ArgSpec, BinaryArg, Example, FuelSpec, Group, GroupRule, Profile, Role,
     ToolSpec,
@@ -267,6 +272,17 @@ fn load_opts(args: &Args) -> Result<LoadOpts, ToolError> {
     Ok(LoadOpts::raw(base, raw_addr(args, "entry")?))
 }
 
+/// Gives how the project reads the input copy again.
+fn load_spec(args: &Args) -> Result<LoadSpec, ToolError> {
+    if args.str("file_format") != Some("raw") {
+        return Ok(LoadSpec::Auto);
+    }
+    Ok(LoadSpec::Raw {
+        base: raw_addr(args, "base")?.unwrap_or(0),
+        entry: raw_addr(args, "entry")?,
+    })
+}
+
 /// Gives the name and the bytes of the file of the call.
 fn read_input(session: &Session, args: &Args) -> Result<(String, Vec<u8>), ToolError> {
     if let Some(name) = args.str("builtin") {
@@ -355,12 +371,46 @@ fn report(binary: &OpenBinary, already: bool, steps_used: u64) -> Object {
     out
 }
 
-/// Gives the open binary `text` for a call with `binary_id`.
-fn open_by_id(session: &Session, text: &str) -> Result<BinaryId, ToolError> {
-    BinaryId::parse(text)
-        .ok()
-        .filter(|id| session.binary(*id).is_some())
-        .ok_or_else(|| session.unknown_binary())
+/// Runs the analysis that the call asks for after an open. Gives the fuel used.
+fn analyze_after(
+    session: &mut Session,
+    id: BinaryId,
+    admitted: Admitted,
+    args: &Args,
+    ctx: &mut Ctx,
+) -> Result<u64, ToolError> {
+    let until = match args.str("analysis") {
+        Some("none") => return Ok(0),
+        Some("triage") => Until::Triage,
+        _ => Until::Full,
+    };
+    let report = match admitted {
+        Admitted::Fresh => session.analyze(id, until, &mut ctx.fuel)?,
+        Admitted::Current => None,
+        Admitted::Stale(band) => session.reanalyze(id, band, &mut ctx.fuel)?,
+    };
+    Ok(report.map_or(0, |r| r.steps_used))
+}
+
+/// Opens the binary `text` for a call with `binary_id`: an open binary, else its project.
+fn open_by_id(
+    session: &mut Session,
+    text: &str,
+    args: &Args,
+    ctx: &mut Ctx,
+) -> Result<Payload, ToolError> {
+    let Ok(id) = BinaryId::parse(text) else {
+        return Err(session.unknown_binary());
+    };
+    if session.binary(id).is_some() {
+        return finish(session, id, true, 0, ctx);
+    }
+    let Some((admitted, warnings)) = session.reopen(id)? else {
+        return Err(session.unknown_binary_id(text));
+    };
+    ctx.warnings.extend(warnings);
+    let steps = analyze_after(session, id, admitted, args, ctx)?;
+    finish(session, id, false, steps, ctx)
 }
 
 /// Sets the frame of the call to the loaded binary and gives the payload.
@@ -395,8 +445,7 @@ fn finish(
 
 fn run(session: &mut Session, args: &Args, ctx: &mut Ctx) -> Result<Payload, ToolError> {
     if let Some(text) = args.str("binary_id") {
-        let id = open_by_id(session, text)?;
-        return finish(session, id, true, 0, ctx);
+        return open_by_id(session, text, args, ctx);
     }
     let (file_name, bytes) = read_input(session, args)?;
     let program = make_program(session, args, &bytes)?;
@@ -420,17 +469,8 @@ fn run(session: &mut Session, args: &Args, ctx: &mut Ctx) -> Result<Payload, Too
         });
         return Ok(Payload::Object(report(&binary, false, 0)));
     }
-    session.open(binary);
-    let until = match args.str("analysis") {
-        Some("none") => None,
-        Some("triage") => Some(Until::Triage),
-        _ => Some(Until::Full),
-    };
-    let steps = match until {
-        Some(until) => session
-            .analyze(id, until, &mut ctx.fuel)?
-            .map_or(0, |r| r.steps_used),
-        None => 0,
-    };
+    let (admitted, warnings) = session.admit(binary, &bytes, load_spec(args)?)?;
+    ctx.warnings.extend(warnings);
+    let steps = analyze_after(session, id, admitted, args, ctx)?;
     finish(session, id, false, steps, ctx)
 }

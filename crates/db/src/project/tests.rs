@@ -1,0 +1,749 @@
+//! Tests of the project directory: replay (AC-117), the torn tail (AC-119a), a corrupt line
+//! (AC-119b), crash consistency (AC-120b), the golden v1 project (AC-120c), the lock (AC-124),
+//! project safety (AC-125), forward undo (AC-128b) and the snapshot cadence.
+
+#[path = "../../tests/common/fs_sim.rs"]
+pub(crate) mod fs_sim;
+
+use std::path::{Path, PathBuf};
+
+use ghidorah_base::{Address, ErrorCode, Limits, Rev, TxId};
+use ghidorah_json::Value;
+use ghidorah_loader::{LoadOpts, load};
+use ghidorah_testkit::pbt::check;
+use ghidorah_types::Prim;
+
+use self::fs_sim::SimFs;
+use super::{
+    Access, LoadSpec, OpenOptions, Opened, Project, ProjectError, ProjectMeta, SNAPSHOT_EVERY,
+    check_root, list,
+};
+use crate::edit::Edit;
+use crate::fs::Fs;
+use crate::hash::StateHash;
+use crate::history::{History, Scope};
+use crate::journal::{JOURNAL_FILE, Line, TxLine};
+use crate::lock::{BOOT_ID_FILE, LOCK_FILE, LockInfo};
+use crate::meta::MetaLine;
+use crate::program::Program;
+use crate::progress::FuncProgress;
+use crate::snapshot::SNAPSHOT_FILE;
+use crate::source::Source;
+use crate::symbols::SymKind;
+use crate::tests::ops::{Pools, base_edit};
+use crate::tests::session;
+use crate::tx::Commit;
+use crate::undo::{UndoRequest, run};
+
+/// The projects root of the simulated file system.
+pub(crate) const ROOT: &str = "/data/projects";
+
+/// The boot ID of the simulated process files.
+pub(crate) const BOOT: &str = "4b2c0d6e-boot";
+
+/// Gives the lock owner of the simulated process `pid`.
+pub(crate) fn me(pid: u32) -> LockInfo {
+    LockInfo {
+        pid,
+        start_time: 1000 + u64::from(pid),
+        boot_id: BOOT.to_owned(),
+    }
+}
+
+/// Gives a `/proc/<pid>/stat` text with the start time `start`. The name holds a `)`.
+pub(crate) fn stat_line(pid: u32, start: u64) -> String {
+    let middle: Vec<String> = (4..=21).map(|n| n.to_string()).collect();
+    format!("{pid} (ghi (worker)) S {} {start} 0 0\n", middle.join(" "))
+}
+
+/// Makes the process `pid` alive in `fs`.
+pub(crate) fn alive(fs: &SimFs, pid: u32) {
+    let path = PathBuf::from(format!("/proc/{pid}/stat"));
+    fs.seed(&path, stat_line(pid, me(pid).start_time).as_bytes());
+}
+
+/// Gives a simulated file system with the boot ID and the live processes `pids`.
+pub(crate) fn sim(pids: &[u32]) -> SimFs {
+    let fs = SimFs::new();
+    fs.seed(Path::new(BOOT_ID_FILE), format!("{BOOT}\n").as_bytes());
+    for pid in pids {
+        alive(&fs, *pid);
+    }
+    fs
+}
+
+/// Gives the bytes and a fresh program of a fixture.
+pub(crate) fn input(name: &str) -> (Vec<u8>, Program) {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../fixtures/bin")
+        .join(name);
+    let bytes = std::fs::read(&path).unwrap();
+    let (binary, mem) = load(&bytes, &LoadOpts::AUTO, &Limits::DEFAULT).unwrap();
+    let program = Program::from_binary(binary, mem, &Limits::DEFAULT).unwrap();
+    (bytes, program)
+}
+
+/// Gives the open settings of the process `pid`.
+pub(crate) fn opts(access: Access, pid: u32) -> OpenOptions {
+    OpenOptions {
+        access,
+        me: me(pid),
+        limits: Limits::DEFAULT,
+        engine: Value::Null,
+    }
+}
+
+fn write(pid: u32) -> OpenOptions {
+    opts(Access::Write { break_lock: false }, pid)
+}
+
+/// Makes the project of `hello.gcc-O2` in `fs` for the process `pid`.
+pub(crate) fn create(fs: &SimFs, pid: u32) -> (Project, Program, PathBuf) {
+    let (bytes, program) = input("hello.gcc-O2");
+    let meta = ProjectMeta::new(&program, "hello.gcc-O2", LoadSpec::Auto);
+    let dir = Project::dir_of(Path::new(ROOT), meta.binary_id);
+    let project = Project::create(
+        fs.boxed(),
+        Path::new(ROOT),
+        meta,
+        &bytes,
+        &program,
+        &write(pid),
+    )
+    .unwrap();
+    (project, program, dir)
+}
+
+fn hash(p: &Program) -> StateHash {
+    p.state_hash().unwrap()
+}
+
+/// Journals a commit and records it.
+fn journal(project: &mut Project, h: &mut History, p: &Program, commit: &Commit) {
+    let line = TxLine::of_commit(commit);
+    project
+        .append(&Line::Tx(Box::new(line.clone())), p)
+        .unwrap();
+    h.record(&line);
+}
+
+/// Commits a rename of `addr` and journals it.
+pub(crate) fn rename(
+    p: &mut Program,
+    project: &mut Project,
+    h: &mut History,
+    addr: u64,
+    name: &str,
+) -> Commit {
+    let mut tx = p
+        .begin("symbol_rename", Source::Agent, session("mcp-1"))
+        .unwrap();
+    let fact = tx.fact(name.to_string());
+    tx.apply(Edit::SetName {
+        addr: Address::ram(addr),
+        key: None,
+        kind: SymKind::Label,
+        primary: true,
+        name: Some(fact),
+        evidence: Vec::new(),
+    })
+    .unwrap();
+    let commit = tx.commit().unwrap();
+    journal(project, h, p, &commit);
+    commit
+}
+
+fn reopen(fs: &SimFs, dir: &Path, options: &OpenOptions) -> Result<Opened, ProjectError> {
+    Project::open(fs.boxed(), dir, options)
+}
+
+#[test]
+fn create_then_open_keeps_the_state() {
+    let fs = sim(&[100]);
+    let (mut project, mut p, dir) = create(&fs, 100);
+    let mut h = History::new();
+    rename(&mut p, &mut project, &mut h, 0x1084, "alpha");
+    rename(&mut p, &mut project, &mut h, 0x1088, "beta");
+    drop(project);
+    assert!(
+        fs.get(&dir.join(LOCK_FILE)).is_none(),
+        "a drop releases the lock"
+    );
+    let opened = reopen(&fs, &dir, &write(100)).unwrap();
+    assert_eq!(hash(&opened.program), hash(&p));
+    assert_eq!(opened.program.rev(), Rev(2));
+    assert_eq!(opened.history.entries().count(), 2);
+    assert!(!opened.tail_discarded);
+    assert_eq!(opened.project.lines(), 2);
+}
+
+#[test]
+fn ac_117_journal_replay() {
+    let (_, start) = input("hello.gcc-O2");
+    let long = start.types().store().prim(Prim::Long);
+    let pools = Pools::of(&start, long);
+    check("ac_117_journal_replay", 16, |g| {
+        let fs = sim(&[100]);
+        let (mut project, mut p, dir) = create(&fs, 100);
+        let mut h = History::new();
+        for _ in 0..1 + g.draw(30) {
+            if g.draw(5) == 0 {
+                let req = UndoRequest {
+                    scope: Scope::All,
+                    tx: None,
+                    count: 1,
+                    redo: g.bool(),
+                    force: true,
+                    dry_run: false,
+                    source: Source::Agent,
+                    session: session("mcp-2"),
+                };
+                if let Ok(out) = run(&mut p, &h, &req)
+                    && let Some(line) = out.line
+                {
+                    project
+                        .append(&Line::Tx(Box::new(line.clone())), &p)
+                        .map_err(|e| e.to_string())?;
+                    h.record(&line);
+                }
+                continue;
+            }
+            let mut tx = p.begin("model", Source::Agent, session("mcp-1")).unwrap();
+            for _ in 0..=g.draw(2) {
+                let kind = g.draw(14);
+                let edit = base_edit(g, &tx, &pools, kind);
+                let _ = tx.apply(edit);
+            }
+            let commit = tx.commit().map_err(|e| e.to_string())?;
+            if !commit.noop {
+                journal(&mut project, &mut h, &p, &commit);
+            }
+        }
+        drop(project);
+        let mut raw = fs.boxed();
+        let _ = raw.remove(&dir.join(SNAPSHOT_FILE));
+        let opened = reopen(&fs, &dir, &write(100)).map_err(|e| e.to_string())?;
+        if hash(&opened.program) != hash(&p) || opened.program.rev() != p.rev() {
+            return Err("replay from an empty project differs".to_owned());
+        }
+        if opened.history != h {
+            return Err("the history of the journal differs".to_owned());
+        }
+        Ok(())
+    });
+}
+
+#[test]
+fn ac_119a_journal_tail() {
+    let fs = sim(&[100]);
+    let (mut project, mut p, dir) = create(&fs, 100);
+    let mut h = History::new();
+    rename(&mut p, &mut project, &mut h, 0x1084, "alpha");
+    rename(&mut p, &mut project, &mut h, 0x1088, "beta");
+    let two = hash(&p);
+    rename(&mut p, &mut project, &mut h, 0x108c, "gamma");
+    drop(project);
+    let path = dir.join(JOURNAL_FILE);
+    let text = fs.get(&path).unwrap();
+    let body = &text[..text.len() - 1];
+    let start = body.iter().rposition(|b| *b == b'\n').unwrap() + 1;
+    let last = body.len() - start;
+    for k in 0..=last + 1 {
+        let image = fs.crash_image();
+        let mut cut = text[..start].to_vec();
+        cut.extend_from_slice(&text[start..(start + k).min(text.len())]);
+        image.boxed().write_all(&path, &cut).unwrap();
+        let opened = reopen(&image, &dir, &write(100)).unwrap();
+        let torn = k > 0 && k <= last;
+        assert_eq!(opened.tail_discarded, torn, "cut at {k}");
+        if k <= last {
+            assert_eq!(hash(&opened.program), two, "cut at {k}");
+            assert_eq!(
+                image.get(&path).unwrap(),
+                text[..start].to_vec(),
+                "repair at {k}"
+            );
+        } else {
+            assert_eq!(opened.program.rev(), Rev(3), "full line");
+        }
+    }
+    // A read-only open drops the tail and writes nothing.
+    let image = fs.crash_image();
+    let mut cut = text[..start].to_vec();
+    cut.extend_from_slice(&text[start..start + 9]);
+    image.boxed().write_all(&path, &cut).unwrap();
+    let opened = reopen(&image, &dir, &opts(Access::ReadOnly, 100)).unwrap();
+    assert!(opened.tail_discarded);
+    assert_eq!(image.get(&path).unwrap(), cut);
+}
+
+#[test]
+fn ac_119b_journal_corrupt() {
+    let fs = sim(&[100]);
+    let (mut project, mut p, dir) = create(&fs, 100);
+    let mut h = History::new();
+    for (i, addr) in [0x1084, 0x1088, 0x108c].into_iter().enumerate() {
+        rename(&mut p, &mut project, &mut h, addr, &format!("n{i}"));
+    }
+    drop(project);
+    let path = dir.join(JOURNAL_FILE);
+    let mut text = fs.get(&path).unwrap();
+    let second = text.iter().position(|b| *b == b'\n').unwrap() + 12;
+    text[second] = if text[second] == b'1' { b'2' } else { b'1' };
+    fs.boxed().write_all(&path, &text).unwrap();
+    let _ = fs.boxed().remove(&dir.join(SNAPSHOT_FILE));
+    let error = reopen(&fs, &dir, &write(100)).unwrap_err();
+    assert_eq!(error, ProjectError::Corrupt { line: 2 });
+    assert_eq!(error.code(), ErrorCode::JournalCorrupt);
+}
+
+/// Runs `step` on a copy of `base` with a crash after each operation count. Each reopen gives
+/// the hash before or after.
+fn crash_each(base: &SimFs, dir: &Path, step: &dyn Fn(&mut Project, &mut Program)) -> usize {
+    let mut k = 0;
+    loop {
+        let fs = base.crash_image();
+        let mut opened = reopen(&fs, dir, &write(100)).unwrap();
+        let before = hash(&opened.program);
+        let ops = fs.ops();
+        fs.stop_after(k);
+        step(&mut opened.project, &mut opened.program);
+        let after = hash(&opened.program);
+        let used = fs.ops() - ops;
+        let image = fs.crash_image();
+        let again = reopen(&image, dir, &opts(Access::ReadOnly, 200)).unwrap();
+        let got = hash(&again.program);
+        assert!(got == before || got == after, "crash after {k} operations");
+        if used < k || k > 16 {
+            assert_eq!(got, after, "a step with no crash keeps its effect");
+            return k;
+        }
+        k += 1;
+    }
+}
+
+#[test]
+fn ac_120b_crash_consistency() {
+    let fs = sim(&[100]);
+    let (mut project, mut p, dir) = create(&fs, 100);
+    let mut h = History::new();
+    rename(&mut p, &mut project, &mut h, 0x1084, "alpha");
+    drop(project);
+    let commit_ops = crash_each(&fs, &dir, &|project, p| {
+        let mut tx = p
+            .begin("symbol_rename", Source::Agent, session("mcp-1"))
+            .unwrap();
+        let fact = tx.fact("beta".to_string());
+        tx.apply(Edit::SetName {
+            addr: Address::ram(0x1088),
+            key: None,
+            kind: SymKind::Label,
+            primary: true,
+            name: Some(fact),
+            evidence: Vec::new(),
+        })
+        .unwrap();
+        let commit = tx.commit().unwrap();
+        let line = TxLine::of_commit(&commit);
+        let _ = project.append(&Line::Tx(Box::new(line)), p);
+    });
+    assert!(commit_ops >= 2, "{commit_ops}");
+    let snapshot_ops = crash_each(&fs, &dir, &|project, p| {
+        let _ = project.snapshot(p);
+    });
+    assert!(snapshot_ops >= 5, "{snapshot_ops}");
+}
+
+/// The golden v1 project: the demo binary with a rename, a note, an undone comment and two
+/// meta lines.
+fn golden_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/golden/projects/v1")
+}
+
+/// Writes the golden v1 project again: the demo binary (`crackme.gcc-O2`) with a rename, a
+/// note, a snapshot, a comment, the undo of the comment and two meta lines.
+fn bless_golden() {
+    let root = golden_dir();
+    let _ = std::fs::remove_dir_all(&root);
+    let (bytes, mut p) = input("crackme.gcc-O2");
+    let meta = ProjectMeta::new(&p, "demo.elf", LoadSpec::Auto);
+    let mut real = crate::fs::RealFs;
+    let mut options = write(1);
+    options.me = crate::lock::current(&mut real).unwrap_or_else(|| me(1));
+    let mut project = Project::create(
+        Box::new(crate::fs::RealFs),
+        &root,
+        meta,
+        &bytes,
+        &p,
+        &options,
+    )
+    .unwrap();
+    let mut h = History::new();
+    let mut tx = p
+        .begin("symbol_rename", Source::Agent, session("mcp-1"))
+        .unwrap();
+    let fact = tx.fact("read_input".to_string());
+    tx.apply(Edit::SetName {
+        addr: Address::ram(0x1090),
+        key: None,
+        kind: SymKind::Label,
+        primary: true,
+        name: Some(fact),
+        evidence: vec!["fn:0x1080".to_string()],
+    })
+    .unwrap();
+    let commit = tx.commit().unwrap();
+    journal(&mut project, &mut h, &p, &commit);
+    let mut tx = p
+        .begin("note_write", Source::Agent, session("mcp-1"))
+        .unwrap();
+    let note = crate::notes::Note {
+        id: tx.program().notes().next_id(),
+        kind: crate::notes::NoteKind::Finding,
+        text: "The check XORs each input byte with a key.".to_string(),
+        at: Some(Address::ram(0x11e0)),
+        func: Some(ghidorah_base::FuncId(Address::ram(0x11e0))),
+        status: crate::notes::NoteStatus::Open,
+        tags: vec!["crypto".to_string()],
+        evidence: vec!["fn:0x11e0".to_string()],
+        claims: Vec::new(),
+        set: None,
+        src: Source::Agent,
+        session: session("mcp-1"),
+        rev: tx.pending_rev(),
+    };
+    tx.apply(Edit::WriteNote(Box::new(note))).unwrap();
+    let commit = tx.commit().unwrap();
+    journal(&mut project, &mut h, &p, &commit);
+    project.snapshot(&p).unwrap();
+    let mut tx = p
+        .begin("comment_set", Source::Agent, session("mcp-1"))
+        .unwrap();
+    let text = tx.fact("loop over the input".to_string());
+    tx.apply(Edit::SetComment {
+        addr: Address::ram(0x11e4),
+        kind: crate::comments::CommentKind::Eol,
+        text: Some(text),
+    })
+    .unwrap();
+    let commit = tx.commit().unwrap();
+    journal(&mut project, &mut h, &p, &commit);
+    let req = UndoRequest {
+        scope: Scope::Session(session("mcp-1")),
+        tx: None,
+        count: 1,
+        redo: false,
+        force: false,
+        dry_run: false,
+        source: Source::Agent,
+        session: session("mcp-1"),
+    };
+    let line = run(&mut p, &h, &req).unwrap().line.unwrap();
+    project
+        .append(&Line::Tx(Box::new(line.clone())), &p)
+        .unwrap();
+    h.record(&line);
+    let visited = MetaLine::Progress {
+        func: ghidorah_base::FuncId(Address::ram(0x11e0)),
+        row: FuncProgress {
+            visited: true,
+            ..FuncProgress::default()
+        },
+    };
+    let brief = MetaLine::Brief {
+        session: session("mcp-1"),
+        rev: p.rev(),
+    };
+    for meta in [visited, brief] {
+        crate::meta::apply(&mut p, &meta);
+        project.append(&Line::Meta(meta), &p).unwrap();
+    }
+}
+
+#[test]
+fn ac_120c_golden_v1() {
+    if std::env::var_os(ghidorah_testkit::golden::BLESS_ENV).is_some_and(|v| v == "1") {
+        bless_golden();
+    }
+    let dir = golden_dir().join("467a43b75d95c826");
+    let mut fs = crate::fs::RealFs;
+    let opened = Project::open(fs.boxed(), &dir, &opts(Access::ReadOnly, 1)).unwrap();
+    let p = &opened.program;
+    assert_eq!(p.rev(), Rev(4));
+    assert_eq!(opened.project.meta().format_version, 1);
+    let name = p
+        .base()
+        .symbols()
+        .primary(Address::ram(0x1090))
+        .map(|s| s.name.value.clone());
+    assert_eq!(name.as_deref(), Some("read_input"));
+    assert_eq!(p.notes().iter().count(), 1);
+    let comment = p
+        .base()
+        .comments()
+        .get(Address::ram(0x11e4), crate::comments::CommentKind::Eol);
+    assert!(comment.is_none(), "the undo removed the comment");
+    let func = ghidorah_base::FuncId(Address::ram(0x11e0));
+    assert!(p.progress().get(func).visited);
+    assert_eq!(
+        p.progress()
+            .mark(&session("mcp-1"))
+            .map(|m| m.last_brief_rev),
+        Some(Rev(4))
+    );
+    assert_eq!(opened.history.mcp_labels(), 1);
+    assert!(Project::exists(&mut fs, &dir));
+    assert!(
+        !dir.join(LOCK_FILE).exists(),
+        "a read-only open takes no lock"
+    );
+}
+
+#[test]
+fn ac_124_project_lock() {
+    let fs = sim(&[100, 200]);
+    let (project, _, dir) = create(&fs, 100);
+    let held = reopen(&fs, &dir, &write(200)).unwrap_err();
+    assert_eq!(
+        held,
+        ProjectError::Locked {
+            owner: Some(me(100)),
+            stale: false
+        }
+    );
+    assert_eq!(held.code(), ErrorCode::ProjectLocked);
+    let mut reader = reopen(&fs, &dir, &opts(Access::ReadOnly, 200)).unwrap();
+    assert!(reader.project.is_read_only());
+    let line = Line::Meta(MetaLine::Brief {
+        session: session("mcp-1"),
+        rev: Rev(0),
+    });
+    assert_eq!(
+        reader.project.append(&line, &reader.program),
+        Err(ProjectError::ReadOnly)
+    );
+    // The owner stops with no clean close: the lock stays, and its process is gone.
+    std::mem::forget(project);
+    let _ = fs.boxed().remove(Path::new("/proc/100/stat"));
+    let stale = reopen(&fs, &dir, &write(200)).unwrap_err();
+    assert_eq!(
+        stale,
+        ProjectError::Locked {
+            owner: Some(me(100)),
+            stale: true
+        }
+    );
+    let broken = reopen(&fs, &dir, &opts(Access::Write { break_lock: true }, 200)).unwrap();
+    let lock = fs.get(&dir.join(LOCK_FILE)).unwrap();
+    let owner = LockInfo::from_json(
+        &ghidorah_json::parse(
+            &String::from_utf8(lock).unwrap(),
+            &ghidorah_json::Limits::DEFAULT,
+        )
+        .unwrap(),
+    );
+    assert_eq!(owner, Some(me(200)));
+    drop(broken);
+    assert!(
+        fs.get(&dir.join(LOCK_FILE)).is_none(),
+        "the new owner releases the lock"
+    );
+}
+
+#[test]
+fn ac_125_project_safety() {
+    let fs = sim(&[100]);
+    fs.seed(Path::new("/work/repo/.git/HEAD"), b"ref: main\n");
+    let mut raw = fs.boxed();
+    let inside = Path::new("/work/repo/.cache/projects");
+    assert_eq!(
+        check_root(raw.as_mut(), inside, false),
+        Err(ProjectError::InsideGitTree(inside.to_path_buf()))
+    );
+    assert_eq!(check_root(raw.as_mut(), inside, true), Ok(()));
+    assert_eq!(check_root(raw.as_mut(), Path::new(ROOT), false), Ok(()));
+    let (_project, program, dir) = create(&fs, 100);
+    assert_eq!(fs.get(&dir.join(".gitignore")), Some(b"*\n".to_vec()));
+    let sha = ghidorah_base::hex::encode(&program.meta().sha256);
+    let copy = dir.join("bin").join(&sha);
+    assert!(fs.is_read_only(&copy), "the input copy has mode 0444");
+    assert_eq!(fs.get(&copy), Some(input("hello.gcc-O2").0));
+    // The real file system gives the input copy the mode 0444.
+    let tmp = std::env::temp_dir().join(format!("ghidorah-ac125-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp);
+    let (bytes, real) = input("hello.gcc-O2");
+    let meta = ProjectMeta::new(&real, "hello.gcc-O2", LoadSpec::Auto);
+    let mut me_now = crate::fs::RealFs;
+    let owner = crate::lock::current(&mut me_now).unwrap_or_else(|| me(1));
+    let mut options = write(1);
+    options.me = owner;
+    let made = Project::create(
+        Box::new(crate::fs::RealFs),
+        &tmp,
+        meta,
+        &bytes,
+        &real,
+        &options,
+    )
+    .unwrap();
+    let file = made.dir().join("bin").join(&sha);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(&file).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o444);
+    }
+    drop(made);
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn ac_128b_forward_undo() {
+    let fs = sim(&[100]);
+    let (mut project, mut p, dir) = create(&fs, 100);
+    let mut h = History::new();
+    let first = rename(&mut p, &mut project, &mut h, 0x1084, "alpha");
+    let path = dir.join(JOURNAL_FILE);
+    let before = fs.get(&path).unwrap();
+    let req = UndoRequest {
+        scope: Scope::Session(session("mcp-1")),
+        tx: None,
+        count: 1,
+        redo: false,
+        force: false,
+        dry_run: false,
+        source: Source::Agent,
+        session: session("mcp-1"),
+    };
+    let out = run(&mut p, &h, &req).unwrap();
+    let line = out.line.unwrap();
+    project
+        .append(&Line::Tx(Box::new(line.clone())), &p)
+        .unwrap();
+    h.record(&line);
+    let after = fs.get(&path).unwrap();
+    assert!(after.len() > before.len());
+    assert_eq!(
+        &after[..before.len()],
+        &before[..],
+        "the journal never gets shorter"
+    );
+    assert_eq!(line.undo_of, vec![first.tx]);
+    assert_eq!(line.tx, TxId(2));
+    assert_eq!(p.rev(), Rev(2), "rev only increases");
+    assert_eq!(h.lines().len(), 2);
+}
+
+#[test]
+fn snapshot_every_256_lines() {
+    let fs = sim(&[100]);
+    let (mut project, mut p, dir) = create(&fs, 100);
+    let mut snapshots = Vec::new();
+    for i in 0..300u64 {
+        let name = if i % 2 == 0 { "even" } else { "odd" };
+        let mut tx = p
+            .begin("symbol_rename", Source::Agent, session("mcp-1"))
+            .unwrap();
+        let fact = tx.fact(name.to_string());
+        tx.apply(Edit::SetName {
+            addr: Address::ram(0x1084),
+            key: None,
+            kind: SymKind::Label,
+            primary: true,
+            name: Some(fact),
+            evidence: Vec::new(),
+        })
+        .unwrap();
+        let commit = tx.commit().unwrap();
+        let line = Line::Tx(Box::new(TxLine::of_commit(&commit)));
+        if project.append(&line, &p).unwrap() {
+            snapshots.push(i + 1);
+        }
+    }
+    assert_eq!(snapshots, vec![SNAPSHOT_EVERY]);
+    let text = fs.get(&dir.join(SNAPSHOT_FILE)).unwrap();
+    let snap = crate::snapshot::decode(&text).unwrap();
+    assert_eq!(snap.rev, Rev(SNAPSHOT_EVERY));
+    assert_eq!(snap.journal_lines, SNAPSHOT_EVERY);
+    drop(project);
+    let opened = reopen(&fs, &dir, &write(100)).unwrap();
+    assert_eq!(hash(&opened.program), hash(&p));
+}
+
+#[test]
+fn meta_lines_and_runs_after_the_snapshot() {
+    let fs = sim(&[100]);
+    let (mut project, mut p, dir) = create(&fs, 100);
+    let func = ghidorah_base::FuncId(Address::ram(0x1080));
+    let row = FuncProgress {
+        visited: true,
+        ..FuncProgress::default()
+    };
+    let line = MetaLine::Progress { func, row };
+    crate::meta::apply(&mut p, &line);
+    project.append(&Line::Meta(line), &p).unwrap();
+    project.snapshot(&p).unwrap();
+    let marker = crate::journal::RunLine {
+        rev: Rev(1),
+        tx: TxId(1),
+        state: crate::journal::RunState::Complete,
+        inputs_hash: [7; 32],
+        fuel_used: 12,
+        result_hash: [9; 32],
+    };
+    crate::replay::skip_to(&mut p, Rev(1), TxId(1));
+    project.append(&Line::Run(marker), &p).unwrap();
+    drop(project);
+    let opened = reopen(&fs, &dir, &write(100)).unwrap();
+    assert!(opened.program.progress().get(func).visited);
+    assert_eq!(opened.program.rev(), Rev(1));
+    assert!(
+        opened.analysis.behind,
+        "the run after the snapshot is not in the snapshot"
+    );
+    assert!(!opened.analysis.current);
+    assert_eq!(opened.analysis.last_run, Some(marker));
+}
+
+#[test]
+fn crash_records_and_project_list() {
+    let fs = sim(&[100]);
+    let (mut project, mut p, _dir) = create(&fs, 100);
+    let mut h = History::new();
+    rename(&mut p, &mut project, &mut h, 0x1084, "alpha");
+    let record = Value::object([("tool", Value::from("test_boom"))]);
+    let path = project.write_crash("00ff00ff00ff00ff", &record).unwrap();
+    assert_eq!(path, "crash/00ff00ff00ff00ff.json");
+    let found = list(fs.boxed().as_mut(), Path::new(ROOT));
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].rev, Rev(1));
+    assert_eq!(found[0].file_name, "hello.gcc-O2");
+    assert_eq!(found[0].last_session.as_deref(), Some("mcp-1"));
+}
+
+#[test]
+fn project_meta_roundtrip_and_errors() {
+    let (_, program) = input("hello.gcc-O2");
+    let meta = ProjectMeta::new(
+        &program,
+        "hello.gcc-O2",
+        LoadSpec::Raw {
+            base: 0x40_0000,
+            entry: Some(0x40_1000),
+        },
+    );
+    assert_eq!(ProjectMeta::from_json(&meta.to_json()), Ok(meta.clone()));
+    let mut wrong = meta.to_json();
+    if let Some(o) = wrong.as_object_mut() {
+        o.insert("format_version", Value::from(9u64));
+    }
+    assert!(ProjectMeta::from_json(&wrong).is_err());
+    let fs = sim(&[100]);
+    let missing = reopen(
+        &fs,
+        Path::new("/data/projects/0011223344556677"),
+        &write(100),
+    );
+    assert!(missing.is_err());
+}

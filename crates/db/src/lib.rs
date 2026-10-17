@@ -29,8 +29,17 @@
 //! | [`invariants`] | [`Program::check_invariants`] and [`Violation`] | Section 3.11 |
 //! | [`hash`] | [`Program::state_hash`] and [`StateHash`] | Section 3.12 |
 //! | [`codec`] | The JSON codec of every table and edit | Sections 3.7, 3.10 |
+//! | [`fs`] | The [`Fs`] seam and [`RealFs`] | Section 3.10 |
+//! | [`journal`] | Journal lines with checksums | Sections 3.7, 3.10 |
+//! | [`meta`] | Meta lines: progress rows and last-brief marks | Section 3.7 |
+//! | [`snapshot`] | Snapshots and the analysis inputs hash | Sections 3.9, 3.10 |
+//! | [`lock`] | The single-writer lock | Section 3.10 |
+//! | [`project`] | [`Project`]: create, open, append, snapshot, crash records | Section 3.10, ADR-0022 |
+//! | [`replay`] | Replay of journal lines after a snapshot | Section 3.10 |
+//! | [`history`] | [`History`]: commit lines, undo entries and `history_list` rows | Sections 3.7, 3.8 |
+//! | [`undo`] | Undo and redo as forward commits | Section 3.7, ADR-0017 |
 //!
-//! The crate reads no file. The persistence modules get file access through the `Fs` seam.
+//! The persistence modules read and write files only through the [`Fs`] seam.
 
 // The Tx guard calls most manager mutators. The analysis engine (WP-15) and the journal
 // replay and undo (WP-20) call the others and `Tx::restore`. Until they exist, these
@@ -49,26 +58,39 @@ pub mod edit;
 pub mod epochs;
 pub mod events;
 pub mod fact;
+pub mod fs;
 pub mod funcs;
 pub mod hash;
+pub mod history;
 pub mod invariants;
+pub mod journal;
 pub mod jumptables;
 pub mod listing;
+pub mod lock;
+pub mod meta;
 pub mod notes;
 pub mod overrides;
 pub mod program;
 pub mod progress;
+pub mod project;
 pub mod refs;
+pub mod replay;
+pub mod snapshot;
 pub mod source;
 pub mod strings;
 pub mod symbols;
 pub mod tx;
 pub mod typesglue;
+pub mod undo;
 pub mod vars;
 pub mod why;
 
 #[cfg(test)]
 mod tests;
+
+// The shared test file system `tests/common/fs_sim.rs` names this crate `ghidorah_db`.
+#[cfg(test)]
+extern crate self as ghidorah_db;
 
 pub use codec::{CodecError, Reason};
 pub use comments::{CommentKind, Comments};
@@ -76,11 +98,16 @@ pub use edit::{BlockedEdit, Edit, EditError, EditKind, FuncRecord, Layer, Slot, 
 pub use epochs::{Epochs, Table};
 pub use events::{EVENT_RING, Event, Events};
 pub use fact::{Blocked, Fact, Invalid, Origin, SessionLabel, WriteError, higher};
+pub use fs::{Fs, FsError, RealFs};
 pub use funcs::{Caveat, FuncFlags, Funcs, Function, Part, PartKind, StartReason};
 pub use hash::StateHash;
+pub use history::{ChangeKind, Entry, EntryState, History, Row, RowQuery, Scope};
 pub use invariants::Violation;
+pub use journal::{Line, RunLine, RunState, TxLine};
 pub use jumptables::{JtMethod, JumpTable, JumpTables};
 pub use listing::{CodeUnit, DataDef, FlowKind, Listing};
+pub use lock::LockInfo;
+pub use meta::MetaLine;
 pub use notes::{Claim, Note, NoteKind, NoteSet, NoteStatus, Notes, SetMembers, SetOp};
 pub use overrides::{FlowOverride, FlowOverrides};
 pub use program::{
@@ -88,11 +115,16 @@ pub use program::{
     VarView,
 };
 pub use progress::{FuncProgress, Mark, Progress, ProgressCounts};
+pub use project::{
+    Access, AnalysisStatus, LoadSpec, OpenOptions, Opened, Project, ProjectError, ProjectMeta,
+    ProjectSummary,
+};
 pub use refs::{Ref, RefKey, RefType, Refs};
 pub use source::{Source, Verdict, write_rule};
 pub use strings::{Encoding, StrInfo, Strings};
 pub use symbols::{SymKey, SymKind, Symbol, Symbols};
 pub use tx::{Applied, Commit, Nested, Tx, TxError, TxLabel};
 pub use typesglue::Types;
+pub use undo::{UndoError, UndoOutcome, UndoRequest};
 pub use vars::{VarFact, Vars};
 pub use why::{FactKey, RuleCode, Why, WhyStore};
