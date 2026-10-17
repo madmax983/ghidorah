@@ -348,3 +348,28 @@ fn regress_nested_std_group() {
     let clean = "use std::{collections::{BTreeMap}, fmt};\n";
     assert!(xtask::scan::layering(rel, clean).is_empty());
 }
+
+/// An `xtask:` item runs the xtask command, not the binary of the caller.
+///
+/// A cargo step in a tier-2 run builds `target/debug/xtask` again, and in a test the caller
+/// is the test binary. In both cases the path of the running binary is not the xtask binary.
+#[test]
+fn regress_xtask_evidence_runs_the_xtask_command() {
+    let row = ac::AcRow {
+        id: "AC-900".to_owned(),
+        line: 1,
+        stretch: false,
+        removed: false,
+        evidence: vec![Evidence::Xtask {
+            sub: "ac".to_owned(),
+            pointer: "/acs".to_owned(),
+            op: Op::Ge,
+            value: "300".to_owned(),
+        }],
+        closes: vec!["01".to_owned()],
+        needs: Vec::new(),
+    };
+    let outcomes = acrun::run_rows(&xtask::workspace::root(), &[row], true).expect("the item runs");
+    let statuses: Vec<Status> = outcomes.iter().map(|o| o.status).collect();
+    assert_eq!(statuses, [Status::Pass]);
+}

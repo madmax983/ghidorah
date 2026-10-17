@@ -177,8 +177,10 @@ fn run_xtask(
     if let Some(value) = cache.get(sub) {
         return Ok(value.clone());
     }
-    let exe = std::env::current_exe().map_err(|e| Error::io("xtask", e))?;
-    let out = proc::run(Command::new(exe).arg(sub).current_dir(root))?;
+    // Cargo runs the xtask command. The running binary can be a test binary.
+    // Also, a cargo step of the same run can build `target/debug/xtask` again.
+    let mut cmd = proc::cargo_cmd(&["run", "--quiet", "--package", "xtask", "--", sub]);
+    let out = proc::run(cmd.current_dir(root))?;
     let value = json::parse(out.stdout.trim()).ok();
     cache.insert(sub.to_owned(), value.clone());
     Ok(value)
