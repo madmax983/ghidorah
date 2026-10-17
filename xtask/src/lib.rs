@@ -14,6 +14,8 @@
 //! | `xtask ac` | [`ac`] | Checks the AC table of the design and runs its evidence. |
 //! | `xtask ste` | [`ste`] | Checks the docs and comments with the STE checker of `testkit` (AC-025). |
 //! | `xtask verify` | [`verify`] | Runs the Verus proofs of the kernel and writes `verify/results.json`. |
+//! | `xtask fixtures` | [`fixtures`] | Builds the fixture corpus, its truth and its goldens, and checks them (WP-06). |
+//! | `xtask golden` | [`golden`] | Blesses goldens and checks their headers. |
 
 pub mod ac;
 pub mod acrun;
@@ -22,7 +24,9 @@ pub mod cov;
 pub mod dag;
 pub mod error;
 pub mod finding;
+pub mod fixtures;
 pub mod gates;
+pub mod golden;
 pub mod json;
 pub mod manifest;
 pub mod proc;

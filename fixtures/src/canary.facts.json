@@ -1,0 +1,41 @@
+{
+  "claims": [
+    {
+      "args": [
+        "main",
+        "copy_name"
+      ],
+      "rel": "calls"
+    },
+    {
+      "args": [
+        "main",
+        "checksum_line"
+      ],
+      "rel": "calls"
+    }
+  ],
+  "program": "canary",
+  "runs": [
+    {
+      "args": [],
+      "exit": 0,
+      "stdout": "canary\n1120\n"
+    }
+  ],
+  "strings": [
+    {
+      "text": "line:%s"
+    }
+  ],
+  "survey_facts": [
+    {
+      "kind": "import",
+      "value": "__stack_chk_fail"
+    },
+    {
+      "kind": "import",
+      "value": "puts"
+    }
+  ]
+}

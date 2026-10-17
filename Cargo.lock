@@ -18,6 +18,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "ghidorah-oracle"
+version = "0.1.0"
+
+[[package]]
 name = "ghidorah-spec"
 version = "0.1.0"
 

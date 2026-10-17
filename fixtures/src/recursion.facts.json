@@ -1,0 +1,84 @@
+{
+  "abstain": [
+    {
+      "answer": "unknown",
+      "claim": {
+        "args": [
+          "walk",
+          "print_node"
+        ],
+        "rel": "calls"
+      },
+      "id": "walk_calls_print_node",
+      "reason": "walk calls a visitor that its caller passes as an argument"
+    },
+    {
+      "answer": "unknown",
+      "claim": {
+        "args": [
+          "walk",
+          "fib"
+        ],
+        "rel": "calls"
+      },
+      "id": "walk_calls_fib",
+      "reason": "walk calls a visitor that its caller passes as an argument"
+    }
+  ],
+  "claims": [
+    {
+      "args": [
+        "fib",
+        "fib"
+      ],
+      "rel": "calls"
+    },
+    {
+      "args": [
+        "is_even",
+        "is_odd"
+      ],
+      "rel": "calls"
+    },
+    {
+      "args": [
+        "is_odd",
+        "is_even"
+      ],
+      "rel": "calls"
+    },
+    {
+      "args": [
+        "main",
+        "walk"
+      ],
+      "rel": "calls"
+    }
+  ],
+  "indirect_calls": [
+    {
+      "func": "walk",
+      "targets": [
+        "print_node"
+      ]
+    }
+  ],
+  "program": "recursion",
+  "runs": [
+    {
+      "args": [],
+      "exit": 0,
+      "stdout": "1\n2\n3\n89 0\n"
+    }
+  ],
+  "survey_facts": [
+    {
+      "kind": "function",
+      "value": "fib"
+    },
+    {
+      "kind": "function",
+      "value": "walk"
+    }
+  ]
+}

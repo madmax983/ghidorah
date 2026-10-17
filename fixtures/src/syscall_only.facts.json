@@ -1,0 +1,107 @@
+{
+  "claims": [
+    {
+      "args": [
+        "emit_banner",
+        "write"
+      ],
+      "rel": "has_syscall"
+    },
+    {
+      "args": [
+        "exit_ok",
+        "exit"
+      ],
+      "rel": "has_syscall"
+    },
+    {
+      "args": [
+        "_start",
+        "emit_banner"
+      ],
+      "rel": "calls"
+    }
+  ],
+  "noreturn": [
+    "exit_ok"
+  ],
+  "program": "syscall_only",
+  "runs": [
+    {
+      "args": [],
+      "exit": 0,
+      "stdout": "syscall only\n"
+    }
+  ],
+  "survey_facts": [
+    {
+      "kind": "syscall",
+      "value": "write"
+    },
+    {
+      "kind": "syscall",
+      "value": "exit"
+    },
+    {
+      "kind": "syscall",
+      "value": "getpid"
+    }
+  ],
+  "syscalls": [
+    {
+      "args": [
+        {
+          "kind": "int",
+          "v": "0x1"
+        },
+        {
+          "kind": "str",
+          "text": "syscall only\n"
+        },
+        {
+          "kind": "int",
+          "v": "0xd"
+        }
+      ],
+      "func": "emit_banner",
+      "name": "write",
+      "nr": 1
+    },
+    {
+      "args": [
+        {
+          "kind": "int",
+          "v": "0x2"
+        },
+        {
+          "kind": "str",
+          "text": "status: ok\n"
+        },
+        {
+          "kind": "int",
+          "v": "0xb"
+        }
+      ],
+      "func": "emit_status",
+      "name": "write",
+      "nr": 1
+    },
+    {
+      "args": [],
+      "func": "get_pid",
+      "name": "getpid",
+      "nr": 39
+    },
+    {
+      "args": [
+        {
+          "kind": "int",
+          "v": "0x0"
+        }
+      ],
+      "func": "exit_ok",
+      "name": "exit",
+      "nr": 60
+    }
+  ]
+}

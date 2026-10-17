@@ -1,0 +1,75 @@
+{
+  "claims": [
+    {
+      "args": [
+        "main",
+        "run"
+      ],
+      "rel": "calls"
+    },
+    {
+      "args": [
+        "run",
+        "greet"
+      ],
+      "rel": "calls"
+    },
+    {
+      "args": [
+        "run",
+        "finish"
+      ],
+      "rel": "calls"
+    },
+    {
+      "args": [
+        "finish",
+        "puts"
+      ],
+      "rel": "calls"
+    }
+  ],
+  "program": "hello",
+  "runs": [
+    {
+      "args": [],
+      "exit": 0,
+      "stdout": "Hello, world!\nGoodbye.\n"
+    },
+    {
+      "args": [
+        "x"
+      ],
+      "exit": 1,
+      "stdout": "Hello, friend!\nGoodbye.\n"
+    }
+  ],
+  "strings": [
+    {
+      "text": "Hello, %s!\n"
+    },
+    {
+      "text": "Goodbye."
+    },
+    {
+      "text": "friend"
+    },
+    {
+      "text": "world"
+    }
+  ],
+  "survey_facts": [
+    {
+      "kind": "import",
+      "value": "puts"
+    },
+    {
+      "kind": "string",
+      "value": "Goodbye."
+    },
+    {
+      "kind": "function",
+      "value": "main"
+    }
+  ]
+}

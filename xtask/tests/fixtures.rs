@@ -1,0 +1,160 @@
+//! Tests of the fixture corpus, its truth, its goldens and the frozen eval inputs (WP-06).
+//!
+//! Tier 1 reads only checked-in files. The tier-2 test rebuilds the corpus with gcc and clang.
+
+use std::path::PathBuf;
+
+use xtask::Finding;
+use xtask::fixtures::{self, large, leaf, manifest, questions, spec, truth};
+use xtask::json::Value;
+
+// T2 has at least 600 functions (design Section 12.3).
+const _: () = assert!(large::FUNCTIONS >= 600);
+
+fn root() -> PathBuf {
+    xtask::workspace::root()
+}
+
+fn show(found: &[Finding]) -> String {
+    let lines: Vec<String> = found.iter().take(20).map(ToString::to_string).collect();
+    format!("{} findings:\n{}", found.len(), lines.join("\n"))
+}
+
+#[test]
+fn ac_022_fixture_manifest() {
+    let root = root();
+    let manifest = manifest::read(&root).expect("the manifest reads");
+    let table = spec::fixtures();
+    assert!(
+        table.len() >= 120,
+        "the fixture table has {} fixtures",
+        table.len()
+    );
+    assert_eq!(
+        manifest
+            .entries
+            .iter()
+            .filter(|e| !e.path.starts_with("fixtures/bin/pe/"))
+            .count(),
+        table.len()
+    );
+    let found = manifest::check_files(&root, &manifest).expect("the binaries read");
+    assert!(found.is_empty(), "{}", show(&found));
+    let found = manifest::check_goldens(&root, &manifest).expect("the goldens read");
+    assert!(found.is_empty(), "{}", show(&found));
+    assert!(manifest.total_bytes() <= fixtures::MAX_TOTAL_BYTES);
+    for tool in ["gcc", "clang", "binutils"] {
+        assert!(
+            manifest.tools.contains_key(tool),
+            "the manifest has no {tool} version"
+        );
+    }
+}
+
+#[test]
+fn truth_files_parse() {
+    let root = root();
+    let manifest = manifest::read(&root).expect("the manifest reads");
+    let found = truth::check_all(&root, &manifest).expect("the truth files read");
+    assert!(found.is_empty(), "{}", show(&found));
+    // Spot checks against the C sources.
+    let crackme = truth::read(&root, "crackme.gcc-O2").expect("crackme truth");
+    assert_eq!(
+        crackme
+            .pointer("/facts/secrets/password")
+            .and_then(|v| v.as_str()),
+        Some("s3cr3t-k3y")
+    );
+    let cold = truth::read(&root, "cold_split.gcc-O2").expect("cold_split truth");
+    let parts = cold
+        .get("cold_parts")
+        .and_then(|v| v.as_array())
+        .expect("cold parts");
+    assert!(!parts.is_empty(), "gcc -O2 makes .cold parts of cold_split");
+    let large = truth::read(&root, "large.gcc-O2").expect("large truth");
+    let count = large
+        .get("function_count")
+        .and_then(Value::as_u64)
+        .expect("count");
+    assert!(count >= 600, "T2 has {count} functions");
+    let tables = large
+        .get("jump_tables")
+        .and_then(|v| v.as_array())
+        .expect("tables");
+    assert!(tables.len() >= 50, "T2 has {} jump tables", tables.len());
+    let sys = truth::read(&root, "syscall_only.gcc-O2").expect("syscall_only truth");
+    let sites = sys
+        .get("syscalls")
+        .and_then(|v| v.as_array())
+        .expect("syscalls");
+    assert_eq!(sites.len(), 4);
+}
+
+#[test]
+fn leaf_vectors_cover_every_leaf() {
+    let root = root();
+    let manifest = manifest::read(&root).expect("the manifest reads");
+    let found = leaf::check_vectors(&root, &manifest).expect("the vectors read");
+    assert!(found.is_empty(), "{}", show(&found));
+    // Every leaf-vector build of a program with LEAF lines lists its leaf functions.
+    let mut builds = 0;
+    for fixture in spec::fixtures() {
+        if fixture.variant.is_none() && fixture.build.leaf_vectors {
+            let t = truth::read(&root, &fixture.truth_name()).expect("truth");
+            let fns = t
+                .get("leaf_functions")
+                .and_then(|v| v.as_array())
+                .expect("leafs");
+            if !fns.is_empty() {
+                builds += 1;
+            }
+        }
+    }
+    assert!(builds >= 9, "only {builds} builds have leaf vectors");
+}
+
+#[test]
+fn answers_equal_truth_ptr() {
+    let found = questions::check_answers(&root()).expect("the questions read");
+    assert!(found.is_empty(), "{}", show(&found));
+}
+
+#[test]
+fn questions_and_intents_hash_locked() {
+    let root = root();
+    let found = questions::check_locks(&root).expect("the frozen inputs read");
+    assert!(found.is_empty(), "{}", show(&found));
+    let all = questions::read_questions(&root).expect("questions");
+    let minimum: usize = questions::CATEGORY_MINIMUMS.iter().map(|(_, n)| n).sum();
+    assert!(
+        all.len() >= minimum,
+        "{} questions, need {minimum}",
+        all.len()
+    );
+    assert!(
+        all.iter().all(|q| q.category != "pe"),
+        "WP-30 appends the pe group"
+    );
+}
+
+#[test]
+fn gen_large_matches_source() {
+    let text = large::generate();
+    let path = root().join(large::SOURCE_PATH);
+    let checked_in = std::fs::read_to_string(&path).expect("large.c reads");
+    assert!(text == checked_in, "run `cargo xtask fixtures gen-large`");
+    let count = text.lines().filter(|l| l.starts_with("NI u64 f")).count();
+    assert_eq!(count, large::FUNCTIONS);
+    assert_eq!(large::generate(), text, "two runs give equal text");
+}
+
+#[test]
+#[ignore = "tier2"]
+fn fixtures_build_reproduces_checked_in_files() {
+    let report = fixtures::build::run(&root(), true).expect("the fixture build runs");
+    assert_eq!(
+        report.get("ok").and_then(xtask::json::Value::as_bool),
+        Some(true),
+        "{report}"
+    );
+}
