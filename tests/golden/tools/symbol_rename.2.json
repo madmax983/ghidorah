@@ -1,0 +1,40 @@
+{"golden":"generator=tools_examples version=1 fixture=crackme.gcc-O2 fixture_sha256=467a43b75d95c826daba8cb216d01d7fd386aa96c5ef5a95c2effffe1780de8f"}
+{
+  "ok": true,
+  "binary_id": "467a43b75d95c826",
+  "rev": 2,
+  "session": "cli",
+  "analysis": {
+    "state": "complete",
+    "rev": 1
+  },
+  "partial": false,
+  "data": {
+    "items": [
+      {
+        "input": {
+          "target": "0x1094",
+          "name": "check_len",
+          "evidence": [
+            "fn:0x11e0"
+          ]
+        },
+        "ok": true,
+        "data": {
+          "target": "0x1094",
+          "id": "0x1094",
+          "old": "LAB_00001094",
+          "new": "check_len",
+          "source": "agent",
+          "noop": false
+        }
+      }
+    ],
+    "ok_count": 1,
+    "error_count": 0,
+    "rev": 2,
+    "tx": "tx:2"
+  },
+  "tx": "tx:2",
+  "noop": false
+}

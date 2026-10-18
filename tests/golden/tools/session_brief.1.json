@@ -1,0 +1,48 @@
+{"golden":"generator=tools_examples version=1 fixture=crackme.gcc-O2 fixture_sha256=467a43b75d95c826daba8cb216d01d7fd386aa96c5ef5a95c2effffe1780de8f"}
+{
+  "ok": true,
+  "binary_id": "467a43b75d95c826",
+  "rev": 1,
+  "session": "cli",
+  "analysis": {
+    "state": "complete",
+    "rev": 1
+  },
+  "partial": false,
+  "data": {
+    "binary_id": "467a43b75d95c826",
+    "binaries": [
+      {
+        "binary_id": "467a43b75d95c826",
+        "file_name": "demo.elf",
+        "rev": 1,
+        "read_only": false,
+        "analysis": "complete"
+      }
+    ],
+    "progress": {
+      "functions": 12,
+      "visited": 0,
+      "named": 12,
+      "typed": 0,
+      "commented": 0,
+      "pct": 0
+    },
+    "open_notes": {
+      "todo": 0,
+      "hypothesis": 0,
+      "total": 0,
+      "top": []
+    },
+    "recent_findings": [],
+    "recent_edits": [],
+    "changed_since_last_brief": {
+      "since_rev": 0,
+      "count": 0,
+      "by_kind": []
+    },
+    "weak_names": [],
+    "orphans": [],
+    "truncated": false
+  }
+}
