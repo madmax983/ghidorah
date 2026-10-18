@@ -1,0 +1,78 @@
+{"golden":"generator=tools_examples version=1 fixture=crackme.gcc-O2 fixture_sha256=467a43b75d95c826daba8cb216d01d7fd386aa96c5ef5a95c2effffe1780de8f"}
+{
+  "ok": true,
+  "binary_id": "467a43b75d95c826",
+  "rev": 2,
+  "session": "cli",
+  "analysis": {
+    "state": "complete",
+    "rev": 1
+  },
+  "partial": false,
+  "data": {
+    "steps": [
+      {
+        "id": "rename",
+        "tool": "symbol_rename",
+        "ok": true,
+        "chars": 290,
+        "fuel": 0
+      },
+      {
+        "id": "note",
+        "tool": "comment_set",
+        "ok": true,
+        "chars": 310,
+        "fuel": 0
+      },
+      {
+        "id": "check",
+        "tool": "addr_info",
+        "ok": true,
+        "chars": 521,
+        "fuel": 0,
+        "data": {
+          "input": "0x1090",
+          "addr": "0x1090",
+          "resolved_from": {
+            "rule": "hex",
+            "matched": "0x1090"
+          },
+          "region": {
+            "name": "seg:3",
+            "perms": "r-x"
+          },
+          "section": {
+            "id": "sec:16:.text",
+            "name": ".text"
+          },
+          "func": {
+            "id": "fn:0x1080",
+            "name": "main",
+            "offset": "0x10"
+          },
+          "symbol": {
+            "name": "read_input",
+            "source": "agent",
+            "kind": "label"
+          },
+          "code_unit": {
+            "kind": "undefined",
+            "len": 1
+          },
+          "xrefs_in": 0,
+          "xrefs_out": 0,
+          "notes": 0,
+          "file_offset": "0x1090"
+        }
+      }
+    ],
+    "budget_used": {
+      "chars": 521,
+      "fuel": 0,
+      "steps": 3
+    }
+  },
+  "tx": "tx:2",
+  "noop": false
+}

@@ -273,7 +273,7 @@ fn ac_219_destructive_rejected() {
             "func_edit",
         ),
         (
-            r#"{"id":"b","tool":"func_edit","args":{"action":"remove_ref","ref":{"from":"0x1080","to":"0x11e0","kind":"call"}}}"#,
+            r#"{"id":"b","tool":"func_edit","args":{"action":"remove_ref","ref":{"from":"0x1091","to":"0x11e0","kind":"unconditional_call"}}}"#,
             "func_edit",
         ),
     ];
@@ -292,7 +292,7 @@ fn ac_219_destructive_rejected() {
         let step = json(second);
         assert_eq!(Some(&args), step.get("args"), "{envelope}");
     }
-    // A destructive action in a direct call is not rejected, and a safe action is allowed.
+    // A direct call accepts a destructive action, and a batch accepts a safe action.
     let mut s = demo();
     let envelope = batch(
         &mut s,

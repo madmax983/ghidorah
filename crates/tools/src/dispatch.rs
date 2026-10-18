@@ -251,6 +251,8 @@ struct Invocation<'a, S: Host> {
     tool: &'static ToolSpec<S>,
     index: usize,
     args: &'a Args,
+    /// `true` for a batch step: an object result that does not fit stays whole.
+    whole: bool,
 }
 
 /// Gives the call arguments with `key` set to `value`, or removed for `None`.
@@ -324,8 +326,66 @@ fn panic_text(payload: &(dyn std::any::Any + Send)) -> String {
         .unwrap_or_else(|| "the handler panicked".to_owned())
 }
 
+/// The limits of one step of a batch (design Section 11.5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct StepLimits {
+    /// The budget of the step envelope in characters. It replaces the default of the tool.
+    pub max_chars: u64,
+    /// The fuel of the step: the fuel that the batch still has.
+    pub fuel: u64,
+}
+
+/// The result of one batch step: the envelope and the fuel that the handler used.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct StepRun {
+    /// The envelope of the step.
+    pub envelope: Envelope,
+    /// The fuel that the handler used.
+    pub fuel_used: u64,
+    /// The error of a failed step, with its template values and repair calls.
+    pub error: Option<ToolError>,
+}
+
+/// Gives the step result of the failure `error`.
+fn fail<S: Host>(
+    registry: &Registry<S>,
+    host: &S,
+    frame: Frame,
+    tool: &str,
+    error: ToolError,
+) -> StepRun {
+    StepRun {
+        envelope: failure(registry, host, frame, tool, &error),
+        fuel_used: 0,
+        error: Some(error),
+    }
+}
+
 /// Runs one request through `registry` on `host`.
 pub(crate) fn run<S: Host>(registry: &Registry<S>, host: &mut S, request: &Request) -> Envelope {
+    run_with(registry, host, request, None).envelope
+}
+
+/// Runs one batch step through `registry` on `host` with the limits of the batch.
+///
+/// The step gets `limits.fuel` and the budget `limits.max_chars`. An object result that does
+/// not fit its budget stays whole, so the batch can leave out its data.
+pub(crate) fn run_step<S: Host>(
+    registry: &Registry<S>,
+    host: &mut S,
+    request: &Request,
+    limits: StepLimits,
+) -> StepRun {
+    run_with(registry, host, request, Some(limits))
+}
+
+/// Runs one request through `registry` on `host`, with the limits of a batch step or none.
+fn run_with<S: Host>(
+    registry: &Registry<S>,
+    host: &mut S,
+    request: &Request,
+    limits: Option<StepLimits>,
+) -> StepRun {
     let bare = Frame {
         session: request.session.clone().unwrap_or_default(),
         ..Frame::default()
@@ -340,13 +400,13 @@ pub(crate) fn run<S: Host>(registry: &Registry<S>, host: &mut S, request: &Reque
         let error = ToolError::new(ErrorCode::UnknownTool)
             .var("tool", &request.tool)
             .candidates(candidates);
-        return failure(registry, host, bare, &request.tool, &error);
+        return fail(registry, host, bare, &request.tool, error);
     };
     if !host.in_profile(tool.name) {
         let error = ToolError::new(ErrorCode::ToolNotInProfile)
             .var("tool", tool.name)
             .detail("reason", Value::from("not_in_profile"));
-        return failure(registry, host, bare, tool.name, &error);
+        return fail(registry, host, bare, tool.name, error);
     }
     let coerce = |kind: &ArgKind, value: &Value| host.coerce(kind, value);
     let parsed = match args::parse(tool, &request.args, Some(&coerce)) {
@@ -356,7 +416,7 @@ pub(crate) fn run<S: Host>(registry: &Registry<S>, host: &mut S, request: &Reque
             let frame = host
                 .frame(tool, &Globals::default(), session)
                 .unwrap_or(bare);
-            return failure(registry, host, frame, tool.name, &error);
+            return fail(registry, host, frame, tool.name, error);
         }
     };
     let globals = parsed.args.globals();
@@ -364,7 +424,7 @@ pub(crate) fn run<S: Host>(registry: &Registry<S>, host: &mut S, request: &Reque
         Ok(frame) => frame,
         Err(error) => {
             let error = binary_repair(tool.name, parsed.args.canonical(), error);
-            return failure(registry, host, bare, tool.name, &error);
+            return fail(registry, host, bare, tool.name, error);
         }
     };
     if let (true, Some(expected)) = (tool.mutating, globals.expected_rev)
@@ -378,18 +438,20 @@ pub(crate) fn run<S: Host>(registry: &Registry<S>, host: &mut S, request: &Reque
         let error = ToolError::new(ErrorCode::Conflict)
             .detail("current_rev", int(frame.rev))
             .next(Call::new(tool.name, args, WHY_REV));
-        return failure(registry, host, frame, tool.name, &error);
+        return fail(registry, host, frame, tool.name, error);
     }
-    let max_chars = globals.max_chars.unwrap_or(tool.max_chars);
-    let fuel = globals
-        .max_steps
-        .or_else(|| tool.fuel.map(|f| f.default))
-        .map_or_else(Fuel::unlimited, Fuel::new);
-    let mut ctx = Ctx::new(
-        frame,
-        fuel,
-        Budget::new(u64::from(max_chars), request.content),
+    let max_chars = limits.map_or_else(
+        || u64::from(globals.max_chars.unwrap_or(tool.max_chars)),
+        |l| l.max_chars,
     );
+    let fuel = match limits {
+        Some(l) => Fuel::new(l.fuel),
+        None => globals
+            .max_steps
+            .or_else(|| tool.fuel.map(|f| f.default))
+            .map_or_else(Fuel::unlimited, Fuel::new),
+    };
+    let mut ctx = Ctx::new(frame, fuel, Budget::new(max_chars, request.content));
     ctx.format = globals.format;
     ctx.max_ms = globals.max_ms;
     ctx.warnings = parsed.warnings;
@@ -403,18 +465,22 @@ pub(crate) fn run<S: Host>(registry: &Registry<S>, host: &mut S, request: &Reque
         tool,
         index,
         args: &parsed.args,
+        whole: limits.is_some(),
     };
-    match result {
+    let fuel_used = ctx.fuel.used();
+    let mut out = match result {
         Ok(Ok(payload)) => success(&call, host, ctx, payload),
-        Ok(Err(error)) => failure(registry, host, ctx.frame, tool.name, &error),
+        Ok(Err(error)) => fail(registry, host, ctx.frame, tool.name, error),
         Err(payload) => {
             let crash = Crash::new(tool.name, &request.args, panic_text(payload.as_ref()));
             host.on_panic(&crash);
             let mut error = ToolError::new(ErrorCode::InternalError);
             error.crash_id = Some(crash.id);
-            failure(registry, host, ctx.frame, tool.name, &error)
+            fail(registry, host, ctx.frame, tool.name, error)
         }
-    }
+    };
+    out.fuel_used = fuel_used;
+    out
 }
 
 /// Gives the valid `next` calls and warnings of a success.
@@ -440,13 +506,9 @@ fn hints<S: Host>(call: &Invocation<'_, S>, host: &S, ctx: &mut Ctx) -> Vec<Call
     keep_valid(call.registry, &in_profile, next)
 }
 
-/// Wraps a handler payload into the success envelope.
-fn success<S: Host>(
-    call: &Invocation<'_, S>,
-    host: &S,
-    mut ctx: Ctx,
-    payload: Payload,
-) -> Envelope {
+/// Wraps a handler payload into the success envelope. A list that does not shape gives
+/// its failure.
+fn success<S: Host>(call: &Invocation<'_, S>, host: &S, mut ctx: Ctx, payload: Payload) -> StepRun {
     let next = hints(call, host, &mut ctx);
     let fields = &call.args.globals().fields;
     match payload {
@@ -469,32 +531,41 @@ fn success<S: Host>(
             fit_or_fail(call, host, &ctx, envelope)
         }
         Payload::List(list) => match list::shape(call, host, &ctx, list, &next) {
-            Ok(envelope) => envelope,
-            Err(error) => failure(call.registry, host, ctx.frame, call.tool.name, &error),
+            Ok(envelope) => StepRun {
+                envelope,
+                fuel_used: 0,
+                error: None,
+            },
+            Err(error) => fail(call.registry, host, ctx.frame, call.tool.name, error),
         },
     }
 }
 
-/// Gives `envelope` when it fits the budget, else an `OUTPUT_BUDGET_EXCEEDED` failure.
+/// Gives `envelope` when it fits the budget, else an `OUTPUT_BUDGET_EXCEEDED` failure. A batch
+/// step keeps its whole envelope.
 fn fit_or_fail<S: Host>(
     call: &Invocation<'_, S>,
     host: &S,
     ctx: &Ctx,
     envelope: Envelope,
-) -> Envelope {
+) -> StepRun {
     let size = result_chars(&envelope.to_json(), false, ctx.budget.mode);
-    if size <= ctx.budget.limit() {
-        envelope
+    if call.whole || size <= ctx.budget.limit() {
+        StepRun {
+            envelope,
+            fuel_used: 0,
+            error: None,
+        }
     } else {
         let error = ToolError::new(ErrorCode::OutputBudgetExceeded)
             .detail("chars", int(size))
             .detail("limit", int(ctx.budget.limit()));
-        failure(
+        fail(
             call.registry,
             host,
             ctx.frame.clone(),
             call.tool.name,
-            &error,
+            error,
         )
     }
 }

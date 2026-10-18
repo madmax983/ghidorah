@@ -365,10 +365,7 @@ pub const SPEC: ToolSpec<Session> = ToolSpec {
     summary: "Search the items of a binary by kind: names, strings, bytes, comments, notes, types, imports, exports, sections, segments, libraries, symbols, sets and jump tables.",
     description: "Search the items of a binary by kind: names, strings, bytes, comments, notes, types, imports, exports, sections, segments, libraries, symbols, sets and jump tables. \
                   Send kind with a query, or ids with note:, set: or jt: IDs to read full records. \
-                  An empty query lists every item of the kind. \
-                  The match substr ignores the letter case. \
-                  In a byte pattern, two question marks match any byte. \
-                  String items give the reference count and a call that lists the references.",
+                  An empty query lists every item of the kind.",
     args: ARGS,
     groups: &[Group {
         members: &["kind", "ids"],

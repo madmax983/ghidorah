@@ -129,9 +129,6 @@ fn example_envelopes() -> Vec<(&'static ToolSpec<Session>, &'static str, Value)>
                 let envelope = call(&mut s, tool.name, setup);
                 assert_eq!(envelope.get("ok"), Some(&Value::Bool(true)), "{envelope}");
             }
-            if tool.name == "binary_load" {
-                s = crate::support::session();
-            }
             let envelope = call(&mut s, tool.name, example.args);
             out.push((*tool, example.args, envelope));
         }
@@ -212,11 +209,15 @@ fn ac_132a_137_143_full_registry_examples() {
         let mut bad = Vec::new();
         walk(envelope, &mut |key, value| {
             let address = ADDRESS_KEYS.contains(&key) || key.ends_with("_addr");
-            if address
-                && !value
-                    .as_str()
+            let hex = |v: &Value| {
+                v.as_str()
                     .is_some_and(ghidorah_tools::outshape::is_addr_text)
-            {
+            };
+            let ok = match value {
+                Value::Array(items) => items.iter().all(hex),
+                other => hex(other),
+            };
+            if address && !ok {
                 bad.push(format!("{key} = {value}"));
             }
             if let Value::Number(n) = value {
@@ -281,8 +282,15 @@ fn expect(spec: &ArgSpec, path: &str, names: &mut BTreeSet<String>, values: &mut
     }
 }
 
-/// Gives the requests of `tests/data/requests/*.jsonl`: `(tool, args)`.
-fn requests() -> Vec<(String, Value)> {
+/// One request of `tests/data/requests/*.jsonl`: `{ tool, args, before? }`.
+struct Line {
+    tool: String,
+    args: Value,
+    before: Vec<(String, Value)>,
+}
+
+/// Gives the requests of `tests/data/requests/*.jsonl`.
+fn requests() -> Vec<Line> {
     let dir = root().join("tests/data/requests");
     let mut files: Vec<_> = std::fs::read_dir(&dir)
         .unwrap_or_else(|e| panic!("{}: {e}", dir.display()))
@@ -296,10 +304,23 @@ fn requests() -> Vec<(String, Value)> {
         let text = std::fs::read_to_string(&file).expect("the request file reads");
         for line in text.lines().filter(|l| !l.trim().is_empty()) {
             let value = json(line);
-            out.push((
-                text_at(&value, "/tool"),
-                value.get("args").cloned().unwrap_or_default(),
-            ));
+            let before = value
+                .get("before")
+                .and_then(Value::as_array)
+                .unwrap_or_default()
+                .iter()
+                .map(|c| {
+                    (
+                        text_at(c, "/tool"),
+                        c.get("args").cloned().unwrap_or_default(),
+                    )
+                })
+                .collect();
+            out.push(Line {
+                tool: text_at(&value, "/tool"),
+                args: value.get("args").cloned().unwrap_or_default(),
+                before,
+            });
         }
     }
     out
@@ -310,53 +331,100 @@ fn requests_dir() -> &'static Path {
     Path::new("tests/data/requests")
 }
 
-#[test]
-fn ac_132b_full_argument_coverage() {
-    let registry = full_registry();
-    let mut calls: Vec<(String, Value)> = Vec::new();
-    for tool in registry.tools() {
-        calls.extend(
-            tool.examples
-                .iter()
-                .map(|e| (tool.name.to_owned(), json(e.args))),
-        );
-    }
-    calls.extend(requests());
-    let (mut names, mut values) = (BTreeSet::new(), BTreeSet::new());
-    for (name, args) in &calls {
-        let (_, tool) = registry
-            .get(name)
-            .unwrap_or_else(|| panic!("{name} is not a tool"));
-        if !tool.examples.iter().any(|e| json(e.args) == *args) {
-            let mut s = demo();
-            let envelope = call_value(&mut s, name, args.clone());
-            assert_eq!(
-                envelope.get("ok"),
-                Some(&Value::Bool(true)),
-                "{}: {name} {args}: {envelope}",
-                requests_dir().display()
-            );
+/// Records the argument paths and enum values of one call of `name`. The steps of a batch
+/// count as calls of their tools.
+fn record_call(
+    registry: &Registry<Session>,
+    name: &str,
+    args: &Value,
+    names: &mut BTreeSet<String>,
+    values: &mut BTreeSet<String>,
+) {
+    let (_, tool) = registry
+        .get(name)
+        .unwrap_or_else(|| panic!("{name} is not a tool"));
+    let globals = globals_of(tool);
+    for (key, value) in args
+        .as_object()
+        .unwrap_or(&ghidorah_json::Object::new())
+        .iter()
+    {
+        if let Some(spec) = tool.arg(key) {
+            record(spec, &format!("{name}.{key}"), value, names, values);
+        } else if let Some(spec) = globals.iter().find(|g| g.name == key) {
+            record(spec, &format!("global.{key}"), value, names, values);
         }
-        let globals = globals_of(tool);
-        for (key, value) in args.as_object().expect("an object").iter() {
-            if let Some(spec) = tool.arg(key) {
-                record(
-                    spec,
-                    &format!("{name}.{key}"),
-                    value,
-                    &mut names,
-                    &mut values,
-                );
-            } else if let Some(spec) = globals.iter().find(|g| g.name == key) {
-                record(
-                    spec,
-                    &format!("global.{key}"),
-                    value,
-                    &mut names,
-                    &mut values,
+    }
+    if name == "batch_run" {
+        let steps = args
+            .get("steps")
+            .and_then(Value::as_array)
+            .unwrap_or_default();
+        for step in steps {
+            let tool = text_at(step, "/tool");
+            if registry.get(&tool).is_some() {
+                let empty = Value::Object(ghidorah_json::Object::new());
+                record_call(
+                    registry,
+                    &tool,
+                    step.get("args").unwrap_or(&empty),
+                    names,
+                    values,
                 );
             }
         }
+    }
+}
+
+#[test]
+fn ac_132b_full_argument_coverage() {
+    let registry = full_registry();
+    let (mut names, mut values) = (BTreeSet::new(), BTreeSet::new());
+    for tool in registry.tools() {
+        for example in tool.examples {
+            record_call(
+                &registry,
+                tool.name,
+                &json(example.args),
+                &mut names,
+                &mut values,
+            );
+        }
+    }
+    for line in requests() {
+        let mut s = demo();
+        for (tool, args) in &line.before {
+            let envelope = call_value(&mut s, tool, args.clone());
+            assert_eq!(
+                envelope.get("ok"),
+                Some(&Value::Bool(true)),
+                "{}: before {tool} {args}: {envelope}",
+                requests_dir().display()
+            );
+        }
+        let envelope = call_value(&mut s, &line.tool, line.args.clone());
+        assert_eq!(
+            envelope.get("ok"),
+            Some(&Value::Bool(true)),
+            "{}: {} {}: {envelope}",
+            requests_dir().display(),
+            line.tool,
+            line.args
+        );
+        for entry in envelope
+            .pointer("/data/steps")
+            .and_then(Value::as_array)
+            .unwrap_or_default()
+        {
+            assert_eq!(
+                entry.get("ok"),
+                Some(&Value::Bool(true)),
+                "{}: {}: {entry}",
+                requests_dir().display(),
+                line.args
+            );
+        }
+        record_call(&registry, &line.tool, &line.args, &mut names, &mut values);
     }
     let (mut want_names, mut want_values) = (BTreeSet::new(), BTreeSet::new());
     for tool in registry.tools() {

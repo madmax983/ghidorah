@@ -155,7 +155,7 @@ fn ac_179b_star_cap() {
         &mut s,
         r#"{"steps":[
             {"id":"s1","tool":"mem_read","args":{"target":"0x1080","as":"insn","count":80}},
-            {"id":"s2","tool":"func_get","args":{"targets":{"$ref":"s1","ptr":"/data/rows/*/addr"}}}
+            {"id":"s2","tool":"func_get","args":{"targets":{"$ref":"s1","ptr":"/data/rows/*/a"}}}
         ]}"#,
     );
     assert_eq!(step_code(&envelope, 1), "PLUCK_TOO_LONG", "{envelope}");

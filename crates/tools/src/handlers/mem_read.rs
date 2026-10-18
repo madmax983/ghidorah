@@ -251,8 +251,7 @@ pub const SPEC: ToolSpec<Session> = ToolSpec {
     summary: "Read memory as hex, text, integers, pointers, a C type with field paths, or instructions in a linear sweep.",
     description: "Read memory as hex, text, integers, pointers, a C type with field paths, or instructions in a linear sweep. \
                   The read stops at the end of the region of the target. \
-                  The form insn gives disassembly rows and needs no function. Send next_cursor as cursor for the next rows. \
-                  The form type takes C type text in c, for example struct sockaddr_in. \
+                  The form insn gives disassembly rows and needs no function. \
                   Text from the binary comes back escaped, with the exact bytes in hex.",
     args: ARGS,
     actions: ACTIONS,

@@ -23,7 +23,7 @@ const ROWS: &[Row] = &[
         edits: &["SetName"],
         notes: &[],
         steps: r#"[
-            {"id":"w","tool":"symbol_rename","args":{"target":"fn:0x11e0","name":"verify_input","evidence":["fn:0x1080"]}},
+            {"id":"w","tool":"symbol_rename","args":{"target":"fn:0x11e0","name":"verify_input","evidence":["fn:0x1080"],"force":true}},
             {"id":"r1","tool":"func_list","args":{"filter":{"name":"verify_*"}},"expect":[{"ptr":"/data/items/0/name","op":"eq","value":"verify_input"}]},
             {"id":"r2","tool":"func_get","args":{"target":"fn:0x11e0"},"expect":[{"ptr":"/data/name","op":"eq","value":"verify_input"}]},
             {"id":"r3","tool":"search","args":{"kind":"name","query":"verify_input"},"expect":[{"ptr":"/data/items","op":"len_gt","value":0}]},
@@ -119,7 +119,7 @@ const ROWS: &[Row] = &[
             {"id":"r3","tool":"search","args":{"kind":"note","note_filter":{"kind":"hypothesis"}},"expect":[{"ptr":"/data/items","op":"len_eq","value":1}]},
             {"id":"r4","tool":"search","args":{"kind":"note","note_filter":{"kind":"finding"}},"expect":[{"ptr":"/data/items","op":"len_eq","value":1}]},
             {"id":"r5","tool":"search","args":{"kind":"note","note_filter":{"kind":"error"}},"expect":[{"ptr":"/data/items","op":"len_eq","value":1}]},
-            {"id":"r6","tool":"search","args":{"ids":[{"$ref":"n2","ptr":"/data/note"}]},"expect":[{"ptr":"/data/items/0/text/text","op":"eq","value":"Read check_password."}]}
+            {"id":"r6","tool":"search","args":{"ids":[{"$ref":"n2","ptr":"/data/note"}]},"expect":[{"ptr":"/data/items/0/text","op":"eq","value":"Read check_password."}]}
         ]"#,
     },
     Row {
@@ -216,9 +216,9 @@ fn ac_206_read_back() {
     check_all(&read, "delete");
     edits.insert("DeleteFunction");
 
-    // ReplaceAnalysis: an analysis run writes a marker that history_list shows.
-    let mut s = demo();
-    data(&call(&mut s, "analysis_run", "{}"));
+    // ReplaceAnalysis: the analysis run of a load writes a marker that history_list shows.
+    let mut s = crate::support::session();
+    data(&call(&mut s, "binary_load", r#"{"builtin":"demo"}"#));
     let read = batch(
         &mut s,
         r#"{"steps":[{"id":"r","tool":"history_list","args":{"coalesce":false},"expect":[{"ptr":"/data/items/*/kind","op":"contains","value":"analysis"}]}]}"#,

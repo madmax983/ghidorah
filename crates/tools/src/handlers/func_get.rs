@@ -259,10 +259,7 @@ pub const SPEC: ToolSpec<Session> = ToolSpec {
     summary: "Get one or more functions with selected sections: summary, disassembly, IR, decompiled C, xrefs, callers, callees, strings, variables, notes, why, CFG and jump tables.",
     description: "Get one or more functions with selected sections: summary, disassembly, IR, decompiled C, xrefs, callers, callees, strings, variables, notes, why, CFG and jump tables. \
                   Send target, or targets for up to 50 functions. \
-                  The sections share max_chars by weight, so a large section can come back cut. \
-                  A cut disassembly or decompile gives next_cursor: send it in cursors to read on. \
-                  decomp_opts.lines selects a window of lines of the decompiled C, and ir_opts.level l1 gives the SSA form. \
-                  The member omitted names each section that did not fit, with its size. \
+                  The sections share max_chars by weight. A cut section gives next_cursor: send it in cursors. \
                   A call with disasm, ir or decomp marks the function as visited, and this mark changes no fact.",
     args: ARGS,
     groups: &[Group {

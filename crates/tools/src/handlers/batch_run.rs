@@ -277,11 +277,9 @@ pub const SPEC: ToolSpec<Session> = ToolSpec {
     title: "Run a batch of steps",
     summary: "Run up to 32 dependent tool steps in one batch call, with references, guards and one transaction for edits.",
     description: "Run up to 32 dependent tool steps in one batch call, with references, guards and one transaction for edits. \
-                  A step argument {\"$ref\":\"s1\",\"ptr\":\"/data/items/*/id\"} takes values of an earlier step, and * maps over a list. \
-                  The server checks all steps and reference types before a step runs. \
+                  A step argument {\"$ref\":\"s1\",\"ptr\":\"/data/items/*/id\"} takes values of an earlier step. \
                   Only the steps in return send their data. \
-                  A batch with edits commits once with one rev, or rolls back. \
-                  The server rejects destructive steps.",
+                  A batch with edits commits once with one rev, or rolls back.",
     args: ARGS,
     output: OutputShape::Obj(FIELDS),
     annotations: Annotations {
@@ -298,11 +296,11 @@ pub const SPEC: ToolSpec<Session> = ToolSpec {
             golden: "tests/golden/batch/batch_run.1.json",
         },
         Example {
-            args: r#"{"steps":[{"id":"rename","tool":"symbol_rename","args":{"target":"0x1090","name":"read_input"}},{"id":"note","tool":"comment_set","args":{"target":"0x1080","kind":"plate","text":"The entry reads the input and checks it."}},{"id":"check","tool":"func_list","args":{"filter":{"name":"read_*"}},"expect":[{"ptr":"/data/items/0/name","op":"eq","value":"read_input"}]}],"return":["check"],"label":"rename and comment"}"#,
+            args: r#"{"steps":[{"id":"rename","tool":"symbol_rename","args":{"target":"0x1090","name":"read_input"}},{"id":"note","tool":"comment_set","args":{"target":"0x1080","kind":"plate","text":"The entry reads the input and checks it."}},{"id":"check","tool":"addr_info","args":{"target":"0x1090"},"expect":[{"ptr":"/data/symbol/name","op":"eq","value":"read_input"}]}],"return":["check"],"label":"rename and comment"}"#,
             golden: "tests/golden/batch/batch_run.2.json",
         },
         Example {
-            args: r#"{"steps":[{"id":"s1","tool":"symbol_rename","args":{"target":"fn:0x11e0","name":"verify_password"}}],"dry_run":true}"#,
+            args: r#"{"steps":[{"id":"s1","tool":"symbol_rename","args":{"target":"fn:0x11e0","name":"verify_password","force":true}}],"dry_run":true}"#,
             golden: "tests/golden/batch/batch_run.3.json",
         },
     ],

@@ -74,10 +74,8 @@ pub const SPEC: ToolSpec<Session> = ToolSpec {
     summary: "Calculate numbers and addresses: bases, widths, signedness and file offsets.",
     description: "Calculate numbers and addresses: bases, widths, signedness and file offsets. \
                   The expression takes the operators + - * / % << >> & | ^ ~ and parentheses. \
-                  A term is a 0x hex number, a symbol, a section name, a default name such as FUN_00401000 or an ID such as fn:0x401000. \
-                  A term of digits only is an error, because the server does not guess the base. \
-                  The arithmetic uses 64 bits and wraps, and division is unsigned. \
-                  With an open binary, the result also tells the region, the file offset and the function at the value.",
+                  A term is a 0x hex number, a symbol, a section name, a default name or an ID. \
+                  The arithmetic uses 64 bits and wraps.",
     args: ARGS,
     output: OutputShape::Obj(FIELDS),
     profiles: &[Profile::Full, Profile::Readonly],

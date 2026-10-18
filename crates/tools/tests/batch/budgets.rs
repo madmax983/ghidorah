@@ -23,7 +23,7 @@ fn ac_181a_budgets() {
     let entries = steps(&envelope);
     assert_eq!(entries.len(), 2, "{envelope}");
     assert!(chars(&envelope) <= 2_500, "{} characters", chars(&envelope));
-    // The step outside return is not trimmed: its size is the size of the direct call.
+    // The batch does not trim the step outside return: its size is the size of the direct call.
     let direct = call(
         &mut s,
         "search",

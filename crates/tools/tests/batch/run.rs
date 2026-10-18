@@ -112,7 +112,7 @@ const EDITS: &str = r#"{"steps":[
     {"id":"rename","tool":"symbol_rename","args":{"target":"0x1090","name":"read_input"}},
     {"id":"note","tool":"comment_set","args":{"target":"0x1080","kind":"plate","text":"The entry."}},
     {"id":"todo","tool":"note_write","args":{"kind":"todo","text":"Check the loop.","at":"0x11e0"}},
-    {"id":"check","tool":"func_list","args":{"filter":{"name":"read_*"}}}
+    {"id":"check","tool":"addr_info","args":{"target":"0x1090"}}
 ],"return":["check"]}"#;
 
 #[test]
@@ -127,7 +127,7 @@ fn ac_177_atomic() {
     assert!(text_at(&envelope, "/tx").starts_with("tx:"), "{envelope}");
     assert_eq!(envelope.get("noop"), Some(&Value::Bool(false)));
     assert_eq!(
-        text_at(got, "/steps/3/data/items/0/name"),
+        text_at(got, "/steps/3/data/symbol/name"),
         "read_input",
         "a read after an edit sees it"
     );
@@ -178,8 +178,12 @@ fn ac_177_atomic() {
         assert_eq!(rev(&s), rev0);
         assert_eq!(state_hash(&s), hash0);
         assert_eq!(lines(&s), lines0);
-        let names = call(&mut s, "func_list", r#"{"filter":{"name":"read_*"}}"#);
-        assert_eq!(int_at(&names, "/page/total"), 0, "{names}");
+        let named = call(&mut s, "addr_info", r#"{"target":"0x1090"}"#);
+        assert_ne!(
+            text_at(&named, "/data/symbol/name"),
+            "read_input",
+            "{named}"
+        );
     }
     let mut s = demo();
     let envelope = batch(&mut s, failing[0]);
@@ -194,7 +198,7 @@ fn ac_178_dry_run() {
     let text = r#"{"steps":[
         {"id":"rename","tool":"symbol_rename","args":{"target":"0x1090","name":"read_input"}},
         {"id":"note","tool":"comment_set","args":{"target":"0x1080","kind":"eol","text":"Start."}},
-        {"id":"check","tool":"func_list","args":{"filter":{"name":"read_*"}}}
+        {"id":"check","tool":"addr_info","args":{"target":"0x1090"}}
     ],"dry_run":true}"#;
     let envelope = batch(&mut s, text);
     let got = data(&envelope);
@@ -207,7 +211,7 @@ fn ac_178_dry_run() {
     let ops: Vec<String> = diff.iter().map(|d| text_at(d, "/op")).collect();
     assert_eq!(ops, ["SetName", "SetComment"], "{envelope}");
     assert_eq!(
-        text_at(got, "/steps/2/data/items/0/name"),
+        text_at(got, "/steps/2/data/symbol/name"),
         "read_input",
         "the dry run reads its own edits"
     );
@@ -215,8 +219,12 @@ fn ac_178_dry_run() {
     assert_eq!(state_hash(&s), hash0);
     assert_eq!(lines(&s), lines0);
     assert_eq!(int_at(&envelope, "/rev"), rev0);
-    let after = call(&mut s, "func_list", r#"{"filter":{"name":"read_*"}}"#);
-    assert_eq!(int_at(&after, "/page/total"), 0, "{after}");
+    let after = call(&mut s, "addr_info", r#"{"target":"0x1090"}"#);
+    assert_ne!(
+        text_at(&after, "/data/symbol/name"),
+        "read_input",
+        "{after}"
+    );
 }
 
 #[test]

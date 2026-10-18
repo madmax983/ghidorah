@@ -18,17 +18,18 @@
 //! | `panic` | the demo binary and a test tool `panic_tool` that panics |
 //! | `locked` | a second session on a project that a first session holds |
 //! | `torn`, `corrupt` | a project whose journal has a torn last line, or a bad middle line |
-//! | `elf:aarch64`, `elf:mangled`, `file:elf32` | a temp root with a built input file |
+//! | `elf:aarch64`, `elf:mangled`, `elf:sp`, `elf:wide`, `file:elf32` | a temp root with a built input file |
 
 use std::cell::Cell;
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use ghidorah_base::catalog::RepairClass;
 use ghidorah_base::{Clock, ErrorCode, FixedClock, WarningCode};
 use ghidorah_json::Value;
-use ghidorah_testkit::elf::{ElfBuilder, ImportKind, Loc, Section, Symbol};
+use ghidorah_testkit::elf::{ElfBuilder, Fde, ImportKind, Loc, Section, Symbol};
 use ghidorah_testkit::ste::check_agent_text;
 use ghidorah_tools::hints::{MAX_NEXT, check};
 use ghidorah_tools::session::{LabelRule, ProjectsConfig};
@@ -136,9 +137,11 @@ impl Clock for StepClock {
 
 /// Gives a new empty directory for one setup.
 fn tmp(name: &str) -> PathBuf {
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let n = NEXT.fetch_add(1, Ordering::Relaxed);
     let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
         .join("batch_triggers")
-        .join(name);
+        .join(format!("{}-{n}", name.replace(':', "_")));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("the temp directory exists");
     dir
@@ -177,6 +180,64 @@ fn session_of_file(name: &str, file: &str, bytes: &[u8]) -> Session {
     let mut config = config();
     config.roots = Roots::new(&dir, &[PathBuf::from(".")]).expect("the temp root");
     session_with(config)
+}
+
+/// The count of `cmp edi, N; je end` pairs of `elf:wide`: more blocks than the structurer
+/// budget of 500 nodes.
+const WIDE_PAIRS: u32 = 600;
+
+/// Gives the bytes of the built input file of `elf:ARG`.
+fn elf_bytes(arg: &str) -> Vec<u8> {
+    let at = |off| Loc::section(".text", off);
+    match arg {
+        "aarch64" => {
+            let code = [0x1f, 0x20, 0x03, 0xd5, 0xc0, 0x03, 0x5f, 0xd6];
+            ElfBuilder::exec()
+                .machine(183)
+                .section(Section::code(".text", &code))
+                .symbol(Symbol::func("main", at(0), 8))
+                .entry(Loc::symbol("main"))
+                .build()
+        }
+        "sp" => {
+            // push rbp; call leaf; pop rbp; ret, then leaf: ret. The FDE has no CFA rows, so
+            // its CFA at the call does not agree with the stack pointer after the push.
+            let code = [0x55, 0xe8, 0x02, 0x00, 0x00, 0x00, 0x5d, 0xc3, 0xc3];
+            ElfBuilder::exec()
+                .section(Section::code(".text", &code))
+                .symbol(Symbol::func("main", at(0), 8))
+                .symbol(Symbol::func("leaf", at(8), 1))
+                .fde(Fde {
+                    at: at(0),
+                    len: 8,
+                    program: Vec::new(),
+                })
+                .entry(Loc::symbol("main"))
+                .build()
+        }
+        "wide" => {
+            let end = WIDE_PAIRS * 9;
+            let mut code = Vec::new();
+            for i in 0..WIDE_PAIRS {
+                code.extend([0x83, 0xff, i.to_le_bytes()[0], 0x0f, 0x84]);
+                code.extend((end - (i + 1) * 9).to_le_bytes());
+            }
+            code.push(0xc3);
+            let size = u64::from(end) + 1;
+            ElfBuilder::exec()
+                .section(Section::code(".text", &code))
+                .symbol(Symbol::func("main", at(0), size))
+                .entry(Loc::symbol("main"))
+                .build()
+        }
+        _ => ElfBuilder::exec()
+            .section(Section::code(".text", &[0xc3; 4]))
+            .symbol(Symbol::func("_ZN3foo3barEv", at(0), 1))
+            .symbol(Symbol::func("main", at(2), 1))
+            .import("__cxa_atexit", ImportKind::Plt)
+            .entry(Loc::symbol("main"))
+            .build(),
+    }
 }
 
 /// Writes a project of the demo binary with two renames to `dir`.
@@ -269,30 +330,7 @@ fn setup(setup: &str, keep: &mut Keep) -> Session {
             std::fs::write(&journal, out).expect("the journal writes");
             session_with(projects_config(&dir))
         }
-        "elf" => {
-            let bytes = match arg {
-                "aarch64" => {
-                    let code = [0x1f, 0x20, 0x03, 0xd5, 0xc0, 0x03, 0x5f, 0xd6];
-                    ElfBuilder::exec()
-                        .machine(183)
-                        .section(Section::code(".text", &code))
-                        .symbol(Symbol::func("main", Loc::section(".text", 0), 8))
-                        .entry(Loc::symbol("main"))
-                        .build()
-                }
-                _ => {
-                    let at = |off| Loc::section(".text", off);
-                    ElfBuilder::exec()
-                        .section(Section::code(".text", &[0xc3; 4]))
-                        .symbol(Symbol::func("_ZN3foo3barEv", at(0), 1))
-                        .symbol(Symbol::func("main", at(2), 1))
-                        .import("__cxa_atexit", ImportKind::Plt)
-                        .entry(Loc::symbol("main"))
-                        .build()
-                }
-            };
-            session_of_file(setup, "input.elf", &bytes)
-        }
+        "elf" => session_of_file(setup, "input.elf", &elf_bytes(arg)),
         "file" => {
             let mut elf32 = vec![0x7f, b'E', b'L', b'F', 1, 1, 1, 0];
             elf32.resize(64, 0);
@@ -326,9 +364,19 @@ fn run(line: &Line) -> (Session, Value, Keep) {
     (s, envelope, keep)
 }
 
-/// The codes that no shipped code path gives yet. AC-141b stays open while the list holds a
-/// code.
-const NO_PRODUCER: &[&str] = &["W_STALE_OP_ID", "W_NORETURN_SUSPECT"];
+/// The codes that no call can give yet. AC-141b stays open while the list holds a code.
+///
+/// | Code | Why no call gives it |
+/// |---|---|
+/// | `W_STALE_OP_ID`, `W_NORETURN_SUSPECT` | no shipped code path gives the warning |
+/// | `BODY_OVERLAP` | `func_edit` gives a no-op for an existing function, and redo stops at a later edit |
+/// | `W_STRUCTURE_SELFCHECK` | a guard of the structurer; no input of the fixtures fails the self-check |
+const NO_PRODUCER: &[&str] = &[
+    "W_STALE_OP_ID",
+    "W_NORETURN_SUSPECT",
+    "BODY_OVERLAP",
+    "W_STRUCTURE_SELFCHECK",
+];
 
 #[test]
 fn code_triggers_give_their_codes() {
@@ -352,7 +400,6 @@ fn code_triggers_give_their_codes() {
 fn wanted() -> BTreeSet<String> {
     let mut out: BTreeSet<String> = ErrorCode::ALL
         .iter()
-        .filter(|c| **c != ErrorCode::OutputBudgetExceeded)
         .map(|c| c.info().name.to_owned())
         .collect();
     out.extend(WarningCode::ALL.iter().map(|c| c.info().name.to_owned()));
@@ -370,7 +417,7 @@ fn code_triggers_cover_the_enums_with_a_producer() {
 }
 
 #[test]
-#[ignore = "W_STALE_OP_ID and W_NORETURN_SUSPECT have no producer in the shipped code"]
+#[ignore = "the codes of NO_PRODUCER have no producer that a call reaches"]
 fn ac_141b_code_triggers() {
     let covered: BTreeSet<String> = lines().into_iter().map(|l| l.code).collect();
     let missing: Vec<String> = wanted().difference(&covered).cloned().collect();

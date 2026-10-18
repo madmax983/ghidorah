@@ -1,6 +1,7 @@
 //! `ghidorah doctor` (design Section 10.14).
 
 use ghidorah_json::Value;
+use ghidorah_tools::{Host, Session};
 
 use crate::common::registry::TestHost;
 use crate::common::{env, json, run_in};
@@ -51,6 +52,41 @@ fn doctor_reports_checks() {
     assert!(
         !root.join(ghidorah_cli::doctor::PROBE).exists(),
         "the probe file is gone"
+    );
+}
+
+#[test]
+fn ac_231_doctor() {
+    // The doctor of the shipped registry: every check passes on the build host.
+    let env = env("doctor_shipped");
+    let root = env.cwd.join("projects");
+    let root_text = root.to_string_lossy().into_owned();
+    let output = run_in::<Session>(&["doctor", "--project-root", &root_text], "", &env);
+    assert_eq!(output.code, 0, "{}", output.stdout);
+    assert_eq!(output.lines().len(), 1, "one JSON object");
+    let report = json(&output.stdout);
+    assert_eq!(report.get("ok"), Some(&Value::Bool(true)), "{report}");
+    let checks = report
+        .get("checks")
+        .and_then(Value::as_array)
+        .expect("the checks");
+    assert!(checks.len() >= 4, "{report}");
+    for c in checks {
+        assert_eq!(c.get("ok"), Some(&Value::Bool(true)), "{c}");
+    }
+    let results = check(&report, "examples")
+        .get("results")
+        .and_then(Value::as_array)
+        .expect("example results");
+    let examples: usize = <Session as Host>::registry()
+        .tools()
+        .iter()
+        .map(|t| t.examples.len())
+        .sum();
+    assert_eq!(
+        results.len(),
+        examples,
+        "one row per example of the shipped registry"
     );
 }
 

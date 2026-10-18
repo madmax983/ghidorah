@@ -30,13 +30,16 @@
 //! | A batch with edits | one transaction and one rev, or a full roll back |
 //! | A read-only batch out of fuel or time | the done steps, `stopped_by` and `resume` |
 
+mod budget;
 mod exec;
 pub mod guards;
+mod refs;
 mod validate;
 
 pub use exec::run;
 pub use guards::{Guard, GuardOp, OPS};
-pub use validate::{Plan, Step, plan};
+pub use refs::{Part, Reference, Typed, sample, sample_id};
+pub use validate::{Binding, Plan, Resume, Step, check, plan};
 
 /// The largest number of steps in one batch.
 pub const MAX_STEPS: usize = 32;

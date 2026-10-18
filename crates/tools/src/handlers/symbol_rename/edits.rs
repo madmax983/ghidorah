@@ -43,7 +43,7 @@ impl Committed {
 }
 
 /// Gives the planned edit list of a dry run: `[{ op, key, old, new }]`.
-fn diff(planned: &[Applied]) -> Value {
+pub(crate) fn diff(planned: &[Applied]) -> Value {
     let rows = planned
         .iter()
         .map(|a| {

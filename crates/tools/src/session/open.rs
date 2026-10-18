@@ -223,6 +223,9 @@ impl Session {
         let Some(band) = band else {
             return Ok(None);
         };
+        if self.batch_band(id, band) {
+            return Ok(None);
+        }
         self.reanalyze(id, band, fuel)
     }
 
