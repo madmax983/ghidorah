@@ -252,3 +252,59 @@ fn unknown_verdict_hints_at_the_gap() {
         .expect("an addr_info hint");
     assert_eq!(text_at(hint, "/args/target"), "0x1014", "{envelope}");
 }
+
+#[test]
+fn claim_inputs_take_each_form() {
+    let (mut s, _) = open("demo");
+    let cases: [(&str, &str, &str); 14] = [
+        ("calls", r#"["main",4224]"#, "refuted"),
+        ("const_arg", r#"["imp:puts",0,-1]"#, "unknown"),
+        ("const_arg", r#"["imp:puts",0,"-1"]"#, "unknown"),
+        ("const_arg", r#"["imp:puts",0,"check_password"]"#, "unknown"),
+        ("reaches", r#"["main","sys:write"]"#, "INVALID_ARGUMENT"),
+        (
+            "xref",
+            r#"["0x10a1","0x1060","unconditional_call"]"#,
+            "supported",
+        ),
+        ("has_syscall", r#"["main",1]"#, "refuted"),
+        ("has_syscall", r#"["main","1"]"#, "refuted"),
+        ("has_syscall", r#"["main",70000]"#, "INVALID_ARGUMENT"),
+        ("has_syscall", r#"["main",true]"#, "INVALID_ARGUMENT"),
+        ("reaches", r#"["main"]"#, "INVALID_ARGUMENT"),
+        (
+            "const_arg",
+            r#"["imp:puts",0,"ext:0x3"]"#,
+            "INVALID_ARGUMENT",
+        ),
+        ("uses_import", r#"["main","puts"]"#, "supported"),
+        ("in_func", r#"["ext:0x3","main"]"#, "unknown"),
+    ];
+    let claims: Vec<Value> = cases
+        .iter()
+        .map(|(rel, args, _)| {
+            let list = json(args)
+                .as_array()
+                .map(<[Value]>::to_vec)
+                .unwrap_or_default();
+            claim(rel, &list)
+        })
+        .collect();
+    let got = verdicts(&mut s, &claims);
+    for ((rel, args, want), entry) in cases.iter().zip(&got) {
+        let found = if entry.get("error").is_some() {
+            text_at(entry, "/error/code")
+        } else {
+            text_at(entry, "/verdict")
+        };
+        assert_eq!(&found, want, "{rel} {args}: {entry}");
+    }
+    let arity = got.get(10).expect("the arity case");
+    assert_eq!(
+        text_at(arity, "/error/details/expected"),
+        "2 to 3 arguments: f, g, d",
+        "{arity}"
+    );
+    let ext = got.get(13).expect("the EXTERNAL case");
+    assert_eq!(texts(ext, "/basis/gaps"), ["ext:0x3"], "{ext}");
+}

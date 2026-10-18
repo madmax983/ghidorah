@@ -30,7 +30,7 @@ pub(crate) type Step<T> = Result<T, Stop>;
 #[derive(Debug)]
 pub struct Checker<'p> {
     program: &'p Program,
-    pub(crate) imports: Imports,
+    imports: Imports,
     scopes: BTreeMap<FuncId, Option<Scope>>,
     all_gaps: Option<BTreeSet<Address>>,
 }
