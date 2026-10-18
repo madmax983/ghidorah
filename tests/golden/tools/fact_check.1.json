@@ -1,0 +1,233 @@
+{"golden":"generator=tools_examples version=1 fixture=crackme.gcc-O2 fixture_sha256=467a43b75d95c826daba8cb216d01d7fd386aa96c5ef5a95c2effffe1780de8f"}
+{
+  "ok": true,
+  "binary_id": "467a43b75d95c826",
+  "rev": 1,
+  "session": "cli",
+  "analysis": {
+    "state": "complete",
+    "rev": 1
+  },
+  "partial": false,
+  "data": {
+    "verdicts": [
+      {
+        "claim": {
+          "rel": "calls",
+          "args": [
+            "main",
+            "imp:puts"
+          ]
+        },
+        "verdict": "supported",
+        "evidence": [
+          "ref:0x10a1>0x1060:unconditional_call",
+          "ref:0x10b7>0x1060:unconditional_call",
+          "ref:0x10c7>0x1060:unconditional_call"
+        ],
+        "basis": {
+          "complete": true,
+          "gaps": []
+        }
+      },
+      {
+        "claim": {
+          "rel": "calls",
+          "args": [
+            "check_password",
+            "imp:puts"
+          ]
+        },
+        "verdict": "refuted",
+        "evidence": [],
+        "basis": {
+          "complete": true,
+          "gaps": []
+        }
+      },
+      {
+        "claim": {
+          "rel": "calls",
+          "args": [
+            "fn:0x1000",
+            "main"
+          ]
+        },
+        "verdict": "unknown",
+        "evidence": [],
+        "basis": {
+          "complete": false,
+          "gaps": [
+            "0x1014"
+          ]
+        }
+      },
+      {
+        "claim": {
+          "rel": "reaches",
+          "args": [
+            "main",
+            "imp:strlen",
+            2
+          ]
+        },
+        "verdict": "supported",
+        "evidence": [
+          "ref:0x1091>0x11e0:unconditional_call",
+          "ref:0x11e8>0x1070:unconditional_call"
+        ],
+        "basis": {
+          "complete": true,
+          "gaps": []
+        }
+      },
+      {
+        "claim": {
+          "rel": "uses_import",
+          "args": [
+            "check_password",
+            "imp:strlen"
+          ]
+        },
+        "verdict": "supported",
+        "evidence": [
+          "ref:0x11e8>0x1070:unconditional_call"
+        ],
+        "basis": {
+          "complete": true,
+          "gaps": []
+        }
+      },
+      {
+        "claim": {
+          "rel": "refs_string",
+          "args": [
+            "main",
+            "Access*"
+          ]
+        },
+        "verdict": "supported",
+        "evidence": [
+          "ref:0x109a>0x202d:data",
+          "ref:0x10b0>0x201e:data"
+        ],
+        "basis": {
+          "complete": true,
+          "gaps": []
+        }
+      },
+      {
+        "claim": {
+          "rel": "refs_addr",
+          "args": [
+            "main",
+            "0x202d"
+          ]
+        },
+        "verdict": "supported",
+        "evidence": [
+          "ref:0x109a>0x202d:data"
+        ],
+        "basis": {
+          "complete": true,
+          "gaps": []
+        }
+      },
+      {
+        "claim": {
+          "rel": "xref",
+          "args": [
+            "0x10a1",
+            "imp:puts",
+            "call"
+          ]
+        },
+        "verdict": "supported",
+        "evidence": [
+          "ref:0x10a1>0x1060:unconditional_call"
+        ],
+        "basis": {
+          "complete": true,
+          "gaps": []
+        }
+      },
+      {
+        "claim": {
+          "rel": "const_arg",
+          "args": [
+            "imp:puts",
+            0,
+            "str:0x202d"
+          ]
+        },
+        "verdict": "supported",
+        "evidence": [
+          "0x10a1"
+        ],
+        "basis": {
+          "complete": true,
+          "gaps": []
+        }
+      },
+      {
+        "claim": {
+          "rel": "has_syscall",
+          "args": [
+            "main",
+            "sys:write"
+          ]
+        },
+        "verdict": "refuted",
+        "evidence": [],
+        "basis": {
+          "complete": true,
+          "gaps": []
+        }
+      },
+      {
+        "claim": {
+          "rel": "noreturn",
+          "args": [
+            "main"
+          ]
+        },
+        "verdict": "refuted",
+        "evidence": [
+          "0x10af"
+        ],
+        "basis": {
+          "complete": true,
+          "gaps": []
+        }
+      },
+      {
+        "claim": {
+          "rel": "in_func",
+          "args": [
+            "0x10a1",
+            "main"
+          ]
+        },
+        "verdict": "supported",
+        "evidence": [
+          "fn:0x1080"
+        ],
+        "basis": {
+          "complete": true,
+          "gaps": []
+        }
+      }
+    ],
+    "explanations": [],
+    "rules": []
+  },
+  "next": [
+    {
+      "tool": "addr_info",
+      "args": {
+        "target": "0x1014"
+      },
+      "why": "Read the site that blocks a refuted verdict."
+    }
+  ]
+}
