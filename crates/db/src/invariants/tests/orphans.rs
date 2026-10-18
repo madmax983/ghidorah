@@ -5,7 +5,6 @@
 //! invariants.
 
 use crate::edit::{Edit, Layer};
-use crate::program::AnalysisSet;
 use crate::refs::{Ref, RefKey, RefType};
 use crate::source::Source;
 use crate::tests::{ram, seeded, session};
@@ -37,8 +36,7 @@ fn regress_orphan_agent_ref_keeps_invariants() {
     // A re-analysis publishes a set with no code unit at the source of the reference.
     let label = crate::fact::SessionLabel::new(crate::fact::SessionLabel::ANALYSIS).unwrap();
     let mut tx = p.begin("analysis_run", Source::Analysis, label).unwrap();
-    tx.apply(Edit::ReplaceAnalysis(Box::new(AnalysisSet::default())))
-        .unwrap();
+    tx.apply(Edit::ReplaceAnalysis(Box::default())).unwrap();
     tx.commit().unwrap();
     assert!(p.code_unit(0x1090).is_none(), "the source is not code");
     assert!(

@@ -93,9 +93,9 @@ fn regress_holder_edit_replays() {
     // A noreturn flag on a discovered function makes a base holder record. The exact edit of
     // the journal line must make the same record again.
     let start = seeded();
-    let mut live = start.clone();
+    let mut edited = start.clone();
     let func = FuncId(Address::ram(0x1080));
-    let mut tx = live.begin("t", Source::Agent, session("mcp-1")).unwrap();
+    let mut tx = edited.begin("t", Source::Agent, session("mcp-1")).unwrap();
     let flag = tx.fact(true);
     tx.apply(Edit::SetNoreturn {
         id: func,
@@ -105,6 +105,6 @@ fn regress_holder_edit_replays() {
     let line = TxLine::of_commit(&tx.commit().unwrap());
     let mut p = start;
     apply_tx(&mut p, &line).unwrap();
-    assert_eq!(p.state_hash(), live.state_hash());
+    assert_eq!(p.state_hash(), edited.state_hash());
     assert!(p.base().funcs().get(func).is_some(), "the holder record");
 }

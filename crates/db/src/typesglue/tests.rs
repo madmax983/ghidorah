@@ -112,8 +112,8 @@ fn a_rollback_or_a_noop_puts_the_store_back() {
 #[test]
 fn a_commit_line_replays_its_types() {
     let start = seeded();
-    let mut live = start.clone();
-    let mut tx = agent(&mut live);
+    let mut edited = start.clone();
+    let mut tx = agent(&mut edited);
     let parsed = tx.parse_sig(SIG).unwrap();
     let edit = sig_edit(&tx, parsed.ty);
     tx.apply(edit).unwrap();
@@ -128,13 +128,13 @@ fn a_commit_line_replays_its_types() {
     assert_eq!(read.types, commit.types);
     let mut fresh = start;
     crate::replay::apply_tx(&mut fresh, &read).unwrap();
-    assert_eq!(fresh.types(), live.types());
+    assert_eq!(fresh.types(), edited.types());
     let sig = fresh
         .func(FuncId(ram(0x1080)))
         .and_then(|v| v.sig)
         .map(|s| s.value);
     assert_eq!(sig, Some(parsed.ty));
-    assert_eq!(fresh.state_hash().unwrap(), live.state_hash().unwrap());
+    assert_eq!(fresh.state_hash().unwrap(), edited.state_hash().unwrap());
 }
 
 #[test]
