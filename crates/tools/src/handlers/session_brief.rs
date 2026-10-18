@@ -169,8 +169,7 @@ pub const SPEC: ToolSpec<Session> = ToolSpec {
     summary: "Brief a new session: projects on disk, progress, open notes, recent findings and edits, and orphans.",
     description: "Brief a new session: projects on disk, progress, open notes, recent findings and edits, and orphans. \
                   Call it first after a context reset or a server restart. \
-                  With no open binary, the result lists the projects on disk, and next opens the newest one. \
-                  With an open binary, the result tells what changed after your last brief and which functions still have default names. \
+                  With no open binary, next opens the newest project. \
                   The call writes the last-brief mark of your session, and this mark changes no fact and no rev.",
     output: OutputShape::Obj(FIELDS),
     profiles: &[Profile::Full, Profile::Readonly],

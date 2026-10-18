@@ -20,8 +20,9 @@
 //!
 //! The `store` module keeps the history and the project of each binary. Tool handlers commit
 //! through [`Session::transact`] and [`Session::undo`], so each commit gets its journal line.
-//! The `open` module opens, reloads and closes the projects.
+//! The `open` module opens and closes projects. [`batch`] makes one transaction of a batch.
 
+pub mod batch;
 mod open;
 mod store;
 

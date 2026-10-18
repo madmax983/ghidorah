@@ -154,10 +154,9 @@ pub const SPEC: ToolSpec<Session> = ToolSpec {
     title: "Rename symbols",
     summary: "Rename the symbols of functions, labels, data and variables.",
     description: "Rename the symbols of functions, labels, data and variables. \
-                  Send target and name for one rename, or items for up to 100 renames in one transaction. \
-                  Add evidence with IDs or func_similar feature texts, so that the journal keeps the reason. \
-                  IDs such as fn:0x401130 stay the same after a rename. \
-                  A name from the symbol table of the binary has a higher rank than your name, so its rename needs force true.",
+                  Send target and name, or items for up to 100 renames in one transaction. \
+                  Add evidence, so that the journal keeps the reason. \
+                  A name from the symbol table of the binary has a higher rank, so its rename needs force true.",
     args: ARGS,
     groups: &[Group {
         members: &["target", "items"],

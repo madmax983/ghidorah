@@ -98,9 +98,7 @@ pub const SPEC: ToolSpec<Session> = ToolSpec {
     summary: "Search the tools and the topics: give names, summaries or full schemas.",
     description: "Search the tools and the topics: give names, summaries or full schemas. \
                   Send query with words that tell the task, name for one tool, or topic for a concept text. \
-                  With no argument, the result lists every tool. \
-                  The level names gives only the names, summaries adds the first sentence, and full adds the input schema and one example per action. \
-                  The rank is the same at each level. \
+                  The level full adds the schema with every argument doc and one example per action. \
                   Topics: addresses, ids, budgets, batch, errors, rules, relations, profiles, resume.",
     args: ARGS,
     output: OutputShape::Obj(FIELDS),

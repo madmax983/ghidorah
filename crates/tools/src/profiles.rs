@@ -15,7 +15,7 @@ use std::collections::BTreeSet;
 use ghidorah_json::Value;
 
 use crate::registry::Registry;
-use crate::schema::input_schema;
+use crate::schema::{Detail, catalog_schema};
 use crate::spec::{Profile, ToolSpec};
 
 /// The largest number of tools in the `full` profile (AC-130a).
@@ -126,13 +126,23 @@ impl ProfileSet {
     /// `{ name, title, description, inputSchema, annotations }`.
     #[must_use]
     pub fn entry<S: 'static>(&self, tool: &ToolSpec<S>) -> Value {
-        Value::object([
-            ("name", Value::from(tool.name)),
-            ("title", Value::from(tool.title)),
-            ("description", Value::from(tool.description)),
-            ("inputSchema", input_schema(tool)),
-            ("annotations", self.annotations(tool)),
-        ])
+        let (detail, text) = match self.profile {
+            Profile::Mini => (Detail::Compact, tool.summary),
+            Profile::Full | Profile::Readonly => (Detail::Catalog, tool.description),
+        };
+        let mut hints = self.annotations(tool);
+        if let Some(object) = hints.as_object_mut() {
+            let _ = object.remove("title");
+        }
+        let mut out = ghidorah_json::Object::new();
+        out.push("name", Value::from(tool.name));
+        if detail != Detail::Compact {
+            out.push("title", Value::from(tool.title));
+        }
+        out.push("description", Value::from(text));
+        out.push("inputSchema", catalog_schema(tool, detail));
+        out.push("annotations", hints);
+        Value::Object(out)
     }
 
     /// Gives the `tools` array of `tools/list`: one entry per active tool in registry order.

@@ -100,10 +100,7 @@ pub const SPEC: ToolSpec<Session> = ToolSpec {
     title: "Get a C type",
     summary: "Get a C type with its definition and its layout: size, alignment and field offsets.",
     description: "Get a C type with its definition and its layout: size, alignment and field offsets. \
-                  Send target with a t: ID or a type name, or send c with C type text. \
-                  The text c can name the prelude types, for example struct sockaddr_in, size_t and FILE. \
-                  The layout follows the natural rules of the data model of the binary, with no bit-fields. \
-                  A type with no size, for example void, has size null.",
+                  Send target with a t: ID or a type name, or send c with C type text, for example struct sockaddr_in.",
     args: ARGS,
     groups: &[Group {
         members: &["target", "c"],

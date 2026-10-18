@@ -412,9 +412,7 @@ pub const SPEC: ToolSpec<Session> = ToolSpec {
     summary: "Create or delete functions and override the analysis: noreturn, jump-table targets, flow, indirect call targets and references.",
     description: "Create or delete functions and override the analysis: noreturn, jump-table targets, flow, indirect call targets and references. \
                   Each action commits one agent fact and runs the re-analysis within max_steps. \
-                  When the fuel stops the re-analysis, reads show the old analysis with partial true until analysis_run completes it. \
-                  The analysis never replaces an override, and a function with a disagreement gets W_AGENT_OVERRIDE_CONFLICT. \
-                  An agent fact that loses its function stays at its address with W_FACT_ORPHANED. \
+                  The analysis never replaces an override. \
                   The actions delete and remove_ref remove only the facts of an agent or a user.",
     args: ARGS,
     actions: ACTIONS,

@@ -6,6 +6,7 @@
 
 pub mod addr_info;
 pub mod analysis_run;
+pub mod batch_run;
 pub mod calc;
 pub mod comment_set;
 pub mod fact_check;

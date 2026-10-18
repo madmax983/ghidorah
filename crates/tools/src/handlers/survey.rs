@@ -133,9 +133,7 @@ pub const SPEC: ToolSpec<Session> = ToolSpec {
     summary: "Survey a loaded binary: identity, protections, sections, imports, strings, entry points, functions, syscalls and coverage.",
     description: "Survey a loaded binary: identity, protections, sections, imports, strings, entry points, functions, syscalls and coverage. \
                   Call it first after binary_load. \
-                  Each section gets a part of max_chars. \
-                  When a section does not fit, its member omitted gives the count of the items that it leaves out and a search call for them. \
-                  Imports come in groups by capability category, and strings show the most referenced strings first. \
+                  A section that does not fit gives omitted with a search call for the rest. \
                   Send include to get fewer sections.",
     args: ARGS,
     output: OutputShape::Obj(FIELDS),

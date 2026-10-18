@@ -116,10 +116,8 @@ pub const SPEC: ToolSpec<Session> = ToolSpec {
     title: "List the history",
     summary: "List the history of edits since a revision, and the analysis runs.",
     description: "List the history of edits since a revision, and the analysis runs. \
-                  The rows come from the journal of the project, so old rows stay. \
                   By default each changed fact gives one row with its last rev and session. \
-                  Send coalesce false for one row per edit with its transaction and undone_by. \
-                  Send session to keep one session, or exclude_session to leave one out. \
+                  Send coalesce false for one row per edit. \
                   Call it after a context reset to see what changed since your last rev.",
     args: ARGS,
     output: OutputShape::Obj(FIELDS),

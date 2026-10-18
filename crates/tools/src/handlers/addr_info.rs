@@ -81,9 +81,7 @@ pub const SPEC: ToolSpec<Session> = ToolSpec {
     summary: "Tell what is at an address: region, section, function, symbol, code unit, overrides, comments and xref counts.",
     description: "Tell what is at an address: region, section, function, symbol, code unit, overrides, comments and xref counts. \
                   Send target, or targets for up to 50 addresses. \
-                  The member resolved_from tells which rule of the address grammar read the input. \
-                  Send include with refs or comments for those lists. \
-                  The file offset is null for bytes that the file does not hold.",
+                  Send include with refs or comments for those lists.",
     args: ARGS,
     groups: &[Group {
         members: &["target", "targets"],

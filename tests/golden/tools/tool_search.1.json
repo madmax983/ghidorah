@@ -37,16 +37,6 @@
         }
       },
       {
-        "name": "symbol_rename",
-        "summary": "Rename the symbols of functions, labels, data and variables.",
-        "annotations": {
-          "readOnlyHint": false,
-          "destructiveHint": false,
-          "idempotentHint": true,
-          "openWorldHint": false
-        }
-      },
-      {
         "name": "comment_set",
         "summary": "Set or clear the comments at addresses.",
         "annotations": {
@@ -59,8 +49,8 @@
     ]
   },
   "page": {
-    "returned": 5,
-    "total": 5,
+    "returned": 4,
+    "total": 4,
     "truncated": false
   }
 }

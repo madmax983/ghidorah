@@ -85,9 +85,7 @@ pub const SPEC: ToolSpec<Session> = ToolSpec {
     description: "Apply a C type or a prototype to an address, a function or a variable. \
                   Send signature with one C prototype for a function. \
                   Send type with C type text for a var: ID or for the data at an address. \
-                  A signature re-runs the analysis bands 800 and above, and data at an address re-runs the analysis from band 100. \
-                  Text that does not parse gives C_PARSE_ERROR with the line, the column and the expected tokens. \
-                  The name in the prototype does not rename the function.",
+                  Text that does not parse gives C_PARSE_ERROR.",
     args: ARGS,
     groups: &[Group {
         members: &["type", "signature"],

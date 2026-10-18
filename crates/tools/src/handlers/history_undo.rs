@@ -85,10 +85,8 @@ pub const SPEC: ToolSpec<Session> = ToolSpec {
     summary: "Undo or redo your committed edits in the history as new commits.",
     description: "Undo or redo your committed edits in the history as new commits. \
                   With no argument, the call reverts the most recent transaction of your session. \
-                  Send session * for every session, count for more transactions, or tx for one older transaction. \
-                  A selective undo gives CONFLICT when a later transaction changed the same facts. \
-                  Send redo true to apply undone transactions again, until a new edit ends the redo chain. \
-                  Send dry_run true to see the planned edits first.",
+                  Send session * for every session, count for more transactions, or tx for one transaction. \
+                  Send redo true to apply undone transactions again.",
     args: ARGS,
     output: OutputShape::Obj(FIELDS),
     annotations: Annotations {

@@ -175,9 +175,7 @@ pub const SPEC: ToolSpec<Session> = ToolSpec {
     title: "List the functions",
     summary: "List and filter the functions of a binary, and sort them by address, name, size or priority.",
     description: "List and filter the functions of a binary, and sort them by address, name, size or priority. \
-                  Each item gives the ID, the entry, the name, the size, the start reason, the confidence, the counts of callers and callees, and the caveats. \
                   The sort priority puts functions with risky imports, many references and strings first. \
-                  Each analysis run fixes the priority order, so names and visits do not change it. \
                   Send filter to narrow the list, and cursor for the next page.",
     args: ARGS,
     output: OutputShape::Obj(FIELDS),

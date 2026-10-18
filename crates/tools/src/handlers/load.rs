@@ -143,10 +143,9 @@ pub const SPEC: ToolSpec<Session> = ToolSpec {
     summary: "Load a binary for analysis: an ELF file under a root, a raw blob, the built-in demo or an open binary by its ID.",
     description: "Load a binary for analysis: an ELF file under a root, a raw blob, the built-in demo or an open binary by its ID. \
                   Send exactly one of path, builtin and binary_id. \
-                  A relative path starts at the first root of the server, and a path outside the roots gives PATH_OUTSIDE_ROOT. \
                   Send file_format raw and base for a blob of x86-64 code. \
                   The analysis runs after the load within max_steps. \
-                  The result gives the binary_id for later calls, and already_loaded tells if the binary is open already.",
+                  Use the binary_id of the result in later calls.",
     args: ARGS,
     groups: &[Group {
         members: &["path", "builtin", "binary_id"],

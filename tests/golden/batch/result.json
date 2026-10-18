@@ -1,0 +1,123 @@
+{"golden":"generator=batch_result version=1"}
+{
+  "ok": true,
+  "binary_id": "467a43b75d95c826",
+  "rev": 1,
+  "session": "cli",
+  "analysis": {
+    "state": "complete",
+    "rev": 1
+  },
+  "partial": false,
+  "data": {
+    "steps": [
+      {
+        "id": "s1",
+        "tool": "search",
+        "ok": true,
+        "chars": 540,
+        "fuel": 0,
+        "data": {
+          "items": [
+            {
+              "kind": "string",
+              "id": "str:0x2004",
+              "addr": "0x2004",
+              "text": {
+                "text": "usage: crackme <password>",
+                "hex": "75736167653a20637261636b6d65203c70617373776f72643e",
+                "len": 25,
+                "src": "binary"
+              },
+              "func": "fn:0x1080",
+              "extra": {
+                "ref_count": 1,
+                "funcs": [
+                  "fn:0x1080"
+                ]
+              },
+              "next": {
+                "tool": "xref_list",
+                "args": {
+                  "targets": [
+                    "str:0x2004"
+                  ]
+                },
+                "why": "List the references to the string."
+              }
+            }
+          ]
+        },
+        "page": {
+          "returned": 1,
+          "total": 1,
+          "truncated": false
+        }
+      },
+      {
+        "id": "s2",
+        "tool": "func_list",
+        "ok": true,
+        "chars": 934,
+        "fuel": 0,
+        "page": {
+          "returned": 3,
+          "total": 12,
+          "truncated": true,
+          "next_cursor": "01030019368873ebe2514a000101000000000000000200020000000000000000e011000000000000080d2038",
+          "hint": "Add filter.name, filter.min_confidence or filter.calls to narrow the list."
+        }
+      },
+      {
+        "id": "s3",
+        "tool": "calc",
+        "ok": true,
+        "chars": 542,
+        "fuel": 0,
+        "data": {
+          "value": "0x1090",
+          "unsigned": "4240",
+          "signed": "4240",
+          "views": {
+            "u8": "144",
+            "u16": "4240",
+            "u32": "4240",
+            "u64": "4240",
+            "i8": "-112",
+            "i16": "4240",
+            "i32": "4240",
+            "i64": "4240"
+          },
+          "address": {
+            "mapped": true,
+            "region": "seg:3",
+            "file_offset": "0x1090",
+            "func": {
+              "id": "fn:0x1080",
+              "name": {
+                "text": "main",
+                "hex": "6d61696e",
+                "len": 4,
+                "src": "binary"
+              }
+            }
+          }
+        },
+        "next": [
+          {
+            "tool": "addr_info",
+            "args": {
+              "target": "0x1090"
+            },
+            "why": "Tell what is at the address."
+          }
+        ]
+      }
+    ],
+    "budget_used": {
+      "chars": 1082,
+      "fuel": 0,
+      "steps": 3
+    }
+  }
+}

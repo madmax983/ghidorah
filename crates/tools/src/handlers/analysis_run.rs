@@ -182,11 +182,9 @@ pub const SPEC: ToolSpec<Session> = ToolSpec {
     title: "Run the analysis",
     summary: "Run or resume the analysis of a binary within a fuel budget.",
     description: "Run or resume the analysis of a binary within a fuel budget. \
-                  The run stops at a fixpoint or after max_steps work units. \
                   The state complete means that no analyzer has work. \
-                  The state budget_stopped means that reads see a partial set, so call analysis_run again while resume is true. \
-                  The state stale means that a re-analysis runs, and reads see the old set. \
-                  The result lists each analyzer with its priority band, its pending ranges and its runs, and the changed facts of the call.",
+                  With budget_stopped or stale, reads see a partial set, so call analysis_run again while resume is true. \
+                  The result lists the analyzers and the changed facts.",
     args: ARGS,
     output: OutputShape::Obj(FIELDS),
     annotations: Annotations::EDIT,

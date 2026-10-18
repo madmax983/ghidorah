@@ -61,6 +61,10 @@ pub const LINES: &[Line] = &[
         tools: &[],
     },
     Line {
+        text: "Global arguments of every tool: binary_id, format, fields, max_chars and session. List tools also take limit, cursor, count_only, shape and in.",
+        tools: &[],
+    },
+    Line {
         text: "batch_run runs up to 32 steps in one call. A step refers to an earlier step with {\"$ref\":\"s1\",\"ptr\":\"/data/items/*/id\"}. A batch with edits is one transaction.",
         tools: &["batch_run"],
     },

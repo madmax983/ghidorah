@@ -22,6 +22,7 @@ use ghidorah_db::{
 use ghidorah_json::Value;
 
 use super::Session;
+use super::batch::BatchTx;
 use crate::errors::{Candidate, ToolError};
 
 /// The projects settings of a session.
@@ -43,6 +44,7 @@ pub struct Store {
     pub(super) project: Option<Project>,
     pub(super) checkpoint: Option<Box<Program>>,
     pub(super) checkpoint_lines: usize,
+    pub(super) batch: Option<Box<BatchTx>>,
 }
 
 impl Store {
@@ -55,6 +57,7 @@ impl Store {
             project: None,
             checkpoint: Some(Box::new(program.clone())),
             checkpoint_lines: 0,
+            batch: None,
         }
     }
 
@@ -66,6 +69,7 @@ impl Store {
             project: Some(project),
             checkpoint: None,
             checkpoint_lines: 0,
+            batch: None,
         }
     }
 
@@ -162,6 +166,9 @@ impl Session {
         session: &str,
         edit: impl FnOnce(&mut Tx<'_>) -> Result<T, ToolError>,
     ) -> Result<(Commit, T), ToolError> {
+        if self.in_batch(id) {
+            return self.transact_batch(id, session, edit);
+        }
         let session = session_label(session)?;
         let source = self.config.source;
         let binary = self
@@ -215,6 +222,9 @@ impl Session {
             return Err(ToolError::new(ErrorCode::UnknownBinary));
         };
         ghidorah_db::meta::apply(&mut binary.program, line);
+        if let Some(batch) = store.batch.as_mut() {
+            batch.fold(line);
+        }
         if let Some(project) = store.project.as_mut().filter(|p| !p.is_read_only()) {
             project
                 .append(&Line::Meta(line.clone()), &binary.program)
@@ -225,7 +235,7 @@ impl Session {
     }
 
     /// Writes one journal line of a commit and records it in the history.
-    fn journal(&mut self, id: BinaryId, line: &TxLine) -> Result<(), ToolError> {
+    pub(super) fn journal(&mut self, id: BinaryId, line: &TxLine) -> Result<(), ToolError> {
         let (Some(binary), Some(store)) = (self.binaries.get(&id), self.stores.get_mut(&id)) else {
             return Err(ToolError::new(ErrorCode::UnknownBinary));
         };

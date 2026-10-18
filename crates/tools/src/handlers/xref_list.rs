@@ -135,9 +135,8 @@ pub const SPEC: ToolSpec<Session> = ToolSpec {
     title: "List cross-references",
     summary: "List the xrefs to or from targets, with call-graph depth, call-site context and argument values.",
     description: "List the xrefs to or from targets, with call-graph depth, call-site context and argument values. \
-                  Send targets with addresses, names or IDs. The target imp:puts gives every site of the import, and `via` tells the path: plt, got or direct. \
-                  Send direction from for the references out of a function body. \
-                  Send args true for the argument values of each call: an integer, a string, a function, an address or unknown. \
+                  The target imp:puts gives every site of the import. \
+                  Send direction from for the references out of a function, and args true for the argument values. \
                   When basis.complete is false, an unresolved indirect call can add callers.",
     args: ARGS,
     output: OutputShape::Obj(FIELDS),
