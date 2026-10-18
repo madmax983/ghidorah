@@ -80,7 +80,7 @@ fn create_needs_an_instruction_start_in_code() {
     let inside = call(
         &mut s,
         "func_edit",
-        r#"{"action":"create","target":"0x11d1"}"#,
+        r#"{"action":"create","target":"0x11e1"}"#,
     );
     assert_eq!(code(&inside), "INVALID_ARGUMENT", "{inside}");
     let data_addr = call(

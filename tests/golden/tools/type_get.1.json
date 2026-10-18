@@ -1,0 +1,52 @@
+{"golden":"generator=tools_examples version=1 fixture=crackme.gcc-O2 fixture_sha256=467a43b75d95c826daba8cb216d01d7fd386aa96c5ef5a95c2effffe1780de8f"}
+{
+  "ok": true,
+  "binary_id": "467a43b75d95c826",
+  "rev": 1,
+  "session": "cli",
+  "analysis": {
+    "state": "complete",
+    "rev": 1
+  },
+  "partial": false,
+  "data": {
+    "id": "t:sockaddr_in",
+    "name": "sockaddr_in",
+    "kind": "struct",
+    "c": "struct sockaddr_in { sa_family_t sin_family; in_port_t sin_port; struct in_addr sin_addr; unsigned char sin_zero[8]; };",
+    "size": 16,
+    "align": 4,
+    "layout": [
+      "+0x0 sa_family_t sin_family",
+      "+0x2 in_port_t sin_port",
+      "+0x4 struct in_addr sin_addr",
+      "+0x8 unsigned char sin_zero[8]"
+    ],
+    "fields": [
+      {
+        "name": "sin_family",
+        "offset": 0,
+        "size": 2,
+        "type": "sa_family_t"
+      },
+      {
+        "name": "sin_port",
+        "offset": 2,
+        "size": 2,
+        "type": "in_port_t"
+      },
+      {
+        "name": "sin_addr",
+        "offset": 4,
+        "size": 4,
+        "type": "struct in_addr"
+      },
+      {
+        "name": "sin_zero",
+        "offset": 8,
+        "size": 8,
+        "type": "unsigned char [8]"
+      }
+    ]
+  }
+}

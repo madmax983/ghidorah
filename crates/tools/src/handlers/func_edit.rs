@@ -25,8 +25,14 @@
 //!   (design Section 3.9) and `W_AGENT_OVERRIDE_CONFLICT` when the analysis disagrees with
 //!   the override.
 //! - `dry_run: true` gives the planned edits in `diff` and changes nothing.
+//!
+//! The `plan` module checks the inputs. The `edit` module holds the commit steps that
+//! `type_edit` also uses.
 
-use ghidorah_base::ErrorCode;
+pub(crate) mod edit;
+mod plan;
+
+use ghidorah_json::{Object, Value};
 
 use crate::args::Args;
 use crate::dispatch::{Ctx, Payload};
@@ -446,6 +452,15 @@ const fn example(args: &'static str, golden: &'static str) -> Example {
 }
 
 fn run(session: &mut Session, args: &Args, ctx: &mut Ctx) -> Result<Payload, ToolError> {
-    let _ = (session, args, ctx);
-    Err(ToolError::new(ErrorCode::InternalError))
+    let p = &session.bound(&ctx.frame)?.program;
+    crate::handlers::func_sections::x86_only(p)?;
+    let plan = plan::Plan::of(p, args)?;
+    let focus = plan.focus(p);
+    let out = edit::run(session, args, ctx, focus, |tx| plan.apply(tx, args))?;
+    let mut result = Object::new();
+    result.push("action", Value::from(args.action().unwrap_or_default()));
+    result.push("target", Value::from(plan.target()));
+    result.push("rev", Value::from(out.rev));
+    result.push("analysis", edit::analysis(out.report, ctx));
+    Ok(Payload::Object(result))
 }

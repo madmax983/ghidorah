@@ -47,9 +47,16 @@ pub fn arg_value(p: &Program, v: &ArgValue, caps: Caps) -> Value {
     }
 }
 
-/// Gives the parameter names of the callee at `to`: the Tier-0 prototype of its import or of
-/// its name.
+/// Gives the parameter names of the callee at `to`. The signature of its function comes
+/// first (design Section 9.5), then the Tier-0 prototype of its import or of its name.
 fn param_names(p: &Program, to: Address) -> Vec<Option<String>> {
+    let sig = p
+        .func(ghidorah_base::FuncId(to))
+        .and_then(|v| v.sig)
+        .and_then(|s| p.types().sig(s.value));
+    if let Some(sig) = sig {
+        return sig.params.iter().map(|q| q.name.clone()).collect();
+    }
     let import = p
         .imports()
         .values()

@@ -8,8 +8,8 @@
 //! ```
 //!
 //! - `facts` holds the tables of both layers with their counters, the note store, the SHA-256
-//!   of the input and the types: their number, and the C texts that added types after the
-//!   prelude.
+//!   of the input and the types. The types are a number of types, or the number and the C
+//!   texts that added types after the prelude.
 //! - `journal_lines` is the number of journal lines that the snapshot covers. Replay applies
 //!   only the lines after them.
 //! - `analysis_inputs_hash` is the inputs hash of the last analysis run, or `null`.
