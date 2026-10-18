@@ -12,7 +12,8 @@
 //! | `conflicts` | `JumpTables` | `W_AGENT_OVERRIDE_CONFLICT` with the analysis value |
 //!
 //! A record whose owner is not in the set does not go into the set. The agent noreturn flag
-//! of the base layer also gives `W_AGENT_OVERRIDE_CONFLICT` when the flow disagrees.
+//! of the base layer also gives `W_AGENT_OVERRIDE_CONFLICT` when the flow disagrees. A call
+//! with an unsafe fall-through gives `W_NORETURN_SUSPECT` (see `noreturn::suspects`).
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -319,6 +320,7 @@ pub(crate) fn decorate(program: &Program, work: &Work, entry: u64, func: &mut Fu
             Some(&remedy),
         ));
     }
+    caveats.extend(crate::analyzers::noreturn::suspects(program, work, entry));
     func.caveats.extend(caveats);
 }
 

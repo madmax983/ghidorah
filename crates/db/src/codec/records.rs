@@ -255,15 +255,17 @@ impl Json for NoteSet {
     }
 }
 
-/// The member names of a note.
-const NOTE_NAMES: [&str; 13] = [
-    "id", "kind", "text", "at", "func", "status", "tags", "evidence", "claims", "set", "src",
-    "session", "rev",
+/// The member names of a note. The member `lift_ver` is optional.
+const NOTE_NAMES: [&str; 14] = [
+    "id", "kind", "text", "at", "func", "status", "tags", "evidence", "lift_ver", "claims", "set",
+    "src", "session", "rev",
 ];
 
 impl Json for Note {
+    /// Gives the JSON form. A note with no `lift_ver` has no member for it. So a note without
+    /// `op:` evidence keeps the form of format version 1.
     fn enc(&self) -> Value {
-        obj([
+        let mut members = vec![
             ("id", self.id.enc()),
             ("kind", self.kind.enc()),
             ("text", self.text.enc()),
@@ -272,12 +274,18 @@ impl Json for Note {
             ("status", self.status.enc()),
             ("tags", self.tags.enc()),
             ("evidence", self.evidence.enc()),
+        ];
+        if let Some(ver) = self.lift_ver {
+            members.push(("lift_ver", ver.enc()));
+        }
+        members.extend([
             ("claims", self.claims.enc()),
             ("set", self.set.enc()),
             ("src", self.src.enc()),
             ("session", self.session.enc()),
             ("rev", self.rev.enc()),
-        ])
+        ]);
+        Value::object(members)
     }
 
     fn dec(v: &Value) -> Result<Self, CodecError> {
@@ -291,7 +299,7 @@ impl Json for Note {
             status: o.get("status")?,
             tags: o.get("tags")?,
             evidence: o.get("evidence")?,
-            lift_ver: None,
+            lift_ver: o.opt::<Option<u32>>("lift_ver")?.flatten(),
             claims: o.get("claims")?,
             set: o.get("set")?,
             src: o.get("src")?,

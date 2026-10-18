@@ -20,6 +20,8 @@
 //!
 //! - Only a function that an agent or a user made can go. Analysis finds the other functions
 //!   again, so `delete` of such a function gives `NOT_FOUND`.
+//! - A `create` in the body of another function gives `BODY_OVERLAP`. The candidate names the
+//!   owner.
 //! - A re-analysis that stops on the fuel gives `W_ANALYSIS_STALE`. `analysis_run` resumes it.
 //! - A complete re-analysis gives `W_FACT_ORPHANED` for each agent fact that lost its anchor
 //!   (design Section 3.9) and `W_AGENT_OVERRIDE_CONFLICT` when the analysis disagrees with

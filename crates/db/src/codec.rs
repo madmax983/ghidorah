@@ -159,6 +159,14 @@ impl<'a> Obj<'a> {
         T::dec(self.member(name)?).map_err(|e| e.at(name))
     }
 
+    /// Reads the optional member `name`. A missing member gives `None`.
+    pub(crate) fn opt<T: Json>(self, name: &str) -> Result<Option<T>, CodecError> {
+        self.value
+            .get(name)
+            .map(|v| T::dec(v).map_err(|e| e.at(name)))
+            .transpose()
+    }
+
     /// Reads the member `name` with `read`.
     pub(crate) fn with<T>(
         self,

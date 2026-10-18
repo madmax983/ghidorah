@@ -60,8 +60,10 @@ fn var_id(section: &Value, name: &str) -> String {
         .get("vars")
         .and_then(Value::as_array)
         .and_then(|vars| vars.iter().find(|v| text_at(v, "/name") == name))
-        .map(|v| text_at(v, "/id"))
-        .unwrap_or_else(|| panic!("no variable {name}: {section}"))
+        .map_or_else(
+            || panic!("no variable {name}: {section}"),
+            |v| text_at(v, "/id"),
+        )
 }
 
 #[test]

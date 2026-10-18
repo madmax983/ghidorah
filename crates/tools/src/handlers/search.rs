@@ -26,6 +26,8 @@
 //! comes after a set record, so the cursor pages the members. String items carry
 //! `ref_count`, at most 3 `funcs` and a `next` call to `xref_list`. Name and byte searches
 //! use fuel. When the fuel runs out, `page.total_lower_bound` replaces `page.total`.
+//!
+//! A note item whose `op:` evidence has another lifter version gives one `W_STALE_OP_ID`.
 
 mod filter;
 mod kinds;
@@ -456,6 +458,9 @@ fn run(session: &mut Session, args: &Args, ctx: &mut Ctx) -> Result<Payload, Too
         }
     }
     namer.finish(ctx);
+    if let Some(warning) = kinds::stale_ops(p, &items.list) {
+        ctx.warn(warning);
+    }
     let count = u64::try_from(items.list.len()).unwrap_or(u64::MAX);
     Ok(Payload::List(ListPayload {
         items: items.list,
