@@ -1,6 +1,6 @@
-//! The register checks of WP-22a, WP-22b, WP-24 and WP-25: the shipped registry holds the
-//! memory, override, type, claim and batch tools in catalog order, and `session_brief` lists
-//! the orphans of `ghidorah_analysis::orphans::find`.
+//! The register checks of WP-22a, WP-22b, WP-24 and WP-25. The shipped registry holds the
+//! memory, override, type, claim and batch tools in catalog order. `session_brief` lists the
+//! orphans of `ghidorah_analysis::orphans::find`.
 
 use ghidorah_base::{Address, BinaryId};
 use ghidorah_db::{Edit, SymKind};

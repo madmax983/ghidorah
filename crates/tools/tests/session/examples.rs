@@ -18,9 +18,9 @@ use crate::support::{
 /// The tools whose examples need one committed edit in the session `mcp-1`.
 const NEEDS_EDIT: &[&str] = &["history_list", "history_undo"];
 
-/// The tools whose examples need the facts of the analysis engine. They are the read tools of
-/// WP-17b, the memory tools of WP-22a, the override and type tools of WP-22b, the claim tool
-/// of WP-24 and the batch tool of WP-25.
+/// The tools whose examples need the facts of the analysis engine: the read tools of WP-17b
+/// and the memory tools of WP-22a. The override and type tools of WP-22b, the claim tool of
+/// WP-24 and the batch tool of WP-25 also need them.
 const NEEDS_ANALYSIS: &[&str] = &[
     "binary_survey",
     "func_list",
