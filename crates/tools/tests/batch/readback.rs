@@ -159,9 +159,11 @@ fn run_row(steps_text: &str) {
 
 /// Makes sure that every step entry of `envelope` passes.
 fn check_all(envelope: &Value, what: &str) {
-    if envelope.get("ok") != Some(&Value::Bool(true)) {
-        panic!("{what}: {envelope}");
-    }
+    assert_eq!(
+        envelope.get("ok"),
+        Some(&Value::Bool(true)),
+        "{what}: {envelope}"
+    );
     for entry in steps(envelope) {
         assert_eq!(entry.get("ok"), Some(&Value::Bool(true)), "{what}: {entry}");
     }
@@ -188,14 +190,13 @@ fn ac_206_read_back() {
         r#"{"steps":[{"id":"r","tool":"xref_list","args":{"targets":["0x2004"]}}]}"#,
     );
     check_all(&read, "remove_ref");
-    let sources: Vec<String> = read
+    let agent = read
         .pointer("/data/steps/0/data/items")
         .and_then(Value::as_array)
         .unwrap_or_default()
         .iter()
-        .map(|i| text_at(i, "/source"))
-        .collect();
-    assert!(!sources.contains(&"agent".to_owned()), "{read}");
+        .any(|i| text_at(i, "/source") == "agent");
+    assert!(!agent, "{read}");
     edits.insert("RemoveRef");
 
     let mut s = demo();

@@ -16,6 +16,7 @@ use ghidorah_json::{Object, Value};
 
 use super::guards::Guard;
 use super::refs::{self, Reference};
+use super::shapes;
 use super::{
     DESTRUCTIVE, MAX_STEP_ID, NOT_IN_BATCH, OnError, STEP_GLOBALS, WHY_DIRECT, WHY_LIMIT, WHY_TOP,
 };
@@ -389,7 +390,7 @@ fn check_step(
             .ok_or_else(|| ToolError::new(ErrorCode::BadReference))?;
         refs::typed(r, source.tool, step)?;
         limit_check(r, source, raw)?;
-        let sample = r.spec.map_or(Value::Null, |s| refs::sample(&s.kind));
+        let sample = r.spec.map_or(Value::Null, |s| shapes::sample(&s.kind));
         refs::set_at(&mut test, &r.at, sample);
     }
     let coerce = |kind: &crate::spec::ArgKind, value: &Value| crate::coerce::lenient(kind, value);

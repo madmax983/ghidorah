@@ -476,10 +476,10 @@ fn agent_texts(value: &Value, out: &mut Vec<String>) {
     match value {
         Value::Object(object) => {
             for (key, member) in object.iter() {
-                if matches!(key, "message" | "hint" | "why") {
-                    if let Some(text) = member.as_str() {
-                        out.push(text.to_owned());
-                    }
+                if matches!(key, "message" | "hint" | "why")
+                    && let Some(text) = member.as_str()
+                {
+                    out.push(text.to_owned());
                 }
                 agent_texts(member, out);
             }

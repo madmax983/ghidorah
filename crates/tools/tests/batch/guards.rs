@@ -60,7 +60,7 @@ fn guard_ops() {
         r#"{"ptr":"/data","op":"eq"}"#,
         r#"{"op":"exists"}"#,
         r#"{"ptr":"/data","op":"len_eq","value":"x"}"#,
-        r#"[]"#,
+        "[]",
     ];
     for text in bad {
         assert!(Guard::parse(&json(text)).is_err(), "{text}");

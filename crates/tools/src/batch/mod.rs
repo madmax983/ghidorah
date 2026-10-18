@@ -10,6 +10,7 @@
 //! |---|---|---|
 //! | `validate` | The checks of the whole batch before a step runs | Section 11.3 |
 //! | `refs` | References: their places, their types and their values | Sections 11.2, 11.3 |
+//! | `shapes` | The output shapes of a step envelope and the sample argument values | Section 11.3 |
 //! | `exec` | The run of the steps, the transaction and the result | Sections 11.4, 11.6 |
 //! | [`guards`] | The `expect` guards and the `claim` guards | Section 11.2 |
 //! | `budget` | The shares of `max_chars`, the fuel and the resume bindings | Section 11.5 |
@@ -34,11 +35,13 @@ mod budget;
 mod exec;
 pub mod guards;
 mod refs;
+mod shapes;
 mod validate;
 
 pub use exec::run;
 pub use guards::{Guard, GuardOp, OPS};
-pub use refs::{Part, Reference, Typed, sample, sample_id};
+pub use refs::{Part, Reference};
+pub use shapes::{Typed, sample, sample_id};
 pub use validate::{Binding, Plan, Resume, Step, check, plan};
 
 /// The largest number of steps in one batch.
