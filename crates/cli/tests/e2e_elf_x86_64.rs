@@ -7,8 +7,9 @@
 //! `analysis_run`, `history_list` and a dry run of `history_undo` (version 3).
 //!
 //! Version 6 adds `func_get include decomp`. Version 4 (WP-22a) adds the edits
-//! `symbol_rename`, `comment_set` and `note_write`, and a `session_brief`. Later WPs add client
-//! lines and bless the server lines again with `GHIDORAH_BLESS=1`.
+//! `symbol_rename`, `comment_set` and `note_write`, and a `session_brief`. WP-22b adds
+//! `func_edit set_call_targets`, a prototype in `type_edit` and `type_get`. Later WPs add
+//! client lines and bless the server lines again with `GHIDORAH_BLESS=1`.
 
 #![allow(
     clippy::expect_used,
@@ -45,7 +46,7 @@ fn text<'a>(reply: &'a Value, pointer: &str) -> Option<&'a str> {
 fn e2e_elf_x86_64() {
     let clients = clients("e2e");
     assert!(
-        clients.len() >= 16,
+        clients.len() >= 19,
         "the transcript has the handshake, tools/list and the tool calls"
     );
     let projects = tmp("e2e_projects");
@@ -118,9 +119,9 @@ fn e2e_elf_x86_64() {
     check_edits(&steps);
 }
 
-/// Checks the replies of the edits of WP-22a and of the brief (ids 12 to 15).
+/// Checks the replies of the edits of WP-22a and WP-22b (ids 12 to 18) and of the brief.
 fn check_edits(steps: &[(crate::common::transcript::ClientLine, Vec<String>)]) {
-    for id in 12..=15 {
+    for id in 12..=18 {
         let edit = reply(steps, id);
         assert_eq!(
             edit.pointer("/result/structuredContent/ok"),
@@ -147,4 +148,24 @@ fn check_edits(steps: &[(crate::common::transcript::ClientLine, Vec<String>)]) {
         .and_then(Value::as_array)
         .map_or(0, <[Value]>::len);
     assert_eq!(edits, 3, "the rename, the comment and the note: {brief}");
+    let targets = reply(steps, 16);
+    assert_eq!(
+        text(&targets, "/data/analysis/state"),
+        Some("complete"),
+        "func_edit runs the analysis again: {targets}"
+    );
+    let typed = reply(steps, 17);
+    assert_eq!(
+        text(&typed, "/data/applied/new"),
+        Some("int (const char *input)"),
+        "{typed}"
+    );
+    let layout = reply(steps, 18);
+    assert_eq!(
+        layout
+            .pointer("/result/structuredContent/data/size")
+            .and_then(Value::as_u64),
+        Some(16),
+        "{layout}"
+    );
 }

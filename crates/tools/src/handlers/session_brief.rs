@@ -16,7 +16,7 @@
 //! | `recent_edits` | the newest changed facts of the history |
 //! | `changed_since_last_brief` | `{ since_rev, count, by_kind }`: the facts that changed after the last brief of the session |
 //! | `weak_names` | the functions of the highest priority that still have a default name |
-//! | `orphans` | the agent facts whose function no longer exists |
+//! | `orphans` | the agent facts that lost their anchor after a complete analysis: `{ kind, at, id }` |
 //! | `truncated` | `true` when the budget cut a list |
 //!
 //! Each list holds at most [`MAX_ROWS`] rows. The handler cuts all lists to one row cap until
@@ -280,7 +280,7 @@ fn hints(ctx: &mut Ctx, facts: &Facts, bound: bool) {
         let args = with_binary(vec![("kind", Value::from("note")), ("note_filter", filter)]);
         calls.push(Call::new("search", args, WHY_NOTES));
     }
-    if let Some(o) = facts.orphans.first() {
+    if let Some(o) = facts.orphans.iter().find(|o| o.lost_function) {
         let args = with_binary(vec![
             ("action", Value::from("create")),
             ("target", fs::addr(o.at)),

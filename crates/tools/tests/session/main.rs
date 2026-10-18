@@ -20,6 +20,7 @@ mod cursor;
 mod examples;
 mod load;
 mod profiles;
+mod registered;
 mod resolve;
 mod search;
 mod session;

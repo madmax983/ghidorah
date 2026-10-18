@@ -8,29 +8,31 @@
 //! | weak names | the frozen priority order of design Section 7.11 |
 //! | orphans | address, then kind, then ID |
 //!
-//! An orphan is an agent or user fact whose function does not exist. It is a function name at
-//! an address with no function, or a variable fact of a function that is not there.
+//! The orphans come from [`ghidorah_analysis::orphans::find`], so the brief lists the same facts
+//! that get `W_FACT_ORPHANED`. The brief reads them only on a complete analysis. A stale
+//! analysis can lack a new agent function, and then that function looks like an orphan.
 
 use ghidorah_analysis::analyzers::metrics;
-use ghidorah_base::{FuncId, Rev};
-use ghidorah_db::{
-    ChangeKind, History, Note, NoteKind, NoteStatus, Program, Row, RowQuery, Source, SymKind,
-};
+use ghidorah_base::Rev;
+use ghidorah_db::{ChangeKind, History, Note, NoteKind, NoteStatus, Program, Row, RowQuery};
 use ghidorah_json::{Object, Value};
 
 use super::{MAX_ROWS, TEXT_CHARS};
+use crate::envelope::AnalysisState;
 use crate::handlers::func_sections::{addr, safe};
 use crate::session::OpenBinary;
 
 /// One orphaned fact.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) struct Orphan {
-    /// The address of the fact.
+    /// The address where the fact stays.
     pub at: ghidorah_base::Address,
-    /// The kind: `name` or `var`.
+    /// The kind: `function`, `variable`, `name` or `reference`.
     pub kind: &'static str,
-    /// The ID of the fact: the address text or the `var:` ID.
+    /// The ID of the fact: a `fn:`, `var:` or `ref:` ID, or the address of a name.
     pub id: String,
+    /// `true` when the fact lost its function, so `func_edit create` at `at` puts it back.
+    pub lost_function: bool,
 }
 
 /// The facts of one brief at full length.
@@ -160,37 +162,22 @@ fn changes(history: &History, p: &Program, since: Rev) -> Vec<Row> {
     rows
 }
 
-/// Tells if a fact source is an agent or a user.
-const fn is_agent(source: Source) -> bool {
-    matches!(source, Source::Agent | Source::User)
-}
-
-/// Gives the orphaned facts of `p` in order.
-fn orphans(p: &Program) -> Vec<Orphan> {
-    let mut out = Vec::new();
-    for s in p.base().symbols().iter() {
-        if s.kind == SymKind::Function
-            && is_agent(s.name.source)
-            && p.func(FuncId(s.addr)).is_none()
-        {
-            out.push(Orphan {
-                at: s.addr,
-                kind: "name",
-                id: s.addr.to_string(),
-            });
-        }
+/// Gives the orphaned facts of `b` in order: none while the analysis is not complete.
+fn orphans(b: &OpenBinary) -> Vec<Orphan> {
+    if b.analysis
+        .is_none_or(|a| a.state != AnalysisState::Complete)
+    {
+        return Vec::new();
     }
-    for (var, fact) in p.base().vars().iter() {
-        let agent = fact.name.as_ref().is_some_and(|f| is_agent(f.source))
-            || fact.ty.as_ref().is_some_and(|f| is_agent(f.source));
-        if agent && p.func(var.func).is_none() {
-            out.push(Orphan {
-                at: var.func.0,
-                kind: "var",
-                id: var.to_string(),
-            });
-        }
-    }
+    let mut out: Vec<Orphan> = ghidorah_analysis::orphans::find(&b.program)
+        .iter()
+        .map(|o| Orphan {
+            at: o.at,
+            kind: o.kind.name(),
+            id: o.id(),
+            lost_function: o.lost_function(),
+        })
+        .collect();
     out.sort();
     out
 }
@@ -276,7 +263,7 @@ impl Facts {
             edits: changes(history, p, Rev(0)).iter().map(edit_row).collect(),
             changed: (since.0, by_kind),
             weak,
-            orphans: orphans(p),
+            orphans: orphans(b),
         }
     }
 

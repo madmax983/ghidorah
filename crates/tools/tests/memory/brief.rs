@@ -131,7 +131,7 @@ fn ac_155_session_brief() {
             "{brief}"
         );
         assert!(
-            kinds.contains(&("var".to_owned(), "0x1088".to_owned())),
+            kinds.contains(&("variable".to_owned(), "0x1088".to_owned())),
             "{brief}"
         );
         let weak = list(&brief, "weak_names");

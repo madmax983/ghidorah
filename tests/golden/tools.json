@@ -1273,6 +1273,86 @@
     }
   },
   {
+    "name": "type_get",
+    "title": "Get a C type",
+    "description": "Get a C type with its definition and its layout: size, alignment and field offsets. Send target with a t: ID or a type name, or send c with C type text. The text c can name the prelude types, for example struct sockaddr_in, size_t and FILE. The layout follows the natural rules of the data model of the binary, with no bit-fields. A type with no size, for example void, has size null.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "target": {
+          "type": "string",
+          "maxLength": 1024,
+          "description": "The type: a t: ID or a type name, for example t:sockaddr_in or size_t."
+        },
+        "c": {
+          "type": "string",
+          "maxLength": 4000,
+          "description": "The C type text, for example struct sockaddr_in *."
+        },
+        "include": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "decl",
+              "layout"
+            ],
+            "description": "One part of the result."
+          },
+          "maxItems": 2,
+          "description": "The parts of the result: decl for the C definition, layout for the fields.",
+          "default": [
+            "decl",
+            "layout"
+          ]
+        },
+        "binary_id": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "The ID of the target binary. Leave it out when exactly one binary is open."
+        },
+        "format": {
+          "type": "string",
+          "enum": [
+            "concise",
+            "detailed"
+          ],
+          "description": "The detail level. The detailed form adds provenance, coercion details and sizes.",
+          "default": "concise"
+        },
+        "fields": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 256,
+            "description": "A JSON pointer."
+          },
+          "maxItems": 32,
+          "description": "JSON pointers into data. The result keeps only these fields."
+        },
+        "max_chars": {
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 60000,
+          "description": "The largest result in characters. The count includes every copy of the result."
+        },
+        "session": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "The session label for provenance, filters and the undo scope."
+        }
+      },
+      "additionalProperties": false
+    },
+    "annotations": {
+      "title": "Get a C type",
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
     "name": "history_list",
     "title": "List the history",
     "description": "List the history of edits since a revision, and the analysis runs. The rows come from the journal of the project, so old rows stay. By default each changed fact gives one row with its last rev and session. Send coalesce false for one row per edit with its transaction and undone_by. Send session to keep one session, or exclude_session to leave one out. Call it after a context reset to see what changed since your last rev.",
@@ -2028,6 +2108,305 @@
       "readOnlyHint": false,
       "destructiveHint": false,
       "idempotentHint": false,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "func_edit",
+    "title": "Edit functions and overrides",
+    "description": "Create or delete functions and override the analysis: noreturn, jump-table targets, flow, indirect call targets and references. Each action commits one agent fact and runs the re-analysis within max_steps. When the fuel stops the re-analysis, reads show the old analysis with partial true until analysis_run completes it. The analysis never replaces an override, and a function with a disagreement gets W_AGENT_OVERRIDE_CONFLICT. An agent fact that loses its function stays at its address with W_FACT_ORPHANED. The actions delete and remove_ref remove only the facts of an agent or a user.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "create",
+            "delete",
+            "set_noreturn",
+            "set_jumptable",
+            "set_flow",
+            "set_call_targets",
+            "add_ref",
+            "remove_ref"
+          ],
+          "description": "The change to make."
+        },
+        "target": {
+          "type": [
+            "integer",
+            "string"
+          ],
+          "description": "The function: an entry address, a name or a fn: ID."
+        },
+        "at": {
+          "type": [
+            "integer",
+            "string"
+          ],
+          "description": "The instruction of the override: an indirect jump, an indirect call or a branch."
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 1024,
+          "description": "The name of the new function."
+        },
+        "noreturn": {
+          "type": "boolean",
+          "description": "The value true marks a function that does not return."
+        },
+        "targets": {
+          "type": "array",
+          "items": {
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
+          "maxItems": 1024,
+          "description": "The case addresses of a jump table, or the fn: and imp: IDs of an indirect call."
+        },
+        "flow": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "fallthrough",
+                "call_as_jump",
+                "jump_as_call",
+                "clear"
+              ],
+              "description": "The new flow of the instruction. The kind clear removes the override."
+            },
+            "to": {
+              "type": [
+                "integer",
+                "string"
+              ],
+              "description": "The next address of the kind fallthrough."
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "additionalProperties": false,
+          "description": "The flow override: a kind, and the next address of the kind fallthrough."
+        },
+        "ref": {
+          "type": "object",
+          "properties": {
+            "from": {
+              "type": [
+                "integer",
+                "string"
+              ],
+              "description": "The source: the start of an instruction or of a data definition."
+            },
+            "to": {
+              "type": [
+                "integer",
+                "string"
+              ],
+              "description": "The destination address."
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "unconditional_call",
+                "conditional_call",
+                "computed_call",
+                "unconditional_jump",
+                "conditional_jump",
+                "computed_jump",
+                "data",
+                "read",
+                "write",
+                "read_write",
+                "param"
+              ],
+              "description": "The reference type, for example unconditional_call or read."
+            }
+          },
+          "required": [
+            "from",
+            "to",
+            "kind"
+          ],
+          "additionalProperties": false,
+          "description": "The reference: its source, its destination and its type."
+        },
+        "binary_id": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "The ID of the target binary. Leave it out when exactly one binary is open."
+        },
+        "format": {
+          "type": "string",
+          "enum": [
+            "concise",
+            "detailed"
+          ],
+          "description": "The detail level. The detailed form adds provenance, coercion details and sizes.",
+          "default": "concise"
+        },
+        "fields": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 256,
+            "description": "A JSON pointer."
+          },
+          "maxItems": 32,
+          "description": "JSON pointers into data. The result keeps only these fields."
+        },
+        "max_chars": {
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 60000,
+          "description": "The largest result in characters. The count includes every copy of the result."
+        },
+        "session": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "The session label for provenance, filters and the undo scope."
+        },
+        "expected_rev": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "The rev that the call expects. Another rev gives CONFLICT."
+        },
+        "dry_run": {
+          "type": "boolean",
+          "description": "Return the planned edit list with no commit."
+        },
+        "force": {
+          "type": "boolean",
+          "description": "Allow an agent write over an imported fact. The journal records the force."
+        },
+        "max_steps": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000000000,
+          "description": "The fuel of the call in work units."
+        },
+        "max_ms": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3600000,
+          "description": "A wall-clock guard in milliseconds. Fuel stays the main stop rule."
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "title": "Edit functions and overrides",
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "type_edit",
+    "title": "Apply a C type",
+    "description": "Apply a C type or a prototype to an address, a function or a variable. Send signature with one C prototype for a function. Send type with C type text for a var: ID or for the data at an address. A signature re-runs the analysis bands 800 and above, and data at an address re-runs the analysis from band 100. Text that does not parse gives C_PARSE_ERROR with the line, the column and the expected tokens. The name in the prototype does not rename the function.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "target": {
+          "type": [
+            "integer",
+            "string"
+          ],
+          "description": "The function, the variable or the data: an address, a name, a fn: ID or a var: ID."
+        },
+        "type": {
+          "type": "string",
+          "maxLength": 4000,
+          "description": "The C type text of a variable or of the data at an address, for example char [16]."
+        },
+        "signature": {
+          "type": "string",
+          "maxLength": 4000,
+          "description": "One C prototype of a function, for example int check(const char *input)."
+        },
+        "binary_id": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "The ID of the target binary. Leave it out when exactly one binary is open."
+        },
+        "format": {
+          "type": "string",
+          "enum": [
+            "concise",
+            "detailed"
+          ],
+          "description": "The detail level. The detailed form adds provenance, coercion details and sizes.",
+          "default": "concise"
+        },
+        "fields": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 256,
+            "description": "A JSON pointer."
+          },
+          "maxItems": 32,
+          "description": "JSON pointers into data. The result keeps only these fields."
+        },
+        "max_chars": {
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 60000,
+          "description": "The largest result in characters. The count includes every copy of the result."
+        },
+        "session": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "The session label for provenance, filters and the undo scope."
+        },
+        "expected_rev": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "The rev that the call expects. Another rev gives CONFLICT."
+        },
+        "dry_run": {
+          "type": "boolean",
+          "description": "Return the planned edit list with no commit."
+        },
+        "force": {
+          "type": "boolean",
+          "description": "Allow an agent write over an imported fact. The journal records the force."
+        },
+        "max_steps": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000000000,
+          "description": "The fuel of the call in work units."
+        },
+        "max_ms": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3600000,
+          "description": "A wall-clock guard in milliseconds. Fuel stays the main stop rule."
+        }
+      },
+      "required": [
+        "target"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "title": "Apply a C type",
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true,
       "openWorldHint": false
     }
   },

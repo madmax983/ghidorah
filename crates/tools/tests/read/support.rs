@@ -25,12 +25,15 @@ pub static READ: &[&ToolSpec<Session>] = &[
     &handlers::mem_read::SPEC,
     &handlers::addr_info::SPEC,
     &handlers::calc::SPEC,
+    &handlers::type_get::SPEC,
     &handlers::history_list::SPEC,
     &handlers::session_brief::SPEC,
     &handlers::tool_search::SPEC,
     &handlers::symbol_rename::SPEC,
     &handlers::comment_set::SPEC,
     &handlers::note_write::SPEC,
+    &handlers::func_edit::SPEC,
+    &handlers::type_edit::SPEC,
     &handlers::history_undo::SPEC,
 ];
 
