@@ -1,9 +1,9 @@
-//! The registry-wide rules over the full registry: the shipped tools and `batch_run`
+//! The registry-wide rules over the full registry: the shipped tools, `batch_run` included
 //! (AC-024, AC-129a to AC-129f, AC-130a, AC-131a, AC-131b, AC-132a, AC-132b, AC-137,
 //! AC-143, AC-221, AC-222).
 //!
 //! The tests of WP-13a and WP-13b check these rules on their registries. These tests check
-//! them on every tool of the catalog that this branch holds.
+//! them on every shipped tool.
 
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -20,8 +20,8 @@ use ghidorah_tools::{
 
 use crate::support::{call, call_value, chars, demo, full_registry, json, root, text_at};
 
-/// The characters that the catalog keeps free for the tools of later WPs: `fact_check` and
-/// `func_similar` when they are not in the registry yet.
+/// The characters that the catalog keeps free for a tool of a later WP: `func_similar` when
+/// it is not in the registry yet.
 const LATER_TOOL_CHARS: u64 = 1_200;
 
 /// Gives the `tools/list` size of `profile` over `registry`.
@@ -33,10 +33,7 @@ fn catalog_chars(registry: &Registry<Session>, profile: Profile) -> u64 {
 #[test]
 fn ac_131a_full_catalog_headroom() {
     let registry = full_registry();
-    let later = ["fact_check", "func_similar"]
-        .iter()
-        .filter(|t| registry.get(t).is_none())
-        .count() as u64;
+    let later = u64::from(registry.get("func_similar").is_none());
     let size = catalog_chars(&registry, Profile::Full);
     assert!(
         size + later * LATER_TOOL_CHARS <= MAX_FULL_CHARS as u64,

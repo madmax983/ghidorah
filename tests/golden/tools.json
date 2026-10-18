@@ -1314,5 +1314,129 @@
       "idempotentHint": false,
       "openWorldHint": false
     }
+  },
+  {
+    "name": "batch_run",
+    "title": "Run a batch of steps",
+    "description": "Run up to 32 dependent tool steps in one batch call, with references, guards and one transaction for edits. A step argument {\"$ref\":\"s1\",\"ptr\":\"/data/items/*/id\"} takes values of an earlier step. Only the steps in return send their data. A batch with edits commits once with one rev, or rolls back.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "steps": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "tool": {
+                "type": "string"
+              },
+              "args": {},
+              "expect": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "ptr": {
+                      "type": "string"
+                    },
+                    "op": {
+                      "enum": [
+                        "eq",
+                        "ne",
+                        "gt",
+                        "ge",
+                        "lt",
+                        "le",
+                        "contains",
+                        "glob",
+                        "len_eq",
+                        "len_gt",
+                        "exists"
+                      ]
+                    },
+                    "value": {}
+                  }
+                },
+                "maxItems": 8
+              },
+              "claim": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "rel": {
+                      "type": "string"
+                    },
+                    "args": {
+                      "type": "array",
+                      "items": {},
+                      "maxItems": 4
+                    }
+                  }
+                },
+                "maxItems": 8
+              }
+            }
+          },
+          "maxItems": 32
+        },
+        "return": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 32
+        },
+        "on_error": {
+          "enum": [
+            "stop",
+            "continue"
+          ]
+        },
+        "label": {
+          "type": "string"
+        },
+        "resume": {
+          "type": "object",
+          "properties": {
+            "from_step": {
+              "type": "string"
+            },
+            "bindings": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "step": {
+                    "type": "string"
+                  },
+                  "ptr": {
+                    "type": "string"
+                  },
+                  "value": {}
+                }
+              },
+              "maxItems": 64
+            }
+          }
+        },
+        "binary_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "steps"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false
+    }
   }
 ]

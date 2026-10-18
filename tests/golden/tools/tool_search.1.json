@@ -55,12 +55,22 @@
           "idempotentHint": true,
           "openWorldHint": false
         }
+      },
+      {
+        "name": "batch_run",
+        "summary": "Run up to 32 dependent tool steps in one batch call, with references, guards and one transaction for edits.",
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": false,
+          "idempotentHint": false,
+          "openWorldHint": false
+        }
       }
     ]
   },
   "page": {
-    "returned": 5,
-    "total": 5,
+    "returned": 6,
+    "total": 6,
     "truncated": false
   }
 }

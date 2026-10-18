@@ -9,8 +9,10 @@
 //! Version 6 adds `func_get include decomp`. Version 4 (WP-22a) adds the edits
 //! `symbol_rename`, `comment_set` and `note_write`, and a `session_brief`. WP-22b adds
 //! `func_edit set_call_targets`, a prototype in `type_edit` and `type_get`. WP-24 adds a
-//! `fact_check` call with two claims and one why tree. Later WPs add client lines and bless
-//! the server lines again with `GHIDORAH_BLESS=1`.
+//! `fact_check` call with two claims and one why tree. Version 5 (WP-25) adds a `batch_run`
+//! call: a rename and a read-back step with an `expect` guard and a `claim` guard, in one
+//! transaction. Later WPs add client lines and bless the server lines again with
+//! `GHIDORAH_BLESS=1`.
 
 #![allow(
     clippy::expect_used,
@@ -47,7 +49,7 @@ fn text<'a>(reply: &'a Value, pointer: &str) -> Option<&'a str> {
 fn e2e_elf_x86_64() {
     let clients = clients("e2e");
     assert!(
-        clients.len() >= 20,
+        clients.len() >= 21,
         "the transcript has the handshake, tools/list and the tool calls"
     );
     let projects = tmp("e2e_projects");
@@ -119,6 +121,46 @@ fn e2e_elf_x86_64() {
     );
     check_edits(&steps);
     check_claims(&steps);
+    check_batch(&steps);
+}
+
+/// Checks the reply of the `batch_run` call of WP-25 (id 20): one transaction gives one rev,
+/// and the read-back step sees the new name.
+fn check_batch(steps: &[(crate::common::transcript::ClientLine, Vec<String>)]) {
+    let before = reply(steps, 19)
+        .pointer("/result/structuredContent/rev")
+        .and_then(Value::as_u64)
+        .expect("fact_check gives the rev");
+    let batch = reply(steps, 20);
+    assert_eq!(
+        batch.pointer("/result/structuredContent/ok"),
+        Some(&Value::Bool(true)),
+        "{batch}"
+    );
+    assert_eq!(
+        batch
+            .pointer("/result/structuredContent/rev")
+            .and_then(Value::as_u64),
+        Some(before + 1),
+        "the batch commits one rev: {batch}"
+    );
+    assert_eq!(
+        text(&batch, "/tx"),
+        Some(format!("tx:{}", before + 1).as_str()),
+        "{batch}"
+    );
+    for step in 0..2 {
+        assert_eq!(
+            batch.pointer(&format!("/result/structuredContent/data/steps/{step}/ok")),
+            Some(&Value::Bool(true)),
+            "the step and its guards pass: {batch}"
+        );
+    }
+    assert_eq!(
+        text(&batch, "/data/steps/1/data/symbol/name"),
+        Some("read_line"),
+        "{batch}"
+    );
 }
 
 /// Checks the reply of the `fact_check` call of WP-24 (id 19).

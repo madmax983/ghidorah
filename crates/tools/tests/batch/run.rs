@@ -14,7 +14,7 @@ use crate::support::{
 };
 
 /// The read-only tools whose examples the equivalence test mixes.
-const MIXED: [&str; 11] = [
+const MIXED: [&str; 12] = [
     "binary_survey",
     "func_list",
     "func_get",
@@ -23,6 +23,7 @@ const MIXED: [&str; 11] = [
     "mem_read",
     "addr_info",
     "calc",
+    "fact_check",
     "type_get",
     "history_list",
     "tool_search",

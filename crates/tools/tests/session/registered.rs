@@ -1,6 +1,6 @@
-//! The register checks of WP-22a, WP-22b and WP-24: the shipped registry holds the memory,
-//! override, type and claim tools in catalog order, and `session_brief` lists the orphans of
-//! `ghidorah_analysis::orphans::find`.
+//! The register checks of WP-22a, WP-22b, WP-24 and WP-25: the shipped registry holds the
+//! memory, override, type, claim and batch tools in catalog order, and `session_brief` lists
+//! the orphans of `ghidorah_analysis::orphans::find`.
 
 use ghidorah_base::{Address, BinaryId};
 use ghidorah_db::{Edit, SymKind};
@@ -10,9 +10,9 @@ use ghidorah_tools::{Session, ToolError, handlers};
 
 use crate::support::{DEMO_ID, call, data, registry, session, text_at};
 
-/// The tools of WP-22a, WP-22b and WP-24 with their catalog numbers (design Section 10.3).
-/// The shipped registry holds the tools 1 to 21 in order, so a number is one more than its
-/// index.
+/// The tools of WP-22a, WP-22b, WP-24 and WP-25 with their catalog numbers (design Section
+/// 10.3). The shipped registry holds the tools 1 to 22 in order, so a number is one more than
+/// its index.
 const CATALOG: &[(usize, &str)] = &[
     (11, "fact_check"),
     (12, "type_get"),
@@ -22,6 +22,7 @@ const CATALOG: &[(usize, &str)] = &[
     (18, "note_write"),
     (19, "func_edit"),
     (20, "type_edit"),
+    (22, "batch_run"),
 ];
 
 #[test]
@@ -34,7 +35,7 @@ fn shipped_registry_holds_the_memory_and_override_tools() {
         assert_eq!(index + 1, *number, "{name} is at the index {index}");
     }
     let names = shipped.names();
-    assert_eq!(names.last(), Some(&"history_undo"), "{names:?}");
+    assert_eq!(names.last(), Some(&"batch_run"), "{names:?}");
     for spec in [
         &handlers::session_brief::SPEC,
         &handlers::symbol_rename::SPEC,
@@ -44,6 +45,7 @@ fn shipped_registry_holds_the_memory_and_override_tools() {
         &handlers::func_edit::SPEC,
         &handlers::type_edit::SPEC,
         &handlers::fact_check::SPEC,
+        &handlers::batch_run::SPEC,
     ] {
         assert!(names.contains(&spec.name), "{} is not shipped", spec.name);
     }

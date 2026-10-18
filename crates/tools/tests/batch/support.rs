@@ -1,126 +1,34 @@
 //! Shared helpers of the batch tests: the registry, sessions, calls and JSON reads.
 //!
-//! The registry of the tests is the shipped registry with `batch_run` at its catalog place.
-//! When the shipped registry has no `fact_check`, a test `fact_check` takes its place, so the
-//! claim guards have a relation tool. After the register commits, the shipped registry holds
-//! both tools, and the tests use it as it is.
+//! The registry of the tests is the shipped registry. It holds `batch_run` and `fact_check`
+//! at their catalog places, so the claim guards get the verdicts of the real relation checks.
 
 use std::path::PathBuf;
-use std::sync::OnceLock;
 
 use ghidorah_base::{BinaryId, FixedClock};
 use ghidorah_db::Program;
-use ghidorah_json::{Limits, Object, Value};
+use ghidorah_json::{Limits, Value};
 use ghidorah_testkit::fixture::cached;
-use ghidorah_tools::outshape::Field;
 use ghidorah_tools::registry::shipped;
 use ghidorah_tools::{
-    AnalysisInfo, ArgKind, ArgSpec, Args, Ctx, Example, OpenBinary, OutputShape, Payload, Profile,
-    ProfileSet, Registry, Request, Role, Roots, Session, SessionConfig, ToolError, ToolSpec,
-    dispatch_with, handlers,
+    AnalysisInfo, OpenBinary, Profile, ProfileSet, Registry, Request, Roots, Session,
+    SessionConfig, dispatch_with, handlers,
 };
 
 /// The binary ID of the demo binary.
 pub const DEMO_ID: &str = "467a43b75d95c826";
 
-/// The claim that the test `fact_check` supports: `main` calls `check_password`.
+/// A claim that is supported on the demo binary: `main` calls `check_password`.
 pub const TRUE_CALL: [&str; 2] = ["fn:0x1080", "fn:0x11e0"];
 
-const CLAIM_ARGS: &[ArgSpec] = &[ArgSpec::new(
-    "claims",
-    Role::Param,
-    ArgKind::Json,
-    "The claims of the test.",
-)];
-
-/// A test `fact_check` for a registry without the real tool. It supports only the claim
-/// `calls(fn:0x1080, fn:0x11e0)`, and it refutes every other claim.
-pub const TEST_FACT_CHECK: ToolSpec<Session> = ToolSpec {
-    title: "Check facts in a test",
-    summary: "Check fact claims of a test with supported or refuted verdicts.",
-    description: "Check fact claims of a test with supported or refuted verdicts.",
-    args: CLAIM_ARGS,
-    output: OutputShape::Obj(&[Field::req("verdicts", OutputShape::Any)]),
-    profiles: &Profile::ALL,
-    examples: &[Example {
-        args: r#"{"claims":[]}"#,
-        golden: "tests/golden/batch/test_fact_check.json",
-    }],
-    ..ToolSpec::base("fact_check", test_fact_check)
-};
-
-fn test_fact_check(_: &mut Session, args: &Args, _: &mut Ctx) -> Result<Payload, ToolError> {
-    let claims = args
-        .get("claims")
-        .and_then(Value::as_array)
-        .unwrap_or_default();
-    let verdicts = claims
-        .iter()
-        .map(|claim| {
-            let args: Vec<&str> = claim
-                .get("args")
-                .and_then(Value::as_array)
-                .unwrap_or_default()
-                .iter()
-                .filter_map(Value::as_str)
-                .collect();
-            let rel = claim.get("rel").and_then(Value::as_str);
-            let verdict = if rel == Some("calls") && args == TRUE_CALL {
-                "supported"
-            } else {
-                "refuted"
-            };
-            Value::object([("claim", claim.clone()), ("verdict", Value::from(verdict))])
-        })
-        .collect();
-    let mut out = Object::new();
-    out.push("verdicts", Value::Array(verdicts));
-    Ok(Payload::Object(out))
-}
-
-/// Gives `tools` with `tool` before the first tool named `before`, or at the end.
-fn insert(
-    tools: &mut Vec<&'static ToolSpec<Session>>,
-    tool: &'static ToolSpec<Session>,
-    before: &str,
-) {
-    let at = tools
-        .iter()
-        .position(|t| t.name == before)
-        .unwrap_or(tools.len());
-    tools.insert(at, tool);
-}
-
-/// Gives the full registry: the shipped tools with `batch_run` at its catalog place.
-///
-/// The registry-wide tests run over it. After the register commit of WP-25, it is the
-/// shipped registry.
+/// Gives the full registry of the registry-wide tests: the shipped registry.
 pub fn full_registry() -> Registry<Session> {
-    static CELL: OnceLock<Registry<Session>> = OnceLock::new();
-    *CELL.get_or_init(|| {
-        let base = shipped();
-        if base.get("batch_run").is_some() {
-            return base;
-        }
-        let mut tools: Vec<&'static ToolSpec<Session>> = base.tools().to_vec();
-        insert(&mut tools, &handlers::batch_run::SPEC, "func_similar");
-        Registry::new(Box::leak(tools.into_boxed_slice()))
-    })
+    shipped()
 }
 
-/// Gives the registry of the sessions: the full registry, and the test `fact_check` when the
-/// full registry has no `fact_check`.
+/// Gives the registry of the sessions: the shipped registry.
 pub fn registry() -> Registry<Session> {
-    static CELL: OnceLock<Registry<Session>> = OnceLock::new();
-    *CELL.get_or_init(|| {
-        let base = full_registry();
-        if base.get("fact_check").is_some() {
-            return base;
-        }
-        let mut tools: Vec<&'static ToolSpec<Session>> = base.tools().to_vec();
-        insert(&mut tools, &TEST_FACT_CHECK, "type_get");
-        Registry::new(Box::leak(tools.into_boxed_slice()))
-    })
+    shipped()
 }
 
 /// Gives the workspace root.
