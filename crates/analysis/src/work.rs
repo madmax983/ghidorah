@@ -17,6 +17,7 @@ use ghidorah_db::{FlowKind, Program, RefKey, StartReason, StrInfo};
 use ghidorah_kernel::RangeSet;
 
 use crate::analyzers::dataptr::CodePtrs;
+use crate::analyzers::gapcomp::GapState;
 use crate::analyzers::refs::DataRefs;
 use crate::ctx::{Body, Summary, UnitRec};
 use crate::irfacts::IrFacts;
@@ -127,6 +128,8 @@ pub(crate) struct Work {
     pub ir: IrFacts,
     /// The code pointers in data and the address-taken sites.
     pub codeptrs: CodePtrs,
+    /// The state of the gap components.
+    pub gapcomp: GapState,
 }
 
 /// Gives the import of each import slot of `program`: the ELF slot map, then the slots of
