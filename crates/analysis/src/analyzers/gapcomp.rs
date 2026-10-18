@@ -21,7 +21,8 @@
 //! tail call. It leaves the component. Each weakly connected component becomes a function
 //! when it passes 3 tests:
 //!
-//! - Every instruction decodes. A direct call goes to executable memory.
+//! - Every instruction decodes, and no branch goes into an instruction or into padding. A
+//!   direct call goes to executable memory.
 //! - Every path ends in `ret`, an indirect jump, a noreturn call or a jump out of the
 //!   component. A jump out goes to a function entry or to another component.
 //! - It has at least [`MIN_INSNS`] instructions.
@@ -29,7 +30,8 @@
 //! The entry is the lowest address of the component that has no predecessor in it. It gets
 //! the reason `GapComponent`, confidence [`CONFIDENCE`] and `R_GAP_COMPONENT`. Each step tests
 //! every gap again, and a `GapComponent` reason that fails a test goes. An entry gets the
-//! reason at most [`MAX_ADDS`] times, so the steps reach a fixpoint.
+//! reason at most [`MAX_ADDS`] times, so the steps reach a fixpoint. One step decodes at
+//! most [`MAX_SCAN`] gap bytes.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -277,10 +279,49 @@ fn cases(ctx: &AnalysisCtx<'_>) -> BTreeMap<u64, Vec<u64>> {
     out
 }
 
-/// The CFG of the gap nodes with union-find sets for the components.
+/// Union-find sets over the gap nodes.
+struct Sets(Vec<usize>);
+
+impl Sets {
+    /// Gives the set of `i`, with path halving.
+    fn find(&mut self, mut i: usize) -> usize {
+        while let Some(&p) = self.0.get(i) {
+            if p == i {
+                break;
+            }
+            let up = self.0.get(p).copied().unwrap_or(p);
+            if let Some(slot) = self.0.get_mut(i) {
+                *slot = up;
+            }
+            i = up;
+        }
+        i
+    }
+
+    /// Joins the sets of `a` and `b`. The lower index stays the set.
+    fn join(&mut self, a: usize, b: usize) {
+        let (ra, rb) = (self.find(a), self.find(b));
+        if let Some(slot) = self.0.get_mut(ra.max(rb)) {
+            *slot = ra.min(rb);
+        }
+    }
+}
+
+/// The test state of one component.
+#[derive(Debug, Clone, Copy, Default)]
+struct Part {
+    /// The number of decoded instructions.
+    insns: u64,
+    /// A node breaks a test.
+    bad: bool,
+    /// The lowest address without a predecessor in the component.
+    entry: Option<u64>,
+}
+
+/// The CFG of the gap nodes with the sets of its components.
 struct Graph {
-    /// The parent link of each node.
-    parent: Vec<usize>,
+    /// The components.
+    sets: Sets,
     /// The strong edges.
     strong: Vec<(usize, usize)>,
     /// The unconditional jumps to gap nodes that are not call targets.
@@ -297,7 +338,7 @@ impl Graph {
             nodes.iter().enumerate().map(|(i, n)| (n.at, i)).collect();
         let called: BTreeSet<u64> = nodes.iter().filter_map(|n| n.call).collect();
         let mut g = Self {
-            parent: (0..nodes.len()).collect(),
+            sets: Sets((0..nodes.len()).collect()),
             strong: Vec::new(),
             jumps: Vec::new(),
             bad: Vec::with_capacity(nodes.len()),
@@ -335,43 +376,19 @@ impl Graph {
         g
     }
 
-    /// Gives the set of `i`, with path halving.
-    fn find(&mut self, mut i: usize) -> usize {
-        while let Some(&p) = self.parent.get(i) {
-            if p == i {
-                break;
-            }
-            let up = self.parent.get(p).copied().unwrap_or(p);
-            if let Some(slot) = self.parent.get_mut(i) {
-                *slot = up;
-            }
-            i = up;
-        }
-        i
-    }
-
-    /// Joins the sets of `a` and `b`. The lower index stays the set.
-    fn join(&mut self, a: usize, b: usize) {
-        let (ra, rb) = (self.find(a), self.find(b));
-        if let Some(slot) = self.parent.get_mut(ra.max(rb)) {
-            *slot = ra.min(rb);
-        }
-    }
-
     /// Joins the strong edges. Then it joins each jump whose target only one strong part
     /// jumps to. The other jumps are tail calls.
     fn close(&mut self) {
-        for (i, j) in self.strong.clone() {
-            self.join(i, j);
+        for &(i, j) in &self.strong {
+            self.sets.join(i, j);
         }
         let mut parts: BTreeMap<usize, BTreeSet<usize>> = BTreeMap::new();
-        for (i, j) in self.jumps.clone() {
-            let part = self.find(i);
-            parts.entry(j).or_default().insert(part);
+        for &(i, j) in &self.jumps {
+            parts.entry(j).or_default().insert(self.sets.find(i));
         }
-        for (i, j) in self.jumps.clone() {
+        for &(i, j) in &self.jumps {
             if parts.get(&j).is_some_and(|p| p.len() == 1) {
-                self.join(i, j);
+                self.sets.join(i, j);
             }
         }
     }
@@ -380,28 +397,26 @@ impl Graph {
     fn entries(mut self, nodes: &[Node]) -> Vec<u64> {
         self.close();
         let mut inner = vec![false; nodes.len()];
-        let edges: Vec<(usize, usize)> = self.strong.iter().chain(&self.jumps).copied().collect();
-        for (i, j) in edges {
-            if self.find(i) == self.find(j)
+        for &(i, j) in self.strong.iter().chain(&self.jumps) {
+            if self.sets.find(i) == self.sets.find(j)
                 && let Some(p) = inner.get_mut(j)
             {
                 *p = true;
             }
         }
-        // Per component: the instruction count, a broken test and the entry.
-        let mut comps: BTreeMap<usize, (u64, bool, Option<u64>)> = BTreeMap::new();
+        let mut parts: BTreeMap<usize, Part> = BTreeMap::new();
         for (i, n) in nodes.iter().enumerate() {
-            let c = comps.entry(self.find(i)).or_default();
-            c.0 = c.0.saturating_add(u64::from(!n.bad));
-            c.1 |= self.bad.get(i).copied().unwrap_or(true);
-            if c.2.is_none() && !inner.get(i).copied().unwrap_or(true) {
-                c.2 = Some(n.at);
+            let part = parts.entry(self.sets.find(i)).or_default();
+            part.insns = part.insns.saturating_add(u64::from(!n.bad));
+            part.bad |= self.bad.get(i).copied().unwrap_or(true);
+            if part.entry.is_none() && !inner.get(i).copied().unwrap_or(true) {
+                part.entry = Some(n.at);
             }
         }
-        comps
+        parts
             .into_values()
-            .filter(|(insns, bad, _)| !bad && *insns >= MIN_INSNS)
-            .filter_map(|(_, _, entry)| entry)
+            .filter(|p| !p.bad && p.insns >= MIN_INSNS)
+            .filter_map(|p| p.entry)
             .collect()
     }
 }
