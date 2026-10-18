@@ -16,7 +16,8 @@ use ghidorah_base::{Address, Fuel, FuncId, ImportId};
 use ghidorah_db::{Program, RefType};
 
 use super::check::{Checker, Step, Stop, negative, site_gaps, supported};
-use super::relations::{Endpoint, Evidence, Gap, Outcome};
+use super::outcome::{Evidence, Gap, Outcome};
+use super::relations::Endpoint;
 use super::scope::override_targets;
 use crate::callargs::{self, ArgValue};
 

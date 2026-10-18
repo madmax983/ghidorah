@@ -157,8 +157,8 @@ pub fn verdict_of(session: &mut Session, rel: &str, args: &[&str]) -> Value {
         .expect("one verdict")
 }
 
-/// Tells if the instruction at `at` is an indirect call or jump with no target: no flow
-/// reference, no resolved jump table and no `IndirectTargets` override.
+/// Tells if the instruction at `at` is an indirect call or jump with no target. Such a site has
+/// no flow reference, no resolved jump table and no `IndirectTargets` override.
 pub fn is_open_site(p: &Program, at: u64) -> bool {
     let Some(CodeUnit::Insn { flow, .. }) = p.code_unit(at) else {
         return false;

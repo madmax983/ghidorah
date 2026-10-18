@@ -2,7 +2,7 @@
 //!
 //! [`key_of`] reads the ID text of a fact. [`explain`] gives its tree. A node with a why-record
 //! has its rule and its premises. A node with no why-record is an input of the binary or a
-//! fact of an agent, an import or a user: it has its source and no premises.
+//! fact of an agent, an import or a user. It has its source and no premises.
 //!
 //! | Input | Fact |
 //! |---|---|
@@ -271,9 +271,10 @@ pub fn source_of(program: &Program, key: &FactKey) -> Option<Source> {
     }
 }
 
-/// Gives the why tree of the fact `key`. The tree stops at the depth `depth`, at most
-/// [`MAX_DEPTH`]. The walk takes one unit of `nodes` for each node, and it stops when `nodes`
-/// is 0. The root is always in the tree.
+/// Gives the why tree of the fact `key`.
+///
+/// The tree stops at the depth `depth`, at most [`MAX_DEPTH`]. The walk takes one unit of
+/// `nodes` for each node, and it stops when `nodes` is 0. The root is always in the tree.
 #[must_use]
 pub fn explain(program: &Program, key: &FactKey, depth: u32, nodes: &mut usize) -> Node {
     let mut path = Vec::new();

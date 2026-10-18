@@ -13,7 +13,7 @@
 //! | `xref(from, to, kind)` | the reference exists | from is an analyzed instruction that is not a gap |
 //! | `const_arg(callee, index, value)` | a call site passes the value | each call site has a known value, and the callee has no unresolved caller |
 //! | `has_syscall(f, name)` | f has the syscall site | each syscall site of f has a number, and f has no unresolved jump |
-//! | `noreturn(f)` | the noreturn flag is set | f has a return instruction |
+//! | `noreturn(f)` | f has the noreturn flag | f has a return instruction |
 //! | `in_func(a, f)` | the body of f holds a | another function owns a |
 //!
 //! A gap is an indirect call or jump with no target: no call or jump reference, no resolved
@@ -23,12 +23,11 @@
 mod callers;
 pub mod check;
 pub mod explain;
+pub mod outcome;
 pub mod relations;
 mod scope;
 
 pub use check::Checker;
 pub use explain::{ExplainError, Node, explain, fact_name, key_of, key_text, source_of};
-pub use relations::{
-    Atom, CATALOG, ColKind, Column, Endpoint, Evidence, Gap, NAMES, Outcome, RefClass, RelSpec,
-    Relation, Verdict,
-};
+pub use outcome::{Evidence, Gap, Outcome, Verdict};
+pub use relations::{Atom, CATALOG, ColKind, Column, Endpoint, NAMES, RefClass, RelSpec, Relation};

@@ -18,7 +18,7 @@ use ghidorah_base::{Address, FuncId, Id, ImportId, Limits};
 use ghidorah_db::{CommentKind, FlowKind, FlowOverride, Program, RefKey, RefType};
 use ghidorah_kernel::RangeSet;
 
-use super::relations::Evidence;
+use super::outcome::Evidence;
 use crate::callgraph::Callee;
 
 /// The bytes of the `syscall` instruction.
@@ -163,10 +163,10 @@ pub(crate) fn build(program: &Program, imports: &Imports, func: FuncId) -> Optio
             if leaves {
                 s.tails.push(site);
             }
-            if key.kind.is_call() || leaves {
-                if let Some(c) = callee(program, imports, key.to) {
-                    s.calls.entry(c).or_default().insert(Evidence::Ref(key));
-                }
+            if (key.kind.is_call() || leaves)
+                && let Some(c) = callee(program, imports, key.to)
+            {
+                s.calls.entry(c).or_default().insert(Evidence::Ref(key));
             }
         }
         for t in override_targets(program, site).unwrap_or_default() {

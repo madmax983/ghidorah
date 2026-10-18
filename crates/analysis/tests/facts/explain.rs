@@ -37,7 +37,7 @@ fn tree_of_a_function() {
     let tree = explain(&p, &key, 5, &mut nodes);
     assert_eq!(tree.id, "fn:0x11e0");
     assert_eq!(
-        tree.rule.as_ref().map(|r| r.as_str()),
+        tree.rule.as_ref().map(ghidorah_db::RuleCode::as_str),
         Some("R_SYMBOL_FUNC")
     );
     assert_eq!(tree.premises.len(), 1);

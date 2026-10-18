@@ -14,7 +14,8 @@ use ghidorah_base::{Address, Fuel, FuncId, Glob};
 use ghidorah_db::{Encoding, Program, RefType};
 
 use super::callers;
-use super::relations::{Atom, Endpoint, Evidence, Gap, Outcome, RefClass, Verdict};
+use super::outcome::{Evidence, Gap, Outcome, Verdict};
+use super::relations::{Atom, Endpoint, RefClass};
 use super::scope::{self, Imports, Scope};
 use crate::callgraph::Callee;
 

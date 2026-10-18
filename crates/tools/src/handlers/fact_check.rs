@@ -19,7 +19,9 @@ mod render;
 
 use std::collections::BTreeMap;
 
-use ghidorah_analysis::facts::{Checker, Gap, NAMES, Outcome, Verdict, explain, key_of};
+use ghidorah_analysis::facts::{
+    Checker, ExplainError, Gap, NAMES, Outcome, Verdict, explain, key_of,
+};
 use ghidorah_base::{ErrorCode, Fuel};
 use ghidorah_db::Program;
 use ghidorah_json::{Object, Value};
@@ -230,25 +232,21 @@ fn check_one(
 }
 
 /// Gives the error of a fact ID that does not explain.
-fn explain_error(e: &ghidorah_analysis::facts::ExplainError, path: &str) -> ToolError {
+fn explain_error(e: &ExplainError, path: &str) -> ToolError {
     match e {
-        ghidorah_analysis::facts::ExplainError::NotFound(kind) => {
-            ToolError::new(ErrorCode::NotFound)
-                .var("kind", kind)
-                .path(path)
-                .detail("kind", Value::from(*kind))
-        }
-        ghidorah_analysis::facts::ExplainError::BadId(_) => {
-            ToolError::new(ErrorCode::InvalidArgument)
-                .var("field", path.strip_prefix('/').unwrap_or(path))
-                .path(path)
-                .detail(
-                    "expected",
-                    Value::from(
-                        "a fact ID: fn:, ref:, str:, jt:, sym:, var:, imp:, exp:, note: or 0x hex",
-                    ),
-                )
-        }
+        ExplainError::NotFound(kind) => ToolError::new(ErrorCode::NotFound)
+            .var("kind", kind)
+            .path(path)
+            .detail("kind", Value::from(*kind)),
+        ExplainError::BadId(_) => ToolError::new(ErrorCode::InvalidArgument)
+            .var("field", path.strip_prefix('/').unwrap_or(path))
+            .path(path)
+            .detail(
+                "expected",
+                Value::from(
+                    "a fact ID: fn:, ref:, str:, jt:, sym:, var:, imp:, exp:, note: or 0x hex",
+                ),
+            ),
     }
 }
 
