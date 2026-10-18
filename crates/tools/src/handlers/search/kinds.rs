@@ -2,12 +2,16 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use ghidorah_base::{Address, Caps, ErrorCode, Fuel, FuncId, Id, JumpTableId, Limits, NoteId};
+use ghidorah_base::{
+    Address, Caps, ErrorCode, Fuel, FuncId, Id, JumpTableId, Limits, NoteId, WarningCode,
+};
 use ghidorah_db::{CommentKind, Note, Program, SetMembers};
 use ghidorah_json::{Object, Value};
 
 use super::filter::{Items, Matcher, New};
 use super::{STRING_FUNCS, WHY_STRING_REFS};
+use crate::dispatch::Item;
+use crate::envelope::Warning;
 use crate::errors::ToolError;
 use crate::handlers::func_sections::{self as fs, Namer};
 
@@ -293,6 +297,47 @@ pub fn notes(items: &mut Items<'_>, m: &Matcher, filter: Option<&Value>) {
     for new in list {
         items.push(new, None);
     }
+}
+
+/// Gives one `W_STALE_OP_ID` for the note items of `list` whose `op:` evidence has another
+/// lifter version. `at` is the first such op ID. `details` holds its note, its lifter version,
+/// the current version and the count of such op IDs.
+#[must_use]
+pub fn stale_ops(p: &Program, list: &[Item]) -> Option<Warning> {
+    let current = ghidorah_analysis::fir::LIFT_VER;
+    let mut first: Option<(NoteId, u32, String)> = None;
+    let mut count = 0u64;
+    for item in list {
+        if item.value.get("kind").and_then(Value::as_str) != Some("note") {
+            continue;
+        }
+        let id = item.value.get("id").and_then(Value::as_str).map(Id::parse);
+        let Some(Ok(Id::Note(id))) = id else {
+            continue;
+        };
+        let Some(note) = p.notes().get(id) else {
+            continue;
+        };
+        let Some(ver) = note.lift_ver.filter(|v| *v != current) else {
+            continue;
+        };
+        for e in &note.evidence {
+            if matches!(Id::parse(e), Ok(Id::Op(_))) {
+                count = count.saturating_add(1);
+                first.get_or_insert_with(|| (id, ver, e.clone()));
+            }
+        }
+    }
+    let (note, ver, op) = first?;
+    let mut warning = Warning::new(WarningCode::StaleOpId);
+    warning.at = Some(op);
+    let mut details = Object::new();
+    details.push("note", Value::from(note.to_string()));
+    details.push("lift_ver", Value::from(ver));
+    details.push("current", Value::from(current));
+    details.push("count", Value::from(count));
+    warning.details = Some(details);
+    Some(warning)
 }
 
 /// Adds the named types and typedefs whose name matches.

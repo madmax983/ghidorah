@@ -623,6 +623,7 @@ fn note_edits_check_origin_rev_and_rank() {
         status: NoteStatus::Open,
         tags: Vec::new(),
         evidence: Vec::new(),
+        lift_ver: None,
         claims: Vec::new(),
         set: None,
         src: Source::User,

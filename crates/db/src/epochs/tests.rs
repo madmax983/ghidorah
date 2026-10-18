@@ -89,6 +89,7 @@ fn table_epochs_follow_commits() {
             status: NoteStatus::Open,
             tags: Vec::new(),
             evidence: Vec::new(),
+            lift_ver: None,
             claims: Vec::new(),
             set: None,
             src: Source::Agent,

@@ -8,7 +8,8 @@
 //! | `at` | the address, and the function that owns it |
 //! | `set` | the set name and the result of the set operation (the `members` module) |
 //!
-//! Each write takes the source, the session and the pending rev of the transaction.
+//! Each write takes the source, the session and the pending rev of the transaction. Evidence
+//! with an `op:` ID also sets `lift_ver` to the current lifter version.
 
 use ghidorah_base::{ErrorCode, Id, NoteId, SetName};
 use ghidorah_db::{
@@ -120,6 +121,7 @@ fn start(tx: &Tx<'_>, args: &Args, name: Option<&SetName>) -> Result<(Note, bool
         status: NoteStatus::Open,
         tags: Vec::new(),
         evidence: Vec::new(),
+        lift_ver: None,
         claims: Vec::new(),
         set: None,
         src: origin.source,
@@ -173,6 +175,10 @@ pub(super) fn build(tx: &Tx<'_>, args: &Args) -> Result<Note, ToolError> {
                 "an ID such as fn:0x401130",
             ));
         }
+        let ops = evidence
+            .iter()
+            .any(|e| matches!(Id::parse(e), Ok(Id::Op(_))));
+        note.lift_ver = ops.then_some(ghidorah_analysis::fir::LIFT_VER);
         note.evidence = evidence;
     }
     if let Some(claims) = args.list("claims") {

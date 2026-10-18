@@ -18,6 +18,7 @@ fn note(id: u64, kind: NoteKind) -> Note {
         status: NoteStatus::Open,
         tags: vec!["parser".to_string()],
         evidence: vec!["fn:0x401000".to_string()],
+        lift_ver: None,
         claims: vec![Claim {
             rel: "calls".to_string(),
             args: vec!["fn:0x401000".to_string(), "imp:puts".to_string()],

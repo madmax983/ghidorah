@@ -57,6 +57,7 @@ fn note(tx: &Tx<'_>, id: u64, text: &str) -> Note {
         status: NoteStatus::Open,
         tags: Vec::new(),
         evidence: vec!["fn:0x1080".to_string()],
+        lift_ver: None,
         claims: Vec::new(),
         set: None,
         src: tx.origin().source,

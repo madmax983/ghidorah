@@ -16,21 +16,39 @@
 //! again for all functions, so a lost reason also removes a flag. A body that a flag of the
 //! fixpoint does not cut waits for the next `Disasm` run. A flag of the fall-through rule
 //! stays while its function exists: its cuts can remove the call sites that gave it.
+//!
+//! `suspects` gives the caveat `W_NORETURN_SUSPECT` of a missed noreturn callee. It marks
+//! a direct call to a callee that is not noreturn when the flow after the call is unsafe:
+//!
+//! | After the call, past at most [`MAX_PADDING`] `nop` forms | Unsafe |
+//! |---|---|
+//! | the entry or the code of another function | yes |
+//! | memory that is not executable, or bytes that do not decode | yes |
+//! | `int3` or a 0 byte | yes |
+//! | code that no function owns: a gap | yes |
+//! | code of the caller | no |
+//!
+//! The remedy is `func_edit { action: "set_noreturn" }` on the callee.
 
 use std::collections::BTreeMap;
 
-use ghidorah_base::{Address, FuncId};
-use ghidorah_db::FactKey;
+use ghidorah_base::{Address, FuncId, Limits, WarningCode};
+use ghidorah_db::{Caveat, FactKey, Program};
 use ghidorah_kernel::RangeSet;
+use ghidorah_x86::Mnem;
 
 use crate::code::{decode_at, is_exec};
 use crate::ctx::{AnalysisCtx, Summary, UNIT_NORETURN_CALL};
 use crate::registry::AnalyzerId;
 use crate::spec::{AnalyzerSpec, Grain, Opt, Step, Trigger};
 use crate::why::{Rule, Why};
+use crate::work::Work;
 
 /// The smallest number of unsafe call sites of `R_NORETURN_FALLTHROUGH`.
 pub const UNSAFE_SITES: u64 = 3;
+
+/// The largest number of `nop` forms after a call that the suspect check skips.
+pub const MAX_PADDING: u32 = 16;
 
 /// The largest number of call-site premises of one `R_NORETURN_FALLTHROUGH` record.
 const SITE_PREMISES: usize = 8;
@@ -243,4 +261,83 @@ pub fn run_discovered(ctx: &mut AnalysisCtx<'_>, ranges: &RangeSet) -> Step {
         let _ = ctx.set_found(entry, found.get(&entry).cloned());
     }
     Step { work }
+}
+
+/// Tells if the function `target` is noreturn. A fact of the base layer wins over the work
+/// state.
+fn flagged(program: &Program, work: &Work, target: u64) -> bool {
+    program
+        .base()
+        .funcs()
+        .get(FuncId(Address::ram(target)))
+        .and_then(|f| f.flags.noreturn.as_ref())
+        .map_or_else(|| work.noreturn(target), |f| f.value)
+}
+
+/// Tells if the flow of the function `entry` that reaches `next` after a call is unsafe. The
+/// check skips at most [`MAX_PADDING`] `nop` forms.
+fn unsafe_next(program: &Program, work: &Work, entry: u64, next: u64) -> bool {
+    let mut at = next;
+    for _ in 0..=MAX_PADDING {
+        let other = (at != entry && work.funcs.contains_key(&at))
+            || work.owner(at).is_some_and(|o| o != entry);
+        if other {
+            return true;
+        }
+        let zero = program
+            .mem()
+            .read(at, 1, &Limits::DEFAULT)
+            .is_ok_and(|b| b.first() == Some(&0));
+        let Some(insn) = decode_at(program, at) else {
+            return true;
+        };
+        if zero || insn.mnem() == Mnem::Int3 {
+            return true;
+        }
+        if !insn.is_nop() {
+            return work.owner(at).is_none();
+        }
+        let Some(after) = at.checked_add(u64::from(insn.len())) else {
+            return true;
+        };
+        at = after;
+    }
+    false
+}
+
+/// Gives the remedy of a suspect call to `target`.
+fn suspect_remedy(target: u64) -> String {
+    format!(
+        "func_edit {{ action: \"set_noreturn\", target: \"{}\", noreturn: true }}",
+        FuncId(Address::ram(target))
+    )
+}
+
+/// Gives the `W_NORETURN_SUSPECT` caveats of the function `entry` in site order. A direct call
+/// gets one when its callee is not noreturn and the flow after the call is unsafe.
+pub(crate) fn suspects(program: &Program, work: &Work, entry: u64) -> Vec<Caveat> {
+    let Some(summary) = work.funcs.get(&entry).and_then(|f| f.summary.as_ref()) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for (site, target) in &summary.calls {
+        let Some(unit) = work.units.get(site) else {
+            continue;
+        };
+        let cut = unit.flags & UNIT_NORETURN_CALL != 0;
+        if unit.owner != entry || cut || flagged(program, work, *target) {
+            continue;
+        }
+        let Some(next) = site.checked_add(u64::from(unit.len)) else {
+            continue;
+        };
+        if unsafe_next(program, work, entry, next) {
+            out.push(Caveat {
+                code: WarningCode::NoreturnSuspect,
+                at: Some(Address::ram(*site)),
+                remedy: Some(suspect_remedy(*target)),
+            });
+        }
+    }
+    out
 }

@@ -4,7 +4,7 @@
 //!
 //! | Input | Check |
 //! |---|---|
-//! | `target` of `create` | an instruction start in an executable region |
+//! | `target` of `create` | an instruction start in an executable region. No other function owns it. |
 //! | `target` of `delete` | a function record of an agent or a user |
 //! | `target` of `set_noreturn` | a function |
 //! | `at` of `set_jumptable` | an indirect jump |
@@ -12,6 +12,10 @@
 //! | `at` of `set_flow` | an instruction. `call_as_jump` needs a direct call and `jump_as_call` a direct jump. |
 //! | `targets` and `flow.to` | instruction starts in executable regions. A `set_call_targets` target can be an import. |
 //! | `ref` of `remove_ref` | a reference of an agent or a user |
+//!
+//! A `create` inside the body of a function gives `BODY_OVERLAP`, and its candidate names the
+//! owner. This holds for the entry of a discovered function too. Only the entry of an agent
+//! function stays a valid target, so a second `create` of it is a no-op.
 
 use ghidorah_base::{Address, ErrorCode, FuncId, JumpTableId};
 use ghidorah_db::{
@@ -22,7 +26,7 @@ use ghidorah_json::Value;
 
 use super::edit::{edit_error, not_found};
 use crate::args::Args;
-use crate::errors::ToolError;
+use crate::errors::{Candidate, ToolError};
 use crate::resolve::{self, Named, Site};
 
 /// The checked action of one call.
@@ -102,6 +106,30 @@ fn code_target(p: &Program, at: Address, field: &str, path: &str) -> Result<Addr
             "an instruction start in an executable region",
         ))
     }
+}
+
+/// Checks that no function owns the new entry `entry`. The entry of an agent function is the
+/// one exception: a second `create` of it changes nothing.
+fn free_entry(p: &Program, entry: Address) -> Result<Address, ToolError> {
+    let Some(owner) = p.owner_of(entry) else {
+        return Ok(entry);
+    };
+    let again = owner.0 == entry
+        && p.base()
+            .funcs()
+            .get(owner)
+            .is_some_and(|f| f.start_reason == StartReason::Agent);
+    if again {
+        return Ok(entry);
+    }
+    let id = owner.to_string();
+    let mut candidate = Candidate::text(&id, &format!("function at {}", owner.0));
+    candidate.id = Some(id);
+    candidate.addr = Some(owner.0.to_string());
+    candidate.kind = Some("function".to_owned());
+    Err(ToolError::new(ErrorCode::BodyOverlap)
+        .path("/target")
+        .candidates(vec![candidate]))
 }
 
 /// Gives the site `at` when its instruction has a flow of `want`.
@@ -185,12 +213,12 @@ impl Plan {
     ///
     /// Returns the resolver errors, `INVALID_ARGUMENT` for a site of the wrong kind,
     /// `MISSING_ARGUMENT` for `flow.to`, and `NOT_FOUND` for a function or a reference that
-    /// the action needs.
+    /// the action needs. Returns `BODY_OVERLAP` for a `create` in the body of a function.
     pub fn of(p: &Program, args: &Args) -> Result<Self, ToolError> {
         match args.action().unwrap_or_default() {
             "create" => {
                 let at = address(p, args.get("target"), "/target")?;
-                let entry = code_target(p, at, "target", "/target")?;
+                let entry = free_entry(p, code_target(p, at, "target", "/target")?)?;
                 Ok(Self::Create {
                     entry,
                     name: args.str("name").map(str::to_owned),

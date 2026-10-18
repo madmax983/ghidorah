@@ -12,6 +12,7 @@
 #![allow(clippy::panic, reason = "a test fails through a panic")]
 
 mod comments;
+mod field;
 mod section;
 mod support;
 mod vars;

@@ -16,9 +16,11 @@
 //! | `read_only` | the demo binary in read-only mode |
 //! | `slow` | the demo binary with a clock that moves 1,000 ms at each read |
 //! | `panic` | the demo binary and a test tool `panic_tool` that panics |
+//! | `selfcheck` | the demo binary and a test tool `selfcheck_tool` that runs the real self-check |
+//! | `project:NAME` | a projects root with the golden project `tests/golden/projects/NAME` |
 //! | `locked` | a second session on a project that a first session holds |
 //! | `torn`, `corrupt` | a project whose journal has a torn last line, or a bad middle line |
-//! | `elf:aarch64`, `elf:mangled`, `elf:sp`, `elf:wide`, `file:elf32` | a temp root with a built input file |
+//! | `elf:aarch64`, `elf:mangled`, `elf:sp`, `elf:suspect`, `elf:wide`, `file:elf32` | a temp root with a built input file |
 
 use std::cell::Cell;
 use std::collections::BTreeSet;
@@ -27,15 +29,17 @@ use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use ghidorah_base::catalog::RepairClass;
-use ghidorah_base::{Clock, ErrorCode, FixedClock, WarningCode};
-use ghidorah_json::Value;
+use ghidorah_base::{Address, Clock, ErrorCode, FixedClock, FuncId, WarningCode};
+use ghidorah_decomp::{Opts, ProgramEnv, Tree};
+use ghidorah_json::{Object, Value};
 use ghidorah_testkit::elf::{ElfBuilder, Fde, ImportKind, Loc, Section, Symbol};
 use ghidorah_testkit::ste::check_agent_text;
 use ghidorah_tools::hints::{MAX_NEXT, check};
 use ghidorah_tools::session::{LabelRule, ProjectsConfig};
 use ghidorah_tools::{
-    Args, Ctx, Example, Host, OpenBinary, OutputShape, Payload, Registry, Request, Roots, Session,
-    SessionConfig, ToolError, ToolSpec, dispatch_with, handlers,
+    ArgKind, ArgSpec, Args, Ctx, Example, Host, OpenBinary, OutputShape, Payload, Registry,
+    Request, Role, Roots, Session, SessionConfig, ToolError, ToolSpec, Warning, dispatch_with,
+    handlers,
 };
 
 use crate::support::{
@@ -107,14 +111,67 @@ const PANIC_TOOL: ToolSpec<Session> = ToolSpec {
     ..ToolSpec::base("panic_tool", panics)
 };
 
+/// The entry of `main` in the demo binary.
+const DEMO_MAIN: u64 = 0x1080;
+
+/// Runs the real self-check of the decompiler on the tree of `main` in the demo binary. With
+/// `wrong: true`, the tree is empty, so its block traces differ from the traces of the CFG.
+fn selfcheck(session: &mut Session, args: &Args, ctx: &mut Ctx) -> Result<Payload, ToolError> {
+    let p = &session.bound(&ctx.frame)?.program;
+    let id = FuncId(Address::ram(DEMO_MAIN));
+    let mut decomp = ghidorah_decomp::decompile(p, id, &Opts::default(), &mut ctx.fuel)
+        .map_err(|_| ToolError::new(ErrorCode::InternalError))?;
+    if args.bool("wrong").unwrap_or(false) {
+        decomp.tree = Tree::Seq(Vec::new());
+    }
+    let body = ghidorah_decomp::print::body_units(p, id);
+    let names = ghidorah_x86::lift::Names;
+    let out = ghidorah_decomp::finish(decomp, &ProgramEnv(p), &names, "main", &body);
+    for row in &out.warnings {
+        let mut warning = Warning::new(row.code);
+        warning.at = Some(format!("{:#x}", row.at));
+        ctx.warnings.push(warning);
+    }
+    let mut result = Object::new();
+    result.push("validation", Value::from(out.metrics.validation.name()));
+    Ok(Payload::Object(result))
+}
+
+/// The arguments of the self-check tool.
+const SELFCHECK_ARGS: &[ArgSpec] = &[ArgSpec::new(
+    "wrong",
+    Role::Param,
+    ArgKind::Bool,
+    "The value true replaces the tree with an empty tree.",
+)];
+
+/// A test tool that runs the real self-check on a tree.
+const SELFCHECK_TOOL: ToolSpec<Session> = ToolSpec {
+    title: "Run the self-check in a test",
+    summary: "Run the self-check of the decompiler on the tree of main.",
+    description: "Run the self-check of the decompiler on the tree of main.",
+    args: SELFCHECK_ARGS,
+    output: OutputShape::Any,
+    ..ToolSpec::base("selfcheck_tool", selfcheck)
+};
+
+/// Gives the registry of the sessions with `tool` at the end.
+fn registry_with(tool: &'static ToolSpec<Session>) -> Registry<Session> {
+    let mut tools = registry().tools().to_vec();
+    tools.push(tool);
+    Registry::new(Box::leak(tools.into_boxed_slice()))
+}
+
 /// Gives the registry of the sessions with the panic tool at the end.
 fn panic_registry() -> Registry<Session> {
     static CELL: OnceLock<Registry<Session>> = OnceLock::new();
-    *CELL.get_or_init(|| {
-        let mut tools = registry().tools().to_vec();
-        tools.push(&PANIC_TOOL);
-        Registry::new(Box::leak(tools.into_boxed_slice()))
-    })
+    *CELL.get_or_init(|| registry_with(&PANIC_TOOL))
+}
+
+/// Gives the registry of the sessions with the self-check tool at the end.
+fn selfcheck_registry() -> Registry<Session> {
+    static CELL: OnceLock<Registry<Session>> = OnceLock::new();
+    *CELL.get_or_init(|| registry_with(&SELFCHECK_TOOL))
 }
 
 /// A clock whose monotonic time moves 1,000 ms at each read.
@@ -215,6 +272,17 @@ fn elf_bytes(arg: &str) -> Vec<u8> {
                 .entry(Loc::symbol("main"))
                 .build()
         }
+        "suspect" => {
+            // main: call helper, then int3 padding. helper: xor eax, eax; ret. The call falls
+            // through into padding, but helper returns.
+            let code = [0xe8, 0x03, 0, 0, 0, 0xcc, 0xcc, 0xcc, 0x31, 0xc0, 0xc3];
+            ElfBuilder::exec()
+                .section(Section::code(".text", &code))
+                .symbol(Symbol::func("main", at(0), 8))
+                .symbol(Symbol::func("helper", at(8), 3))
+                .entry(Loc::symbol("main"))
+                .build()
+        }
         "wide" => {
             let end = WIDE_PAIRS * 9;
             let mut code = Vec::new();
@@ -250,6 +318,27 @@ fn write_project(dir: &std::path::Path) {
         let renamed = call(&mut s, "symbol_rename", &args);
         assert_eq!(renamed.get("ok"), Some(&Value::Bool(true)), "{renamed}");
     }
+}
+
+/// Copies the golden project `name` of the demo binary into `dir`. The input copy comes
+/// from the bytes of the built-in demo binary.
+fn copy_project(name: &str, dir: &std::path::Path) {
+    let from = root()
+        .join("tests/golden/projects")
+        .join(name)
+        .join(DEMO_ID);
+    let to = dir.join(DEMO_ID);
+    std::fs::create_dir_all(to.join("bin")).expect("the project directory exists");
+    for entry in std::fs::read_dir(&from).expect("the golden project reads") {
+        let path = entry.expect("an entry").path();
+        if let Some(file) = path.file_name() {
+            std::fs::copy(&path, to.join(file)).expect("the copy works");
+        }
+    }
+    let meta = std::fs::read_to_string(to.join("project.json")).expect("the project file");
+    let sha = text_at(&json(&meta), "/sha256");
+    std::fs::write(to.join("bin").join(sha), ghidorah_tools::demo::BYTES)
+        .expect("the input copy writes");
 }
 
 /// The sessions that a setup keeps alive, for example the first writer of `locked`.
@@ -304,6 +393,21 @@ fn setup(setup: &str, keep: &mut Keep) -> Session {
             handlers::analysis_run::install(&mut s);
             open_demo(&mut s, false);
             s
+        }
+        "selfcheck" => {
+            let mut s = Session::with_registry(
+                selfcheck_registry(),
+                config(),
+                Box::new(FixedClock::new(0)),
+            );
+            handlers::analysis_run::install(&mut s);
+            open_demo(&mut s, false);
+            s
+        }
+        "project" => {
+            let dir = tmp(setup);
+            copy_project(arg, &dir);
+            session_with(projects_config(&dir))
         }
         "locked" => {
             let dir = tmp("locked");
@@ -364,22 +468,18 @@ fn run(line: &Line) -> (Session, Value, Keep) {
     (s, envelope, keep)
 }
 
-/// The codes that no call can give yet. AC-141b stays open while the list holds a code.
-///
-/// | Code | Why no call gives it |
-/// |---|---|
-/// | `W_STALE_OP_ID`, `W_NORETURN_SUSPECT` | no shipped code path gives the warning |
-/// | `BODY_OVERLAP` | `func_edit` gives a no-op for an existing function, and redo stops at a later edit |
-/// | `W_STRUCTURE_SELFCHECK` | a guard of the structurer; no input of the fixtures fails the self-check |
-const NO_PRODUCER: &[&str] = &[
-    "W_STALE_OP_ID",
-    "W_NORETURN_SUSPECT",
-    "BODY_OVERLAP",
-    "W_STRUCTURE_SELFCHECK",
-];
+/// Gives the codes of both enums that the lines must cover.
+fn wanted() -> BTreeSet<String> {
+    let mut out: BTreeSet<String> = ErrorCode::ALL
+        .iter()
+        .map(|c| c.info().name.to_owned())
+        .collect();
+    out.extend(WarningCode::ALL.iter().map(|c| c.info().name.to_owned()));
+    out
+}
 
 #[test]
-fn code_triggers_give_their_codes() {
+fn ac_141b_code_triggers() {
     let all = lines();
     assert!(all.len() >= 40, "{} lines", all.len());
     let mut bad = Vec::new();
@@ -394,34 +494,43 @@ fn code_triggers_give_their_codes() {
         "lines without their code:\n{}",
         bad.join("\n")
     );
-}
-
-/// Gives the codes of both enums that the lines must cover.
-fn wanted() -> BTreeSet<String> {
-    let mut out: BTreeSet<String> = ErrorCode::ALL
-        .iter()
-        .map(|c| c.info().name.to_owned())
-        .collect();
-    out.extend(WarningCode::ALL.iter().map(|c| c.info().name.to_owned()));
-    out
-}
-
-#[test]
-fn code_triggers_cover_the_enums_with_a_producer() {
-    let covered: BTreeSet<String> = lines().into_iter().map(|l| l.code).collect();
-    let missing: Vec<String> = wanted()
-        .into_iter()
-        .filter(|c| !covered.contains(c) && !NO_PRODUCER.contains(&c.as_str()))
-        .collect();
-    assert!(missing.is_empty(), "codes with no line: {missing:?}");
-}
-
-#[test]
-#[ignore = "the codes of NO_PRODUCER have no producer that a call reaches"]
-fn ac_141b_code_triggers() {
-    let covered: BTreeSet<String> = lines().into_iter().map(|l| l.code).collect();
+    let covered: BTreeSet<String> = all.into_iter().map(|l| l.code).collect();
     let missing: Vec<String> = wanted().difference(&covered).cloned().collect();
     assert!(missing.is_empty(), "codes with no line: {missing:?}");
+}
+
+#[test]
+fn selfcheck_ok_has_no_warning() {
+    let mut keep = Keep::new();
+    let mut s = setup("selfcheck", &mut keep);
+    let real = call(&mut s, "selfcheck_tool", r#"{"wrong":false}"#);
+    assert_eq!(text_at(&real, "/data/validation"), "ok", "{real}");
+    assert!(!holds_code(&real, "W_STRUCTURE_SELFCHECK"), "{real}");
+    let wrong = call(&mut s, "selfcheck_tool", r#"{"wrong":true}"#);
+    assert_eq!(text_at(&wrong, "/data/validation"), "repaired", "{wrong}");
+    let mut demo = crate::support::demo();
+    let list = call(&mut demo, "func_list", r#"{"limit":1000}"#);
+    let ids: Vec<String> = list
+        .pointer("/data/items")
+        .and_then(Value::as_array)
+        .unwrap_or_default()
+        .iter()
+        .map(|f| text_at(f, "/id"))
+        .collect();
+    assert!(ids.len() > 5, "{list}");
+    for id in ids {
+        let args = Value::object([
+            ("target", Value::from(id.as_str())),
+            ("include", json(r#"["decomp"]"#)),
+        ]);
+        let envelope = call_value(&mut demo, "func_get", args);
+        assert!(
+            !holds_code(&envelope, "W_STRUCTURE_SELFCHECK"),
+            "{id}: {envelope}"
+        );
+        let validation = text_at(&envelope, "/data/decomp/metrics/validation/structure");
+        assert_eq!(validation, "ok", "{id}: {envelope}");
+    }
 }
 
 /// Tells if `code` names an error code of class R, or of class R* with a repair call.

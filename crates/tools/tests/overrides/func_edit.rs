@@ -293,3 +293,45 @@ fn dry_run_changes_nothing() {
     assert!(program(&s).func(FuncId(Address::ram(0x11d0))).is_none());
     assert!(warnings(&envelope, "W_FACT_ORPHANED").is_empty());
 }
+
+#[test]
+fn create_at_entry_of_other_function_is_body_overlap() {
+    let mut s = demo();
+    let rev = program(&s).rev();
+    // `check_password` owns its entry 0x11e0 and the instruction at 0x11e4.
+    for target in ["0x11e0", "0x11e4"] {
+        let args = format!(r#"{{"action":"create","target":"{target}"}}"#);
+        let envelope = call(&mut s, "func_edit", &args);
+        assert_eq!(code(&envelope), "BODY_OVERLAP", "{target}: {envelope}");
+        assert_eq!(
+            text_at(&envelope, "/error/candidates/0/id"),
+            "fn:0x11e0",
+            "the candidate names the owner: {envelope}"
+        );
+        assert_eq!(text_at(&envelope, "/error/candidates/0/kind"), "function");
+    }
+    assert_eq!(program(&s).rev(), rev, "a refused create changes nothing");
+    let p = program(&s);
+    assert!(p.base().funcs().get(FuncId(Address::ram(0x11e4))).is_none());
+    assert!(p.func(FuncId(Address::ram(0x11e4))).is_none());
+    // A second create of an agent function stays a no-op.
+    let first = call(
+        &mut s,
+        "func_edit",
+        r#"{"action":"create","target":"0x11d0"}"#,
+    );
+    assert_eq!(first.get("noop"), Some(&Value::Bool(false)), "{first}");
+    let again = call(
+        &mut s,
+        "func_edit",
+        r#"{"action":"create","target":"0x11d0"}"#,
+    );
+    assert_eq!(again.get("noop"), Some(&Value::Bool(true)), "{again}");
+    let inside = call(
+        &mut s,
+        "func_edit",
+        r#"{"action":"create","target":"0x11d7"}"#,
+    );
+    assert_eq!(code(&inside), "BODY_OVERLAP", "{inside}");
+    assert_eq!(text_at(&inside, "/error/candidates/0/id"), "fn:0x11d0");
+}
