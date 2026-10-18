@@ -102,6 +102,7 @@ static SHIPPED: &[&ToolSpec<Session>] = &[
     &crate::handlers::mem_read::SPEC,
     &crate::handlers::addr_info::SPEC,
     &crate::handlers::calc::SPEC,
+    &crate::handlers::fact_check::SPEC,
     &crate::handlers::type_get::SPEC,
     &crate::handlers::history_list::SPEC,
     &crate::handlers::session_brief::SPEC,

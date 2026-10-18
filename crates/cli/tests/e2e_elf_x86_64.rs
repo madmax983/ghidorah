@@ -8,8 +8,9 @@
 //!
 //! Version 6 adds `func_get include decomp`. Version 4 (WP-22a) adds the edits
 //! `symbol_rename`, `comment_set` and `note_write`, and a `session_brief`. WP-22b adds
-//! `func_edit set_call_targets`, a prototype in `type_edit` and `type_get`. Later WPs add
-//! client lines and bless the server lines again with `GHIDORAH_BLESS=1`.
+//! `func_edit set_call_targets`, a prototype in `type_edit` and `type_get`. WP-24 adds a
+//! `fact_check` call with two claims and one why tree. Later WPs add client lines and bless
+//! the server lines again with `GHIDORAH_BLESS=1`.
 
 #![allow(
     clippy::expect_used,
@@ -46,7 +47,7 @@ fn text<'a>(reply: &'a Value, pointer: &str) -> Option<&'a str> {
 fn e2e_elf_x86_64() {
     let clients = clients("e2e");
     assert!(
-        clients.len() >= 19,
+        clients.len() >= 20,
         "the transcript has the handshake, tools/list and the tool calls"
     );
     let projects = tmp("e2e_projects");
@@ -117,6 +118,27 @@ fn e2e_elf_x86_64() {
         "func_get include decomp gives the C text of main: {decomp}"
     );
     check_edits(&steps);
+    check_claims(&steps);
+}
+
+/// Checks the reply of the `fact_check` call of WP-24 (id 19).
+fn check_claims(steps: &[(crate::common::transcript::ClientLine, Vec<String>)]) {
+    let claims = reply(steps, 19);
+    assert_eq!(
+        text(&claims, "/data/verdicts/0/verdict"),
+        Some("supported"),
+        "main calls puts: {claims}"
+    );
+    assert_eq!(
+        text(&claims, "/data/verdicts/1/verdict"),
+        Some("refuted"),
+        "_init does not call main: func_edit gave targets to its indirect call at 0x1014: {claims}"
+    );
+    assert_eq!(
+        text(&claims, "/data/explanations/0/rule"),
+        Some("R_SYMBOL_FUNC"),
+        "{claims}"
+    );
 }
 
 /// Checks the replies of the edits of WP-22a and WP-22b (ids 12 to 18) and of the brief.

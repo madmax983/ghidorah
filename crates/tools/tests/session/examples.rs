@@ -19,7 +19,8 @@ use crate::support::{
 const NEEDS_EDIT: &[&str] = &["history_list", "history_undo"];
 
 /// The tools whose examples need the facts of the analysis engine. They are the read tools of
-/// WP-17b, the memory tools of WP-22a and the override and type tools of WP-22b.
+/// WP-17b, the memory tools of WP-22a, the override and type tools of WP-22b and the claim
+/// tool of WP-24.
 const NEEDS_ANALYSIS: &[&str] = &[
     "binary_survey",
     "func_list",
@@ -28,6 +29,7 @@ const NEEDS_ANALYSIS: &[&str] = &[
     "search",
     "mem_read",
     "addr_info",
+    "fact_check",
     "type_get",
     "session_brief",
     "symbol_rename",
@@ -37,8 +39,8 @@ const NEEDS_ANALYSIS: &[&str] = &[
     "type_edit",
 ];
 
-/// Gives the session of the examples of `tool`: the demo binary. A read, memory, override or
-/// type tool gets the analysis engine, as in the tests that own its goldens. A history tool
+/// Gives the session of the examples of `tool`: the demo binary. A read, claim, memory,
+/// override or type tool gets the analysis engine, as in the tests that own its goldens. A history tool
 /// gets one rename in the session `mcp-1`, so `history_undo` has a transaction to undo.
 fn example_session(tool: &str) -> Session {
     if NEEDS_ANALYSIS.contains(&tool) {
@@ -192,6 +194,7 @@ fn agent_text_is_ste() {
         .chain(handlers::func_edit::TEXTS)
         .chain(handlers::type_get::TEXTS)
         .chain(handlers::type_edit::TEXTS)
+        .chain(handlers::fact_check::TEXTS)
         .chain(&[ghidorah_tools::session::WHY_REOPEN]);
     for text in handler_texts {
         texts.push(("handler text".to_owned(), (*text).to_owned()));

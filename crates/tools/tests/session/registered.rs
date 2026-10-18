@@ -1,5 +1,5 @@
-//! The register checks of WP-22a and WP-22b: the shipped registry holds the memory, override
-//! and type tools in catalog order, and `session_brief` lists the orphans of
+//! The register checks of WP-22a, WP-22b and WP-24: the shipped registry holds the memory,
+//! override, type and claim tools in catalog order, and `session_brief` lists the orphans of
 //! `ghidorah_analysis::orphans::find`.
 
 use ghidorah_base::{Address, BinaryId};
@@ -10,9 +10,11 @@ use ghidorah_tools::{Session, ToolError, handlers};
 
 use crate::support::{DEMO_ID, call, data, registry, session, text_at};
 
-/// The tools of WP-22a and WP-22b with their catalog numbers (design Section 10.4). The
-/// shipped registry has no `fact_check` (11) yet, so a number is one more than its index.
+/// The tools of WP-22a, WP-22b and WP-24 with their catalog numbers (design Section 10.3).
+/// The shipped registry holds the tools 1 to 21 in order, so a number is one more than its
+/// index.
 const CATALOG: &[(usize, &str)] = &[
+    (11, "fact_check"),
     (12, "type_get"),
     (14, "session_brief"),
     (16, "symbol_rename"),
@@ -29,7 +31,7 @@ fn shipped_registry_holds_the_memory_and_override_tools() {
         let (index, _) = shipped
             .get(name)
             .unwrap_or_else(|| panic!("{name} is not shipped"));
-        assert_eq!(index + 2, *number, "{name} is at the index {index}");
+        assert_eq!(index + 1, *number, "{name} is at the index {index}");
     }
     let names = shipped.names();
     assert_eq!(names.last(), Some(&"history_undo"), "{names:?}");
@@ -41,6 +43,7 @@ fn shipped_registry_holds_the_memory_and_override_tools() {
         &handlers::type_get::SPEC,
         &handlers::func_edit::SPEC,
         &handlers::type_edit::SPEC,
+        &handlers::fact_check::SPEC,
     ] {
         assert!(names.contains(&spec.name), "{} is not shipped", spec.name);
     }

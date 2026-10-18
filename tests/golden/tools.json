@@ -663,6 +663,67 @@
     }
   },
   {
+    "name": "fact_check",
+    "title": "Check claims and explain facts",
+    "description": "Check claims with supported, refuted or unknown verdicts, and explain why a fact exists. Send claims with a relation and its arguments, for example calls with the arguments main and imp:puts. Send explain with fact IDs to get the why tree of each fact. A refuted verdict is sound: the facts that the relation reads are complete. An indirect call with no target gives unknown, and basis.gaps lists the sites that block a refuted verdict. Call func_edit with the action set_call_targets to give a site its targets.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "claims": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "rel": {
+                "enum": [
+                  "calls",
+                  "reaches",
+                  "uses_import",
+                  "refs_string",
+                  "refs_addr",
+                  "xref",
+                  "const_arg",
+                  "has_syscall",
+                  "noreturn",
+                  "in_func"
+                ]
+              },
+              "args": {
+                "type": "array",
+                "items": {},
+                "maxItems": 3
+              }
+            }
+          },
+          "maxItems": 20
+        },
+        "explain": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 10
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "max_nodes": {
+          "type": "integer"
+        },
+        "binary_id": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
     "name": "type_get",
     "title": "Get a C type",
     "description": "Get a C type with its definition and its layout: size, alignment and field offsets. Send target with a t: ID or a type name, or send c with C type text, for example struct sockaddr_in.",
