@@ -8,6 +8,7 @@ pub mod addr_info;
 pub mod analysis_run;
 pub mod calc;
 pub mod comment_set;
+pub mod fact_check;
 pub mod func_edit;
 pub mod func_get;
 pub mod func_list;
