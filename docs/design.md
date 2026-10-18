@@ -1,6 +1,6 @@
 # ghidorah design and plan
 
-Date: 2026-10-17. Revision: 4 (see the revision log at the end). Status: Accepted for implementation. Inputs: `docs/research.md`, the planning results (three brainstorms, a reverse brainstorm and six thinking hats), the design review of revision 1 and the owner decisions of 2026-10-17 (revision 3).
+Date: 2026-10-18. Revision: 5 (see the revision log at the end). Status: Accepted for implementation. Inputs: `docs/research.md`, the planning results (three brainstorms, a reverse brainstorm and six thinking hats), the design review of revision 1 and the owner decisions of 2026-10-17 (revision 3).
 
 How to read this document:
 
@@ -476,7 +476,7 @@ Function {
   name: via symbols (FUNCTION symbol at entry),
   sig: Option<Fact<SigId>>,
   flags: { noreturn: Fact<bool>, thunk, varargs },
-  start_reason: StartReason,   // Entry | Symbol | PltStub | Main | Pdata | Fde | Call | TailCall | Endbr | Agent
+  start_reason: StartReason,   // Entry | Symbol | PltStub | Main | Pdata | Fde | Call | TailCall | Endbr | Agent | DataPtr | AddrTaken | GapComponent
   confidence: u8,              // 0..=100, see Section 7.3
   caveats: Vec<Caveat { code, at, remedy }>,
   source: Source,              // ANALYSIS for discovered, AGENT or USER for func_edit create
@@ -655,7 +655,7 @@ flowchart TD
 `Program::check_invariants() -> Vec<Violation>` is an executable specification. It runs after every commit under `debug_assertions` and after every step of the model tests (AC-123):
 
 1. The from-index and the to-index of refs hold the same set.
-2. Every ref `from` is the start of a code unit or a data definition.
+2. Every ANALYSIS ref `from` is the start of a code unit or a data definition. An agent ref whose source stops being code stays as a fact and gets `W_FACT_ORPHANED` (revision 5).
 3. Function bodies are disjoint, and each body contains its entry. The ownership map equals the union of bodies.
 4. Each address has at most one primary symbol.
 5. Code units do not overlap.
@@ -1013,7 +1013,10 @@ flowchart TD
   I --> J[TailCallsAndParts 420]
   J --> K[MainDiscovery 430]
   K --> L[EndbrSeeds 440]
-  L --> M[References 600]
+  L --> DP[DataPtrSeeds 450]
+  DP --> AT[AddrTakenSeeds 460]
+  AT --> GC[GapComponents 470]
+  GC --> M[References 600]
   M --> N[Strings 650]
   N --> O[StackFrames 700]
   O --> P[CallingConvention 800]
@@ -1055,6 +1058,7 @@ Seeds in confidence order. Each start keeps `start_reason`, a `Why` and a confid
 | 10 | Agent `func_edit create` | `Agent` | 100 | (agent fact) |
 | 11 | Code pointers in data (revision 4): an aligned 8-byte value in an initialized region without execute permission that points into an executable region. A relocation must give the value (`R_X86_64_RELATIVE` addend, `R_X86_64_64` or a PE `DIR64` base relocation). In a file without such relocations, the value must be in a run of 2 or more such pointers | `DataPtr` | 70 | `R_DATA_CODE_PTR` |
 | 12 | Address-taken code (revision 4): the target of a RIP-relative `lea`, or of a `mov` with a 32-bit absolute immediate in a non-PIE file, that lies in an executable region | `AddrTaken` | 75 | `R_ADDR_TAKEN` |
+| 13 | Gap components (revision 5, Nucleus style): a connected code component in an executable gap that no function owns | `GapComponent` | 40 | `R_GAP_COMPONENT` |
 
 - Recursive descent follows fall-through, branch and call edges. It stops at noreturn calls (Section 7.7).
 - Jump-table targets are case blocks, not functions.
@@ -1064,9 +1068,15 @@ Seeds in confidence order. Each start keeps `start_reason`, a `Why` and a confid
   - It is not a PLT or IAT slot.
   - A linear decode from it gives at least 4 valid instructions before an invalid encoding or the end of the region.
 - Padding heads (`nop`, `int3`, zero bytes) move the candidate to the first other instruction.
-- Without these seeds, functions that only code pointers in data or `lea` reach stay undiscovered. This is the main cause of misses on files without `.eh_frame` (measured: F1 0.749 before revision 4, all misses of this kind).
+- Seeds 11 and 12 find functions that only code pointers in data or `lea` reach. Measured: they raise F1 without `.eh_frame` from 0.749 to 0.835.
+- The other misses have no reference at all: 415 functions of `large.clang-O2.noeh` that nothing calls or names. Only seed 13 can find them.
+- Seed 13 runs last, after all other seeds and recursive descent. For each gap, it skips padding and decodes linearly. It builds the intra-gap CFG with fall-through and branch edges, without call edges. Each weakly connected component becomes a function when it passes 3 tests:
+  - Every instruction of it decodes.
+  - Every path ends in `ret`, an unconditional jump out of the component or a noreturn call.
+  - It has at least 4 instructions.
+- The entry of a component is its lowest address that has no predecessor inside the component. A component that fails a test stays a gap item.
 - FETCH tail-call rule (`TailCallsAndParts`, WP-19): a jump is a tail call only when three conditions are true. The stack height from Section 7.9 is 0. The target obeys the calling convention. Only jumps from this function refer to the target. Otherwise an FDE-only target merges into the caller as a `Cold` part.
-- The MVP has no prologue-pattern gap fill. Executable ranges that no function owns become gap items `{range, bytes, first_insn, remedy: func_edit create}` in the worklist (ADR-0024). Padding (`nop` runs, `int3` runs, zero runs) is not a gap.
+- The MVP has no prologue-pattern gap fill. Seed 13 uses code structure, not byte patterns. Executable ranges that no function owns after seed 13 become gap items `{range, bytes, first_insn, remedy: func_edit create}` in the worklist (ADR-0024). Padding (`nop` runs, `int3` runs, zero runs) is not a gap.
 - Gates: function-start F1 >= 0.98 with `.eh_frame` and >= 0.90 without, against the unstripped twin (AC-077, AC-078). Truth excludes `.cold` symbols, because they are parts. Output keeps the confidence values. The calibration gate is stretch S24. PE fixtures check `.pdata` starts against the `RUNTIME_FUNCTION` table and the link map (AC-248).
 
 ### 7.4 CFG
@@ -2261,7 +2271,7 @@ Ownership rules:
 
 Pairs in one row run in parallel. They share no file except the plain lists and goldens of the register commit (Section 14.1). The production plan of each WP is in parentheses as information only (Section 1.6). A row with one WP has no partner, because its dependencies leave no other WP free for that row.
 
-Revision 3 moved WP-16 to P8 and WP-20 to P10, so that WP-18 starts in P7, as soon as WP-12 merges. Revision 4 adds WP-19b in P13. It also moves WP-23 to P13, because WP-17b and WP-21 merge in P12. WP-22a and WP-22b move to P14, WP-24 and WP-25 to P15, and WP-29 joins WP-30 in P16.
+Revision 3 moved WP-16 to P8 and WP-20 to P10, so that WP-18 starts in P7, as soon as WP-12 merges. Revision 4 adds WP-19b in P13. It also moves WP-23 to P13, because WP-17b and WP-21 merge in P12. WP-22a and WP-22b move to P14, WP-24 and WP-25 to P15, and WP-29 joins WP-30 in P16. Revision 5 adds P16 with WP-19c and WP-25b, and later rows shift by one.
 
 | Pair | WP | WP |
 |---|---|---|
@@ -2280,9 +2290,10 @@ Revision 3 moved WP-16 to P8 and WP-20 to P10, so that WP-18 starts in P7, as so
 | P13 | WP-19b Code-pointer seeds (300) | WP-23 Decompiler output (1,700) |
 | P14 | WP-22a Names, comments, notes and briefs (470) | WP-22b Overrides and type tools (440) |
 | P15 | WP-24 `fact_check` (550) | WP-25 `batch_run` (690) |
-| P16 | WP-29 Function similarity (800) | WP-30 PE32+ x86-64 loader (1,900) |
-| P17 | WP-26 Evaluation harness (tooling) | - |
-| P18 | WP-27 Hardening (tooling) | WP-28 Docs and AC evidence (no code) |
+| P16 | WP-19c Gap components (250) | WP-25b Code producers and field access (250) |
+| P17 | WP-29 Function similarity (800) | WP-30 PE32+ x86-64 loader (1,900) |
+| P18 | WP-26 Evaluation harness (tooling) | - |
+| P19 | WP-27 Hardening (tooling) | WP-28 Docs and AC evidence (no code) |
 
 #### WP-01 Workspace and gates
 
@@ -2587,13 +2598,13 @@ Revision 3 moved WP-16 to P8 and WP-20 to P10, so that WP-18 starts in P7, as so
 
 - Owns: `crates/analysis/src/analyzers/{dataptr,addrtaken}.rs`, `crates/analysis/tests/ir_analyzers/codeptr.rs`.
 - Provides: seeds 11 (`DataPtr`) and 12 (`AddrTaken`) of Section 7.3 with the Why rules `R_DATA_CODE_PTR` and `R_ADDR_TAKEN`, and the new `StartReason` variants.
-- Touches after merge: `crates/analysis/src/registry.rs`, `crates/analysis/src/analyzers/mod.rs`, the `StartReason` and Why rule enums and their JSON codecs, `crates/analysis/tests/ir_analyzers/pipeline.rs` (remove the `#[ignore]` of `ac_078_f1_noeh`). Its partner WP-23 owns none of these files, so WP-19b edits them in its own branch.
+- Touches after merge: `crates/analysis/src/registry.rs`, `crates/analysis/src/analyzers/mod.rs`, the `StartReason` and Why rule enums and their JSON codecs. Its partner WP-23 owns none of these files, so WP-19b edits them in its own branch.
 - Depends on: WP-17a, WP-19.
-- Closes: AC-078, AC-257.
+- Closes: AC-257. Revision 5 moves AC-078 to WP-19c, because seeds 11 and 12 reach F1 0.835 only.
 
 | Row | Named tests |
 |---|---|
-| Happy | `ac_078_f1_noeh`, `ac_257_codeptr_precision`, `dataptr_seeds_relocated_table` |
+| Happy | `ac_257_codeptr_precision`, `dataptr_seeds_relocated_table` |
 | Boundary | `pointer_into_known_body_is_no_seed`, `pointer_to_data_is_no_seed`, `unaligned_value_is_no_seed`, `single_unrelocated_pointer_is_no_seed`, `short_decode_is_no_seed` |
 | Regression | `jumptable_case_is_no_function`, `ac_077_f1_eh` stays at or above 0.98 |
 
@@ -2659,7 +2670,7 @@ Revision 3 moved WP-16 to P8 and WP-20 to P10, so that WP-18 starts in P7, as so
 - Provides: the C printer with `line_map`, line windows with cursors, comments in the text, the type lattice, the self-check, metrics, warnings, the decompile cache, `func_get include decomp`, `ir_opts.level: l1` and the decompiler lines of the server instructions; e2e transcript v6.
 - Touches after merge: `crates/decomp/src/lib.rs`, `crates/tools/src/handlers/{func_get,func_sections}.rs` (the `decomp` section and IR level `l1`), `crates/tools/src/instructions.rs`, `tests/golden/tools.json`, `tests/golden/mcp/e2e.jsonl`.
 - Depends on: WP-17b, WP-21, WP-22b.
-- Closes: AC-086b, AC-099, AC-102, AC-104a, AC-104b, AC-105a, AC-106a, AC-106b, AC-113b, AC-235, AC-236, AC-237.
+- Closes: AC-086b, AC-099, AC-102, AC-104a, AC-104b, AC-105a, AC-106a, AC-106b, AC-113b, AC-235, AC-237. Revision 5 moves AC-236 to WP-25b, because it needs `type_edit` of WP-22b.
 
 | Row | Named tests |
 |---|---|
@@ -2687,13 +2698,45 @@ Revision 3 moved WP-16 to P8 and WP-20 to P10, so that WP-18 starts in P7, as so
 - Provides: `batch_run` (interface committed first for WP-26), validation with `OutputShape` typing, references with `*` and `partial`, guards, resume bindings, the dry-run edit list; e2e transcript v5.
 - Touches after merge: `crates/tools/src/registry.rs`, `crates/tools/src/handlers/mod.rs`, `tests/golden/tools.json`, `tests/golden/mcp/e2e.jsonl`. Its register commit rebases after WP-24 merges. That commit closes the registry-wide ACs.
 - Depends on: WP-13b, WP-22a, WP-22b (code); WP-24 (register commit).
-- Closes: AC-175, AC-176a, AC-176b, AC-177, AC-178, AC-179a to AC-179c, AC-180, AC-181a to AC-181d, AC-182, AC-183, AC-184, AC-206, AC-219, AC-220, AC-231, and the registry-wide ACs AC-024, AC-129a to AC-129f, AC-130a to AC-130c, AC-131a to AC-131c, AC-132a, AC-132b, AC-133, AC-135, AC-137, AC-141b, AC-142, AC-143, AC-149a, AC-149b, AC-152a, AC-152b, AC-174, AC-214, AC-221, AC-222.
+- Closes: AC-175, AC-176a, AC-176b, AC-177, AC-178, AC-179a to AC-179c, AC-180, AC-181a to AC-181d, AC-182, AC-183, AC-184, AC-206, AC-219, AC-220, AC-231, and the registry-wide ACs AC-024, AC-129a to AC-129f, AC-130a to AC-130c, AC-131a to AC-131c, AC-132a, AC-132b, AC-133, AC-135, AC-137, AC-142, AC-143, AC-149a, AC-149b, AC-152a, AC-152b, AC-174, AC-214, AC-221, AC-222.
 
 | Row | Named tests |
 |---|---|
 | Happy | `e2e_elf_x86_64` v5, `ac_175_step_equivalence`, `ac_177_atomic`, `ac_184_result_shape` |
 | Boundary | `ac_176a_static_validation`, `ac_176b_globals_in_steps`, `ac_179a_bad_refs` to `ac_179c_truncated_source`, `ac_181a_budgets` to `ac_181d_step_cap`, `ac_219_destructive_rejected` |
 | Regression | `ac_178_dry_run`, `ac_180_readonly`, `ac_182_on_error`, `ac_183_guards`, `ac_206_read_back`, `ac_220_repair_calls`, `ac_141b_code_triggers` |
+
+#### WP-19c Gap components (revision 5)
+
+- Owns: `crates/analysis/src/analyzers/gapcomp.rs`, `crates/analysis/tests/ir_analyzers/gapcomp.rs`.
+- Provides: seed 13 (`GapComponent`) of Section 7.3 with the Why rule `R_GAP_COMPONENT` and the `StartReason` variant.
+- Touches after merge: `crates/analysis/src/registry.rs`, `crates/analysis/src/analyzers/mod.rs`, the `StartReason` and Why rule enums, `crates/tools/src/handlers/func_list.rs` (`REASONS`), `crates/analysis/tests/ir_analyzers/pipeline.rs` (remove the `#[ignore]` of `ac_078_f1_noeh`), goldens that list analyzers. Its partner WP-25b owns none of these files, so WP-19c edits them in its own branch.
+- Depends on: WP-19b.
+- Closes: AC-078, AC-258.
+
+| Row | Named tests |
+|---|---|
+| Happy | `ac_078_f1_noeh`, `ac_258_gap_precision`, `component_of_two_functions_splits` |
+| Boundary | `three_insn_component_stays_a_gap`, `padding_only_gap_is_no_function`, `invalid_decode_rejects_component`, `component_entry_has_no_inner_predecessor` |
+| Regression | `ac_077_f1_eh` stays at or above 0.98, `gaps_match_truth`, `hidden_gate_stays_a_gap` |
+
+#### WP-25b Code producers and field access (revision 5)
+
+- Owns: `crates/tools/tests/decomp/field.rs` and the producers below in the files that hold their checks.
+- Provides: reachable producers for the four codes that had none:
+  - `BODY_OVERLAP`: `func_edit create` at an address inside the body of another function. The error names the owner in `candidates`.
+  - `W_NORETURN_SUSPECT`: a caveat on a call to a function that is not known as noreturn, when the call has an unsafe fall-through (into data, an invalid encoding, another function or a gap). The remedy is `func_edit set_noreturn`.
+  - `W_STALE_OP_ID`: a note read whose OpId evidence has another `lift_ver`. The trigger is a golden project with an old `lift_ver` in note evidence.
+  - `W_STRUCTURE_SELFCHECK`: the decompiler self-check mismatch. The trigger is a test-only tool in `dispatch_with` that runs the real self-check on a wrong AST. The shipped registry has no test tool.
+- It adds the four trigger lines to `tests/data/code_triggers.jsonl`, removes the `#[ignore]` of `ac_141b_code_triggers` and adds `ac_236_field_access`.
+- Depends on: WP-22b, WP-23, WP-25.
+- Closes: AC-141b, AC-236.
+
+| Row | Named tests |
+|---|---|
+| Happy | `ac_141b_code_triggers`, `ac_236_field_access` |
+| Boundary | `create_at_entry_of_other_function_is_body_overlap`, `call_into_padding_is_suspect`, `same_lift_ver_has_no_warning` |
+| Regression | `noreturn_call_has_no_suspect_caveat`, `selfcheck_ok_has_no_warning` |
 
 #### WP-26 Evaluation harness
 
@@ -3025,7 +3068,7 @@ AC-073 and AC-075b are in Section 15.20 (SSA and decompiler).
 | AC | Statement | Evidence | Closes | Needs |
 |---|---|---|---|---|
 | AC-077 | Function-start F1 is at least 0.98 on stripped T1 and T2 fixtures with `.eh_frame`, against unstripped-twin truth. | `test:analysis::ac_077_f1_eh@T1` | 19 | - |
-| AC-078 | Function-start F1 is at least 0.90 on the no-`.eh_frame` variants. | `test:analysis::ac_078_f1_noeh@T1` | 19b | - |
+| AC-078 | Function-start F1 is at least 0.90 on the no-`.eh_frame` variants. | `test:analysis::ac_078_f1_noeh@T1` | 19c | - |
 | AC-079 | Every `.cold` part belongs to its parent function (`die.cold` belongs to `die`). | `test:analysis::ac_079_cold_parts@T1` | 19 | - |
 | AC-080a | No CFG has a fall-through edge after a call to a noreturn function. | `test:analysis::ac_080a_no_fallthrough_after_noreturn@T1` | 15 | - |
 | AC-080b | The wrapper functions of the `noreturn_*` fixtures have the noreturn flag. | `test:analysis::ac_080b_noreturn_wrappers@T1` | 15 | - |
@@ -3128,7 +3171,7 @@ All decompiler ACs (AC-073, AC-075b, AC-075c, AC-086b, AC-098 to AC-106, AC-108,
 | AC-139 | Stringified arrays, objects, integers, booleans and enum case give results equal to native values plus `W_COERCED`. | `test:tools::ac_139_coercion_matrix@T1` | 13b | - |
 | AC-140 | An unknown key gives `UNKNOWN_ARGUMENT`, and its `next[0]` is a call that passes validation. | `test:tools::ac_140_unknown_argument@T1` | 13a | - |
 | AC-141a | Every `ErrorCode` and `WarningCode` has a frozen number, a message template, a hint, a retry flag and a repair class. | `test:base::ac_141a_catalog_complete@T1` | 05 | - |
-| AC-141b | Each line of `tests/data/code_triggers.jsonl` gives its code, and the lines cover both enums except `OUTPUT_BUDGET_EXCEEDED`. | `test:tools::ac_141b_code_triggers@T1` | 25 | 24 |
+| AC-141b | Each line of `tests/data/code_triggers.jsonl` gives its code, and the lines cover both enums except `OUTPUT_BUDGET_EXCEEDED`. | `test:tools::ac_141b_code_triggers@T1` | 25b | 24 |
 | AC-142 | No error or warning text contains `Some(`, `Os {`, `Error {` or `panicked at`. | `test:tools::ac_142_no_debug_text@T1` | 13a/25 | 24 |
 | AC-143 | Every `next` call and remedy names a tool of the active profile and parses with its `ArgSpec`, and a result has at most 3. | `test:tools::ac_143_executable_hints@T1` | 13a/25 | 24 |
 | AC-144 | A list input with one bad item returns per-item results in input order and `ok: true` for the call. | `test:tools::ac_144_per_item_results@T1` | 17b | - |
@@ -3283,7 +3326,7 @@ These ACs are normal MVP ACs since revision 3 (Section 1.7). AC-018a counts them
 | AC-108 | An unresolved indirect jump prints `goto *(..)` with `W_JUMPTABLE_UNRESOLVED` and never `return`. | `test:decomp::ac_108_computed_goto@T1` | 21 | - |
 | AC-113b | After a signature edit, each caller's decompiled call text matches its golden snippet. | `test:tools::ac_113b_callers_decompile@T1` | 23 | - |
 | AC-235 | Line windows page through the full decompile of every T2 function, and no page exceeds its budget. | `test:tools::ac_235_window_paging@T1` | 23 | - |
-| AC-236 | After `type_edit` sets a `var:` to `struct sockaddr_in *` in `socket_client`, the decompile shows `->sin_port`. | `test:tools::ac_236_field_access@T1` | 23 | - |
+| AC-236 | After `type_edit` sets a `var:` to `struct sockaddr_in *` in `socket_client`, the decompile shows `->sin_port`. | `test:tools::ac_236_field_access@T1` | 25b | 22b |
 | AC-237 | The decompile text prints PLATE, PRE, POST and EOL comments, each with a `line_map` row. | `test:tools::ac_237_comments@T1` | 23 | - |
 
 ### 15.21 ACs appended in revision 2
@@ -3353,6 +3396,7 @@ These ACs are normal MVP ACs since revision 3 (Section 1.7). AC-018a counts them
 | AC | Statement | Evidence | Closes | Needs |
 |---|---|---|---|---|
 | AC-257 | The `DataPtr` and `AddrTaken` seeds add no false start on the T1 and T2 fixtures with `.eh_frame`. At most 1% of their starts are false on the no-`.eh_frame` variants. | `test:analysis::ac_257_codeptr_precision@T1` | 19b | - |
+| AC-258 | The `GapComponent` seed adds no false start on the T1 and T2 fixtures with `.eh_frame`. At most 2% of its starts are false on the no-`.eh_frame` variants. | `test:analysis::ac_258_gap_precision@T1` | 19c | - |
 
 ## 16 Risks and mitigations
 
@@ -3480,3 +3524,11 @@ Revision 4 (2026-10-17) records findings of the build:
 - The pairs table moves WP-23 to P13 next to WP-19b, and shifts WP-22a, WP-22b, WP-24, WP-25 and WP-29 by one row. `xtask/src/ac.rs` PAIRS follows the table.
 - `binary_load` takes `file_format`, not `format`, because the global `format` argument applies to every tool.
 - Section 3.10 records the `load` member of `project.json` and the `journal_lines` member of `snapshot.json`.
+
+Revision 5 (2026-10-18) records findings of P13 to P15:
+
+- Seeds 11 and 12 raise F1 without `.eh_frame` to 0.835, not to 0.90. The other 415 misses have no reference. Section 7.3 adds seed 13 (`GapComponent`, Nucleus style, confidence 40). New WP-19c builds it and closes AC-078. New AC-258 limits its false starts.
+- New WP-25b gives reachable producers for `BODY_OVERLAP`, `W_NORETURN_SUSPECT`, `W_STALE_OP_ID` and `W_STRUCTURE_SELFCHECK`, and closes AC-141b. It also closes AC-236, which needs `type_edit` of WP-22b.
+- Invariant 2 of Section 3.11 covers ANALYSIS refs. An orphaned agent ref stays and gets `W_FACT_ORPHANED`.
+- Section 7.1 shows the seed analyzers at bands 450, 460 and 470.
+- The pairs table adds P16 for WP-19c and WP-25b. Later rows shift by one, and `xtask/src/ac.rs` PAIRS follows the table.
