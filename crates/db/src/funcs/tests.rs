@@ -236,7 +236,8 @@ fn start_reason_names() {
             "endbr",
             "agent",
             "data_ptr",
-            "addr_taken"
+            "addr_taken",
+            "gap_component"
         ]
     );
     for r in StartReason::ALL {

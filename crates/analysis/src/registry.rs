@@ -8,7 +8,8 @@
 use ghidorah_kernel::RangeSet;
 
 use crate::analyzers::{
-    addrtaken, calls, dataptr, disasm, endbr, entry, fde, noreturn, refs, strings, stubs, symbols,
+    addrtaken, calls, dataptr, disasm, endbr, entry, fde, gapcomp, noreturn, refs, strings, stubs,
+    symbols,
 };
 use crate::ctx::AnalysisCtx;
 use crate::spec::{AnalyzerSpec, Step};
@@ -47,6 +48,8 @@ pub enum AnalyzerId {
     DataPtrSeeds,
     /// `AddrTakenSeeds` (460): address-taken code.
     AddrTakenSeeds,
+    /// `GapComponents` (470): connected code components in gaps.
+    GapComponents,
     /// `References` (600): data references of operands, relocations and address tables.
     References,
     /// `Strings` (650): ASCII, UTF-8 and UTF-16LE strings.
@@ -91,6 +94,7 @@ pub static ANALYZERS: &[&AnalyzerSpec] = &[
     &endbr::SPEC,
     &dataptr::SPEC,
     &addrtaken::SPEC,
+    &gapcomp::SPEC,
     &refs::SPEC,
     &strings::SPEC,
     &STACK_FRAMES,
@@ -116,6 +120,7 @@ pub fn run(id: AnalyzerId, ctx: &mut AnalysisCtx<'_>, ranges: &RangeSet) -> Step
         AnalyzerId::EndbrSeeds => endbr::run(ctx, ranges),
         AnalyzerId::DataPtrSeeds => dataptr::run(ctx, ranges),
         AnalyzerId::AddrTakenSeeds => addrtaken::run(ctx, ranges),
+        AnalyzerId::GapComponents => gapcomp::run(ctx, ranges),
         AnalyzerId::References => refs::run(ctx, ranges),
         AnalyzerId::Strings => strings::run(ctx, ranges),
         AnalyzerId::StackFrames => stack::run(ctx, ranges),

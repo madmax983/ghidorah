@@ -50,9 +50,19 @@ fn reason(p: &Program, at: u64) -> Option<(StartReason, u8)> {
         .map(|f| (f.func.start_reason, f.func.confidence))
 }
 
-/// Gives the entries of the functions of `p`.
+/// Gives the entries of the functions of `p`. A function that only seed 13 starts is not in
+/// the list: seed 13 (WP-19c) finds each closed code component in a gap.
 fn entries(p: &Program) -> Vec<u64> {
-    p.funcs().iter().map(|v| v.id().0.off).collect()
+    p.funcs()
+        .iter()
+        .filter(|v| v.func.start_reason != StartReason::GapComponent)
+        .map(|v| v.id().0.off)
+        .collect()
+}
+
+/// Tells if no seed of 1 to 12 starts a function at `at`.
+fn unseeded(p: &Program, at: u64) -> bool {
+    reason(p, at).is_none_or(|(r, _)| r == StartReason::GapComponent)
 }
 
 /// Gives a PIE with an entry `ret` and FUNC at `.text+0x10`, `+0x20` and `+0x30`. The
@@ -268,10 +278,7 @@ fn single_unrelocated_pointer_is_no_seed() {
             (slot + 24, text + 0x30, false)
         ]
     );
-    assert!(
-        p.func(fid(text + 0x10)).is_none(),
-        "a lone pointer is no seed"
-    );
+    assert!(unseeded(&p, text + 0x10), "a lone pointer is no seed");
     for (at, s) in [(text + 0x20, slot + 16), (text + 0x30, slot + 24)] {
         assert_eq!(reason(&p, at), Some((StartReason::DataPtr, 70)));
         let why = p.why(&FactKey::Func(fid(at))).expect("a why-record");
@@ -411,7 +418,7 @@ fn mov_immediate_seeds_only_at_a_fixed_address() {
     let (pie, layout) = analyzed(&ElfBuilder::dyn_object().base(0x40_0000).section(section()));
     let text_at = sec(&layout, ".text");
     assert!(
-        pie.func(fid(text_at + 0x10)).is_none(),
+        unseeded(&pie, text_at + 0x10),
         "a PIE immediate is no address"
     );
 }
@@ -496,8 +503,9 @@ fn ac_257_codeptr_precision() {
             }
         }
     }
+    // Gap components (WP-19c) call some of these starts, so `Call` (95) is their reason now.
     assert!(
-        noeh >= 100,
+        noeh >= 80,
         "the seeds start functions without .eh_frame: {noeh}"
     );
     let wrong = u64::try_from(noeh_false.len()).expect("a count");

@@ -191,7 +191,8 @@ fn func_list_filters_the_code_pointer_reasons() {
     let (mut session, _) = fixture("func_ptrs.clang-O2.noeh");
     let all = all_items(&mut session, "func_list", &json("{}"), 1000);
     let mut seeded = 0;
-    for reason in ["data_ptr", "addr_taken"] {
+    // The build has no gap component, but the filter takes its reason.
+    for reason in ["data_ptr", "addr_taken", "gap_component"] {
         let args = json(&format!(
             r#"{{"filter":{{"start_reason":["{reason}"]}},"limit":1000}}"#
         ));

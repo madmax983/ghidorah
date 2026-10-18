@@ -158,7 +158,8 @@
                   "endbr",
                   "agent",
                   "data_ptr",
-                  "addr_taken"
+                  "addr_taken",
+                  "gap_component"
                 ]
               },
               "maxItems": 10

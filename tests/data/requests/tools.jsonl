@@ -12,7 +12,7 @@
 {"tool":"func_get","args":{"target":"fn:0x11e0","include":["ir"],"ir_opts":{"level":"l1"}}}
 {"tool":"func_get","args":{"target":"fn:0x11e0","include":["ir"],"ir_opts":{"level":"l0"}}}
 {"tool":"func_list","args":{"filter":{"min_confidence":50,"start_reason":["entry","symbol","plt_stub","main","pdata","fde","call","tail_call","endbr","agent"],"visited":false,"named":true,"typed":false,"has_caveat":false,"calls":"puts*","size_min":1,"size_max":1000}}}
-{"tool":"func_list","args":{"filter":{"start_reason":["data_ptr","addr_taken"]}}}
+{"tool":"func_list","args":{"filter":{"start_reason":["data_ptr","addr_taken","gap_component"]}}}
 {"tool":"func_list","args":{"count_only":true,"format":"detailed","fields":["/items/*/id"],"max_chars":5000,"shape":"table"}}
 {"tool":"func_list","args":{"format":"concise","shape":"objects"}}
 {"tool":"func_list","args":{"in":"set:checks"},"before":[{"tool":"note_write","args":{"kind":"set","set":{"name":"checks","members":["fn:0x11e0","fn:0x1080"],"op":"union"}}}]}

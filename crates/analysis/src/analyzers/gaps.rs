@@ -59,7 +59,7 @@ impl Gap {
 }
 
 /// Gives the executable scope of `program`: executable sections, or executable regions.
-fn scope(program: &Program) -> RangeSet {
+pub(crate) fn scope(program: &Program) -> RangeSet {
     let mut regions = RangeSet::new();
     for r in program.mem().regions() {
         if r.perms.contains(Perms::EXECUTE) {
@@ -86,7 +86,7 @@ fn scope(program: &Program) -> RangeSet {
 }
 
 /// Gives the length of the padding at the start of `rest`, or `None` for code.
-fn padding(rest: &[u8], at: u64) -> Option<usize> {
+pub(crate) fn padding(rest: &[u8], at: u64) -> Option<usize> {
     if rest.first() == Some(&0) {
         return Some(1);
     }
@@ -146,13 +146,9 @@ fn split(program: &Program, r: Range, out: &mut Vec<Gap>) {
     }
 }
 
-/// Gives the gap items of `program` in address order.
-#[must_use]
-pub fn items(program: &Program) -> Vec<Gap> {
-    let mut out = Vec::new();
-    if !program.meta().arch.is_x86_64() {
-        return out;
-    }
+/// Gives the addresses that the facts of the binary own. These are the PLT area up to the
+/// next 16-byte boundary, the FDE ranges and the extents of the function symbols.
+pub(crate) fn fixed(program: &Program) -> RangeSet {
     let mut owned = RangeSet::new();
     for r in plt_area(program).ranges() {
         let end = r.last.checked_add(PLT_ENTRY).map(|e| e & !(PLT_ENTRY - 1));
@@ -174,6 +170,17 @@ pub fn items(program: &Program) -> Vec<Gap> {
     for r in b.fdes.iter().map(|f| f.range).chain(symbols) {
         owned.insert(r);
     }
+    owned
+}
+
+/// Gives the gap items of `program` in address order.
+#[must_use]
+pub fn items(program: &Program) -> Vec<Gap> {
+    let mut out = Vec::new();
+    if !program.meta().arch.is_x86_64() {
+        return out;
+    }
+    let mut owned = fixed(program);
     for layer in [program.base(), program.analysis()] {
         for f in layer.funcs().iter() {
             for r in f.body.ranges() {

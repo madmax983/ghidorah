@@ -11,6 +11,7 @@ pub mod disasm;
 pub mod endbr;
 pub mod entry;
 pub mod fde;
+pub mod gapcomp;
 pub mod gaps;
 pub mod lang;
 pub mod metrics;

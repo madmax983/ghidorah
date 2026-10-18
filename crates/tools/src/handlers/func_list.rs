@@ -49,7 +49,7 @@ pub const HINT_NARROW: &str =
 pub const TEXTS: &[&str] = &[HINT_NARROW];
 
 /// The names of the start reasons in the order of design Section 7.3.
-const REASONS: [&str; 12] = [
+const REASONS: [&str; 13] = [
     StartReason::Entry.name(),
     StartReason::Symbol.name(),
     StartReason::PltStub.name(),
@@ -62,6 +62,7 @@ const REASONS: [&str; 12] = [
     StartReason::Agent.name(),
     StartReason::DataPtr.name(),
     StartReason::AddrTaken.name(),
+    StartReason::GapComponent.name(),
 ];
 
 const REASON_ITEM: ArgSpec = ArgSpec::new(
