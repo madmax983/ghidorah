@@ -117,6 +117,7 @@ fn note(kind: NoteKind, members: Option<SetMembers>) -> Note {
         status: NoteStatus::Confirmed,
         tags: vec!["a".to_string(), "b".to_string()],
         evidence: vec!["fn:0x1080".to_string()],
+        lift_ver: None,
         claims: vec![Claim {
             rel: "calls".to_string(),
             args: vec!["fn:0x1080".to_string(), "imp:puts".to_string()],
@@ -269,6 +270,20 @@ fn edit_codec_roundtrip_every_variant() {
     );
     assert_eq!(set.pointer("/name/tx").and_then(Value::as_u64), Some(42));
     assert_eq!(set.pointer("/addr").and_then(Value::as_str), Some("0x1084"));
+}
+
+#[test]
+fn note_lift_ver_round_trips() {
+    let mut old = note(NoteKind::Finding, None);
+    old.evidence = vec!["op:0x1080:3".to_string()];
+    old.lift_ver = Some(0);
+    let e = Edit::WriteNote(Box::new(old));
+    let v = edit_to_json(&e);
+    assert_eq!(v.pointer("/note/lift_ver").and_then(Value::as_u64), Some(0));
+    assert_eq!(edit_from_json(&reparse(&v)).unwrap(), e);
+    // A note with no op: evidence keeps the member list of format version 1.
+    let plain = edit_to_json(&Edit::WriteNote(Box::new(note(NoteKind::Note, None))));
+    assert!(plain.pointer("/note/lift_ver").is_none(), "{plain}");
 }
 
 #[test]

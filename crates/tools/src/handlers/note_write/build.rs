@@ -120,6 +120,7 @@ fn start(tx: &Tx<'_>, args: &Args, name: Option<&SetName>) -> Result<(Note, bool
         status: NoteStatus::Open,
         tags: Vec::new(),
         evidence: Vec::new(),
+        lift_ver: None,
         claims: Vec::new(),
         set: None,
         src: origin.source,

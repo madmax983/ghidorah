@@ -205,6 +205,7 @@ fn write_note(session: &mut ghidorah_tools::Session, kind: NoteKind, set: Option
         status: NoteStatus::Open,
         tags: vec!["crypto".to_owned()],
         evidence: Vec::new(),
+        lift_ver: None,
         claims: Vec::new(),
         set,
         src: Source::Agent,

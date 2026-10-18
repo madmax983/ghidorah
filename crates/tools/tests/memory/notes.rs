@@ -1,11 +1,102 @@
 //! `note_write`: the note kinds, updates, deletes, findings and the records of
-//! `search { ids }` (AC-218).
+//! `search { ids }` (AC-218). A note read whose `op:` evidence has another lifter version
+//! gives `W_STALE_OP_ID`.
 
+use ghidorah_analysis::fir::LIFT_VER;
+use ghidorah_base::NoteId;
+use ghidorah_db::{Edit, Note, NoteKind, NoteStatus};
 use ghidorah_json::Value;
+use ghidorah_tools::{Session, ToolError};
 
 use crate::support::{
-    STRIPPED, all_items, call, code, data, fixture, int_at, json, str_of, text_at, warnings,
+    STRIPPED, all_items, call, code, data, demo, demo_id, fixture, int_at, json, program, str_of,
+    text_at, warnings,
 };
+
+/// The `op:` evidence of the lifter version tests.
+const OP: &str = "op:0x11e4:0";
+
+/// Commits a note with the `op:` evidence [`OP`] and the lifter version `lift_ver`. Gives its ID.
+fn note_with_ops(session: &mut Session, lift_ver: Option<u32>) -> String {
+    let id = demo_id();
+    let (_, note) = session
+        .transact(id, "note_write", "mcp-1", |tx| {
+            let origin = tx.origin();
+            let note = Note {
+                id: tx.program().notes().next_id(),
+                kind: NoteKind::Finding,
+                text: "The loop reads the input.".to_owned(),
+                at: None,
+                func: None,
+                status: NoteStatus::Open,
+                tags: Vec::new(),
+                evidence: vec![OP.to_owned()],
+                lift_ver,
+                claims: Vec::new(),
+                set: None,
+                src: origin.source,
+                session: origin.session.clone(),
+                rev: tx.pending_rev(),
+            };
+            let id = note.id;
+            tx.apply(Edit::WriteNote(Box::new(note)))
+                .map(|_| id)
+                .map_err(|e| ToolError::new(e.code()))
+        })
+        .expect("the note commits");
+    note.to_string()
+}
+
+#[test]
+fn same_lift_ver_has_no_warning() {
+    let mut s = demo();
+    let written = call(
+        &mut s,
+        "note_write",
+        r#"{"kind":"finding","text":"The loop reads the input.","evidence":["op:0x11e4:0","fn:0x11e0"]}"#,
+    );
+    let id = text_at(&written, "/data/note");
+    let note = program(&s, demo_id())
+        .notes()
+        .get(NoteId(1))
+        .cloned()
+        .expect("the note exists");
+    assert_eq!(note.lift_ver, Some(LIFT_VER), "{written}");
+    let plain = call(
+        &mut s,
+        "note_write",
+        r#"{"kind":"note","text":"No op evidence.","evidence":["fn:0x11e0"]}"#,
+    );
+    let plain_id = text_at(&plain, "/data/note");
+    let second = program(&s, demo_id()).notes().get(NoteId(2)).cloned();
+    assert_eq!(second.and_then(|n| n.lift_ver), None, "{plain}");
+    let args = format!(r#"{{"ids":["{id}","{plain_id}"]}}"#);
+    let read = call(&mut s, "search", &args);
+    data(&read);
+    assert_eq!(warnings(&read, "W_STALE_OP_ID"), 0, "{read}");
+    let current = note_with_ops(&mut s, Some(LIFT_VER));
+    let listed = call(&mut s, "search", r#"{"kind":"note"}"#);
+    assert_eq!(warnings(&listed, "W_STALE_OP_ID"), 0, "{current}: {listed}");
+}
+
+#[test]
+fn older_lift_ver_gives_stale_op_id() {
+    let mut s = demo();
+    let old = note_with_ops(&mut s, Some(LIFT_VER.wrapping_sub(1)));
+    let args = format!(r#"{{"ids":["{old}"]}}"#);
+    let read = call(&mut s, "search", &args);
+    data(&read);
+    assert_eq!(warnings(&read, "W_STALE_OP_ID"), 1, "{read}");
+    assert_eq!(text_at(&read, "/warnings/0/at"), OP, "{read}");
+    let listed = call(&mut s, "search", r#"{"kind":"note"}"#);
+    assert_eq!(warnings(&listed, "W_STALE_OP_ID"), 1, "{listed}");
+    // A new write of the evidence takes the current lifter version.
+    let update = format!(r#"{{"target":"{old}","evidence":["{OP}"]}}"#);
+    let written = call(&mut s, "note_write", &update);
+    data(&written);
+    let again = call(&mut s, "search", &args);
+    assert_eq!(warnings(&again, "W_STALE_OP_ID"), 0, "{again}");
+}
 
 #[test]
 fn note_kinds_and_records() {

@@ -127,6 +127,7 @@ fn note(g: &mut Gen, tx: &Tx<'_>) -> Note {
         status: pick(g, &NoteStatus::ALL),
         tags: vec!["t".to_string()],
         evidence,
+        lift_ver: None,
         claims: vec![Claim {
             rel: "calls".to_string(),
             args: vec!["fn:0x1080".to_string(), "fn:0x10c0".to_string()],

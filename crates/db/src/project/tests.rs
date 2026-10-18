@@ -407,6 +407,7 @@ fn bless_golden() {
         status: crate::notes::NoteStatus::Open,
         tags: vec!["crypto".to_string()],
         evidence: vec!["fn:0x11e0".to_string()],
+        lift_ver: None,
         claims: Vec::new(),
         set: None,
         src: Source::Agent,

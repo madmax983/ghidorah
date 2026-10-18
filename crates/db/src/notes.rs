@@ -234,6 +234,9 @@ pub struct Note {
     pub tags: Vec<String>,
     /// The evidence: ID texts that parse.
     pub evidence: Vec<String>,
+    /// The lifter version of the `op:` IDs in `evidence`. A note with no `op:` evidence has
+    /// `None`. A read that finds another version gives `W_STALE_OP_ID`.
+    pub lift_ver: Option<u32>,
     /// The claims.
     pub claims: Vec<Claim>,
     /// The set of a note of kind `set`.

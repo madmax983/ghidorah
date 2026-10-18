@@ -21,6 +21,7 @@
 {"code":"CURSOR_STALE","tool":"batch_run","args":{"steps":[{"id":"page","tool":"func_list","args":{"sort":"name","limit":2}},{"id":"rename","tool":"symbol_rename","args":{"target":{"$ref":"page","ptr":"/data/items/1/id","partial":true},"name":"zz_last","force":true}},{"id":"more","tool":"func_list","args":{"sort":"name","limit":2,"cursor":{"$ref":"page","ptr":"/page/next_cursor"}}}]}}
 {"code":"CONFLICT","tool":"symbol_rename","args":{"target":"0x1090","name":"read_input","expected_rev":99}}
 {"code":"BLOCKED_BY_HIGHER_PRIORITY_SOURCE","tool":"func_edit","args":{"action":"create","target":"0x11d0","name":"gate_check"}}
+{"code":"BODY_OVERLAP","tool":"func_edit","args":{"action":"create","target":"0x11e4"}}
 {"code":"NOT_IN_FUNCTION","tool":"func_get","args":{"target":"0x2004"}}
 {"code":"C_PARSE_ERROR","tool":"type_get","args":{"c":"int ("}}
 {"code":"NOTHING_TO_UNDO","tool":"history_undo","args":{}}
@@ -43,13 +44,16 @@
 {"code":"W_JOURNAL_TAIL_DISCARDED","setup":"torn","tool":"binary_load","args":{"builtin":"demo"}}
 {"code":"W_AGENT_OVERRIDE_CONFLICT","tool":"func_edit","args":{"action":"set_noreturn","target":"fn:0x11e0","noreturn":true}}
 {"code":"W_FACT_ORPHANED","before":[{"tool":"func_edit","args":{"action":"add_ref","ref":{"from":"0x1096","to":"0x11d0","kind":"unconditional_call"}}},{"tool":"type_edit","args":{"target":"var:0x11d0/param:0","type":"int"}}],"tool":"func_edit","args":{"action":"remove_ref","ref":{"from":"0x1096","to":"0x11d0","kind":"unconditional_call"}}}
+{"code":"W_STALE_OP_ID","setup":"project:stale_op","before":[{"tool":"binary_load","args":{"builtin":"demo"}}],"tool":"search","args":{"ids":["note:1"]}}
 {"code":"W_UNGROUNDED_FINDING","tool":"note_write","args":{"kind":"finding","text":"The check is weak."}}
+{"code":"W_NORETURN_SUSPECT","setup":"elf:suspect","before":[{"tool":"binary_load","args":{"path":"input.elf"}}],"tool":"func_get","args":{"target":"main"}}
 {"code":"W_NORETURN_ASSUMED","setup":"fixture:syscall_only.gcc-O2","tool":"func_get","args":{"target":"fn:0x401060","include":["decomp"]}}
 {"code":"W_JUMPTABLE_UNRESOLVED","tool":"func_get","args":{"target":"fn:0x1140"}}
 {"code":"W_INDIRECT_CALL_UNRESOLVED","setup":"fixture:func_ptrs.gcc-O2","tool":"func_get","args":{"target":"fn:0x1000","include":["decomp"]}}
 {"code":"W_LIFT_UNSUPPORTED","setup":"fixture:func_ptrs.gcc-O2","tool":"func_get","args":{"target":"fn:0x11b0","include":["summary","ir","decomp"]}}
 {"code":"W_SP_MISMATCH","setup":"elf:sp","before":[{"tool":"binary_load","args":{"path":"input.elf"}}],"tool":"func_get","args":{"target":"main"}}
 {"code":"W_BUDGET_FLAT","setup":"elf:wide","before":[{"tool":"binary_load","args":{"path":"input.elf"}}],"tool":"func_get","args":{"target":"main","include":["decomp"]}}
+{"code":"W_STRUCTURE_SELFCHECK","setup":"selfcheck","tool":"selfcheck_tool","args":{"wrong":true}}
 {"code":"W_ANALYSIS_STALE","tool":"func_edit","args":{"action":"create","target":"0x11d0","max_steps":20}}
 {"code":"W_TIME_STOP","setup":"slow","tool":"batch_run","args":{"steps":[{"id":"a","tool":"calc","args":{"expr":"0x1"}},{"id":"b","tool":"calc","args":{"expr":"0x2"}},{"id":"c","tool":"calc","args":{"expr":"0x3"}}],"max_ms":1500}}
 {"code":"OUTPUT_BUDGET_EXCEEDED","tool":"mem_read","args":{"target":"0x1080","as":"insn","count":120}}

@@ -1,13 +1,122 @@
-//! Noreturn flags and the CFG after noreturn calls (AC-080a, AC-080b).
+//! Noreturn flags and the CFG after noreturn calls (AC-080a, AC-080b). The caveat
+//! `W_NORETURN_SUSPECT` on a call with an unsafe fall-through to a callee that returns.
 
 use ghidorah_analysis::cfg::{self, EdgeKind};
 use ghidorah_analysis::code::decode_at;
 use ghidorah_analysis::ctx::UNIT_NORETURN_CALL;
-use ghidorah_base::{Address, FuncId};
+use ghidorah_base::{Address, FuncId, Id, WarningCode};
 use ghidorah_db::{CodeUnit, FlowKind, Program};
+use ghidorah_loader::LoadOpts;
+use ghidorah_testkit::elf::{ElfBuilder, Loc, Section, Symbol};
 use ghidorah_x86::Flow;
 
-use crate::support::{all_t1, analyzed, fid, name_of, named, truth, truth_addr};
+use crate::support::{
+    all_t1, analyze, analyzed, fid, name_of, named, program_of, truth, truth_addr,
+};
+
+/// Gives the analyzed program of the `.text` bytes `code` with the function symbols `funcs`:
+/// a name, an offset and a size each. The first function is the entry.
+fn built(code: &[u8], funcs: &[(&str, u64, u64)]) -> Program {
+    let mut b = ElfBuilder::exec().section(Section::code(".text", code));
+    for (name, off, size) in funcs {
+        b = b.symbol(Symbol::func(name, Loc::section(".text", *off), *size));
+    }
+    let b = b.entry(Loc::symbol(funcs[0].0));
+    let mut p = program_of(&b.build(), &LoadOpts::AUTO);
+    let _ = analyze(&mut p);
+    p
+}
+
+/// Gives the `W_NORETURN_SUSPECT` caveats of the function `name`: the site and the remedy.
+fn suspects(p: &Program, name: &str) -> Vec<(u64, String)> {
+    let view = p.func(fid(named(p, name))).expect("the function");
+    view.func
+        .caveats
+        .iter()
+        .filter(|c| c.code == WarningCode::NoreturnSuspect)
+        .map(|c| {
+            let at = c.at.map_or(0, |a| a.off);
+            (at, c.remedy.clone().unwrap_or_default())
+        })
+        .collect()
+}
+
+/// Gives the remedy of a suspect call to the function at `callee`.
+fn remedy_of(callee: u64) -> String {
+    format!("func_edit {{ action: \"set_noreturn\", target: \"fn:{callee:#x}\", noreturn: true }}")
+}
+
+#[test]
+fn call_into_padding_is_suspect() {
+    // call helper; int3 x3 | helper: xor eax, eax; ret
+    let int3 = built(
+        &[0xe8, 0x03, 0, 0, 0, 0xcc, 0xcc, 0xcc, 0x31, 0xc0, 0xc3],
+        &[("main", 0, 8), ("helper", 8, 3)],
+    );
+    // call helper; a 2-byte nop into the entry of helper | helper: xor eax, eax; ret
+    let nop = built(
+        &[0xe8, 0x02, 0, 0, 0, 0x66, 0x90, 0x31, 0xc0, 0xc3],
+        &[("main", 0, 7), ("helper", 7, 3)],
+    );
+    for p in [&int3, &nop] {
+        let main = named(p, "main");
+        let helper = named(p, "helper");
+        assert_eq!(
+            suspects(p, "main"),
+            vec![(main, remedy_of(helper))],
+            "the call falls into padding"
+        );
+        let callee = p.func(fid(helper)).expect("helper");
+        assert!(callee.noreturn.is_none(), "helper returns");
+        assert!(suspects(p, "helper").is_empty());
+    }
+    // call helper; ret | helper: xor eax, eax; ret
+    let safe = built(
+        &[0xe8, 0x01, 0, 0, 0, 0xc3, 0x31, 0xc0, 0xc3],
+        &[("main", 0, 6), ("helper", 6, 3)],
+    );
+    assert!(
+        suspects(&safe, "main").is_empty(),
+        "the call returns into code"
+    );
+}
+
+#[test]
+fn noreturn_call_has_no_suspect_caveat() {
+    // call fatal; int3 x3 | fatal: ud2
+    let p = built(
+        &[0xe8, 0x03, 0, 0, 0, 0xcc, 0xcc, 0xcc, 0x0f, 0x0b],
+        &[("main", 0, 8), ("fatal", 8, 2)],
+    );
+    let fatal = p.func(fid(named(&p, "fatal"))).expect("fatal");
+    assert_eq!(fatal.noreturn.map(|n| n.value), Some(true));
+    assert!(suspects(&p, "main").is_empty());
+    let mut seen = 0usize;
+    for (path, p) in all_t1() {
+        for view in p.funcs() {
+            for c in &view.func.caveats {
+                if c.code != WarningCode::NoreturnSuspect {
+                    continue;
+                }
+                seen += 1;
+                let remedy = c.remedy.clone().unwrap_or_default();
+                let target = remedy
+                    .split('"')
+                    .find_map(|part| match Id::parse(part) {
+                        Ok(Id::Func(f)) => Some(f),
+                        _ => None,
+                    })
+                    .unwrap_or_else(|| panic!("{path}: a remedy names a function: {remedy}"));
+                let callee = p.func(target).and_then(|f| f.noreturn);
+                assert!(
+                    callee.is_none_or(|n| !n.value),
+                    "{path}: the suspect callee {target} is noreturn"
+                );
+            }
+        }
+    }
+    assert!(seen < 50, "{seen} suspect calls in the T1 fixtures");
+}
 
 /// Tells if the call unit at `at` calls a noreturn function, by its flag or its callee.
 fn noreturn_call(p: &Program, at: u64, flags: u8) -> bool {

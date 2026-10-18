@@ -291,6 +291,7 @@ impl Json for Note {
             status: o.get("status")?,
             tags: o.get("tags")?,
             evidence: o.get("evidence")?,
+            lift_ver: None,
             claims: o.get("claims")?,
             set: o.get("set")?,
             src: o.get("src")?,

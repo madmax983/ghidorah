@@ -370,6 +370,7 @@ fn structural_rules_find_broken_tables() {
         status: NoteStatus::Open,
         tags: Vec::new(),
         evidence: vec!["fn:0x10".to_string(), "bad evidence".to_string()],
+        lift_ver: None,
         claims: Vec::new(),
         set: Some(NoteSet {
             name: SetName::new("s").unwrap(),

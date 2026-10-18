@@ -128,6 +128,7 @@ fn session_sets_and_crashes() {
         status: NoteStatus::Open,
         tags: Vec::new(),
         evidence: Vec::new(),
+        lift_ver: None,
         claims: Vec::new(),
         set: Some(NoteSet {
             name: SetName::new("parsers").expect("a set name"),
