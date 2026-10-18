@@ -66,7 +66,6 @@ fn ac_077_f1_eh() {
 }
 
 #[test]
-#[ignore = "F1 0.835 < 0.90: 415 functions of large.clang-O2.noeh have no code or data reference"]
 fn ac_078_f1_noeh() {
     let s = f1("noeh");
     assert!(s.tp > 600, "the noeh functions: {}", s.tp);

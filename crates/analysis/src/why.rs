@@ -32,6 +32,7 @@
 //! | `R_SYSCALL_NUMBER` | the syscall note of a `syscall` site | the code unit of the site |
 //! | `R_DATA_CODE_PTR` | a function at a code pointer in data | the relocation, or the data slot of a pointer run |
 //! | `R_ADDR_TAKEN` | a function at address-taken code | the code unit of the `lea` or the `mov` |
+//! | `R_GAP_COMPONENT` | a function at the entry of a code component in a gap | none: the bytes |
 
 use std::fmt;
 
@@ -92,11 +93,13 @@ pub enum Rule {
     DataCodePtr,
     /// `R_ADDR_TAKEN`.
     AddrTaken,
+    /// `R_GAP_COMPONENT`.
+    GapComponent,
 }
 
 impl Rule {
     /// All rules in catalog order.
-    pub const ALL: [Self; 25] = [
+    pub const ALL: [Self; 26] = [
         Self::Entry,
         Self::SymbolFunc,
         Self::PltRelocSlot,
@@ -122,6 +125,7 @@ impl Rule {
         Self::SyscallNumber,
         Self::DataCodePtr,
         Self::AddrTaken,
+        Self::GapComponent,
     ];
 
     /// Gives the rule code, for example `R_FDE_START`.
@@ -153,6 +157,7 @@ impl Rule {
             Self::SyscallNumber => "R_SYSCALL_NUMBER",
             Self::DataCodePtr => "R_DATA_CODE_PTR",
             Self::AddrTaken => "R_ADDR_TAKEN",
+            Self::GapComponent => "R_GAP_COMPONENT",
         }
     }
 
@@ -197,6 +202,9 @@ impl Rule {
                 "An aligned pointer in data points to code that no function holds."
             }
             Self::AddrTaken => "An instruction takes the address of code that no function holds.",
+            Self::GapComponent => {
+                "A connected code component in a gap ends each path and has no other entry."
+            }
         }
     }
 

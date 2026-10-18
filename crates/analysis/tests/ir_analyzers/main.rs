@@ -1,5 +1,5 @@
-//! The tier-1 tests of the IR-based analyzers of `ghidorah-analysis` (WP-19) and of the
-//! code-pointer seeds (WP-19b).
+//! The tier-1 tests of the IR-based analyzers of `ghidorah-analysis` (WP-19), of the
+//! code-pointer seeds (WP-19b) and of the gap components (WP-19c).
 //!
 //! The derived views (function IR, stack frames, method A, parameters, syscall sites, call
 //! arguments and the start call) run over the published facts of the analyzers. The pipeline
@@ -16,6 +16,7 @@ mod callargs;
 mod cc;
 mod codeptr;
 mod fir;
+mod gapcomp;
 mod jumptable;
 mod main_discovery;
 mod pipeline;
