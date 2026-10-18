@@ -61,6 +61,7 @@ fn analysis_run_completes_and_reports() {
             "EndbrSeeds",
             "DataPtrSeeds",
             "AddrTakenSeeds",
+            "GapComponents",
             "References",
             "Strings",
             "StackFrames",

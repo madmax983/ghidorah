@@ -11,7 +11,7 @@
   "partial": true,
   "data": {
     "state": "budget_stopped",
-    "steps_used": 961,
+    "steps_used": 965,
     "resume": true,
     "analyzers": [
       {
@@ -101,6 +101,12 @@
       {
         "name": "AddrTakenSeeds",
         "priority": 460,
+        "pending": 0,
+        "runs": 1
+      },
+      {
+        "name": "GapComponents",
+        "priority": 470,
         "pending": 0,
         "runs": 1
       },
