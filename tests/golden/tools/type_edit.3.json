@@ -1,0 +1,50 @@
+{"golden":"generator=tools_examples version=1 fixture=crackme.gcc-O2 fixture_sha256=467a43b75d95c826daba8cb216d01d7fd386aa96c5ef5a95c2effffe1780de8f"}
+{
+  "ok": true,
+  "binary_id": "467a43b75d95c826",
+  "rev": 1,
+  "session": "cli",
+  "analysis": {
+    "state": "complete",
+    "rev": 1
+  },
+  "partial": false,
+  "data": {
+    "applied": {
+      "target": "var:0x11e0/param:0",
+      "old": null,
+      "new": "const char *"
+    },
+    "rev": 1
+  },
+  "noop": true,
+  "diff": [
+    {
+      "op": "SetVarFact",
+      "key": {
+        "k": "var",
+        "var": "var:0x11e0/param:0"
+      },
+      "old": {
+        "op": "SetVarFact",
+        "var": "var:0x11e0/param:0",
+        "field": {
+          "type": null
+        }
+      },
+      "new": {
+        "op": "SetVarFact",
+        "var": "var:0x11e0/param:0",
+        "field": {
+          "type": {
+            "value": 118,
+            "source": "agent",
+            "tx": 2,
+            "session": "cli",
+            "force": false
+          }
+        }
+      }
+    }
+  ]
+}

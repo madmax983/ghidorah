@@ -4,19 +4,97 @@
 //! A program starts with the primitive types and the prelude. The binary format selects the
 //! data model. ELF and raw binaries use `x86_64-sysv`. The PE work package adds the model
 //! `x86_64-win` for PE32+ files.
+//!
+//! The store only grows. A transaction adds types with [`Tx::parse_sig`](crate::Tx::parse_sig)
+//! and [`Tx::parse_type`](crate::Tx::parse_type). Each C text that adds a type is a
+//! [`TypeInput`]. The journal line of the commit and the snapshot keep the inputs in order.
+//! The parser is deterministic, so a replay of the inputs over the prelude gives the same
+//! type IDs again.
+//!
+//! | Step | Store |
+//! |---|---|
+//! | a parse in a transaction | the new types, and the input when the store grows |
+//! | a rollback or a commit with no edit | the store before the transaction |
+//! | a commit with edits | the journal line holds the inputs of the transaction |
+//! | a replay or a snapshot restore | the inputs parse again in order |
+//! | an undo | the types stay. A type is a value, not a fact. |
 
 #[cfg(test)]
 mod tests;
 
+use std::fmt;
+
 use ghidorah_base::TypeRef;
 use ghidorah_loader::Format;
-use ghidorah_types::{DataModel, PreludeError, Proto, Sig, StoreError, Type, TypeId, TypeStore};
+use ghidorah_types::{
+    CParseError, DataModel, ParsedSig, PreludeError, Proto, Sig, StoreError, Type, TypeId,
+    TypeStore,
+};
+
+/// The parse mode of a [`TypeInput`] (design Section 9.2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum TypeMode {
+    /// One prototype: `sig` mode.
+    Sig,
+    /// One abstract type: `type` mode.
+    Type,
+}
+
+impl TypeMode {
+    /// Gives the mode name: `sig` or `type`.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Sig => "sig",
+            Self::Type => "type",
+        }
+    }
+
+    /// Gives the mode of a name. Another name gives `None`.
+    #[must_use]
+    pub fn parse(name: &str) -> Option<Self> {
+        [Self::Sig, Self::Type]
+            .into_iter()
+            .find(|m| m.name() == name)
+    }
+}
+
+/// One C text that added types to the store.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct TypeInput {
+    /// The parse mode.
+    pub mode: TypeMode,
+    /// The C text.
+    pub text: String,
+}
+
+/// The error of a replay of type inputs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InputError {
+    /// The index of the input that does not parse, from 0.
+    pub index: usize,
+    /// The parse error.
+    pub error: CParseError,
+}
+
+impl fmt::Display for InputError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "The type input {} does not parse: {}",
+            self.index, self.error
+        )
+    }
+}
+
+impl std::error::Error for InputError {}
 
 /// The types of one program.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Types {
     store: TypeStore,
     model: DataModel,
+    inputs: Vec<TypeInput>,
 }
 
 /// Gives the data model of a binary format.
@@ -37,7 +115,76 @@ impl Types {
         Ok(Self {
             store: TypeStore::with_prelude()?,
             model: model_for(format),
+            inputs: Vec::new(),
         })
+    }
+
+    /// Gives the inputs that added types after the prelude, in parse order.
+    #[must_use]
+    pub fn inputs(&self) -> &[TypeInput] {
+        &self.inputs
+    }
+
+    /// Parses the prototype `text` in `sig` mode into the store. A text that adds a type joins
+    /// [`Types::inputs`].
+    ///
+    /// # Errors
+    ///
+    /// Returns the [`CParseError`] of the text. Then the store does not change.
+    pub(crate) fn parse_sig(&mut self, text: &str) -> Result<ParsedSig, CParseError> {
+        let before = self.store.len();
+        let parsed = ghidorah_types::parse_sig(&mut self.store, text)?;
+        self.record(TypeMode::Sig, text, before);
+        Ok(parsed)
+    }
+
+    /// Parses the abstract type `text` in `type` mode into the store. A text that adds a type
+    /// joins [`Types::inputs`].
+    ///
+    /// # Errors
+    ///
+    /// Returns the [`CParseError`] of the text. Then the store does not change.
+    pub(crate) fn parse_type(&mut self, text: &str) -> Result<TypeId, CParseError> {
+        let before = self.store.len();
+        let id = ghidorah_types::parse_type(&mut self.store, text)?;
+        self.record(TypeMode::Type, text, before);
+        Ok(id)
+    }
+
+    /// Records `text` as an input when the store has more than `before` types.
+    fn record(&mut self, mode: TypeMode, text: &str, before: usize) {
+        if self.store.len() > before {
+            self.inputs.push(TypeInput {
+                mode,
+                text: text.to_owned(),
+            });
+        }
+    }
+
+    /// Parses `input` into the store in its mode.
+    ///
+    /// # Errors
+    ///
+    /// Returns the [`CParseError`] of the text. Then the store does not change.
+    fn parse(&mut self, input: &TypeInput) -> Result<(), CParseError> {
+        match input.mode {
+            TypeMode::Sig => self.parse_sig(&input.text).map(drop),
+            TypeMode::Type => self.parse_type(&input.text).map(drop),
+        }
+    }
+
+    /// Parses each input of `inputs` in order in its mode.
+    ///
+    /// # Errors
+    ///
+    /// Returns the [`InputError`] of the first input that does not parse. The inputs before
+    /// it stay.
+    pub(crate) fn replay(&mut self, inputs: &[TypeInput]) -> Result<(), InputError> {
+        for (index, input) in inputs.iter().enumerate() {
+            self.parse(input)
+                .map_err(|error| InputError { index, error })?;
+        }
+        Ok(())
     }
 
     /// Gives the store.

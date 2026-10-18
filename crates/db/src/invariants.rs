@@ -6,7 +6,7 @@
 //! | # | Rule | Violations |
 //! |---|---|---|
 //! | 1 | The from-index and the to-index of the references hold the same set. | `RefIndex` |
-//! | 2 | Each reference starts at a code unit or a data definition. | `RefFrom` |
+//! | 2 | Each analysis reference starts at a code unit or a data definition. | `RefFrom` |
 //! | 3 | Each body holds its entry. Bodies of one layer are disjoint. The ownership map equals the union of the bodies. | `FuncEntry`, `FuncOverlap`, `Ownership` |
 //! | 4 | Each address with symbols has one primary symbol. The name index equals the symbols. | `Primary`, `NameIndex` |
 //! | 5 | Code units of one layer do not overlap. Data definitions of one layer do not overlap. | `UnitOverlap`, `DataOverlap` |
@@ -17,6 +17,10 @@
 //!
 //! Rule 8 reads "instruction start" as an address in an executable region that no code unit
 //! holds after its first byte. So a new agent target is valid before the re-analysis.
+//!
+//! Rule 2 checks the analysis layer only. A forward `AddRef` checks the source of an agent
+//! reference. A later re-analysis can drop that code unit. Then the agent reference is an
+//! orphan: it stays, and `analysis::orphans` reports it (design Section 3.9).
 
 mod whys;
 
@@ -47,7 +51,8 @@ pub enum Violation {
         /// The layer.
         layer: Layer,
     },
-    /// Rule 2: no code unit and no data definition starts at the source of a reference.
+    /// Rule 2: no code unit and no data definition starts at the source of an analysis
+    /// reference.
     RefFrom {
         /// The layer of the reference.
         layer: Layer,
@@ -329,12 +334,13 @@ impl Program {
             let from = t.refs().iter().map(|f| f.value.key).collect();
             ref_index(layer, from, t.refs().to_index().collect(), &mut out);
         }
-        for (layer, t) in layers {
-            for r in t.refs().iter() {
-                let from = r.value.key.from;
-                if !starts_unit(self, from) {
-                    out.push(Violation::RefFrom { layer, from });
-                }
+        for r in self.analysis().refs().iter() {
+            let from = r.value.key.from;
+            if !starts_unit(self, from) {
+                out.push(Violation::RefFrom {
+                    layer: Layer::Analysis,
+                    from,
+                });
             }
         }
         for (layer, t) in layers {

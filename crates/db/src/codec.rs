@@ -37,6 +37,7 @@ use crate::fact::Invalid;
 use crate::notes::Notes;
 use crate::program::{Program, Tables};
 use crate::progress::Progress;
+use crate::typesglue::{TypeInput, Types};
 use crate::why::FactKey;
 
 pub(crate) use values::Json;
@@ -188,10 +189,35 @@ impl<'a> Obj<'a> {
 /// Gives the fact dump of a program: the input of the state hash.
 ///
 /// The dump holds `binary` (the SHA-256 of the file), `base` and `analysis` (the tables
-/// without counters), `notes` (without the ID counter) and `types` (the number of types).
+/// without counters), `notes` (without the ID counter) and `types` (see [`types_to_json`]).
 #[must_use]
 pub fn facts(program: &Program) -> Value {
     tables::facts(program)
+}
+
+/// Gives the JSON form of the types of a program: the number of types, or
+/// `{ count, inputs }` when C texts added types after the prelude (design Section 9.2).
+#[must_use]
+pub fn types_to_json(types: &Types) -> Value {
+    let count = Value::from(types.store().len());
+    if types.inputs().is_empty() {
+        return count;
+    }
+    let inputs = types.inputs().iter().map(Json::enc).collect();
+    Value::object([("count", count), ("inputs", Value::Array(inputs))])
+}
+
+/// Reads the JSON form of [`types_to_json`]: the number of types and the inputs.
+///
+/// # Errors
+///
+/// Returns a [`CodecError`] for another shape.
+pub fn types_from_json(value: &Value) -> Result<(u64, Vec<TypeInput>), CodecError> {
+    if value.as_object().is_some() {
+        let o = Obj::new(value, &["count", "inputs"])?;
+        return Ok((o.get("count")?, o.each("inputs", TypeInput::dec)?));
+    }
+    Ok((u64::dec(value)?, Vec::new()))
 }
 
 /// Gives the JSON form of the tables of one layer, with the counter of new why-records.

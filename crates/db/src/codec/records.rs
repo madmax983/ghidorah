@@ -7,6 +7,7 @@ use super::values::{Json, Off, obj, text};
 use super::{CodecError, Obj, Reason};
 use crate::funcs::{Caveat, FuncFlags, Function, Part};
 use crate::notes::{Claim, Note, NoteSet, SetMembers};
+use crate::typesglue::{TypeInput, TypeMode};
 use crate::vars::VarFact;
 use crate::why::{FactKey, Why};
 
@@ -21,6 +22,24 @@ impl Json for Part {
             range: o.get("range")?,
             kind: o.get("kind")?,
         })
+    }
+}
+
+impl Json for TypeInput {
+    fn enc(&self) -> Value {
+        obj([
+            ("mode", Value::from(self.mode.name())),
+            ("text", Value::from(self.text.as_str())),
+        ])
+    }
+
+    fn dec(v: &Value) -> Result<Self, CodecError> {
+        let o = Obj::new(v, &["mode", "text"])?;
+        let mode = o.with("mode", |m| {
+            TypeMode::parse(text(m)?).ok_or_else(|| CodecError::text("type mode"))
+        })?;
+        let body: String = o.get("text")?;
+        Ok(Self { mode, text: body })
     }
 }
 

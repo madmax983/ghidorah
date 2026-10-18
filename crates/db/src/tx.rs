@@ -19,6 +19,8 @@
 //!   no effective change is a no-op: it gives `noop: true` and keeps `rev` (AC-127).
 //! - Each commit with edits takes the next transaction ID. A rollback or a no-op takes none.
 //! - Under `debug_assertions`, each commit runs [`Program::check_invariants`].
+//! - [`Tx::parse_sig`] and [`Tx::parse_type`] add types to the store. A rollback and a no-op
+//!   commit put the store back. A commit with edits gives the inputs in [`Commit::types`].
 
 #[cfg(test)]
 mod tests;
@@ -26,6 +28,7 @@ mod tests;
 use std::fmt;
 
 use ghidorah_base::{ErrorCode, Rev, TxId};
+use ghidorah_types::{CParseError, ParsedSig, TypeId};
 
 use crate::edit::{Ctx, Edit, EditError, Mode, apply, normalize};
 use crate::epochs::{Epochs, Touch};
@@ -33,6 +36,7 @@ use crate::events::Events;
 use crate::fact::{Fact, Origin, SessionLabel};
 use crate::program::Program;
 use crate::source::Source;
+use crate::typesglue::{InputError, TypeInput, Types};
 
 /// The longest transaction label in bytes.
 pub const MAX_TX_LABEL: usize = 128;
@@ -137,6 +141,8 @@ pub struct Commit {
     pub force: bool,
     /// The applied edits in apply order.
     pub edits: Vec<Applied>,
+    /// The C texts that added types to the store, in parse order.
+    pub types: Vec<TypeInput>,
 }
 
 impl Commit {
@@ -194,6 +200,7 @@ impl Program {
             used_force: false,
             poisoned: false,
             open: true,
+            types_before: None,
         })
     }
 
@@ -214,6 +221,7 @@ pub struct Tx<'p> {
     used_force: bool,
     poisoned: bool,
     open: bool,
+    types_before: Option<Box<Types>>,
 }
 
 impl<'p> Tx<'p> {
@@ -263,6 +271,67 @@ impl<'p> Tx<'p> {
     #[must_use]
     pub fn edits(&self) -> &[Applied] {
         &self.log
+    }
+
+    /// Parses the prototype `text` in `sig` mode into the type store of the program.
+    ///
+    /// # Errors
+    ///
+    /// Returns the [`CParseError`] of the text. Then the store does not change.
+    pub fn parse_sig(&mut self, text: &str) -> Result<ParsedSig, CParseError> {
+        self.keep_types();
+        self.program.types_mut().parse_sig(text)
+    }
+
+    /// Parses the abstract type `text` in `type` mode into the type store of the program.
+    ///
+    /// # Errors
+    ///
+    /// Returns the [`CParseError`] of the text. Then the store does not change.
+    pub fn parse_type(&mut self, text: &str) -> Result<TypeId, CParseError> {
+        self.keep_types();
+        self.program.types_mut().parse_type(text)
+    }
+
+    /// Parses the type inputs of a journal line again, for a replay.
+    ///
+    /// # Errors
+    ///
+    /// Returns the [`InputError`] of the first input that does not parse.
+    pub(crate) fn replay_types(&mut self, inputs: &[TypeInput]) -> Result<(), InputError> {
+        if inputs.is_empty() {
+            return Ok(());
+        }
+        self.keep_types();
+        self.program.types_mut().replay(inputs)
+    }
+
+    /// Keeps a copy of the types before the first parse of the Tx, for a rollback.
+    fn keep_types(&mut self) {
+        if self.types_before.is_none() {
+            self.types_before = Some(Box::new(self.program.types().clone()));
+        }
+    }
+
+    /// Puts back the types of the start of the Tx.
+    fn restore_types(&mut self) {
+        if let Some(types) = self.types_before.take() {
+            *self.program.types_mut() = *types;
+        }
+    }
+
+    /// Gives the inputs that the Tx added to the types.
+    fn new_types(&self) -> Vec<TypeInput> {
+        let start = self
+            .types_before
+            .as_ref()
+            .map_or(usize::MAX, |t| t.inputs().len());
+        self.program
+            .types()
+            .inputs()
+            .get(start..)
+            .map(<[TypeInput]>::to_vec)
+            .unwrap_or_default()
     }
 
     /// Tells if a nested abort poisoned the Tx.
@@ -330,6 +399,9 @@ impl<'p> Tx<'p> {
             // An exact inverse puts back a state that held before, so it succeeds.
             let _ = apply(self.program, &applied.inverse, &ctx);
         }
+        if mark == 0 {
+            self.restore_types();
+        }
     }
 
     /// Opens a nested scope. Its abort poisons this Tx.
@@ -363,6 +435,12 @@ impl<'p> Tx<'p> {
         self.open = false;
         let edits = std::mem::take(&mut self.log);
         let noop = edits.is_empty();
+        let types = if noop {
+            self.restore_types();
+            Vec::new()
+        } else {
+            self.new_types()
+        };
         if let (false, Some(next)) = (noop, next) {
             let rev = Rev(next);
             let mut touch = Touch::default();
@@ -386,6 +464,7 @@ impl<'p> Tx<'p> {
             session: self.origin.session.clone(),
             force: self.used_force,
             edits,
+            types,
         })
     }
 

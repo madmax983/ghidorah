@@ -3,9 +3,9 @@
 //! - A create with listed variables or a plate comment needs empty variable and plate
 //!   slots for the function. Its inverse is a cascading delete. A create without them has
 //!   a delete without cascade as its inverse. So each inverse is exact.
-//! - A forward signature or noreturn edit on a discovered function makes a base holder record.
-//!   The body of the record is the one byte at the entry. Its inverse is a delete without
-//!   cascade.
+//! - A signature or noreturn edit on a discovered function makes a base holder record. The
+//!   body of the record is the one byte at the entry. Its inverse is a delete without cascade.
+//!   An exact edit of a replay or a redo makes the same record again.
 
 use ghidorah_base::{FuncId, VarId};
 
@@ -206,24 +206,23 @@ pub(super) fn delete(
     Ok(remove(t, id, cascade).map(|r| Edit::CreateFunction(Box::new(r))))
 }
 
-/// Makes a holder record for a forward edit on a discovered function of the base layer.
-/// `set` puts the fact into the record.
+/// Makes a holder record for an edit on a discovered function of the base layer. `set` puts
+/// the fact into the record.
+///
+/// A forward edit needs the function. An exact edit of a replay or a redo makes the record
+/// with the start reason `Agent` when the function is not there.
 fn holder(
     p: &mut Program,
     ctx: &Ctx<'_>,
     id: FuncId,
     set: impl FnOnce(&mut Function),
 ) -> Result<Option<Edit>, EditError> {
-    let Some(view) = p.func(id) else {
-        return Err(Invalid::NoFunc(id).into());
+    let (reason, confidence) = match p.func(id) {
+        Some(view) => (view.func.start_reason, view.func.confidence),
+        None if !ctx.forward() => (crate::funcs::StartReason::Agent, 100),
+        None => return Err(Invalid::NoFunc(id).into()),
     };
-    let found = view.func;
-    let mut f = Function::new(
-        id.0,
-        found.start_reason,
-        found.confidence,
-        ctx.origin.source,
-    );
+    let mut f = Function::new(id.0, reason, confidence, ctx.origin.source);
     set(&mut f);
     tables(p, Layer::Base)?.funcs.insert(f)?;
     Ok(Some(Edit::DeleteFunction { id, cascade: false }))
@@ -247,7 +246,7 @@ pub(super) fn signature(
     let Some(func) = t.funcs.get(id) else {
         return match sig {
             None => Ok(None),
-            Some(s) if ctx.forward() && ctx.layer() == Layer::Base => {
+            Some(s) if ctx.layer() == Layer::Base => {
                 holder(p, ctx, id, |f| f.sig = Some(s.clone()))
             }
             Some(_) => Err(Invalid::NoFunc(id).into()),
@@ -275,7 +274,7 @@ pub(super) fn noreturn(
     let Some(func) = t.funcs.get(id) else {
         return match flag {
             None => Ok(None),
-            Some(n) if ctx.forward() && ctx.layer() == Layer::Base => {
+            Some(n) if ctx.layer() == Layer::Base => {
                 holder(p, ctx, id, |f| f.flags.noreturn = Some(n.clone()))
             }
             Some(_) => Err(Invalid::NoFunc(id).into()),

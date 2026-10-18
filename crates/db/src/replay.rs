@@ -5,7 +5,7 @@
 //!
 //! | Line | Effect |
 //! |---|---|
-//! | commit | one transaction with the exact edits of the line, at the same `rev` and `tx` |
+//! | commit | one transaction with the types and the exact edits of the line, at the same `rev` and `tx` |
 //! | analysis run | the `rev` and `tx` move on. The analysis layer is behind, so the state is stale. |
 //! | meta | a fold into the progress rows and the marks |
 //!
@@ -132,6 +132,7 @@ pub fn apply_tx(program: &mut Program, line: &TxLine) -> Result<(), String> {
     let mut tx = program
         .begin(line.label.as_str(), line.source, line.session.clone())
         .map_err(|e| e.to_string())?;
+    tx.replay_types(&line.types).map_err(|e| e.to_string())?;
     for a in &line.edits {
         let same = tx
             .restore(a.edit.clone())
@@ -147,6 +148,9 @@ pub fn apply_tx(program: &mut Program, line: &TxLine) -> Result<(), String> {
     let commit = tx.commit().map_err(|e| e.to_string())?;
     if commit.noop {
         return Err("the line has no edit".to_owned());
+    }
+    if commit.types != line.types {
+        return Err("the types of the line do not give the same inputs".to_owned());
     }
     Ok(())
 }
