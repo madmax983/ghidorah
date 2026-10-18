@@ -6,7 +6,7 @@
 {"fixture":"demo","claim":{"rel":"calls","args":["check_password","imp:strlen"]},"verdict":"supported"}
 {"fixture":"demo","claim":{"rel":"calls","args":["fn:0x1000","main"]},"verdict":"unknown","gaps":["0x1014"]}
 {"fixture":"demo","claim":{"rel":"calls","args":["main","sys:write"]},"verdict":"refuted"}
-{"fixture":"demo","claim":{"rel":"reaches","args":["main","imp:strlen",2]},"verdict":"supported","evidence":["ref:0x1091>0x11e0:unconditional_call","ref:0x11f7>0x1070:unconditional_call"]}
+{"fixture":"demo","claim":{"rel":"reaches","args":["main","imp:strlen",2]},"verdict":"supported","evidence":["ref:0x1091>0x11e0:unconditional_call","ref:0x11e8>0x1070:unconditional_call"]}
 {"fixture":"demo","claim":{"rel":"reaches","args":["main","imp:strlen",1]},"verdict":"refuted"}
 {"fixture":"demo","claim":{"rel":"reaches","args":["main","imp:__cxa_finalize"]},"verdict":"refuted"}
 {"fixture":"demo","claim":{"rel":"reaches","args":["fn:0x1180","imp:puts",3]},"verdict":"unknown","gaps":["0x112f"]}

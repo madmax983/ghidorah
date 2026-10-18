@@ -14,12 +14,23 @@
 //! target table (design Section 10.5). When the analysis is not complete, a `refuted` verdict
 //! changes to `unknown`, because a negative verdict is not sound on a partial analysis.
 
-use ghidorah_analysis::facts::NAMES;
-use ghidorah_json::Object;
+mod parse;
+mod render;
+
+use std::collections::BTreeMap;
+
+use ghidorah_analysis::facts::{Checker, Gap, NAMES, Outcome, Verdict, explain, key_of};
+use ghidorah_base::{ErrorCode, Fuel};
+use ghidorah_db::Program;
+use ghidorah_json::{Object, Value};
+
+pub use parse::atom;
 
 use crate::args::Args;
 use crate::dispatch::{Ctx, Payload};
 use crate::errors::ToolError;
+use crate::handlers::func_sections as fs;
+use crate::hints::Call;
 use crate::outshape::{Field, OutputShape};
 use crate::session::Session;
 use crate::spec::{ArgKind, ArgSpec, Example, Group, GroupRule, Profile, Role, ToolSpec};
@@ -37,7 +48,7 @@ pub const MAX_ARGS: usize = 3;
 pub const MAX_ID: usize = 1_024;
 
 /// The largest number of evidence items and gaps of one verdict.
-pub const MAX_ITEMS: usize = 20;
+pub const MAX_ITEMS: usize = render::MAX_ITEMS;
 
 /// The fuel of the check of one claim.
 pub const CLAIM_FUEL: u64 = 20_000_000;
@@ -189,7 +200,120 @@ pub const SPEC: ToolSpec<Session> = ToolSpec {
     ..ToolSpec::base("fact_check", run)
 };
 
+/// Checks one claim on `program` and gives its verdict entry. A claim whose arguments do not
+/// resolve gives `{ claim, error }`. On a partial analysis, `refuted` changes to `unknown`.
+///
+/// The `claim` guards of `batch_run` use the same function, so a guard and a direct call give
+/// the same verdict.
+#[must_use]
+pub fn check_claim(checker: &mut Checker<'_>, claim: &Value, path: &str, partial: bool) -> Value {
+    check_one(checker, claim, path, partial).0
+}
+
+/// Checks one claim. Gives the verdict entry and the outcome of a claim that resolves.
+fn check_one(
+    checker: &mut Checker<'_>,
+    claim: &Value,
+    path: &str,
+    partial: bool,
+) -> (Value, Option<Outcome>) {
+    match atom(checker.program(), claim, path) {
+        Ok(a) => {
+            let mut out = checker.check(&a, &mut Fuel::new(CLAIM_FUEL));
+            if partial {
+                out.weaken();
+            }
+            (render::verdict(claim, &out, partial), Some(out))
+        }
+        Err(e) => (render::error("claim", claim, &e), None),
+    }
+}
+
+/// Gives the error of a fact ID that does not explain.
+fn explain_error(e: &ghidorah_analysis::facts::ExplainError, path: &str) -> ToolError {
+    match e {
+        ghidorah_analysis::facts::ExplainError::NotFound(kind) => {
+            ToolError::new(ErrorCode::NotFound)
+                .var("kind", kind)
+                .path(path)
+                .detail("kind", Value::from(*kind))
+        }
+        ghidorah_analysis::facts::ExplainError::BadId(_) => {
+            ToolError::new(ErrorCode::InvalidArgument)
+                .var("field", path.strip_prefix('/').unwrap_or(path))
+                .path(path)
+                .detail(
+                    "expected",
+                    Value::from(
+                        "a fact ID: fn:, ref:, str:, jt:, sym:, var:, imp:, exp:, note: or 0x hex",
+                    ),
+                )
+        }
+    }
+}
+
+/// Gives the trees of the fact IDs `ids` and the rules of the trees.
+fn trees(p: &Program, ids: &[Value], depth: u32, max_nodes: usize) -> (Vec<Value>, Value) {
+    let mut rules = BTreeMap::new();
+    let mut nodes = max_nodes;
+    let mut out = Vec::with_capacity(ids.len());
+    for (i, id) in ids.iter().enumerate() {
+        let path = format!("/explain/{i}");
+        let text = id.as_str().unwrap_or_default();
+        match key_of(p, text) {
+            Ok(key) => out.push(render::tree(
+                &explain(p, &key, depth, &mut nodes),
+                &mut rules,
+            )),
+            Err(e) => out.push(render::error("id", id, &explain_error(&e, &path))),
+        }
+    }
+    (out, render::rules(&rules))
+}
+
+/// Gives the first site gap of an `unknown` verdict.
+fn first_gap(out: &Outcome) -> Option<String> {
+    if out.verdict != Verdict::Unknown {
+        return None;
+    }
+    out.gaps.iter().find_map(|g| match g {
+        Gap::Site(a) if a.is_ram() => Some(a.to_string()),
+        _ => None,
+    })
+}
+
 fn run(session: &mut Session, args: &Args, ctx: &mut Ctx) -> Result<Payload, ToolError> {
-    let _ = (session.bound(&ctx.frame)?, args);
-    Ok(Payload::Object(Object::new()))
+    let p = &session.bound(&ctx.frame)?.program;
+    fs::x86_only(p)?;
+    let partial = ctx.frame.partial();
+    let mut checker = Checker::new(p);
+    let mut verdicts = Vec::new();
+    let mut gap = None;
+    for (i, claim) in args.list("claims").unwrap_or_default().iter().enumerate() {
+        let (entry, out) = check_one(&mut checker, claim, &format!("/claims/{i}"), partial);
+        if gap.is_none() {
+            gap = out.as_ref().and_then(first_gap);
+        }
+        verdicts.push(entry);
+    }
+    let depth = u32::try_from(args.int("depth").unwrap_or(3)).unwrap_or(3);
+    let max_nodes = usize::try_from(args.int("max_nodes").unwrap_or(200)).unwrap_or(200);
+    let (explanations, rules) = trees(
+        p,
+        args.list("explain").unwrap_or_default(),
+        depth,
+        max_nodes,
+    );
+    if let Some(at) = gap {
+        ctx.hint(Call::new(
+            "addr_info",
+            Value::object([("target", Value::from(at))]),
+            WHY_GAP,
+        ));
+    }
+    let mut out = Object::new();
+    out.push("verdicts", Value::Array(verdicts));
+    out.push("explanations", Value::Array(explanations));
+    out.push("rules", rules);
+    Ok(Payload::Object(out))
 }

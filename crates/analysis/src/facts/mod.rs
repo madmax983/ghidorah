@@ -20,12 +20,14 @@
 //! jump table and no `IndirectTargets` override. A site with an override counts as resolved.
 //! `basis.gaps` lists the gaps that block a negative verdict. A `refuted` verdict is sound.
 
+mod callers;
 pub mod check;
 pub mod explain;
 pub mod relations;
+mod scope;
 
 pub use check::Checker;
-pub use explain::{ExplainError, Node, explain, fact_name, key_of};
+pub use explain::{ExplainError, Node, explain, fact_name, key_of, key_text, source_of};
 pub use relations::{
     Atom, CATALOG, ColKind, Column, Endpoint, Evidence, Gap, NAMES, Outcome, RefClass, RelSpec,
     Relation, Verdict,
