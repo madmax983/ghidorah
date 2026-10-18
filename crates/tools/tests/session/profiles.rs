@@ -188,7 +188,7 @@ fn catalog_chars(set: &ProfileSet, reg: &Registry<Session>) -> usize {
 }
 
 #[test]
-#[ignore = "WP-25: the 13 shipped tools give 35,862 characters > 24,000; the schema compaction of WP-25 closes AC-131a"]
+#[ignore = "WP-25: the 17 shipped tools give 47,710 characters > 24,000; the schema compaction of WP-25 closes AC-131a"]
 fn ac_131a_full_catalog_size() {
     let reg = registry();
     let chars = catalog_chars(&ProfileSet::new(Profile::Full, None), &reg);
@@ -196,7 +196,7 @@ fn ac_131a_full_catalog_size() {
 }
 
 #[test]
-#[ignore = "WP-25: the 7 shipped mini tools give 22,666 characters > 6,000; the schema compaction of WP-25 closes AC-131b"]
+#[ignore = "WP-25: the 9 shipped mini tools give 30,162 characters > 6,000; the schema compaction of WP-25 closes AC-131b"]
 fn ac_131b_mini_catalog_size() {
     let reg = registry();
     let chars = catalog_chars(&ProfileSet::new(Profile::Mini, None), &reg);

@@ -18,7 +18,8 @@ use crate::support::{
 /// The tools whose examples need one committed edit in the session `mcp-1`.
 const NEEDS_EDIT: &[&str] = &["history_list", "history_undo"];
 
-/// The read tools of WP-17b: their examples need the facts of the analysis engine.
+/// The tools whose examples need the facts of the analysis engine. They are the read tools of
+/// WP-17b and the memory tools of WP-22a.
 const NEEDS_ANALYSIS: &[&str] = &[
     "binary_survey",
     "func_list",
@@ -27,11 +28,15 @@ const NEEDS_ANALYSIS: &[&str] = &[
     "search",
     "mem_read",
     "addr_info",
+    "session_brief",
+    "symbol_rename",
+    "comment_set",
+    "note_write",
 ];
 
-/// Gives the session of the examples of `tool`: the demo binary. A read tool gets the
-/// analysis engine, as in the read tests that own its goldens. A history tool gets one rename
-/// in the session `mcp-1`, so `history_undo` has a transaction to undo.
+/// Gives the session of the examples of `tool`: the demo binary. A read or memory tool gets the
+/// analysis engine, as in the tests that own its goldens. A history tool
+/// gets one rename in the session `mcp-1`, so `history_undo` has a transaction to undo.
 fn example_session(tool: &str) -> Session {
     if NEEDS_ANALYSIS.contains(&tool) {
         let mut session = session_with(config());
@@ -169,6 +174,10 @@ fn agent_text_is_ste() {
         .chain(handlers::xref_list::TEXTS)
         .chain(handlers::search::TEXTS)
         .chain(handlers::mem_read::TEXTS)
+        .chain(handlers::symbol_rename::TEXTS)
+        .chain(handlers::comment_set::TEXTS)
+        .chain(handlers::note_write::TEXTS)
+        .chain(handlers::session_brief::TEXTS)
         .chain(&[ghidorah_tools::session::WHY_REOPEN]);
     for text in handler_texts {
         texts.push(("handler text".to_owned(), (*text).to_owned()));
