@@ -58,7 +58,17 @@ fn call_into_padding_is_suspect() {
         &[0xe8, 0x02, 0, 0, 0, 0x66, 0x90, 0x31, 0xc0, 0xc3],
         &[("main", 0, 7), ("helper", 7, 3)],
     );
-    for p in [&int3, &nop] {
+    // helper: xor eax, eax; ret; nop | call helper; then 0 bytes
+    let zero = built(
+        &[0x31, 0xc0, 0xc3, 0x90, 0xe8, 0xf7, 0xff, 0xff, 0xff, 0, 0],
+        &[("main", 4, 7), ("helper", 0, 3)],
+    );
+    // helper: xor eax, eax; ret | call helper at the end of the code
+    let end = built(
+        &[0x31, 0xc0, 0xc3, 0xe8, 0xf8, 0xff, 0xff, 0xff],
+        &[("main", 3, 5), ("helper", 0, 3)],
+    );
+    for p in [&int3, &nop, &zero, &end] {
         let main = named(p, "main");
         let helper = named(p, "helper");
         assert_eq!(
