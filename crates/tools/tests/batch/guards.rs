@@ -1,9 +1,10 @@
 //! The guards of a step: `expect` and `claim` (AC-183).
 
 use ghidorah_json::Value;
+use ghidorah_tools::Profile;
 use ghidorah_tools::batch::{Guard, OPS};
 
-use crate::support::{TRUE_CALL, batch, demo, json, step_code, steps, text_at};
+use crate::support::{TRUE_CALL, batch, call, demo, demo_in, json, step_code, steps, text_at};
 
 /// Gives the guard of the JSON text `text`.
 fn guard(text: &str) -> Guard {
@@ -110,5 +111,51 @@ fn ac_183_guards() {
     assert_eq!(
         text_at(&envelope, "/data/steps/0/error/field_path"),
         "/steps/0/claim/0"
+    );
+}
+
+/// Gives a batch of one `func_list` step with the claim guard `calls(a, b)`.
+fn calls_guard(a: &str, b: &str) -> String {
+    format!(
+        r#"{{"steps":[{{"id":"look","tool":"func_list","args":{{"limit":1}},"claim":[{{"rel":"calls","args":["{a}","{b}"]}}]}}]}}"#
+    )
+}
+
+/// The `mini` profile has `batch_run` but not `fact_check`. A claim guard still gets the
+/// verdict of the relation check, the same as in the `full` profile.
+#[test]
+fn regress_claim_guard_in_mini_profile() {
+    let mut s = demo_in(Profile::Mini);
+    let envelope = batch(&mut s, &calls_guard(TRUE_CALL[0], TRUE_CALL[1]));
+    assert_eq!(
+        envelope.pointer("/data/steps/0/ok"),
+        Some(&Value::Bool(true)),
+        "a supported claim passes in mini: {envelope}"
+    );
+    let envelope = batch(&mut s, &calls_guard(TRUE_CALL[1], TRUE_CALL[0]));
+    assert_eq!(step_code(&envelope, 0), "EXPECT_FAILED", "{envelope}");
+    let mut full = demo();
+    let direct = batch(&mut full, &calls_guard(TRUE_CALL[1], TRUE_CALL[0]));
+    assert_eq!(
+        text_at(&envelope, "/data/steps/0/error/details/actual"),
+        text_at(&direct, "/data/steps/0/error/details/actual"),
+        "mini and full give the same verdict: {envelope} {direct}"
+    );
+    // A claim whose argument does not resolve gives the error code of the direct call.
+    let envelope = batch(&mut s, &calls_guard("no_such_function", TRUE_CALL[0]));
+    let checked = call(
+        &mut full,
+        "fact_check",
+        &format!(
+            r#"{{"claims":[{{"rel":"calls","args":["no_such_function","{}"]}}]}}"#,
+            TRUE_CALL[0]
+        ),
+    );
+    let code = text_at(&checked, "/data/verdicts/0/error/code");
+    assert!(!code.is_empty(), "{checked}");
+    assert_eq!(
+        text_at(&envelope, "/data/steps/0/error/details/actual"),
+        code,
+        "{envelope}"
     );
 }

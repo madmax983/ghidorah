@@ -1,18 +1,26 @@
 //! The inputs and the guards of one step: the resolved references, the bindings of a replay,
 //! the `expect` guards and the claim guards.
+//!
+//! A claim guard calls [`fact_check::check_claim`], the same function as a direct
+//! `fact_check` call. So a guard gives the same verdict, and it needs no `fact_check` in the
+//! active profile: the `mini` profile has `batch_run` but not `fact_check`.
 
+use ghidorah_analysis::facts::Checker;
 use ghidorah_base::ErrorCode;
-use ghidorah_json::{Object, Value};
+use ghidorah_json::Value;
 
 use super::{Run, Slot, skipped};
-use crate::api::{Host, Request};
+use crate::api::Host;
+use crate::args::Globals;
 use crate::batch::WHY_LIMIT;
 use crate::batch::budget;
 use crate::batch::refs::{self, Reference};
 use crate::batch::validate::with_step_args;
-use crate::dispatch::{Ctx, StepLimits, run_step};
+use crate::dispatch::Ctx;
 use crate::errors::{Candidate, ToolError};
 use crate::handlers::batch_run::SPEC;
+use crate::handlers::fact_check;
+use crate::handlers::func_sections::x86_only;
 use crate::hints::Call;
 use crate::session::Session;
 
@@ -48,11 +56,12 @@ fn with_limit(raw: &Value, step: usize, cap: usize) -> Value {
     })
 }
 
-/// Gives the verdict of the first claim of a `fact_check` envelope, or its error code.
-fn verdict_of(envelope: &Value) -> String {
-    envelope
-        .pointer("/data/verdicts/0/verdict")
-        .or_else(|| envelope.pointer("/error/code"))
+/// Gives the verdict of a `fact_check` verdict entry, or the error code of a claim that does
+/// not resolve.
+fn verdict_of(entry: &Value) -> String {
+    entry
+        .get("verdict")
+        .or_else(|| entry.pointer("/error/code"))
         .and_then(Value::as_str)
         .unwrap_or(UNKNOWN)
         .to_owned()
@@ -125,37 +134,41 @@ impl Run<'_> {
         Ok(args)
     }
 
-    /// Checks the claim guards of step `i`. Gives the guard index and the actual verdict of
-    /// the first claim that is not supported.
+    /// Checks the claim guards of step `i` on the binary that a direct `fact_check` call
+    /// binds now. The claims of the step share one [`Checker`]. Gives the guard index and the
+    /// actual verdict of the first claim that is not supported. When no x86-64 binary binds,
+    /// the actual value of the first guard is the error code.
     fn claims(
-        &mut self,
+        &self,
         i: usize,
         session: &mut Session,
-        ctx: &mut Ctx,
+        ctx: &Ctx,
         binary: Option<&str>,
     ) -> Option<(usize, Value)> {
         let claims = self.plan.steps.get(i).map(|s| s.claims.as_slice());
-        for (j, claim) in claims.unwrap_or_default().iter().enumerate() {
-            let known =
-                self.registry.get("fact_check").is_some() && session.in_profile("fact_check");
-            if !known {
-                return Some((j, Value::from(UNKNOWN)));
-            }
-            let mut args = Object::new();
-            args.push("claims", Value::Array(vec![claim.clone()]));
-            if let Some(id) = binary {
-                args.push("binary_id", Value::from(id));
-            }
-            let mut request = Request::new("fact_check", Value::Object(args));
-            request.session = Some(ctx.frame.session.clone());
-            let limits = StepLimits {
-                max_chars: budget::unreturned(),
-                fuel: ctx.fuel.remaining(),
-            };
-            let run = run_step(&self.registry, session, &request, limits);
-            let _ = ctx.fuel.take(run.fuel_used.min(ctx.fuel.remaining()));
-            self.fuel = self.fuel.saturating_add(run.fuel_used);
-            let verdict = verdict_of(&run.envelope.to_json());
+        let claims = claims.unwrap_or_default();
+        if claims.is_empty() {
+            return None;
+        }
+        let globals = Globals {
+            binary_id: binary.map(str::to_owned),
+            ..Globals::default()
+        };
+        let frame = session.frame(&fact_check::SPEC, &globals, Some(&ctx.frame.session));
+        let open = frame.and_then(|frame| {
+            let open = session.bound(&frame)?;
+            x86_only(&open.program)?;
+            Ok((open, frame.partial()))
+        });
+        let (open, partial) = match open {
+            Ok(found) => found,
+            Err(e) => return Some((0, Value::from(e.code.name()))),
+        };
+        let mut checker = Checker::new(&open.program);
+        for (j, claim) in claims.iter().enumerate() {
+            let path = format!("/steps/{i}/claim/{j}");
+            let entry = fact_check::check_claim(&mut checker, claim, &path, partial);
+            let verdict = verdict_of(&entry);
             if verdict != "supported" {
                 return Some((j, Value::from(verdict)));
             }
@@ -166,11 +179,11 @@ impl Run<'_> {
     /// Checks the `expect` guards, then the claim guards, of step `i` against its envelope
     /// `json`. Gives the `EXPECT_FAILED` error of the first guard that fails.
     pub(super) fn guard(
-        &mut self,
+        &self,
         i: usize,
         json: &Value,
         session: &mut Session,
-        ctx: &mut Ctx,
+        ctx: &Ctx,
         binary: Option<&str>,
     ) -> Option<ToolError> {
         let expect = self.plan.steps.get(i).map(|s| s.expect.as_slice());
