@@ -25,12 +25,14 @@
 //! | [`demo`] | The built-in demo binary | Section 10.4 |
 //! | [`calc`](mod@calc) | The `calc` expression engine | Section 10.4 |
 //! | [`handlers`] | The tool handlers, one file per tool | Section 10.4 |
+//! | [`batch`] | The `batch_run` executor: validation, references, guards and budgets | Section 11 |
 //!
 //! The modules of the pipeline do no file or network I/O. Only [`roots`] reads files, for
 //! `binary_load`.
 
 pub mod api;
 pub mod args;
+pub mod batch;
 pub mod budget;
 pub mod calc;
 pub mod coerce;
