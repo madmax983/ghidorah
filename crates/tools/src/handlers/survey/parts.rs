@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use ghidorah_analysis::analyzers::{lang, metrics};
 use ghidorah_analysis::{CallGraph, Callee};
 use ghidorah_base::{Address, Caps, Fuel, FuncId};
-use ghidorah_db::{Program, Types};
+use ghidorah_db::Program;
 use ghidorah_json::{Object, Value};
 use ghidorah_loader::{EntryKind, Kind, Protections, Relro, SegmentKind};
 
@@ -37,7 +37,12 @@ impl Part {
     }
 
     /// Makes a section with a list. `kind` names the `search` kind of the rest, if any.
-    fn listed(mut head: Object, key: &'static str, list: Vec<Value>, kind: Option<&str>) -> Self {
+    pub(super) fn listed(
+        mut head: Object,
+        key: &'static str,
+        list: Vec<Value>,
+        kind: Option<&str>,
+    ) -> Self {
         let mut total = Object::new();
         total.push("total", Value::from(list.len()));
         for (k, v) in head.into_members() {
@@ -101,7 +106,7 @@ pub fn part(c: &Ctx<'_>, name: &str, graph: &CallGraph, fuel: &mut Fuel) -> Part
         "protections" => protections(c.program),
         "segments" => segments(c.program),
         "sections" => sections(c.program),
-        "imports" => imports(c),
+        "imports" => super::imports::part(c),
         "exports" => exports(c),
         "strings" => strings(c),
         "entries" => entries(c),
@@ -114,7 +119,8 @@ pub fn part(c: &Ctx<'_>, name: &str, graph: &CallGraph, fuel: &mut Fuel) -> Part
     }
 }
 
-/// The identity: file, hash, format, machine, kind, base, entry, size and build ID.
+/// The identity: file, hash, format, machine, kind, base, entry, size, build ID and the PE
+/// `CodeView` record.
 fn identity(c: &Ctx<'_>) -> Part {
     let p = c.program;
     let meta = p.meta();
@@ -150,6 +156,12 @@ fn identity(c: &Ctx<'_>) -> Part {
     }
     if let Some(interp) = &b.interp {
         out.push("interp", fs::bin_text(interp.as_bytes(), c.caps));
+    }
+    if let Some(cv) = &b.identity.codeview {
+        let guid = Value::from(ghidorah_loader::pe::guid_text(&cv.guid));
+        let pdb = fs::bin_text(cv.pdb.as_bytes(), c.caps);
+        let fields = [("guid", guid), ("age", Value::from(cv.age)), ("pdb", pdb)];
+        out.push("codeview", Value::object(fields));
     }
     Part::plain(out)
 }
@@ -250,59 +262,6 @@ fn sections(p: &Program) -> Part {
         })
         .collect();
     Part::listed(Object::new(), "items", list, Some("section"))
-}
-
-/// The libraries and the imports in groups by Tier-0 category. PE imports group by DLL in
-/// library order first, and each item names its DLL. An import by ordinal shows `#<ordinal>`.
-fn imports(c: &Ctx<'_>) -> Part {
-    let p = c.program;
-    let libraries: Vec<String> = (p.binary().libraries.iter())
-        .map(|l| fs::safe(&l.render(Caps::DETAILED).text))
-        .collect();
-    let mut grouped: BTreeMap<(usize, usize, String), Value> = BTreeMap::new();
-    for row in p.imports().values() {
-        let name = match (row.id.name(), row.id.ordinal()) {
-            (Some(n), _) => n.to_owned(),
-            (None, Some(o)) => format!("#{o}"),
-            (None, None) => row.id.to_string(),
-        };
-        let category = Types::prototype(&name).map(|proto| proto.category);
-        let order = category.map_or(usize::MAX, |cat| {
-            ghidorah_types::Category::ALL
-                .iter()
-                .position(|x| *x == cat)
-                .unwrap_or(usize::MAX)
-        });
-        let dll = row.id.lib();
-        let group = dll.map_or(0, |d| {
-            (libraries.iter())
-                .position(|x| x.eq_ignore_ascii_case(d))
-                .unwrap_or(usize::MAX)
-        });
-        let mut out = Object::new();
-        out.push("id", Value::from(row.id.to_string()));
-        if let Some(d) = dll {
-            out.push("dll", Value::from(fs::safe(d)));
-        }
-        out.push("name", Value::from(c.namer.text(&name)));
-        out.push(
-            "category",
-            Value::from(category.map_or("other", |cat| cat.name())),
-        );
-        if row.delay {
-            out.push("delay", Value::Bool(true));
-        }
-        grouped.insert((group, order, row.id.to_string()), Value::Object(out));
-    }
-    let mut head = Object::new();
-    let libraries = libraries.into_iter().map(Value::from).collect();
-    head.push("libraries", Value::Array(libraries));
-    Part::listed(
-        head,
-        "items",
-        grouped.into_values().collect(),
-        Some("import"),
-    )
 }
 
 /// The exports with their addresses.

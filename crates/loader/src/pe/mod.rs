@@ -26,6 +26,7 @@ mod relocs;
 mod sections;
 mod tls;
 
+pub use debug::guid_text;
 pub use relocs::{REL_ABSOLUTE, REL_DIR64, REL_HIGHLOW};
 
 use std::borrow::Cow;

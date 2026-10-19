@@ -110,3 +110,24 @@ pub(crate) fn load(px: &mut Px<'_>, rva: u32, size: u32) -> Option<CodeView> {
     }
     None
 }
+
+/// Gives a GUID in the 8-4-4-4-12 form in upper case. The first three fields are
+/// little-endian in the file, as in the Windows `GUID` type.
+#[must_use]
+pub fn guid_text(guid: &[u8; 16]) -> String {
+    use std::fmt::Write;
+    let [a0, a1, a2, a3, b0, b1, c0, c1, rest @ ..] = *guid;
+    let mut out = format!(
+        "{:08X}-{:04X}-{:04X}-",
+        u32::from_le_bytes([a0, a1, a2, a3]),
+        u16::from_le_bytes([b0, b1]),
+        u16::from_le_bytes([c0, c1]),
+    );
+    for (i, b) in rest.iter().enumerate() {
+        if i == 2 {
+            out.push('-');
+        }
+        let _ = write!(out, "{b:02X}");
+    }
+    out
+}

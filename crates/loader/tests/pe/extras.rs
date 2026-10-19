@@ -52,6 +52,14 @@ fn ac_255_pe_protections_identity() {
     assert_eq!((cv.age, cv.pdb.as_str()), (3, Some("C:\\build\\test.pdb")));
     let (plain, _) = load_variant("minimal");
     assert_eq!(plain.identity.codeview, None);
+    let guid = [
+        0x34, 0x7e, 0x8d, 0xf0, 0x17, 0x38, 0x43, 0x8a, 0x4c, 0x4c, 0x44, 0x20, 0x50, 0x44, 0x42,
+        0x2e,
+    ];
+    assert_eq!(
+        ghidorah_loader::pe::guid_text(&guid),
+        "F08D7E34-3817-8A43-4C4C-44205044422E"
+    );
 }
 
 #[test]
