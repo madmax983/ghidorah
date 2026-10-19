@@ -186,7 +186,12 @@ pub struct Context<'a> {
 }
 
 impl<'a> Context<'a> {
-    /// Makes the context of `program`: the EXTERNAL address and the stub of each import.
+    /// Makes the context of `program`: the EXTERNAL address, the stub and the IAT thunks of
+    /// each import.
+    ///
+    /// An IAT thunk is a function with the flag `thunk` whose first instruction refers to the
+    /// EXTERNAL address of the import. So a PE call through a thunk gives the import, as an
+    /// ELF call through a stub does.
     #[must_use]
     pub fn new(program: &'a Program) -> Self {
         let mut imports = BTreeMap::new();
@@ -194,6 +199,15 @@ impl<'a> Context<'a> {
             imports.insert(row.ext, &row.id);
             if let Some(stub) = row.stub {
                 imports.insert(stub, &row.id);
+            }
+            for r in program.refs_to(row.ext) {
+                let from = r.value.key.from;
+                if program
+                    .func(FuncId(from))
+                    .is_some_and(|f| f.func.flags.thunk)
+                {
+                    imports.insert(from, &row.id);
+                }
             }
         }
         Self { program, imports }
@@ -205,7 +219,7 @@ impl<'a> Context<'a> {
         self.program
     }
 
-    /// Gives the import of a reference target: its EXTERNAL address or its stub.
+    /// Gives the import of a reference target: its EXTERNAL address, its stub or an IAT thunk.
     #[must_use]
     pub fn import_at(&self, to: Address) -> Option<&'a ImportId> {
         self.imports.get(&to).copied()

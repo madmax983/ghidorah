@@ -217,3 +217,44 @@ fn no_decodable_instruction_gives_no_feature() {
     let p = blob(&[0x06, 0xc3], 0);
     assert!(stream(&p, BASE).is_empty());
 }
+
+/// The import features of the function at `addr` of the PE fixture `pe_main.exe`, as
+/// `(text, key)` pairs in stream order.
+fn pe_imports(addr: u64) -> Vec<(String, u64)> {
+    let p = fixture("fixtures/bin/pe/pe_main.exe");
+    stream(p, addr)
+        .into_iter()
+        .filter(|x| x.kind == Kind::Import)
+        .map(|x| (x.text, x.key))
+        .collect()
+}
+
+#[test]
+fn regress_similar_pe_thunk_calls_key_imports() {
+    // `dispatch` calls Sleep through its IAT thunk and GetTickCount through the IAT slot.
+    let dispatch = pe_imports(0x1_4000_10b0);
+    let want = [
+        ("imp:kernel32.dll!Sleep", "Sleep"),
+        ("imp:kernel32.dll!GetTickCount", "GetTickCount"),
+    ];
+    for (text, name) in want {
+        assert!(
+            dispatch.contains(&(text.to_owned(), feature_key(Kind::Import, name))),
+            "dispatch: {text} in {dispatch:?}"
+        );
+    }
+    // `imports` calls alpha_named through its thunk, and the ordinal and delay imports
+    // through their slots.
+    let imports = pe_imports(0x1_4000_10e0);
+    let want = [
+        ("imp:alpha.dll!#5", "#5"),
+        ("imp:alpha.dll!alpha_named", "alpha_named"),
+        ("imp:beta.dll!beta_delayed", "beta_delayed"),
+    ];
+    for (text, name) in want {
+        assert!(
+            imports.contains(&(text.to_owned(), feature_key(Kind::Import, name))),
+            "imports: {text} in {imports:?}"
+        );
+    }
+}
