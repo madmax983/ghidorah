@@ -2,7 +2,7 @@
 
 use ghidorah_json::Value;
 
-use crate::support::{call, data, demo, items, str_of, text_at};
+use crate::support::{call, call_value, code, data, demo, items, str_of, text_at};
 
 #[test]
 fn addr_info_fields() {
@@ -88,4 +88,19 @@ fn ac_144_per_item_results() {
         "/targets/0",
         "the error names the item"
     );
+}
+
+/// A hex text with a letter and no `0x` gets a repair call with the prefix (found by WP-26).
+#[test]
+fn regress_bare_hex_has_repair_call() {
+    let mut session = demo();
+    for tool in ["func_get", "addr_info", "mem_read"] {
+        let bad = call(&mut session, tool, r#"{"target":"11e0"}"#);
+        assert_eq!(code(&bad), "ADDRESS_INVALID", "{bad}");
+        assert_eq!(text_at(&bad, "/next/0/tool"), tool, "{bad}");
+        assert_eq!(text_at(&bad, "/next/0/args/target"), "0x11e0", "{bad}");
+        let args = bad.pointer("/next/0/args").cloned().unwrap_or(Value::Null);
+        let fixed = call_value(&mut session, tool, args);
+        assert_eq!(code(&fixed), "", "{fixed}");
+    }
 }

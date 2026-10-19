@@ -470,7 +470,10 @@ fn run_with<S: Host>(
     let fuel_used = ctx.fuel.used();
     let mut out = match result {
         Ok(Ok(payload)) => success(&call, host, ctx, payload),
-        Ok(Err(error)) => fail(registry, host, ctx.frame, tool.name, error),
+        Ok(Err(error)) => {
+            let error = crate::resolve::hex_repair(tool.name, parsed.args.canonical(), error);
+            fail(registry, host, ctx.frame, tool.name, error)
+        }
         Err(payload) => {
             let crash = Crash::new(tool.name, &request.args, panic_text(payload.as_ref()));
             host.on_panic(&crash);

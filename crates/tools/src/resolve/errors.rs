@@ -13,6 +13,7 @@ use ghidorah_json::Value;
 use super::Site;
 use super::table::{Family, accepted};
 use crate::errors::{Candidate, ToolError};
+use crate::hints::{Call, WHY_HEX};
 
 /// The fuel of one did-you-mean scan (Section 10.5).
 pub const DYM_FUEL: u64 = 1_000_000;
@@ -47,6 +48,51 @@ pub(super) fn address_invalid(site: &Site<'_>, repair: Option<String>) -> ToolEr
         (Some(text), Some(make)) => error.next(make(&text)),
         _ => error,
     }
+}
+
+/// Adds the repair call of an `ADDRESS_INVALID` error: the same call with the `0x` prefix on
+/// the address text at the field path of the error (design Section 10.8).
+///
+/// Only a text of 1 to 16 hex digits with at least one letter gets the call. Other errors and
+/// errors with a repair call stay the same.
+#[must_use]
+pub(crate) fn hex_repair(tool: &str, args: &Value, error: ToolError) -> ToolError {
+    if error.code != ErrorCode::AddressInvalid || !error.next.is_empty() {
+        return error;
+    }
+    let Some(tokens) = error
+        .field_path
+        .as_deref()
+        .and_then(|p| p.strip_prefix('/'))
+        .map(|p| p.split('/').collect::<Vec<_>>())
+    else {
+        return error;
+    };
+    let mut fixed = args.clone();
+    let mut slot = Some(&mut fixed);
+    for token in &tokens {
+        slot = match slot {
+            Some(Value::Object(o)) => o.get_mut(token),
+            Some(Value::Array(a)) => token.parse::<usize>().ok().and_then(|i| a.get_mut(i)),
+            _ => None,
+        };
+    }
+    let Some(slot) = slot else {
+        return error;
+    };
+    let text = slot
+        .as_str()
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+    let bare = (1..=16).contains(&text.len())
+        && text.bytes().all(|b| b.is_ascii_hexdigit())
+        && text.bytes().any(|b| b.is_ascii_alphabetic());
+    if !bare {
+        return error;
+    }
+    *slot = Value::from(format!("0x{text}"));
+    error.next(Call::new(tool, fixed, WHY_HEX))
 }
 
 /// Gives `ADDRESS_BASE_AMBIGUOUS` with the decimal and the hex reading of a text of digits.
