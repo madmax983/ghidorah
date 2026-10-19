@@ -122,3 +122,60 @@ fn every_truth_function_is_found() {
         }
     }
 }
+
+/// Gives the program header index of the first executable `PT_LOAD` of an ELF64 file.
+fn exec_load(bytes: &[u8]) -> usize {
+    let word = |at: usize, n: usize| {
+        bytes[at..at + n]
+            .iter()
+            .rev()
+            .fold(0u64, |v, b| (v << 8) | u64::from(*b))
+    };
+    let (phoff, phnum) = (word(32, 8) as usize, word(56, 2) as usize);
+    (0..phnum)
+        .find(|i| {
+            let at = phoff + i * 56;
+            word(at, 4) == 1 && word(at + 4, 4) & 1 == 1
+        })
+        .expect("an executable PT_LOAD")
+}
+
+/// The fuzz target `pipeline_elf` found an executable segment with 0x2b file bytes and a
+/// zero fill of 2^45 bytes. The recursive descent decoded 100,000 instructions of zero fill,
+/// and the analysis and the decompile of that function took seconds. A zero fill holds no code.
+#[test]
+fn regress_no_code_in_zero_fill() {
+    use ghidorah_loader::{LoadOpts, Perms};
+    use ghidorah_testkit::elf::{ElfBuilder, Loc, Malformed, PhdrField, Section, Symbol};
+
+    let base = ElfBuilder::exec()
+        .section(Section::code(".text", &[0x90; 8]))
+        .symbol(Symbol::func("f", Loc::section(".text", 0), 8))
+        .entry(Loc::section(".text", 0))
+        .strip_section_headers();
+    let index = exec_load(&base.build());
+    let bytes = base
+        .malformed(Malformed::Phdr(index, PhdrField::Memsz, 1 << 40))
+        .build();
+    let mut p = crate::support::program_of(&bytes, &LoadOpts::AUTO);
+    crate::support::analyze(&mut p);
+    let code = p
+        .mem()
+        .regions()
+        .find(|r| r.perms.contains(Perms::EXECUTE))
+        .cloned()
+        .expect("the executable region");
+    assert!(code.va.len() > 1 << 39, "the region has the zero fill");
+    let file_end = code.va.first + code.file_size;
+    let funcs = p.funcs();
+    assert!(!funcs.is_empty(), "the entry function exists");
+    for f in funcs {
+        for r in f.func.body.ranges() {
+            assert!(
+                r.last < file_end,
+                "{:#x}: body {r:?} in the zero fill",
+                f.id().0.off
+            );
+        }
+    }
+}

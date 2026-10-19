@@ -23,14 +23,27 @@ pub fn is_mapped(program: &Program, at: u64) -> bool {
     program.mem().region_at(at).is_some()
 }
 
-/// Decodes the instruction at `at` in an executable region. Bad bytes give `None`.
+/// Decodes the instruction at `at` in the file bytes of an executable region. Bad bytes give
+/// `None`.
+///
+/// The zero fill of a region holds no code, so an instruction starts and ends in the file
+/// bytes. A hostile segment with a large zero fill then gives no function of zero bytes.
 #[must_use]
 pub fn decode_at(program: &Program, at: u64) -> Option<Insn> {
     let region = program.mem().region_at(at)?;
     if !region.perms.contains(Perms::EXECUTE) {
         return None;
     }
-    let left = region.va.last.saturating_sub(at).saturating_add(1);
+    let file_last = region
+        .va
+        .first
+        .checked_add(region.file_size)?
+        .checked_sub(1)?
+        .min(region.va.last);
+    if at > file_last {
+        return None;
+    }
+    let left = file_last.saturating_sub(at).saturating_add(1);
     let len = left.min(MAX_LEN as u64);
     let bytes = program.mem().read(at, len, &Limits::DEFAULT).ok()?;
     decode(&bytes, at, &Opts::DEFAULT).ok()
