@@ -24,7 +24,7 @@ fn row(i: &Import) -> Row {
 
 /// Gives the name and the number in parentheses of a `Symbol: name (n)` value.
 fn symbol(value: &str) -> (String, u16) {
-    let (name, n) = value.rsplit_once(" (").expect("a symbol value");
+    let (name, n) = value.rsplit_once('(').expect("a symbol value");
     let n = u16::try_from(number(n.trim_end_matches(')')).expect("a number")).expect("a u16");
     (name.trim().to_owned(), n)
 }
@@ -203,10 +203,11 @@ fn vc6_delay_descriptor_vas() {
             "{variant}"
         );
     }
-    // A VA below the image base is corrupt delay data: a diagnostic, not a fatal error.
+    // A VA below the image base is corrupt delay data: a diagnostic, not a fatal error. The
+    // patch moves `ImageBase` (optional header offset 24) above the VAs of the descriptor.
     let bytes = pe::builder("vc6_delay")
         .expect("variant")
-        .image_base(0x80_0000)
+        .patch(0x58 + 24, &0x80_0000u64.to_le_bytes())
         .build();
     let (b, _) = crate::support::load_ok(&bytes);
     assert!(b.imports.is_empty());

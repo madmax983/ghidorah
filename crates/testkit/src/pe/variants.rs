@@ -275,7 +275,10 @@ fn table_variants() -> Vec<(&'static str, PeBuilder)> {
                 .pdata(plain(0x2000, 0x2010))
                 .pdata(plain(0x1000, 0x100b)),
         ),
-        ("tls_257", base().tls(vec![super::EXE_BASE + 0x1000; 257])),
+        (
+            "tls_257",
+            base().tls((0..257).map(|i| super::EXE_BASE + 0x1000 + i).collect()),
+        ),
         ("tls_one", base().tls(vec![super::EXE_BASE + 0x1000])),
         (
             "codeview",

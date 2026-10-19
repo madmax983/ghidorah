@@ -1,6 +1,6 @@
 #![deny(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
-//! Format probe, ELF64 little-endian parser, raw loader, `MemoryMap` and the owned
-//! `Binary` model of ghidorah (design Section 4).
+//! Format probe, ELF64 little-endian parser, PE32+ parser, raw loader, `MemoryMap` and the
+//! owned `Binary` model of ghidorah (design Section 4).
 //!
 //! The crate is a pure core crate. It reads no file and no clock. The caller gives the bytes.
 //!
@@ -10,6 +10,7 @@
 //! | [`binary`] | [`Binary`], the owned model | Section 4.2 |
 //! | [`memmap`] | [`MemoryMap`], [`Region`], [`Perms`] | Section 3.3 |
 //! | [`elf`] | The ELF64 LE loader | Section 4.3 |
+//! | [`pe`] | The PE32+ x86-64 loader | Sections 4.9 to 4.15 |
 //! | [`raw`] | The raw loader | Section 4.1 |
 //! | [`limits`] | The caps of a load | Section 4.7 |
 //! | [`diag`] | [`Diagnostic`] and [`LoadError`] | Section 4.8 |
@@ -29,6 +30,7 @@ pub mod elf;
 pub mod imports;
 pub mod limits;
 pub mod memmap;
+pub mod pe;
 pub mod probe;
 pub mod raw;
 pub mod stubs;
@@ -50,7 +52,7 @@ pub use raw::RawOpts;
 
 /// The formats that load fully. `UNSUPPORTED_FORMAT` details and the server instructions
 /// read this list.
-pub const SUPPORTED_FORMATS: &[&str] = &["elf64-le", "raw"];
+pub const SUPPORTED_FORMATS: &[&str] = &["elf64-le", "pe32+-x86_64", "raw"];
 
 /// The settings of a load.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -118,6 +120,17 @@ pub fn load(
         } => Err(LoadError::Malformed(
             Diagnostic::new(DiagCode::BadMagic, "elf.ident").at(4),
         )),
+        Detected::Pe {
+            magic: Some(pe::MAGIC_PE32_PLUS),
+            machine: Some(pe::MACHINE_AMD64),
+        } => pe::load(&Arc::from(bytes), sha256, limits),
+        Detected::Pe { magic: None, .. } | Detected::Pe { machine: None, .. } => {
+            Err(LoadError::Malformed(
+                Diagnostic::new(DiagCode::Oob, "pe.coff")
+                    .need(0x18)
+                    .have(size),
+            ))
+        }
         Detected::Unknown if bytes.len() < 4 => Err(LoadError::Malformed(
             Diagnostic::new(DiagCode::Oob, "probe").need(4).have(size),
         )),
