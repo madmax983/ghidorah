@@ -14,6 +14,7 @@ pub mod func_edit;
 pub mod func_get;
 pub mod func_list;
 pub mod func_sections;
+pub mod func_similar;
 pub mod history_list;
 pub mod history_undo;
 pub mod load;
