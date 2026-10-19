@@ -375,6 +375,9 @@ fn imports_match_truth() {
     let mut checked = 0;
     for entry in std::fs::read_dir(&dir).expect("truth dir") {
         let path = entry.expect("entry").path();
+        if !path.is_file() {
+            continue;
+        }
         let truth = json::parse(&std::fs::read_to_string(&path).expect("truth"));
         let want: BTreeSet<String> = truth
             .get("imports")

@@ -7,7 +7,7 @@
 use std::collections::BTreeSet;
 use std::sync::OnceLock;
 
-use crate::data::{DataError, NORETURN_ELF_TXT, data_lines, error};
+use crate::data::{DataError, NORETURN_ELF_TXT, NORETURN_PE_TXT, data_lines, error};
 
 /// A list of function names that do not return.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -76,5 +76,16 @@ pub fn match_name(name: &str) -> &str {
 pub fn elf() -> Result<&'static NoreturnList, &'static DataError> {
     static LIST: OnceLock<Result<NoreturnList, DataError>> = OnceLock::new();
     LIST.get_or_init(|| NoreturnList::parse("noreturn_elf.txt", NORETURN_ELF_TXT))
+        .as_ref()
+}
+
+/// Gives the PE list of `data/noreturn_pe.txt`.
+///
+/// # Errors
+///
+/// Returns the [`DataError`] of the embedded file.
+pub fn pe() -> Result<&'static NoreturnList, &'static DataError> {
+    static LIST: OnceLock<Result<NoreturnList, DataError>> = OnceLock::new();
+    LIST.get_or_init(|| NoreturnList::parse("noreturn_pe.txt", NORETURN_PE_TXT))
         .as_ref()
 }

@@ -50,7 +50,7 @@ fn noreturn_list_by_format() {
     assert!(elf.contains("abort"));
     assert!(noreturn_list("raw").is_none());
     assert!(noreturn_list("").is_none());
-    assert_eq!(NORETURN_BY_FORMAT.len(), 1);
+    assert_eq!(NORETURN_BY_FORMAT.len(), 2);
 }
 
 #[test]
@@ -159,7 +159,7 @@ fn sysv_calling_convention() {
     assert_eq!(c.float_arg_index("xmm8"), None);
     assert_eq!(call_conv("sysv"), Some(&cc::SYSV_X86_64));
     assert_eq!(call_conv("pascal"), None);
-    assert_eq!(CALL_CONVS.len(), 1);
+    assert_eq!(CALL_CONVS.len(), 2);
 }
 
 #[test]

@@ -1,0 +1,37 @@
+# golden: generator=xtask-fixtures version=1 fixture=pe_dll.dll fixture_sha256=eed8fdde4c9eeb00745dc700e3ce083a7bae007eef2f38206614e91a64d18b5f llvm=22.1.6
+
+pe_dll.dll:	file format coff-x86-64
+
+Disassembly of section .text:
+
+0000000180001000 <dll_add>:
+180001000: 8d 04 11                    	lea	eax, [rcx + rdx]
+180001003: 03 05 fb 1f 00 00           	add	eax, dword ptr [rip + 0x1ffb] # 0x180003004
+180001009: c3                          	ret
+18000100a: 66 0f 1f 44 00 00           	nop	word ptr [rax + rax]
+
+0000000180001010 <dll_mul>:
+180001010: 89 c8                       	mov	eax, ecx
+180001012: 0f af c2                    	imul	eax, edx
+180001015: 2b 05 e9 1f 00 00           	sub	eax, dword ptr [rip + 0x1fe9] # 0x180003004
+18000101b: c3                          	ret
+18000101c: 0f 1f 40 00                 	nop	dword ptr [rax]
+180001020: 56                          	push	rsi
+180001021: 57                          	push	rdi
+180001022: 48 83 ec 28                 	sub	rsp, 0x28
+180001026: 89 ce                       	mov	esi, ecx
+180001028: ba 07 00 00 00              	mov	edx, 0x7
+18000102d: e8 ce ff ff ff              	call	0x180001000 <dll_add>
+180001032: 89 c7                       	mov	edi, eax
+180001034: 89 f1                       	mov	ecx, esi
+180001036: ba 03 00 00 00              	mov	edx, 0x3
+18000103b: e8 d0 ff ff ff              	call	0x180001010 <dll_mul>
+180001040: 31 f8                       	xor	eax, edi
+180001042: 48 83 c4 28                 	add	rsp, 0x28
+180001046: 5f                          	pop	rdi
+180001047: 5e                          	pop	rsi
+180001048: c3                          	ret
+180001049: 0f 1f 80 00 00 00 00        	nop	dword ptr [rax]
+180001050: 89 15 ae 1f 00 00           	mov	dword ptr [rip + 0x1fae], edx # 0x180003004
+180001056: b8 01 00 00 00              	mov	eax, 0x1
+18000105b: c3                          	ret

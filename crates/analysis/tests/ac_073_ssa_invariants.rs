@@ -36,7 +36,7 @@ fn program_of(bytes: &[u8]) -> Program {
     Program::from_binary(binary, mem, &Limits::DEFAULT).expect("from_binary")
 }
 
-/// Gives the fixture paths of the manifest.
+/// Gives the fixture paths of the ELF tiers `T1` and `T2` of the manifest.
 fn fixture_paths() -> Vec<String> {
     let text = std::fs::read_to_string(root().join("fixtures/manifest.json")).expect("manifest");
     let manifest = ghidorah_json::parse(&text, &ghidorah_json::Limits::DEFAULT).expect("JSON");
@@ -45,6 +45,7 @@ fn fixture_paths() -> Vec<String> {
         .and_then(Value::as_array)
         .expect("fixtures list")
         .iter()
+        .filter(|f| matches!(f.get("tier").and_then(Value::as_str), Some("T1" | "T2")))
         .map(|f| {
             f.get("path")
                 .and_then(Value::as_str)

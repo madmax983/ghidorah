@@ -11,7 +11,7 @@
   "partial": true,
   "data": {
     "state": "budget_stopped",
-    "steps_used": 965,
+    "steps_used": 969,
     "resume": true,
     "analyzers": [
       {
@@ -35,6 +35,12 @@
       {
         "name": "FdeSeeds",
         "priority": 150,
+        "pending": 0,
+        "runs": 1
+      },
+      {
+        "name": "PdataSeeds",
+        "priority": 155,
         "pending": 0,
         "runs": 1
       },
@@ -65,6 +71,12 @@
       {
         "name": "CallTargets",
         "priority": 400,
+        "pending": 0,
+        "runs": 3
+      },
+      {
+        "name": "IatThunks",
+        "priority": 405,
         "pending": 0,
         "runs": 3
       },

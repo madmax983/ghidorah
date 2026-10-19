@@ -14,6 +14,7 @@ mod addr_info;
 mod func_get;
 mod func_list;
 mod mem_read;
+mod pe;
 mod registry;
 mod search;
 mod support;

@@ -77,6 +77,25 @@ impl DataModel {
         wchar: SizeAlign::same(4),
     };
 
+    /// The x86-64 Windows (LLP64) preset of PE binaries: `long` has 4 bytes, `long double`
+    /// has 8 bytes and `wchar_t` is an unsigned 2-byte type.
+    pub const X86_64_WIN: Self = Self {
+        name: "x86_64-win",
+        char_signed: true,
+        wchar_signed: false,
+        boolean: SizeAlign::same(1),
+        short: SizeAlign::same(2),
+        int: SizeAlign::same(4),
+        long: SizeAlign::same(4),
+        long_long: SizeAlign::same(8),
+        int128: SizeAlign::same(16),
+        pointer: SizeAlign::same(8),
+        float: SizeAlign::same(4),
+        double: SizeAlign::same(8),
+        long_double: SizeAlign::same(8),
+        wchar: SizeAlign::same(2),
+    };
+
     /// Gives the size and the alignment of a primitive type. `void` has none.
     #[must_use]
     pub const fn prim(&self, prim: Prim) -> Option<SizeAlign> {

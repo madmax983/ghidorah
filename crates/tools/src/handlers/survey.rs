@@ -26,6 +26,7 @@
 //! On a binary for another machine, the code sections stay empty, and the result carries
 //! `W_ARCH_UNSUPPORTED` (design Section 4.1).
 
+mod imports;
 mod parts;
 
 use ghidorah_analysis::CallGraph;

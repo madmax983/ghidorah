@@ -14,6 +14,7 @@
 //! - [`fixture`]: one built fixture per key in each test binary.
 //! - [`ste`]: the ASD-STE100 checker with rules STE-1 to STE-8 of ADR-0019.
 //! - [`elf`]: `ElfBuilder`, a writer for small ELF test files.
+//! - [`pe`]: `PeBuilder`, a writer for small PE32+ test files (WP-30).
 
 pub mod bench;
 pub mod elf;
@@ -22,5 +23,6 @@ pub mod fuzz;
 pub mod golden;
 pub mod model;
 pub mod pbt;
+pub mod pe;
 pub mod rng;
 pub mod ste;

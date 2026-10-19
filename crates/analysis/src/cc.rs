@@ -16,7 +16,10 @@
 //!   registers of the save area are not named parameters.
 //!
 //! [`params`] gives the parameters of a function: an agent signature first, then the Tier-0
-//! prototype of its name, then [`recover`]. ELF binaries use [`SYSV_X86_64`].
+//! prototype of its name, then [`recover`]. ELF binaries use [`SYSV_X86_64`]. PE binaries use
+//! [`MS_X64`], whose slots are positional: argument n uses slot n of the integer list or of the
+//! floating list. So the slot count is the highest used slot of both lists, and a stack
+//! parameter means that all four register slots are parameters.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -24,8 +27,10 @@ use ghidorah_base::{Address, Fuel, FuncId};
 use ghidorah_db::{Program, Types};
 use ghidorah_ir::{Arena, Arg, Loc, Node, Op, Opc, Val, local, rpo};
 use ghidorah_kernel::RangeSet;
-use ghidorah_types::cc::SYSV_X86_64;
+use ghidorah_loader::Format;
+use ghidorah_types::cc::{MS_X64, SYSV_X86_64};
 use ghidorah_types::{CallConv, Sig};
+use ghidorah_x86::Mnem;
 
 use crate::ctx::AnalysisCtx;
 use crate::fir::{self, FirError, FuncIr, Opts};
@@ -80,11 +85,13 @@ pub enum ParamSource {
     Recovered,
 }
 
-/// Gives the calling convention of the binary format of `program`.
+/// Gives the calling convention of the binary format of `program`: MS x64 for PE, else `SysV`.
 #[must_use]
-pub const fn conv_of(program: &Program) -> &'static CallConv {
-    let _ = program;
-    &SYSV_X86_64
+pub fn conv_of(program: &Program) -> &'static CallConv {
+    match program.meta().format {
+        Format::Pe32Plus => &MS_X64,
+        Format::Elf64Le | Format::Raw => &SYSV_X86_64,
+    }
 }
 
 /// Gives the location of a register name of a convention table, for example `rdi` or `xmm2`.
@@ -114,6 +121,10 @@ fn call_defs() -> BTreeSet<Loc> {
     out.extend((0..16u8).filter_map(Loc::xmm));
     out
 }
+
+/// The scalar conversions that write the low lane of their XMM destination from an integer
+/// register or from memory. Their only XMM use is the destination.
+const SCALAR_INTO: [Mnem; 2] = [Mnem::Cvtsi2ss, Mnem::Cvtsi2sd];
 
 /// The live-in reads and the writes of one block.
 #[derive(Debug, Default)]
@@ -202,8 +213,12 @@ impl Uses<'_> {
             Opc::Syscall | Opc::Intrinsic => {
                 self.read(op.a[1]);
                 if let Some(e) = self.arena.effect(op) {
+                    let scalar = SCALAR_INTO.iter().any(|m| e.name.0 == *m as u16);
                     for loc in e.uses.iter().filter(|l| l.is_gpr() || l.is_xmm()) {
-                        if !self.out.defs.contains(&loc) {
+                        // The conversion keeps the upper lanes of its destination, but it
+                        // writes the lane of a parameter. So that use is no parameter read.
+                        let dest = scalar && loc.is_xmm() && e.defs.contains(loc);
+                        if !dest && !self.out.defs.contains(&loc) {
                             self.out.uses.insert(loc);
                         }
                     }
@@ -373,6 +388,20 @@ fn save_area(fir: &FuncIr, conv: &CallConv) -> Option<u8> {
     (first < last).then(|| u8::try_from(first).unwrap_or(u8::MAX))
 }
 
+/// Gives the frame offsets at `first` and above that the body reads or writes. They are the
+/// `Load` and `Store` accesses and the sized memory effects of intrinsics, as of `mulsd`.
+fn stack_slots(frame: &crate::stack::Frame, first: i64) -> BTreeSet<i64> {
+    let mut out = frame.stack_args(first);
+    out.extend(
+        frame
+            .escaped
+            .iter()
+            .filter(|(from, to)| *from >= first && *to != i64::MAX)
+            .map(|(from, _)| *from),
+    );
+    out
+}
+
 /// Recovers the parameters of `fir` by the rules of the module doc.
 #[must_use]
 pub fn recover(fir: &FuncIr, conv: &CallConv) -> Params {
@@ -381,11 +410,14 @@ pub fn recover(fir: &FuncIr, conv: &CallConv) -> Params {
     let stack = fir
         .frame
         .as_ref()
-        .and_then(|f| f.stack_args(first).into_iter().next_back())
+        .and_then(|f| stack_slots(f, first).into_iter().next_back())
         .map_or(0, |k| {
             let n = k.saturating_sub(first) / 8 + 1;
             u8::try_from(n).unwrap_or(u8::MAX)
         });
+    if conv.positional {
+        return positional(conv, &live, stack);
+    }
     let area = save_area(fir, conv);
     let al = tests_al(fir);
     let varargs = area.is_some() || al;
@@ -401,6 +433,33 @@ pub fn recover(fir: &FuncIr, conv: &CallConv) -> Params {
         stack,
         varargs,
     }
+}
+
+/// Gives the parameters of a positional convention: slot n is a floating parameter when only
+/// its floating register is live-in, else an integer parameter. A stack parameter fills all the
+/// register slots.
+fn positional(conv: &CallConv, live: &BTreeSet<Loc>, stack: u8) -> Params {
+    let slots = conv.int_args.len().max(conv.float_args.len());
+    let used = usize::from(filled(conv.int_args, live).max(filled(conv.float_args, live)));
+    let used = if stack > 0 { slots } else { used.min(slots) };
+    let is_live = |names: &[&str], n: usize| {
+        names
+            .get(n)
+            .and_then(|r| loc_of(r))
+            .is_some_and(|l| live.contains(&l))
+    };
+    let mut out = Params {
+        stack,
+        ..Params::default()
+    };
+    for n in 0..used {
+        if is_live(conv.float_args, n) && !is_live(conv.int_args, n) {
+            out.float = out.float.saturating_add(1);
+        } else {
+            out.int = out.int.saturating_add(1);
+        }
+    }
+    out
 }
 
 /// Gives the parameters of a signature.

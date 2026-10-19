@@ -8,6 +8,7 @@ use ghidorah_analysis::{CallGraph, Callee};
 use ghidorah_base::{Address, ErrorCode, FuncId, ImportId, SyscallId};
 use ghidorah_db::{FlowOverride, Program, Ref, RefKey, RefType};
 use ghidorah_json::Value;
+use ghidorah_loader::Format;
 
 use crate::errors::ToolError;
 use crate::handlers::func_sections as fs;
@@ -67,34 +68,39 @@ pub fn found(
 
 /// Gives the sites of an import: the stub sites (`plt`), the slot sites (`got`) and the sites
 /// of the EXTERNAL address (`got` through the slot, else `direct`). The references from the
-/// stub itself are not sites.
+/// stub itself are not sites. A PE import gives `thunk` for the sites of its IAT thunk, `iat`
+/// for the slot sites and `direct` for a `call [rip+IAT]` site.
 pub fn import_sites(p: &Program, target: usize, id: &ImportId) -> Result<Vec<Found>, ToolError> {
     let row = p.imports().get(id).ok_or_else(|| {
         ToolError::new(ErrorCode::NotFound)
             .var("kind", "import")
             .detail("kind", Value::from("import"))
     })?;
-    let stub_func = row.stub.and_then(|s| p.owner_of(s));
+    let pe = p.meta().format == Format::Pe32Plus;
+    let (stub_via, slot_via) = if pe { ("thunk", "iat") } else { ("plt", "got") };
+    let stub = resolve::import_entry(p, row);
+    let stub_func = stub.and_then(|s| p.owner_of(s));
     let outside = |r: &&ghidorah_db::Fact<Ref>| {
         stub_func.is_none() || p.owner_of(r.value.key.from) != stub_func
     };
     let mut out = Vec::new();
-    if let Some(stub) = row.stub {
+    if let Some(stub) = stub {
         let refs: Vec<_> = p.refs_to(stub).into_iter().filter(outside).collect();
-        out.extend(found(target, &refs, Some("plt")));
+        out.extend(found(target, &refs, Some(stub_via)));
     }
     if let Some(slot) = row.slot {
         let refs: Vec<_> = p.refs_to(slot).into_iter().filter(outside).collect();
-        out.extend(found(target, &refs, Some("got")));
+        out.extend(found(target, &refs, Some(slot_via)));
     }
     for r in p.refs_to(row.ext).into_iter().filter(outside) {
         let from = r.value.key.from;
-        let through = row.slot.is_some_and(|slot| {
-            from == slot
-                || fs::decode(p, from.off)
-                    .and_then(|insn| slot_of(&insn))
-                    .is_some_and(|s| Address::ram(s) == slot)
-        });
+        let through = !pe
+            && row.slot.is_some_and(|slot| {
+                from == slot
+                    || fs::decode(p, from.off)
+                        .and_then(|insn| slot_of(&insn))
+                        .is_some_and(|s| Address::ram(s) == slot)
+            });
         out.extend(found(
             target,
             &[r],

@@ -4,7 +4,7 @@
 //! |---|---|---|---|---|
 //! | address, name, `bb:`, `op:` | that address | the owner function, else `NOT_IN_FUNCTION` | refs to the address | refs from the one instruction |
 //! | `fn:F`, `exp:F` | the entry of F | F | refs to the entry | refs from the body of F |
-//! | `imp:X` | the stub, else the slot, else the EXTERNAL address | the stub function, else invalid | the sites of the import | invalid |
+//! | `imp:X` | the stub or IAT thunk, else the slot, else the EXTERNAL address | the stub or thunk function, else invalid | the sites of the import | invalid |
 //! | `sys:N` | invalid | invalid | the syscall sites | invalid |
 //! | `str:A` | A | invalid | refs to A | invalid |
 //! | `jt:A` | A | the owner function | refs to A | the case edges of A |
@@ -120,8 +120,7 @@ fn target_at(
             Named::Export(_) | Named::JumpTable(_) => {
                 owner(program, value_at(program, resolved, site)?, site).map(Target::Func)
             }
-            Named::Import(i) => import_row(program, i, site)?
-                .stub
+            Named::Import(i) => super::import_entry(program, import_row(program, i, site)?)
                 .and_then(|stub| program.owner_of(stub))
                 .map(Target::Func)
                 .ok_or_else(invalid),
@@ -176,7 +175,9 @@ fn value_at(program: &Program, resolved: &Resolved, site: &Site<'_>) -> Result<A
         Named::JumpTable(j) => Ok(j.0),
         Named::Import(i) => {
             let row = import_row(program, i, site)?;
-            Ok(row.stub.or(row.slot).unwrap_or(row.ext))
+            Ok(super::import_entry(program, row)
+                .or(row.slot)
+                .unwrap_or(row.ext))
         }
         Named::Export(e) => program
             .exports()

@@ -9,6 +9,7 @@
 //! | `tier0` | AC-109: Tier-0 prototypes |
 //! | `store` | The type store, the C text and the type references |
 //! | `data` | Noreturn lists, the syscall table, calling conventions, data models, license rows |
+//! | `msx64` | The MS x64 convention, the `x86_64-win` model and the PE noreturn list (WP-30) |
 
 #![allow(clippy::panic, reason = "a test fails through a panic")]
 #![allow(
@@ -20,6 +21,7 @@ mod cparse;
 mod data;
 mod layout;
 mod limits;
+mod msx64;
 mod store;
 mod support;
 mod tier0;

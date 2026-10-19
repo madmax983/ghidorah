@@ -8,8 +8,8 @@
 use ghidorah_kernel::RangeSet;
 
 use crate::analyzers::{
-    addrtaken, calls, dataptr, disasm, endbr, entry, fde, gapcomp, noreturn, refs, strings, stubs,
-    symbols,
+    addrtaken, calls, dataptr, disasm, endbr, entry, fde, gapcomp, iat, noreturn, pdata, refs,
+    strings, stubs, symbols,
 };
 use crate::ctx::AnalysisCtx;
 use crate::spec::{AnalyzerSpec, Step};
@@ -26,6 +26,8 @@ pub enum AnalyzerId {
     ImportStubs,
     /// `FdeSeeds` (150): the FDE starts of an ELF file.
     FdeSeeds,
+    /// `PdataSeeds` (155): the `.pdata` starts of a PE file.
+    PdataSeeds,
     /// `Overrides` (160): the seeds of the agent facts.
     Overrides,
     /// `Disasm` (300): recursive descent.
@@ -36,6 +38,8 @@ pub enum AnalyzerId {
     NoReturnDiscovered,
     /// `CallTargets` (400): direct call targets.
     CallTargets,
+    /// `IatThunks` (405): the IAT thunks of a PE file.
+    IatThunks,
     /// `JumpTables` (410): the jump tables of method A.
     JumpTables,
     /// `TailCallsAndParts` (420): FETCH tail calls and cold parts.
@@ -83,11 +87,13 @@ pub static ANALYZERS: &[&AnalyzerSpec] = &[
     &symbols::SPEC,
     &stubs::SPEC,
     &fde::SPEC,
+    &pdata::SPEC,
     &OVERRIDES,
     &disasm::SPEC,
     &noreturn::KNOWN,
     &noreturn::DISCOVERED,
     &calls::SPEC,
+    &iat::SPEC,
     &JUMP_TABLES,
     &TAIL_CALLS,
     &MAIN_DISCOVERY,
@@ -109,11 +115,13 @@ pub fn run(id: AnalyzerId, ctx: &mut AnalysisCtx<'_>, ranges: &RangeSet) -> Step
         AnalyzerId::Symbols => symbols::run(ctx, ranges),
         AnalyzerId::ImportStubs => stubs::run(ctx, ranges),
         AnalyzerId::FdeSeeds => fde::run(ctx, ranges),
+        AnalyzerId::PdataSeeds => pdata::run(ctx, ranges),
         AnalyzerId::Overrides => overrides::run(ctx, ranges),
         AnalyzerId::Disasm => disasm::run(ctx, ranges),
         AnalyzerId::NoReturnKnown => noreturn::run_known(ctx, ranges),
         AnalyzerId::NoReturnDiscovered => noreturn::run_discovered(ctx, ranges),
         AnalyzerId::CallTargets => calls::run(ctx, ranges),
+        AnalyzerId::IatThunks => iat::run(ctx, ranges),
         AnalyzerId::JumpTables => jumptable::run(ctx, ranges),
         AnalyzerId::TailCallsAndParts => tailcall::run(ctx, ranges),
         AnalyzerId::MainDiscovery => main_discovery::run(ctx, ranges),

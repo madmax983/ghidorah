@@ -15,6 +15,7 @@
 //! | `xtask ste` | [`ste`] | Checks the docs and comments with the STE checker of `testkit` (AC-025). |
 //! | `xtask verify` | [`verify`] | Runs the Verus proofs of the kernel and writes `verify/results.json`. |
 //! | `xtask fixtures` | [`fixtures`] | Builds the fixture corpus, its truth and its goldens, and checks them (WP-06). |
+//! | `xtask fixtures build-pe` | [`fixtures_pe`] | Builds the PE32+ fixtures, their truth and their goldens (WP-30). |
 //! | `xtask golden` | [`golden`] | Blesses goldens and checks their headers. |
 //! | `xtask oracle` | [`oracle`] | Writes the native semantic vectors and the host boundary record (WP-16). |
 
@@ -26,6 +27,7 @@ pub mod dag;
 pub mod error;
 pub mod finding;
 pub mod fixtures;
+pub mod fixtures_pe;
 pub mod gates;
 pub mod golden;
 pub mod json;

@@ -274,7 +274,13 @@ pub fn check_value(name: &str, truth: &Value) -> Vec<String> {
 /// Returns an error when a truth file does not read or parse.
 pub fn check_all(root: &Path, manifest: &Manifest) -> Result<Vec<Finding>, Error> {
     let mut found = Vec::new();
-    let mut builds: Vec<&str> = manifest.entries.iter().map(|e| e.truth.as_str()).collect();
+    // The PE truth files of WP-30 have their own schema (`fixtures_pe::truth`).
+    let mut builds: Vec<&str> = manifest
+        .entries
+        .iter()
+        .filter(|e| !e.path.starts_with("fixtures/bin/pe/"))
+        .map(|e| e.truth.as_str())
+        .collect();
     builds.sort_unstable();
     builds.dedup();
     for rel in builds {

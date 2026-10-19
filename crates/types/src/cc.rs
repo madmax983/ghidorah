@@ -2,7 +2,9 @@
 //!
 //! A table is data. The analysis reads the register names and the stack offsets from it.
 //! Register names are the lower case Intel names of the x86 printer, for example `rdi`.
-//! ELF binaries use [`SYSV_X86_64`].
+//! ELF binaries use [`SYSV_X86_64`]. PE binaries use [`MS_X64`].
+
+pub use crate::msx64::MS_X64;
 
 /// One calling-convention table.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

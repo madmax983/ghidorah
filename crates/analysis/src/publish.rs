@@ -139,7 +139,8 @@ fn collect(program: &Program, work: &Work) -> Facts {
         let id = FuncId(Address::ram(*entry));
         let mut func = Function::new(id.0, reason, confidence, Source::Analysis);
         func.body = work.body(*entry);
-        let thunk = f.reasons.contains_key(&StartReason::PltStub);
+        let thunk =
+            f.reasons.contains_key(&StartReason::PltStub) || work.ir.thunks.contains_key(entry);
         let kind = if thunk {
             PartKind::Thunk
         } else {

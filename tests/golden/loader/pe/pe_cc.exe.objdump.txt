@@ -1,0 +1,267 @@
+# golden: generator=xtask-fixtures version=1 fixture=pe_cc.exe fixture_sha256=ef0afb15757115e861050d1da25b2f33bf4d0899e697b791879bc4dd60d70f06 llvm=22.1.6
+
+pe_cc.exe:	file format coff-x86-64
+
+Disassembly of section .text:
+
+0000000140001000 <.text>:
+140001000: 8d 04 49                    	lea	eax, [rcx + 2*rcx]
+140001003: 03 05 0b 20 00 00           	add	eax, dword ptr [rip + 0x200b] # 0x140003014
+140001009: c3                          	ret
+14000100a: 66 0f 1f 44 00 00           	nop	word ptr [rax + rax]
+140001010: 89 c8                       	mov	eax, ecx
+140001012: 0f af c2                    	imul	eax, edx
+140001015: 03 05 f9 1f 00 00           	add	eax, dword ptr [rip + 0x1ff9] # 0x140003014
+14000101b: c3                          	ret
+14000101c: 0f 1f 40 00                 	nop	dword ptr [rax]
+140001020: 89 c8                       	mov	eax, ecx
+140001022: 0f af c2                    	imul	eax, edx
+140001025: 44 29 c0                    	sub	eax, r8d
+140001028: 03 05 e6 1f 00 00           	add	eax, dword ptr [rip + 0x1fe6] # 0x140003014
+14000102e: c3                          	ret
+14000102f: 90                          	nop
+140001030: 8d 04 11                    	lea	eax, [rcx + rdx]
+140001033: 45 29 c8                    	sub	r8d, r9d
+140001036: 41 0f af c0                 	imul	eax, r8d
+14000103a: 03 05 d4 1f 00 00           	add	eax, dword ptr [rip + 0x1fd4] # 0x140003014
+140001040: c3                          	ret
+140001041: 66 66 66 66 66 66 2e 0f 1f 84 00 00 00 00 00	nop	word ptr cs:[rax + rax]
+140001050: 0f af ca                    	imul	ecx, edx
+140001053: 45 0f af c1                 	imul	r8d, r9d
+140001057: 41 8d 04 08                 	lea	eax, [r8 + rcx]
+14000105b: 2b 44 24 28                 	sub	eax, dword ptr [rsp + 0x28]
+14000105f: 03 05 af 1f 00 00           	add	eax, dword ptr [rip + 0x1faf] # 0x140003014
+140001065: c3                          	ret
+140001066: 66 2e 0f 1f 84 00 00 00 00 00       	nop	word ptr cs:[rax + rax]
+140001070: 41 0f af d0                 	imul	edx, r8d
+140001074: 8d 04 0a                    	lea	eax, [rdx + rcx]
+140001077: 44 0f af 4c 24 28           	imul	r9d, dword ptr [rsp + 0x28]
+14000107d: 44 01 c8                    	add	eax, r9d
+140001080: 2b 44 24 30                 	sub	eax, dword ptr [rsp + 0x30]
+140001084: c3                          	ret
+140001085: 66 66 2e 0f 1f 84 00 00 00 00 00    	nop	word ptr cs:[rax + rax]
+140001090: 0f af 4c 24 38              	imul	ecx, dword ptr [rsp + 0x38]
+140001095: 0f af 54 24 30              	imul	edx, dword ptr [rsp + 0x30]
+14000109a: 8d 04 0a                    	lea	eax, [rdx + rcx]
+14000109d: 44 0f af 44 24 28           	imul	r8d, dword ptr [rsp + 0x28]
+1400010a3: 44 01 c0                    	add	eax, r8d
+1400010a6: 44 01 c8                    	add	eax, r9d
+1400010a9: 03 05 65 1f 00 00           	add	eax, dword ptr [rip + 0x1f65] # 0x140003014
+1400010af: c3                          	ret
+1400010b0: 33 4c 24 40                 	xor	ecx, dword ptr [rsp + 0x40]
+1400010b4: 33 54 24 38                 	xor	edx, dword ptr [rsp + 0x38]
+1400010b8: 44 33 44 24 30              	xor	r8d, dword ptr [rsp + 0x30]
+1400010bd: 8d 04 0a                    	lea	eax, [rdx + rcx]
+1400010c0: 44 33 4c 24 28              	xor	r9d, dword ptr [rsp + 0x28]
+1400010c5: 44 01 c8                    	add	eax, r9d
+1400010c8: 44 01 c0                    	add	eax, r8d
+1400010cb: 03 05 43 1f 00 00           	add	eax, dword ptr [rip + 0x1f43] # 0x140003014
+1400010d1: c3                          	ret
+1400010d2: 66 66 66 66 66 2e 0f 1f 84 00 00 00 00 00   	nop	word ptr cs:[rax + rax]
+1400010e0: 48 89 c8                    	mov	rax, rcx
+1400010e3: 49 0f af c1                 	imul	rax, r9
+1400010e7: 49 0f af d0                 	imul	rdx, r8
+1400010eb: 48 29 d0                    	sub	rax, rdx
+1400010ee: c3                          	ret
+1400010ef: 90                          	nop
+1400010f0: 48 63 c2                    	movsxd	rax, edx
+1400010f3: 8b 04 81                    	mov	eax, dword ptr [rcx + 4*rax]
+1400010f6: 03 05 18 1f 00 00           	add	eax, dword ptr [rip + 0x1f18] # 0x140003014
+1400010fc: c3                          	ret
+1400010fd: 0f 1f 00                    	nop	dword ptr [rax]
+140001100: f2 0f 59 05 f8 0e 00 00     	mulsd	xmm0, qword ptr [rip + 0xef8] # 0x140002000
+140001108: f2 0f 58 05 08 1f 00 00     	addsd	xmm0, qword ptr [rip + 0x1f08] # 0x140003018
+140001110: c3                          	ret
+140001111: 66 66 66 66 66 66 2e 0f 1f 84 00 00 00 00 00	nop	word ptr cs:[rax + rax]
+140001120: f2 0f 59 c1                 	mulsd	xmm0, xmm1
+140001124: f2 0f 58 05 ec 1e 00 00     	addsd	xmm0, qword ptr [rip + 0x1eec] # 0x140003018
+14000112c: c3                          	ret
+14000112d: 0f 1f 00                    	nop	dword ptr [rax]
+140001130: f2 0f 2a c1                 	cvtsi2sd	xmm0, ecx
+140001134: f2 41 0f 2a d0              	cvtsi2sd	xmm2, r8d
+140001139: f2 0f 59 c1                 	mulsd	xmm0, xmm1
+14000113d: f2 0f 58 c2                 	addsd	xmm0, xmm2
+140001141: c3                          	ret
+140001142: 66 66 66 66 66 2e 0f 1f 84 00 00 00 00 00   	nop	word ptr cs:[rax + rax]
+140001150: f2 0f 2a ca                 	cvtsi2sd	xmm1, edx
+140001154: f2 41 0f 2a d9              	cvtsi2sd	xmm3, r9d
+140001159: f2 0f 59 da                 	mulsd	xmm3, xmm2
+14000115d: f2 0f 59 c1                 	mulsd	xmm0, xmm1
+140001161: f2 0f 58 c3                 	addsd	xmm0, xmm3
+140001165: c3                          	ret
+140001166: 66 2e 0f 1f 84 00 00 00 00 00       	nop	word ptr cs:[rax + rax]
+140001170: f2 0f 2a d1                 	cvtsi2sd	xmm2, ecx
+140001174: f2 41 0f 2a c0              	cvtsi2sd	xmm0, r8d
+140001179: f2 0f 59 c3                 	mulsd	xmm0, xmm3
+14000117d: f2 0f 59 d1                 	mulsd	xmm2, xmm1
+140001181: f2 0f 58 d0                 	addsd	xmm2, xmm0
+140001185: 0f 57 c0                    	xorps	xmm0, xmm0
+140001188: f2 0f 2a 44 24 28           	cvtsi2sd	xmm0, dword ptr [rsp + 0x28]
+14000118e: f2 0f 58 c2                 	addsd	xmm0, xmm2
+140001192: c3                          	ret
+140001193: 66 66 66 66 2e 0f 1f 84 00 00 00 00 00      	nop	word ptr cs:[rax + rax]
+1400011a0: f2 0f 59 d3                 	mulsd	xmm2, xmm3
+1400011a4: f2 0f 59 c1                 	mulsd	xmm0, xmm1
+1400011a8: f2 0f 58 c2                 	addsd	xmm0, xmm2
+1400011ac: 0f 57 c9                    	xorps	xmm1, xmm1
+1400011af: f2 0f 2a 4c 24 30           	cvtsi2sd	xmm1, dword ptr [rsp + 0x30]
+1400011b5: f2 0f 59 4c 24 28           	mulsd	xmm1, qword ptr [rsp + 0x28]
+1400011bb: f2 0f 58 c1                 	addsd	xmm0, xmm1
+1400011bf: c3                          	ret
+1400011c0: f3 0f 2a ca                 	cvtsi2ss	xmm1, edx
+1400011c4: f3 0f 2a 15 48 1e 00 00     	cvtsi2ss	xmm2, dword ptr [rip + 0x1e48] # 0x140003014
+1400011cc: f3 0f 59 c1                 	mulss	xmm0, xmm1
+1400011d0: f3 0f 58 c2                 	addss	xmm0, xmm2
+1400011d4: c3                          	ret
+1400011d5: 66 66 2e 0f 1f 84 00 00 00 00 00    	nop	word ptr cs:[rax + rax]
+1400011e0: 41 57                       	push	r15
+1400011e2: 41 56                       	push	r14
+1400011e4: 41 55                       	push	r13
+1400011e6: 41 54                       	push	r12
+1400011e8: 56                          	push	rsi
+1400011e9: 57                          	push	rdi
+1400011ea: 55                          	push	rbp
+1400011eb: 53                          	push	rbx
+1400011ec: 48 81 ec b8 00 00 00        	sub	rsp, 0xb8
+1400011f3: 44 0f 29 9c 24 a0 00 00 00  	movaps	xmmword ptr [rsp + 0xa0], xmm11
+1400011fc: 44 0f 29 94 24 90 00 00 00  	movaps	xmmword ptr [rsp + 0x90], xmm10
+140001205: 44 0f 29 8c 24 80 00 00 00  	movaps	xmmword ptr [rsp + 0x80], xmm9
+14000120e: 44 0f 29 44 24 70           	movaps	xmmword ptr [rsp + 0x70], xmm8
+140001214: 0f 29 7c 24 60              	movaps	xmmword ptr [rsp + 0x60], xmm7
+140001219: 0f 29 74 24 50              	movaps	xmmword ptr [rsp + 0x50], xmm6
+14000121e: b9 01 00 00 00              	mov	ecx, 0x1
+140001223: e8 d8 fd ff ff              	call	0x140001000 <.text>
+140001228: 89 44 24 4c                 	mov	dword ptr [rsp + 0x4c], eax
+14000122c: b9 01 00 00 00              	mov	ecx, 0x1
+140001231: ba 02 00 00 00              	mov	edx, 0x2
+140001236: e8 d5 fd ff ff              	call	0x140001010 <.text+0x10>
+14000123b: 89 c3                       	mov	ebx, eax
+14000123d: b9 01 00 00 00              	mov	ecx, 0x1
+140001242: ba 02 00 00 00              	mov	edx, 0x2
+140001247: 41 b8 03 00 00 00           	mov	r8d, 0x3
+14000124d: e8 ce fd ff ff              	call	0x140001020 <.text+0x20>
+140001252: 89 c5                       	mov	ebp, eax
+140001254: b9 01 00 00 00              	mov	ecx, 0x1
+140001259: ba 02 00 00 00              	mov	edx, 0x2
+14000125e: 41 b8 03 00 00 00           	mov	r8d, 0x3
+140001264: 41 b9 04 00 00 00           	mov	r9d, 0x4
+14000126a: e8 c1 fd ff ff              	call	0x140001030 <.text+0x30>
+14000126f: 41 89 c6                    	mov	r14d, eax
+140001272: c7 44 24 20 05 00 00 00     	mov	dword ptr [rsp + 0x20], 0x5
+14000127a: b9 01 00 00 00              	mov	ecx, 0x1
+14000127f: ba 02 00 00 00              	mov	edx, 0x2
+140001284: 41 b8 03 00 00 00           	mov	r8d, 0x3
+14000128a: 41 b9 04 00 00 00           	mov	r9d, 0x4
+140001290: e8 bb fd ff ff              	call	0x140001050 <.text+0x50>
+140001295: 41 89 c7                    	mov	r15d, eax
+140001298: c7 44 24 28 06 00 00 00     	mov	dword ptr [rsp + 0x28], 0x6
+1400012a0: c7 44 24 20 05 00 00 00     	mov	dword ptr [rsp + 0x20], 0x5
+1400012a8: b9 01 00 00 00              	mov	ecx, 0x1
+1400012ad: ba 02 00 00 00              	mov	edx, 0x2
+1400012b2: 41 b8 03 00 00 00           	mov	r8d, 0x3
+1400012b8: 41 b9 04 00 00 00           	mov	r9d, 0x4
+1400012be: e8 ad fd ff ff              	call	0x140001070 <.text+0x70>
+1400012c3: 41 89 c4                    	mov	r12d, eax
+1400012c6: c7 44 24 30 07 00 00 00     	mov	dword ptr [rsp + 0x30], 0x7
+1400012ce: c7 44 24 28 06 00 00 00     	mov	dword ptr [rsp + 0x28], 0x6
+1400012d6: c7 44 24 20 05 00 00 00     	mov	dword ptr [rsp + 0x20], 0x5
+1400012de: b9 01 00 00 00              	mov	ecx, 0x1
+1400012e3: ba 02 00 00 00              	mov	edx, 0x2
+1400012e8: 41 b8 03 00 00 00           	mov	r8d, 0x3
+1400012ee: 41 b9 04 00 00 00           	mov	r9d, 0x4
+1400012f4: e8 97 fd ff ff              	call	0x140001090 <.text+0x90>
+1400012f9: 41 89 c5                    	mov	r13d, eax
+1400012fc: c7 44 24 38 08 00 00 00     	mov	dword ptr [rsp + 0x38], 0x8
+140001304: c7 44 24 30 07 00 00 00     	mov	dword ptr [rsp + 0x30], 0x7
+14000130c: c7 44 24 28 06 00 00 00     	mov	dword ptr [rsp + 0x28], 0x6
+140001314: c7 44 24 20 05 00 00 00     	mov	dword ptr [rsp + 0x20], 0x5
+14000131c: b9 01 00 00 00              	mov	ecx, 0x1
+140001321: ba 02 00 00 00              	mov	edx, 0x2
+140001326: 41 b8 03 00 00 00           	mov	r8d, 0x3
+14000132c: 41 b9 04 00 00 00           	mov	r9d, 0x4
+140001332: e8 79 fd ff ff              	call	0x1400010b0 <.text+0xb0>
+140001337: 89 c7                       	mov	edi, eax
+140001339: b9 01 00 00 00              	mov	ecx, 0x1
+14000133e: ba 02 00 00 00              	mov	edx, 0x2
+140001343: 41 b8 03 00 00 00           	mov	r8d, 0x3
+140001349: 41 b9 04 00 00 00           	mov	r9d, 0x4
+14000134f: e8 8c fd ff ff              	call	0x1400010e0 <.text+0xe0>
+140001354: 48 89 c6                    	mov	rsi, rax
+140001357: 48 8d 0d a2 1c 00 00        	lea	rcx, [rip + 0x1ca2]     # 0x140003000
+14000135e: ba 02 00 00 00              	mov	edx, 0x2
+140001363: e8 88 fd ff ff              	call	0x1400010f0 <.text+0xf0>
+140001368: 03 5c 24 4c                 	add	ebx, dword ptr [rsp + 0x4c]
+14000136c: 41 01 ee                    	add	r14d, ebp
+14000136f: 41 01 de                    	add	r14d, ebx
+140001372: 45 01 fc                    	add	r12d, r15d
+140001375: 45 01 ec                    	add	r12d, r13d
+140001378: 45 01 f4                    	add	r12d, r14d
+14000137b: 01 fe                       	add	esi, edi
+14000137d: 01 c6                       	add	esi, eax
+14000137f: 44 01 e6                    	add	esi, r12d
+140001382: f2 0f 10 35 7e 0c 00 00     	movsd	xmm6, qword ptr [rip + 0xc7e] # 0x140002008
+14000138a: 66 0f 28 c6                 	movapd	xmm0, xmm6
+14000138e: e8 6d fd ff ff              	call	0x140001100 <.text+0x100>
+140001393: 66 44 0f 28 c0              	movapd	xmm8, xmm0
+140001398: f2 0f 10 3d 70 0c 00 00     	movsd	xmm7, qword ptr [rip + 0xc70] # 0x140002010
+1400013a0: 66 0f 28 c6                 	movapd	xmm0, xmm6
+1400013a4: 0f 28 cf                    	movaps	xmm1, xmm7
+1400013a7: e8 74 fd ff ff              	call	0x140001120 <.text+0x120>
+1400013ac: 66 44 0f 28 c8              	movapd	xmm9, xmm0
+1400013b1: f2 45 0f 58 c8              	addsd	xmm9, xmm8
+1400013b6: b9 01 00 00 00              	mov	ecx, 0x1
+1400013bb: 0f 28 cf                    	movaps	xmm1, xmm7
+1400013be: 41 b8 03 00 00 00           	mov	r8d, 0x3
+1400013c4: e8 67 fd ff ff              	call	0x140001130 <.text+0x130>
+1400013c9: 66 44 0f 28 d0              	movapd	xmm10, xmm0
+1400013ce: f2 45 0f 58 d1              	addsd	xmm10, xmm9
+1400013d3: f2 44 0f 10 0d 3c 0c 00 00  	movsd	xmm9, qword ptr [rip + 0xc3c] # 0x140002018
+1400013dc: 66 0f 28 c6                 	movapd	xmm0, xmm6
+1400013e0: ba 02 00 00 00              	mov	edx, 0x2
+1400013e5: 41 0f 28 d1                 	movaps	xmm2, xmm9
+1400013e9: 41 b9 04 00 00 00           	mov	r9d, 0x4
+1400013ef: e8 5c fd ff ff              	call	0x140001150 <.text+0x150>
+1400013f4: 66 44 0f 28 c0              	movapd	xmm8, xmm0
+1400013f9: f2 45 0f 58 c2              	addsd	xmm8, xmm10
+1400013fe: c7 44 24 20 05 00 00 00     	mov	dword ptr [rsp + 0x20], 0x5
+140001406: f2 44 0f 10 15 11 0c 00 00  	movsd	xmm10, qword ptr [rip + 0xc11] # 0x140002020
+14000140f: b9 01 00 00 00              	mov	ecx, 0x1
+140001414: 0f 28 cf                    	movaps	xmm1, xmm7
+140001417: 41 b8 03 00 00 00           	mov	r8d, 0x3
+14000141d: 41 0f 28 da                 	movaps	xmm3, xmm10
+140001421: e8 4a fd ff ff              	call	0x140001170 <.text+0x170>
+140001426: 66 44 0f 28 d8              	movapd	xmm11, xmm0
+14000142b: 48 b8 00 00 00 00 00 00 14 40       	movabs	rax, 0x4014000000000000
+140001435: 48 89 44 24 20              	mov	qword ptr [rsp + 0x20], rax
+14000143a: c7 44 24 28 06 00 00 00     	mov	dword ptr [rsp + 0x28], 0x6
+140001442: 66 0f 28 c6                 	movapd	xmm0, xmm6
+140001446: 0f 28 cf                    	movaps	xmm1, xmm7
+140001449: 41 0f 28 d1                 	movaps	xmm2, xmm9
+14000144d: 41 0f 28 da                 	movaps	xmm3, xmm10
+140001451: e8 4a fd ff ff              	call	0x1400011a0 <.text+0x1a0>
+140001456: 66 0f 28 f0                 	movapd	xmm6, xmm0
+14000145a: f2 41 0f 58 f3              	addsd	xmm6, xmm11
+14000145f: f3 0f 10 05 c1 0b 00 00     	movss	xmm0, dword ptr [rip + 0xbc1] # 0x140002028
+140001467: ba 02 00 00 00              	mov	edx, 0x2
+14000146c: e8 4f fd ff ff              	call	0x1400011c0 <.text+0x1c0>
+140001471: f3 0f 5a c0                 	cvtss2sd	xmm0, xmm0
+140001475: f2 0f 58 c6                 	addsd	xmm0, xmm6
+140001479: f2 41 0f 58 c0              	addsd	xmm0, xmm8
+14000147e: 89 35 90 1b 00 00           	mov	dword ptr [rip + 0x1b90], esi # 0x140003014
+140001484: f2 0f 11 05 8c 1b 00 00     	movsd	qword ptr [rip + 0x1b8c], xmm0 # 0x140003018
+14000148c: 0f 28 74 24 50              	movaps	xmm6, xmmword ptr [rsp + 0x50]
+140001491: 0f 28 7c 24 60              	movaps	xmm7, xmmword ptr [rsp + 0x60]
+140001496: 44 0f 28 44 24 70           	movaps	xmm8, xmmword ptr [rsp + 0x70]
+14000149c: 44 0f 28 8c 24 80 00 00 00  	movaps	xmm9, xmmword ptr [rsp + 0x80]
+1400014a5: 44 0f 28 94 24 90 00 00 00  	movaps	xmm10, xmmword ptr [rsp + 0x90]
+1400014ae: 44 0f 28 9c 24 a0 00 00 00  	movaps	xmm11, xmmword ptr [rsp + 0xa0]
+1400014b7: 48 81 c4 b8 00 00 00        	add	rsp, 0xb8
+1400014be: 5b                          	pop	rbx
+1400014bf: 5d                          	pop	rbp
+1400014c0: 5f                          	pop	rdi
+1400014c1: 5e                          	pop	rsi
+1400014c2: 41 5c                       	pop	r12
+1400014c4: 41 5d                       	pop	r13
+1400014c6: 41 5e                       	pop	r14
+1400014c8: 41 5f                       	pop	r15
+1400014ca: c3                          	ret
