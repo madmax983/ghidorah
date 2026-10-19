@@ -186,6 +186,19 @@ fn search_names_strings_and_bytes() {
     );
 }
 
+/// A query matches the decoded text of a UTF-16 string, not its raw bytes (found by WP-26).
+#[test]
+fn regress_search_utf16_string() {
+    let (mut session, _) = fixture("strings.gcc-O2");
+    let hits = items(&call(
+        &mut session,
+        "search",
+        r#"{"kind":"string","query":"Wide hello from UTF-16"}"#,
+    ));
+    let ids: Vec<String> = hits.iter().map(|h| str_of(h, "id")).collect();
+    assert_eq!(ids, ["str:0x2060"], "{hits:?}");
+}
+
 /// Writes one note to the demo session and gives its ID.
 fn write_note(session: &mut ghidorah_tools::Session, kind: NoteKind, set: Option<NoteSet>) -> u64 {
     let id = BinaryId::parse(crate::support::DEMO_ID).expect("an ID");
