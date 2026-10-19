@@ -142,35 +142,44 @@ fn add(px: &mut Px<'_>, t: &Tables, entry: Lookup, slot: Option<u64>, b: &mut Bi
     });
 }
 
+/// Gives the `u32` at byte `k` of a descriptor.
+fn word(raw: &[u8], k: usize) -> u32 {
+    raw.get(k..k.saturating_add(4))
+        .and_then(|w| <[u8; 4]>::try_from(w).ok())
+        .map_or(0, u32::from_le_bytes)
+}
+
+/// Gives descriptor `i` of the table at `rva` with entries of `size` bytes. The walk stops
+/// (`None`) at an all-zero entry, at a read outside the map and at the DLL limit.
+fn descriptor(px: &mut Px<'_>, rva: u32, i: usize, size: u32, path: &str) -> Option<Vec<u8>> {
+    let Some(at) = u32::try_from(i)
+        .ok()
+        .and_then(|n| n.checked_mul(size))
+        .and_then(|o| rva.checked_add(o))
+    else {
+        px.diag(Diagnostic::new(DiagCode::Overflow, path));
+        return None;
+    };
+    let raw = px.read(at, u64::from(size), path)?.into_owned();
+    if raw.iter().all(|b| *b == 0) {
+        return None;
+    }
+    let limit = px.budget.limits.pe_import_dlls;
+    if u64::try_from(i).unwrap_or(u64::MAX) >= limit {
+        px.diag(Diagnostic::new(DiagCode::Limit, path).have(limit));
+        return None;
+    }
+    Some(raw)
+}
+
 /// Reads the import descriptors at `rva` into `b`.
 pub(crate) fn load(px: &mut Px<'_>, rva: u32, b: &mut Binary) {
-    let limit = px.budget.limits.pe_import_dlls;
     for i in 0.. {
         let path = format!("pe.import[{i}]");
-        let Some(at) = u32::try_from(i)
-            .ok()
-            .and_then(|n| n.checked_mul(20))
-            .and_then(|o| rva.checked_add(o))
-        else {
-            px.diag(Diagnostic::new(DiagCode::Overflow, path));
+        let Some(raw) = descriptor(px, rva, i, 20, &path) else {
             break;
         };
-        let Some(raw) = px.read(at, 20, &path) else {
-            break;
-        };
-        if raw.iter().all(|b| *b == 0) {
-            break;
-        }
-        if u64::try_from(i).unwrap_or(u64::MAX) >= limit {
-            px.diag(Diagnostic::new(DiagCode::Limit, path).have(limit));
-            break;
-        }
-        let word = |k: usize| -> u32 {
-            raw.get(k..k.saturating_add(4))
-                .and_then(|w| <[u8; 4]>::try_from(w).ok())
-                .map_or(0, u32::from_le_bytes)
-        };
-        let (ilt, name_rva, iat) = (word(0), word(12), word(16));
+        let (ilt, name_rva, iat) = (word(&raw, 0), word(&raw, 12), word(&raw, 16));
         let Some(dll) = px.cstr(name_rva, &path) else {
             continue;
         };
@@ -206,38 +215,16 @@ fn delay_rva(px: &mut Px<'_>, value: u32, va_form: bool, path: &str) -> Option<u
 
 /// Reads the delay import descriptors at `rva` into `b`.
 pub(crate) fn load_delay(px: &mut Px<'_>, rva: u32, b: &mut Binary) {
-    let limit = px.budget.limits.pe_import_dlls;
     for i in 0.. {
         let path = format!("pe.delay[{i}]");
-        let Some(at) = u32::try_from(i)
-            .ok()
-            .and_then(|n| n.checked_mul(32))
-            .and_then(|o| rva.checked_add(o))
-        else {
-            px.diag(Diagnostic::new(DiagCode::Overflow, path));
+        let Some(raw) = descriptor(px, rva, i, 32, &path) else {
             break;
         };
-        let Some(raw) = px.read(at, 32, &path) else {
-            break;
-        };
-        if raw.iter().all(|b| *b == 0) {
-            break;
-        }
-        if u64::try_from(i).unwrap_or(u64::MAX) >= limit {
-            px.diag(Diagnostic::new(DiagCode::Limit, path).have(limit));
-            break;
-        }
-        let word = |k: usize| -> u32 {
-            raw.get(k..k.saturating_add(4))
-                .and_then(|w| <[u8; 4]>::try_from(w).ok())
-                .map_or(0, u32::from_le_bytes)
-        };
-        let va_form = word(0) & 1 == 0;
-        let (name, iat, int) = (word(4), word(12), word(16));
+        let va_form = word(&raw, 0) & 1 == 0;
         let fields = (
-            delay_rva(px, name, va_form, &path),
-            delay_rva(px, iat, va_form, &path),
-            delay_rva(px, int, va_form, &path),
+            delay_rva(px, word(&raw, 4), va_form, &path),
+            delay_rva(px, word(&raw, 12), va_form, &path),
+            delay_rva(px, word(&raw, 16), va_form, &path),
         );
         let (Some(name), Some(iat), Some(int)) = fields else {
             continue;

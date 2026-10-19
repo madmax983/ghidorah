@@ -22,7 +22,7 @@ use ghidorah_base::{DiagCode, Limits};
 use super::Px;
 use crate::binary::RuntimeFunction;
 use crate::diag::Diagnostic;
-use crate::memmap::{MemoryMap, Perms};
+use crate::memmap::MemoryMap;
 
 /// The `CHAININFO` flag of `UNWIND_INFO`.
 pub const UNW_FLAG_CHAININFO: u8 = 4;
@@ -121,12 +121,9 @@ fn exec_range(px: &Px<'_>, begin: u32, end: u32) -> bool {
     let last = end
         .checked_sub(1)
         .and_then(|e| px.base.checked_add(u64::from(e)));
-    let exec = |va: u64| {
-        px.map
-            .region_at(va)
-            .is_some_and(|r| r.perms.contains(Perms::EXECUTE))
-    };
-    first.zip(last).is_some_and(|(f, l)| exec(f) && exec(l))
+    first
+        .zip(last)
+        .is_some_and(|(f, l)| px.is_exec(f) && px.is_exec(l))
 }
 
 /// Reads the Exception directory at `rva` with `size` bytes.

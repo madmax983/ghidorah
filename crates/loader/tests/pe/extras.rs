@@ -1,27 +1,14 @@
 //! AC-255 and the `.pdata`, TLS and debug tables: protections, the `CodeView` identity, the
 //! `RUNTIME_FUNCTION` entries with their fragments and the TLS callbacks.
 
-use std::fmt::Write;
-
 use ghidorah_base::DiagCode;
+use ghidorah_loader::pe::guid_text;
 use ghidorah_loader::{EntryKind, PeProtections, Protections};
 use ghidorah_testkit::pe::EXE_BASE;
 
 use crate::support::{
     IMAGES, codes, load_fixture, load_variant, read, readobj, truth, truth_field,
 };
-
-/// Gives a GUID in the 8-4-4-4-12 form of `llvm-readobj`, upper case.
-fn guid_text(g: &[u8; 16]) -> String {
-    let d1 = u32::from_le_bytes([g[0], g[1], g[2], g[3]]);
-    let d2 = u16::from_le_bytes([g[4], g[5]]);
-    let d3 = u16::from_le_bytes([g[6], g[7]]);
-    let mut tail = String::new();
-    for b in &g[10..] {
-        let _ = write!(tail, "{b:02X}");
-    }
-    format!("{d1:08X}-{d2:04X}-{d3:04X}-{:02X}{:02X}-{tail}", g[8], g[9])
-}
 
 #[test]
 fn ac_255_pe_protections_identity() {
@@ -56,10 +43,7 @@ fn ac_255_pe_protections_identity() {
         0x34, 0x7e, 0x8d, 0xf0, 0x17, 0x38, 0x43, 0x8a, 0x4c, 0x4c, 0x44, 0x20, 0x50, 0x44, 0x42,
         0x2e,
     ];
-    assert_eq!(
-        ghidorah_loader::pe::guid_text(&guid),
-        "F08D7E34-3817-8A43-4C4C-44205044422E"
-    );
+    assert_eq!(guid_text(&guid), "F08D7E34-3817-8A43-4C4C-44205044422E");
 }
 
 #[test]
