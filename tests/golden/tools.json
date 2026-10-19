@@ -3,7 +3,7 @@
   {
     "name": "binary_load",
     "title": "Load a binary",
-    "description": "Load a binary for analysis: an ELF file under a root, a raw blob, the built-in demo or an open binary by its ID. Send exactly one of path, builtin and binary_id. Send file_format raw and base for a blob of x86-64 code. The analysis runs after the load within max_steps. Use the binary_id of the result in later calls.",
+    "description": "Load a binary for analysis: an ELF or PE file under a root, a raw blob, the built-in demo or an open binary by its ID. Send exactly one of path, builtin and binary_id. Send file_format raw and base for a blob of x86-64 code. The analysis runs after the load within max_steps. Use the binary_id of the result in later calls.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -22,6 +22,7 @@
           "enum": [
             "auto",
             "elf",
+            "pe",
             "raw"
           ]
         },

@@ -123,7 +123,7 @@ fn sched_tie_break_order() {
                 AnalyzerId::Symbols,
                 AnalyzerId::ImportStubs,
                 AnalyzerId::FdeSeeds,
-                AnalyzerId::Overrides
+                AnalyzerId::PdataSeeds
             ][..]
         )
     );
@@ -356,8 +356,8 @@ fn registry_follows_section_7_1() {
     assert_eq!(
         priorities,
         [
-            100, 110, 120, 150, 160, 300, 301, 302, 400, 410, 420, 430, 440, 450, 460, 470, 600,
-            650, 700, 800, 810
+            100, 110, 120, 150, 155, 160, 300, 301, 302, 400, 405, 410, 420, 430, 440, 450, 460,
+            470, 600, 650, 700, 800, 810
         ]
     );
     for (i, s) in ANALYZERS.iter().enumerate() {

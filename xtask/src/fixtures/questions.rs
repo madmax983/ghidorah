@@ -41,6 +41,7 @@ pub const CATEGORY_MINIMUMS: &[(&str, usize)] = &[
     ("abstain", 4),
     ("decompile", 3),
     ("similar", 2),
+    ("pe", 5),
 ];
 
 /// The answer checks.

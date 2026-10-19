@@ -131,9 +131,15 @@ fn questions_and_intents_hash_locked() {
         "{} questions, need {minimum}",
         all.len()
     );
-    assert!(
-        all.iter().all(|q| q.category != "pe"),
-        "WP-30 appends the pe group"
+    let pe: Vec<usize> = (all.iter().enumerate())
+        .filter(|(_, q)| q.category == "pe")
+        .map(|(i, _)| i)
+        .collect();
+    assert_eq!(pe.len(), 5, "WP-30 appends the pe group of 5 questions");
+    assert_eq!(
+        pe.first().copied(),
+        Some(all.len() - 5),
+        "the pe group comes last"
     );
 }
 
