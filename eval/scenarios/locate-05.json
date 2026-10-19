@@ -1,0 +1,49 @@
+{
+  "id": "locate-05",
+  "question": "q-locate-05",
+  "turns": [
+    {
+      "call": {
+        "tool": "binary_load",
+        "args": {
+          "path": "fixtures/bin/two_helpers.gcc-O2"
+        }
+      }
+    },
+    {
+      "call": {
+        "tool": "search",
+        "args": {
+          "kind": "name",
+          "query": "helper",
+          "match": "exact"
+        }
+      }
+    }
+  ],
+  "answer": {
+    "turn": 1,
+    "ptr": "/data/items",
+    "steps": [
+      {
+        "op": "pick",
+        "ptr": "/addr"
+      }
+    ]
+  },
+  "provenance": {
+    "/turns/0/call/args/path": "question:binaries/0",
+    "/turns/1/call/args/kind": "schema:search.kind",
+    "/turns/1/call/args/query": "question",
+    "/turns/1/call/args/match": "schema:search.match"
+  },
+  "budgets": {
+    "max_calls": 2,
+    "max_chars": 1300,
+    "max_peak_chars": 900
+  },
+  "evidence": [
+    "fn:0x1190",
+    "fn:0x11c0"
+  ]
+}

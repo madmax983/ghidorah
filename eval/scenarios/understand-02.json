@@ -1,0 +1,123 @@
+{
+  "id": "understand-02",
+  "question": "q-understand-02",
+  "turns": [
+    {
+      "call": {
+        "tool": "binary_load",
+        "args": {
+          "path": "fixtures/bin/xor_decode.gcc-O2.stripped"
+        }
+      }
+    },
+    {
+      "call": {
+        "tool": "binary_survey",
+        "args": {
+          "include": [
+            "strings"
+          ]
+        }
+      }
+    },
+    {
+      "call": {
+        "tool": "func_get",
+        "args": {
+          "target": {
+            "$turn": 1,
+            "ptr": "/next/1/args/target"
+          },
+          "include": [
+            "decomp"
+          ]
+        }
+      }
+    },
+    {
+      "call": {
+        "tool": "func_get",
+        "args": {
+          "target": {
+            "$turn": 2,
+            "ptr": "/data/decomp/calls/0/target"
+          },
+          "include": [
+            "decomp"
+          ]
+        }
+      }
+    },
+    {
+      "call": {
+        "tool": "func_get",
+        "args": {
+          "target": {
+            "$turn": 3,
+            "ptr": "/data/decomp/calls/0/target"
+          },
+          "include": [
+            "decomp"
+          ]
+        }
+      }
+    },
+    {
+      "call": {
+        "tool": "mem_read",
+        "args": {
+          "target": "0x2010",
+          "len": 14
+        }
+      }
+    }
+  ],
+  "answer": {
+    "turn": 5,
+    "ptr": "/data/hex",
+    "steps": [
+      {
+        "op": "xor",
+        "var": "param_1",
+        "key": {
+          "turn": 4,
+          "ptr": "/data/decomp/text",
+          "steps": [
+            {
+              "op": "lines"
+            },
+            {
+              "op": "grep",
+              "glob": "return *"
+            },
+            {
+              "op": "first"
+            },
+            {
+              "op": "after",
+              "text": "return "
+            },
+            {
+              "op": "trim_suffix",
+              "text": ";"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "provenance": {
+    "/turns/0/call/args/path": "question:binaries/0",
+    "/turns/1/call/args/include/0": "schema:binary_survey.include",
+    "/turns/2/call/args/include/0": "instructions",
+    "/turns/3/call/args/include/0": "instructions",
+    "/turns/4/call/args/include/0": "instructions",
+    "/turns/5/call/args/target": "response:2/data/decomp/text",
+    "/turns/5/call/args/len": "response:2/data/decomp/text"
+  },
+  "budgets": {
+    "max_calls": 6,
+    "max_chars": 17700,
+    "max_peak_chars": 10300
+  }
+}

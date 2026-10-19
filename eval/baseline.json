@@ -1,0 +1,299 @@
+{
+  "chars_per_token": 3,
+  "scenarios": {
+    "ab-annotate-03": {
+      "calls": 3,
+      "chars": 2343,
+      "peak": 1079,
+      "est_tokens": 781
+    },
+    "ab-annotate-05": {
+      "calls": 3,
+      "chars": 2579,
+      "peak": 1312,
+      "est_tokens": 860
+    },
+    "ab-recover-03": {
+      "calls": 2,
+      "chars": 1666,
+      "peak": 1051,
+      "est_tokens": 556
+    },
+    "ab-understand-02": {
+      "calls": 4,
+      "chars": 10914,
+      "peak": 9360,
+      "est_tokens": 3638
+    },
+    "ab-understand-03": {
+      "calls": 2,
+      "chars": 3035,
+      "peak": 2389,
+      "est_tokens": 1012
+    },
+    "abstain-01": {
+      "calls": 2,
+      "chars": 1061,
+      "peak": 646,
+      "est_tokens": 354
+    },
+    "abstain-02": {
+      "calls": 2,
+      "chars": 1062,
+      "peak": 646,
+      "est_tokens": 354
+    },
+    "abstain-03": {
+      "calls": 2,
+      "chars": 1063,
+      "peak": 646,
+      "est_tokens": 355
+    },
+    "abstain-04": {
+      "calls": 2,
+      "chars": 1056,
+      "peak": 646,
+      "est_tokens": 352
+    },
+    "annotate-01": {
+      "calls": 3,
+      "chars": 1898,
+      "peak": 945,
+      "est_tokens": 633
+    },
+    "annotate-02": {
+      "calls": 4,
+      "chars": 2288,
+      "peak": 1016,
+      "est_tokens": 763
+    },
+    "annotate-03": {
+      "calls": 5,
+      "chars": 2670,
+      "peak": 1079,
+      "est_tokens": 890
+    },
+    "annotate-04": {
+      "calls": 4,
+      "chars": 10200,
+      "peak": 7970,
+      "est_tokens": 3400
+    },
+    "annotate-05": {
+      "calls": 5,
+      "chars": 2906,
+      "peak": 1312,
+      "est_tokens": 969
+    },
+    "decompile-01": {
+      "calls": 2,
+      "chars": 3959,
+      "peak": 3316,
+      "est_tokens": 1320
+    },
+    "decompile-02": {
+      "calls": 2,
+      "chars": 3934,
+      "peak": 3290,
+      "est_tokens": 1312
+    },
+    "decompile-03": {
+      "calls": 2,
+      "chars": 3797,
+      "peak": 3155,
+      "est_tokens": 1266
+    },
+    "locate-01": {
+      "calls": 3,
+      "chars": 5016,
+      "peak": 3347,
+      "est_tokens": 1672
+    },
+    "locate-02": {
+      "calls": 2,
+      "chars": 1219,
+      "peak": 644,
+      "est_tokens": 407
+    },
+    "locate-03": {
+      "calls": 2,
+      "chars": 1460,
+      "peak": 817,
+      "est_tokens": 487
+    },
+    "locate-04": {
+      "calls": 3,
+      "chars": 2123,
+      "peak": 1028,
+      "est_tokens": 708
+    },
+    "locate-05": {
+      "calls": 2,
+      "chars": 1037,
+      "peak": 648,
+      "est_tokens": 346
+    },
+    "pe-01": {
+      "calls": 2,
+      "chars": 1527,
+      "peak": 910,
+      "est_tokens": 509
+    },
+    "pe-02": {
+      "calls": 2,
+      "chars": 1527,
+      "peak": 910,
+      "est_tokens": 509
+    },
+    "pe-03": {
+      "calls": 2,
+      "chars": 1527,
+      "peak": 910,
+      "est_tokens": 509
+    },
+    "pe-04": {
+      "calls": 2,
+      "chars": 904,
+      "peak": 614,
+      "est_tokens": 302
+    },
+    "pe-05": {
+      "calls": 2,
+      "chars": 4692,
+      "peak": 4075,
+      "est_tokens": 1564
+    },
+    "recover-01": {
+      "calls": 4,
+      "chars": 2383,
+      "peak": 1028,
+      "est_tokens": 795
+    },
+    "recover-02": {
+      "calls": 3,
+      "chars": 2328,
+      "peak": 1002,
+      "est_tokens": 776
+    },
+    "recover-03": {
+      "calls": 3,
+      "chars": 1940,
+      "peak": 815,
+      "est_tokens": 647
+    },
+    "resume-01": {
+      "calls": 6,
+      "chars": 4201,
+      "peak": 1241,
+      "est_tokens": 1401
+    },
+    "resume-02": {
+      "calls": 4,
+      "chars": 3375,
+      "peak": 1570,
+      "est_tokens": 1125
+    },
+    "similar-01": {
+      "calls": 3,
+      "chars": 5705,
+      "peak": 4409,
+      "est_tokens": 1902
+    },
+    "similar-02": {
+      "calls": 3,
+      "chars": 2293,
+      "peak": 993,
+      "est_tokens": 765
+    },
+    "triage-01": {
+      "calls": 2,
+      "chars": 1962,
+      "peak": 1312,
+      "est_tokens": 654
+    },
+    "triage-02": {
+      "calls": 2,
+      "chars": 1611,
+      "peak": 961,
+      "est_tokens": 537
+    },
+    "triage-03": {
+      "calls": 2,
+      "chars": 1181,
+      "peak": 652,
+      "est_tokens": 394
+    },
+    "triage-04": {
+      "calls": 2,
+      "chars": 1079,
+      "peak": 626,
+      "est_tokens": 360
+    },
+    "triage-05": {
+      "calls": 2,
+      "chars": 1437,
+      "peak": 793,
+      "est_tokens": 479
+    },
+    "understand-01": {
+      "calls": 3,
+      "chars": 4952,
+      "peak": 3283,
+      "est_tokens": 1651
+    },
+    "understand-02": {
+      "calls": 6,
+      "chars": 14115,
+      "peak": 8227,
+      "est_tokens": 4705
+    },
+    "understand-03": {
+      "calls": 3,
+      "chars": 4056,
+      "peak": 2146,
+      "est_tokens": 1352
+    },
+    "understand-04": {
+      "calls": 2,
+      "chars": 1966,
+      "peak": 1316,
+      "est_tokens": 656
+    },
+    "understand-05": {
+      "calls": 2,
+      "chars": 1971,
+      "peak": 1317,
+      "est_tokens": 657
+    },
+    "verify-01": {
+      "calls": 2,
+      "chars": 991,
+      "peak": 650,
+      "est_tokens": 331
+    },
+    "verify-02": {
+      "calls": 2,
+      "chars": 962,
+      "peak": 654,
+      "est_tokens": 321
+    },
+    "verify-03": {
+      "calls": 2,
+      "chars": 935,
+      "peak": 617,
+      "est_tokens": 312
+    },
+    "verify-04": {
+      "calls": 2,
+      "chars": 974,
+      "peak": 641,
+      "est_tokens": 325
+    },
+    "verify-05": {
+      "calls": 2,
+      "chars": 987,
+      "peak": 650,
+      "est_tokens": 329
+    }
+  }
+}

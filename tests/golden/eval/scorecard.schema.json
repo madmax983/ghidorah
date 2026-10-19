@@ -1,0 +1,130 @@
+{"golden":"generator=ghidorah-eval version=1"}
+{
+  "scenarios": [
+    {
+      "id": "str",
+      "pass": "bool",
+      "calls": "int",
+      "chars": "int",
+      "peak": "int",
+      "est_tokens": "int"
+    }
+  ],
+  "answer_correctness": "rate",
+  "budget_adherence": "rate",
+  "provenance": {
+    "values": "int",
+    "findings": [],
+    "rate": "rate"
+  },
+  "repair": {
+    "by_code": [
+      {
+        "code": "str",
+        "class": "str",
+        "count": "int",
+        "triggered": "int",
+        "ok": "int",
+        "ranks": [
+          "int"
+        ]
+      }
+    ],
+    "r_rate": "rate",
+    "c_rate": "rate"
+  },
+  "hint_follower": {
+    "scenarios": "int",
+    "reached": "int",
+    "rate": "rate",
+    "missed": [
+      "str"
+    ]
+  },
+  "discoverability": {
+    "intents": "int",
+    "tool_search_top3": "rate",
+    "raw_top3": "rate",
+    "misses": [
+      "str"
+    ]
+  },
+  "determinism": {
+    "scenarios": "int",
+    "equal": "int",
+    "rate": "rate",
+    "first_diff": "null"
+  },
+  "recall": {
+    "reset": "rate",
+    "after_edits": "rate",
+    "facts": "int",
+    "noise_edits": "int"
+  },
+  "survey_recall": {
+    "rate": "rate",
+    "fixtures": "int",
+    "facts": "int",
+    "found": "int"
+  },
+  "abstain": {
+    "scenarios": "int",
+    "pass": "int",
+    "rate": "rate"
+  },
+  "metamorphic": {
+    "relations": [
+      {
+        "name": "str",
+        "pass": "bool"
+      }
+    ],
+    "rate": "rate"
+  },
+  "fuzz": {
+    "cases": "int",
+    "violations": "int"
+  },
+  "catalog": {
+    "full_chars": "int",
+    "mini_chars": "int",
+    "instructions_chars": "int"
+  },
+  "ablation": {
+    "objects_chars": "int",
+    "table_chars": "int",
+    "star_calls_saved": "int"
+  },
+  "ab": {
+    "pairs": [
+      {
+        "id": "str",
+        "pass": "bool",
+        "single_calls": "int",
+        "batch_calls": "int",
+        "single_chars": "int",
+        "batch_chars": "int",
+        "calls_saved": "rate",
+        "chars_saved": "rate",
+        "meets": "bool"
+      }
+    ],
+    "confirms": "bool"
+  },
+  "hint_graph": {
+    "unreached": [
+      "str"
+    ],
+    "no_next": [
+      "str"
+    ]
+  },
+  "gates": [
+    {
+      "metric": "str",
+      "value": "rate",
+      "bar": "rate",
+      "pass": "bool"
+    }
+  ]
+}

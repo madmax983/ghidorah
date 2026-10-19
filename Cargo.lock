@@ -62,6 +62,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ghidorah-eval"
+version = "0.1.0"
+dependencies = [
+ "ghidorah-json",
+ "ghidorah-testkit",
+ "ghidorah-tools",
+]
+
+[[package]]
 name = "ghidorah-ir"
 version = "0.1.0"
 dependencies = [

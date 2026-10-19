@@ -1,0 +1,73 @@
+{
+  "id": "understand-03",
+  "question": "q-understand-03",
+  "turns": [
+    {
+      "call": {
+        "tool": "binary_load",
+        "args": {
+          "path": "fixtures/bin/recursion.gcc-O0"
+        }
+      }
+    },
+    {
+      "call": {
+        "tool": "func_list",
+        "args": {
+          "filter": {
+            "start_reason": [
+              "symbol"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "call": {
+        "tool": "xref_list",
+        "args": {
+          "targets": {
+            "$turn": 1,
+            "ptr": "/data/items/*/id"
+          },
+          "kinds": [
+            "call"
+          ],
+          "direction": "from"
+        }
+      }
+    }
+  ],
+  "answer": {
+    "turn": 2,
+    "ptr": "/data/items",
+    "steps": [
+      {
+        "op": "same",
+        "a": "/from_func/name",
+        "b": "/to_name"
+      },
+      {
+        "op": "pick",
+        "ptr": "/to_name"
+      },
+      {
+        "op": "unique"
+      },
+      {
+        "op": "sort"
+      }
+    ]
+  },
+  "provenance": {
+    "/turns/0/call/args/path": "question:binaries/0",
+    "/turns/1/call/args/filter/start_reason/0": "schema:func_list.filter.start_reason",
+    "/turns/2/call/args/kinds/0": "schema:xref_list.kinds",
+    "/turns/2/call/args/direction": "schema:xref_list.direction"
+  },
+  "budgets": {
+    "max_calls": 3,
+    "max_chars": 5100,
+    "max_peak_chars": 2700
+  }
+}

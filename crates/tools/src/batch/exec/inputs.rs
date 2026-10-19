@@ -7,7 +7,7 @@
 
 use ghidorah_analysis::facts::Checker;
 use ghidorah_base::ErrorCode;
-use ghidorah_json::Value;
+use ghidorah_json::{Object, Value};
 
 use super::{Run, Slot, skipped};
 use crate::api::Host;
@@ -56,6 +56,25 @@ fn with_limit(raw: &Value, step: usize, cap: usize) -> Value {
     })
 }
 
+/// Sets `partial: true` on the reference object at `at` in the step arguments `args`.
+fn mark_partial(args: &mut Object, at: &[refs::Part]) {
+    let mut root = Value::Object(std::mem::take(args));
+    let mut slot = Some(&mut root);
+    for part in at {
+        slot = match (part, slot) {
+            (refs::Part::Key(key), Some(Value::Object(o))) => o.get_mut(key),
+            (refs::Part::Index(i), Some(Value::Array(a))) => a.get_mut(*i),
+            _ => None,
+        };
+    }
+    if let Some(Value::Object(reference)) = slot {
+        let _ = reference.insert("partial", Value::from(true));
+    }
+    if let Value::Object(o) = root {
+        *args = o;
+    }
+}
+
 /// Gives the verdict of a `fact_check` verdict entry, or the error code of a claim that does
 /// not resolve.
 fn verdict_of(entry: &Value) -> String {
@@ -95,7 +114,7 @@ impl Run<'_> {
 
     /// Gives the error of a `*` reference of step `i` with too many values. When the source
     /// step is a list tool, `next[0]` sends the batch with a limit on the source step.
-    fn too_long(&self, r: &Reference, error: ToolError) -> ToolError {
+    fn too_long(&self, r: &Reference, step: usize, error: ToolError) -> ToolError {
         let cap = r.cap().unwrap_or(0);
         match self
             .plan
@@ -105,6 +124,8 @@ impl Run<'_> {
         {
             Some(_) => {
                 let batch = with_limit(&self.plan.raw, r.source, cap);
+                // The limit cuts the source page, so the reference must accept a partial page.
+                let batch = with_step_args(&batch, step, |args| mark_partial(args, &r.at));
                 error.next(Call::new(SPEC.name, batch, WHY_LIMIT))
             }
             None => error,
@@ -127,7 +148,7 @@ impl Run<'_> {
             };
             match value {
                 Ok(value) => refs::set_at(&mut args, &r.at, value),
-                Err(e) if e.code == ErrorCode::PluckTooLong => return Err(self.too_long(r, e)),
+                Err(e) if e.code == ErrorCode::PluckTooLong => return Err(self.too_long(r, i, e)),
                 Err(e) => return Err(e),
             }
         }

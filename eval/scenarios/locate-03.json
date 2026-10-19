@@ -1,0 +1,42 @@
+{
+  "id": "locate-03",
+  "question": "q-locate-03",
+  "turns": [
+    {
+      "call": {
+        "tool": "binary_load",
+        "args": {
+          "path": "fixtures/bin/switch.gcc-O2"
+        }
+      }
+    },
+    {
+      "call": {
+        "tool": "func_get",
+        "args": {
+          "target": "run_command",
+          "include": [
+            "jumptables"
+          ]
+        }
+      }
+    }
+  ],
+  "answer": {
+    "turn": 1,
+    "ptr": "/data/jumptables/0/base"
+  },
+  "provenance": {
+    "/turns/0/call/args/path": "question:binaries/0",
+    "/turns/1/call/args/target": "question",
+    "/turns/1/call/args/include/0": "schema:func_get.include"
+  },
+  "budgets": {
+    "max_calls": 2,
+    "max_chars": 1900,
+    "max_peak_chars": 1100
+  },
+  "evidence": [
+    "\"base\":\"0x2028\""
+  ]
+}

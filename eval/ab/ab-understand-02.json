@@ -1,0 +1,131 @@
+{
+  "id": "ab-understand-02",
+  "question": "q-understand-02",
+  "pair": "understand-02",
+  "turns": [
+    {
+      "call": {
+        "tool": "binary_load",
+        "args": {
+          "path": "fixtures/bin/xor_decode.gcc-O2.stripped"
+        }
+      }
+    },
+    {
+      "call": {
+        "tool": "binary_survey",
+        "args": {
+          "include": [
+            "strings"
+          ]
+        }
+      }
+    },
+    {
+      "batch": {
+        "steps": [
+          {
+            "id": "s1",
+            "tool": "func_get",
+            "args": {
+              "target": {
+                "$turn": 1,
+                "ptr": "/next/1/args/target"
+              },
+              "include": [
+                "decomp"
+              ]
+            }
+          },
+          {
+            "id": "s2",
+            "tool": "func_get",
+            "args": {
+              "target": {
+                "$ref": "s1",
+                "ptr": "/data/decomp/calls/0/target"
+              },
+              "include": [
+                "decomp"
+              ]
+            }
+          },
+          {
+            "id": "s3",
+            "tool": "func_get",
+            "args": {
+              "target": {
+                "$ref": "s2",
+                "ptr": "/data/decomp/calls/0/target"
+              },
+              "include": [
+                "decomp"
+              ]
+            }
+          }
+        ],
+        "return": [
+          "s1",
+          "s3"
+        ]
+      }
+    },
+    {
+      "call": {
+        "tool": "mem_read",
+        "args": {
+          "target": "0x2010",
+          "len": 14
+        }
+      }
+    }
+  ],
+  "answer": {
+    "turn": 3,
+    "ptr": "/data/hex",
+    "steps": [
+      {
+        "op": "xor",
+        "var": "param_1",
+        "key": {
+          "turn": 2,
+          "ptr": "/data/steps/2/data/decomp/text",
+          "steps": [
+            {
+              "op": "lines"
+            },
+            {
+              "op": "grep",
+              "glob": "return *"
+            },
+            {
+              "op": "first"
+            },
+            {
+              "op": "after",
+              "text": "return "
+            },
+            {
+              "op": "trim_suffix",
+              "text": ";"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "provenance": {
+    "/turns/0/call/args/path": "question:binaries/0",
+    "/turns/1/call/args/include/0": "schema:binary_survey.include",
+    "/turns/2/batch/steps/0/args/include/0": "instructions",
+    "/turns/2/batch/steps/1/args/include/0": "instructions",
+    "/turns/2/batch/steps/2/args/include/0": "instructions",
+    "/turns/3/call/args/target": "response:2/data/steps/0/data/decomp/text",
+    "/turns/3/call/args/len": "response:2/data/steps/0/data/decomp/text"
+  },
+  "budgets": {
+    "max_calls": 4,
+    "max_chars": 13700,
+    "max_peak_chars": 11700
+  }
+}

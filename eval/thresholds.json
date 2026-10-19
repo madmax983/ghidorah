@@ -1,20 +1,77 @@
 {
   "intents_sha256": "2a97d632c159070a20ddefa355bf0237f7e8f11bea5865cd9368ed06c8241522",
   "metrics": {
-    "abstain_correctness": { "baseline": null, "floor": 1.00, "tolerance": 0.00 },
-    "answer_correctness": { "baseline": null, "floor": 1.00, "tolerance": 0.00 },
-    "argument_provenance": { "baseline": null, "floor": 1.00, "tolerance": 0.00 },
-    "budget_adherence": { "baseline": null, "floor": 1.00, "tolerance": 0.00 },
-    "context_reset_recall": { "baseline": null, "floor": 0.60, "tolerance": 0.05 },
-    "determinism": { "baseline": null, "floor": 1.00, "tolerance": 0.00 },
-    "discoverability": { "baseline": null, "floor": 0.70, "tolerance": 0.05 },
-    "golden_path_cost": { "baseline": null, "floor": null, "tolerance": 0.10 },
-    "hint_follower_reach": { "baseline": null, "floor": 0.60, "tolerance": 0.05 },
-    "metamorphic": { "baseline": null, "floor": 1.00, "tolerance": 0.00 },
-    "recall_after_edits": { "baseline": null, "floor": 0.60, "tolerance": 0.05 },
-    "repair_rate_r": { "baseline": null, "floor": 1.00, "tolerance": 0.00 },
-    "schema_fuzz_violations": { "baseline": null, "floor": null, "tolerance": 0.00 },
-    "survey_fact_recall": { "baseline": null, "floor": 0.60, "tolerance": 0.05 }
+    "abstain_correctness": {
+      "baseline": 1.000,
+      "floor": 1.00,
+      "tolerance": 0.00
+    },
+    "answer_correctness": {
+      "baseline": 1.000,
+      "floor": 1.00,
+      "tolerance": 0.00
+    },
+    "argument_provenance": {
+      "baseline": 1.000,
+      "floor": 1.00,
+      "tolerance": 0.00
+    },
+    "budget_adherence": {
+      "baseline": 1.000,
+      "floor": 1.00,
+      "tolerance": 0.00
+    },
+    "context_reset_recall": {
+      "baseline": 1.000,
+      "floor": 0.60,
+      "tolerance": 0.05
+    },
+    "determinism": {
+      "baseline": 1.000,
+      "floor": 1.00,
+      "tolerance": 0.00
+    },
+    "discoverability": {
+      "baseline": 0.739,
+      "floor": 0.70,
+      "tolerance": 0.05
+    },
+    "golden_path_cost": {
+      "baseline": null,
+      "floor": null,
+      "tolerance": 0.10
+    },
+    "hint_follower_reach": {
+      "baseline": 0.900,
+      "floor": 0.60,
+      "tolerance": 0.05
+    },
+    "metamorphic": {
+      "baseline": 1.000,
+      "floor": 1.00,
+      "tolerance": 0.00
+    },
+    "recall_after_edits": {
+      "baseline": 1.000,
+      "floor": 0.60,
+      "tolerance": 0.05
+    },
+    "repair_rate_r": {
+      "baseline": 1.000,
+      "floor": 1.00,
+      "tolerance": 0.00
+    },
+    "schema_fuzz_violations": {
+      "baseline": null,
+      "floor": null,
+      "tolerance": 0.00
+    },
+    "survey_fact_recall": {
+      "baseline": 0.996,
+      "floor": 0.60,
+      "tolerance": 0.05
+    }
   },
-  "questions_sha256": "cb226a348bc04d6b863dc94ea1d5547e291289e936749306bc614aef6b2ba22e"
+  "questions_sha256": "cb226a348bc04d6b863dc94ea1d5547e291289e936749306bc614aef6b2ba22e",
+  "chars_per_token": 3
 }

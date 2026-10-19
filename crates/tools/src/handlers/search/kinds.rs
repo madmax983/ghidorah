@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use ghidorah_base::{
     Address, Caps, ErrorCode, Fuel, FuncId, Id, JumpTableId, Limits, NoteId, WarningCode,
 };
-use ghidorah_db::{CommentKind, Note, Program, SetMembers};
+use ghidorah_db::{CommentKind, Encoding, Note, Program, SetMembers};
 use ghidorah_json::{Object, Value};
 
 use super::filter::{Items, Matcher, New};
@@ -101,6 +101,21 @@ fn string_addrs(p: &Program) -> BTreeSet<u64> {
     out
 }
 
+/// Gives the characters of the string bytes `raw`, so a query matches the decoded text.
+fn decoded(raw: &[u8], encoding: Encoding) -> String {
+    if encoding != Encoding::Utf16Le {
+        return String::from_utf8_lossy(raw).into_owned();
+    }
+    let units: Vec<u16> = raw
+        .chunks_exact(2)
+        .map(|c| match c {
+            [lo, hi] => u16::from_le_bytes([*lo, *hi]),
+            _ => 0,
+        })
+        .collect();
+    String::from_utf16_lossy(&units)
+}
+
 /// Adds the strings whose text matches. Only referenced strings count, unless `all`.
 pub fn strings(items: &mut Items<'_>, m: &Matcher, all: bool, caps: Caps) {
     let p = items.program;
@@ -114,7 +129,7 @@ pub fn strings(items: &mut Items<'_>, m: &Matcher, all: bool, caps: Caps) {
             continue;
         }
         let raw = ghidorah_analysis::analyzers::strings::bytes(p, at, info).unwrap_or_default();
-        if !m.matches(&String::from_utf8_lossy(&raw)) {
+        if !m.matches(&decoded(&raw, info.encoding)) {
             continue;
         }
         let Some(text) = fs::string_text(p, at, caps) else {

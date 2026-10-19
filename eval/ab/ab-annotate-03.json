@@ -1,0 +1,100 @@
+{
+  "id": "ab-annotate-03",
+  "question": "q-annotate-03",
+  "pair": "annotate-03",
+  "turns": [
+    {
+      "call": {
+        "tool": "binary_load",
+        "args": {
+          "path": "fixtures/bin/struct_access.gcc-O2.stripped"
+        }
+      }
+    },
+    {
+      "call": {
+        "tool": "binary_survey",
+        "args": {
+          "include": [
+            "imports"
+          ]
+        }
+      }
+    },
+    {
+      "batch": {
+        "steps": [
+          {
+            "id": "s1",
+            "tool": "xref_list",
+            "args": {
+              "targets": {
+                "$turn": 1,
+                "ptr": "/data/imports/items",
+                "steps": [
+                  {
+                    "op": "where",
+                    "ptr": "/name",
+                    "eq": "free"
+                  },
+                  {
+                    "op": "pick",
+                    "ptr": "/id"
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "id": "s2",
+            "tool": "symbol_rename",
+            "args": {
+              "target": {
+                "$ref": "s1",
+                "ptr": "/data/items/0/from_func/id"
+              },
+              "name": "free_records"
+            }
+          },
+          {
+            "id": "s3",
+            "tool": "note_write",
+            "args": {
+              "kind": "finding",
+              "text": "free_records frees each record of the list.",
+              "evidence": {
+                "$ref": "s1",
+                "ptr": "/data/items/*/from_func/id"
+              }
+            }
+          }
+        ],
+        "return": [
+          "s2"
+        ]
+      }
+    }
+  ],
+  "answer": {
+    "turn": 2,
+    "ptr": "/data/steps/1/data/items/0/id",
+    "steps": [
+      {
+        "op": "trim_prefix",
+        "text": "fn:"
+      }
+    ]
+  },
+  "provenance": {
+    "/turns/0/call/args/path": "question:binaries/0",
+    "/turns/1/call/args/include/0": "schema:binary_survey.include",
+    "/turns/2/batch/steps/1/args/name": "question",
+    "/turns/2/batch/steps/2/args/kind": "schema:note_write.kind",
+    "/turns/2/batch/steps/2/args/text": "new_text"
+  },
+  "budgets": {
+    "max_calls": 3,
+    "max_chars": 3000,
+    "max_peak_chars": 1400
+  }
+}

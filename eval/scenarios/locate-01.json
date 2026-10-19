@@ -1,0 +1,69 @@
+{
+  "id": "locate-01",
+  "question": "q-locate-01",
+  "turns": [
+    {
+      "call": {
+        "tool": "binary_load",
+        "args": {
+          "path": "fixtures/bin/crackme.gcc-O2.stripped"
+        }
+      }
+    },
+    {
+      "call": {
+        "tool": "binary_survey",
+        "args": {
+          "include": [
+            "strings"
+          ]
+        }
+      }
+    },
+    {
+      "call": {
+        "tool": "func_get",
+        "args": {
+          "target": {
+            "$turn": 1,
+            "ptr": "/next/1/args/target"
+          },
+          "include": [
+            "decomp"
+          ]
+        }
+      }
+    }
+  ],
+  "answer": {
+    "turn": 2,
+    "ptr": "/data/decomp/calls",
+    "steps": [
+      {
+        "op": "where",
+        "ptr": "/name",
+        "glob": "FUN_*"
+      },
+      {
+        "op": "pick",
+        "ptr": "/target"
+      },
+      {
+        "op": "first"
+      }
+    ]
+  },
+  "provenance": {
+    "/turns/0/call/args/path": "question:binaries/0",
+    "/turns/1/call/args/include/0": "schema:binary_survey.include",
+    "/turns/2/call/args/include/0": "instructions"
+  },
+  "budgets": {
+    "max_calls": 3,
+    "max_chars": 6300,
+    "max_peak_chars": 4200
+  },
+  "evidence": [
+    "fn:0x11e0"
+  ]
+}

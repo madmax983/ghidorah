@@ -28,6 +28,7 @@
 //! for the import slot ([`import_entry`]).
 
 mod errors;
+pub(crate) use errors::hex_repair;
 mod rules;
 pub mod table;
 

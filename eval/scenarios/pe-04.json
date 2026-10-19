@@ -1,0 +1,37 @@
+{
+  "id": "pe-04",
+  "question": "q-pe-04",
+  "turns": [
+    {
+      "call": {
+        "tool": "binary_load",
+        "args": {
+          "path": "fixtures/bin/pe/pe_dll.dll"
+        }
+      }
+    },
+    {
+      "call": {
+        "tool": "search",
+        "args": {
+          "kind": "export",
+          "query": "ExitNow"
+        }
+      }
+    }
+  ],
+  "answer": {
+    "turn": 1,
+    "ptr": "/data/items/0/extra/forwarder"
+  },
+  "provenance": {
+    "/turns/0/call/args/path": "question:binaries/0",
+    "/turns/1/call/args/kind": "schema:search.kind",
+    "/turns/1/call/args/query": "question"
+  },
+  "budgets": {
+    "max_calls": 2,
+    "max_chars": 1200,
+    "max_peak_chars": 800
+  }
+}

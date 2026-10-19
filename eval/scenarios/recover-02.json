@@ -1,0 +1,58 @@
+{
+  "id": "recover-02",
+  "question": "q-recover-02",
+  "turns": [
+    {
+      "call": {
+        "tool": "binary_load",
+        "args": {
+          "path": "fixtures/bin/func_ptrs.gcc-O2"
+        }
+      }
+    },
+    {
+      "call": {
+        "tool": "func_get",
+        "args": {
+          "target": "run_op",
+          "include": [
+            "disasm"
+          ]
+        }
+      }
+    },
+    {
+      "call": {
+        "tool": "mem_read",
+        "args": {
+          "target": "0x3d80",
+          "as": "ptr",
+          "count": 4
+        }
+      }
+    }
+  ],
+  "answer": {
+    "turn": 2,
+    "ptr": "/data/values",
+    "steps": [
+      {
+        "op": "pick",
+        "ptr": "/name"
+      }
+    ]
+  },
+  "provenance": {
+    "/turns/0/call/args/path": "question:binaries/0",
+    "/turns/1/call/args/target": "question",
+    "/turns/1/call/args/include/0": "schema:func_get.include",
+    "/turns/2/call/args/target": "response:1/data/disasm/rows",
+    "/turns/2/call/args/as": "schema:mem_read.as",
+    "/turns/2/call/args/count": "schema:mem_read.count"
+  },
+  "budgets": {
+    "max_calls": 3,
+    "max_chars": 3000,
+    "max_peak_chars": 1300
+  }
+}

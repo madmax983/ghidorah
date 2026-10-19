@@ -1,0 +1,40 @@
+{
+  "id": "triage-03",
+  "question": "q-triage-03",
+  "turns": [
+    {
+      "call": {
+        "tool": "binary_load",
+        "args": {
+          "path": "fixtures/bin/canary.gcc-O2.stripped"
+        }
+      }
+    },
+    {
+      "call": {
+        "tool": "binary_survey",
+        "args": {
+          "include": [
+            "protections"
+          ]
+        }
+      }
+    }
+  ],
+  "answer": {
+    "turn": 1,
+    "ptr": "/data/protections/canary"
+  },
+  "provenance": {
+    "/turns/0/call/args/path": "question:binaries/0",
+    "/turns/1/call/args/include/0": "schema:binary_survey.include"
+  },
+  "budgets": {
+    "max_calls": 2,
+    "max_chars": 1500,
+    "max_peak_chars": 900
+  },
+  "evidence": [
+    "\"canary\":true"
+  ]
+}

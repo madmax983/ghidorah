@@ -1,0 +1,73 @@
+{
+  "id": "resume-02",
+  "question": "q-resume-02",
+  "turns": [
+    {
+      "call": {
+        "tool": "binary_load",
+        "args": {
+          "path": "fixtures/bin/hello.gcc-O2.stripped"
+        }
+      }
+    },
+    {
+      "call": {
+        "tool": "binary_survey",
+        "args": {
+          "include": [
+            "strings"
+          ]
+        }
+      }
+    },
+    {
+      "call": {
+        "tool": "note_write",
+        "args": {
+          "kind": "todo",
+          "text": "Read the format string of the greeting.",
+          "at": {
+            "$turn": 1,
+            "ptr": "/data/strings/items/0/funcs/0"
+          }
+        }
+      }
+    },
+    {
+      "call": {
+        "tool": "session_brief",
+        "args": {}
+      },
+      "reset": true
+    }
+  ],
+  "answer": {
+    "turn": 3,
+    "ptr": "/data/open_notes/top",
+    "steps": [
+      {
+        "op": "where",
+        "ptr": "/kind",
+        "eq": "todo"
+      },
+      {
+        "op": "pick",
+        "ptr": "/at"
+      },
+      {
+        "op": "first"
+      }
+    ]
+  },
+  "provenance": {
+    "/turns/0/call/args/path": "question:binaries/0",
+    "/turns/1/call/args/include/0": "schema:binary_survey.include",
+    "/turns/2/call/args/kind": "schema:note_write.kind",
+    "/turns/2/call/args/text": "new_text"
+  },
+  "budgets": {
+    "max_calls": 4,
+    "max_chars": 4300,
+    "max_peak_chars": 2000
+  }
+}

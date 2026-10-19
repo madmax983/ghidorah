@@ -1,0 +1,43 @@
+{
+  "id": "verify-02",
+  "question": "q-verify-02",
+  "turns": [
+    {
+      "call": {
+        "tool": "binary_load",
+        "args": {
+          "path": "fixtures/bin/noreturn_wrappers.gcc-O2"
+        }
+      }
+    },
+    {
+      "call": {
+        "tool": "fact_check",
+        "args": {
+          "claims": [
+            {
+              "rel": "noreturn",
+              "args": [
+                "fatal_abort"
+              ]
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "answer": {
+    "turn": 1,
+    "ptr": "/data/verdicts/0"
+  },
+  "provenance": {
+    "/turns/0/call/args/path": "question:binaries/0",
+    "/turns/1/call/args/claims/0/rel": "schema:fact_check.claims.rel",
+    "/turns/1/call/args/claims/0/args/0": "question"
+  },
+  "budgets": {
+    "max_calls": 2,
+    "max_chars": 1300,
+    "max_peak_chars": 900
+  }
+}
