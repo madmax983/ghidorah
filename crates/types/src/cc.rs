@@ -4,6 +4,8 @@
 //! Register names are the lower case Intel names of the x86 printer, for example `rdi`.
 //! ELF binaries use [`SYSV_X86_64`].
 
+pub use crate::msx64::MS_X64;
+
 /// One calling-convention table.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct CallConv {

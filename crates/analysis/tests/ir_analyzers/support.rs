@@ -35,7 +35,7 @@ pub struct Fixture {
     pub program: String,
 }
 
-/// Gives the fixtures of the manifest in manifest order.
+/// Gives the fixtures of the ELF tiers `T1` and `T2` of the manifest in manifest order.
 pub fn fixtures() -> Vec<Fixture> {
     let text = std::fs::read_to_string(root().join("fixtures/manifest.json")).expect("manifest");
     let manifest = json(&text);
@@ -50,6 +50,7 @@ pub fn fixtures() -> Vec<Fixture> {
             .to_owned()
     };
     list.iter()
+        .filter(|f| matches!(f.get("tier").and_then(Value::as_str), Some("T1" | "T2")))
         .map(|f| Fixture {
             path: field(f, "path"),
             variant: field(f, "variant"),

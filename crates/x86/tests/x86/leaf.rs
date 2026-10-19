@@ -101,6 +101,7 @@ fn truth_files() -> Vec<(String, Vec<Leaf>)> {
     let mut paths: Vec<PathBuf> = std::fs::read_dir(&dir)
         .expect("the truth directory")
         .map(|e| e.expect("entry").path())
+        .filter(|p| p.is_file())
         .collect();
     paths.sort();
     let mut out = Vec::new();

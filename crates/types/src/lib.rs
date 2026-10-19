@@ -28,6 +28,7 @@ pub mod ctext;
 pub mod data;
 pub mod layout;
 pub mod model;
+pub mod msx64;
 pub mod noreturn;
 pub mod prelude;
 pub mod proto;

@@ -68,6 +68,7 @@ fn ac_058_protections() {
     let mut paths: Vec<_> = std::fs::read_dir(&dir)
         .expect("truth dir")
         .map(|e| e.expect("entry").path())
+        .filter(|p| p.is_file())
         .collect();
     paths.sort();
     for path in paths {

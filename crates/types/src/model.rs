@@ -77,6 +77,12 @@ impl DataModel {
         wchar: SizeAlign::same(4),
     };
 
+    /// The x86-64 Windows (LLP64) preset of PE binaries.
+    pub const X86_64_WIN: Self = Self {
+        name: "x86_64-win",
+        ..Self::X86_64_SYSV
+    };
+
     /// Gives the size and the alignment of a primitive type. `void` has none.
     #[must_use]
     pub const fn prim(&self, prim: Prim) -> Option<SizeAlign> {

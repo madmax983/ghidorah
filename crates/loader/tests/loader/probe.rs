@@ -129,7 +129,7 @@ fn probe_table() {
 #[test]
 fn unsupported_formats_name_the_probe() {
     for (bytes, name) in [
-        (pe(0x8664, 0x20b), "pe32+-x86_64"),
+        (pe(0x14c, 0x10b), "pe32-i386"),
         (b"MZ".to_vec(), "dos_mz"),
         (vec![0xcf, 0xfa, 0xed, 0xfe, 0, 0, 0, 0], "macho64"),
         (vec![0xca, 0xfe, 0xba, 0xbe, 0, 0, 0, 52], "java_class"),

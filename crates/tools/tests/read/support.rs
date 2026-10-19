@@ -259,6 +259,7 @@ pub fn t1_fixtures() -> Vec<&'static str> {
     let mut names: Vec<String> = std::fs::read_dir(root().join("fixtures/bin"))
         .expect("the fixture directory reads")
         .filter_map(Result::ok)
+        .filter(|e| e.path().is_file())
         .map(|e| e.file_name().to_string_lossy().into_owned())
         .filter(|n| !n.starts_with("large."))
         .collect();
@@ -271,6 +272,7 @@ pub fn t2_fixtures() -> Vec<&'static str> {
     let mut names: Vec<String> = std::fs::read_dir(root().join("fixtures/bin"))
         .expect("the fixture directory reads")
         .filter_map(Result::ok)
+        .filter(|e| e.path().is_file())
         .map(|e| e.file_name().to_string_lossy().into_owned())
         .filter(|n| n.starts_with("large."))
         .collect();
