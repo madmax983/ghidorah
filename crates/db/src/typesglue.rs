@@ -101,7 +101,8 @@ pub struct Types {
 #[must_use]
 pub const fn model_for(format: Format) -> DataModel {
     match format {
-        Format::Elf64Le | Format::Raw | Format::Pe32Plus => DataModel::X86_64_SYSV,
+        Format::Elf64Le | Format::Raw => DataModel::X86_64_SYSV,
+        Format::Pe32Plus => DataModel::X86_64_WIN,
     }
 }
 

@@ -252,15 +252,20 @@ fn sections(p: &Program) -> Part {
     Part::listed(Object::new(), "items", list, Some("section"))
 }
 
-/// The libraries and the imports in groups by Tier-0 category.
+/// The libraries and the imports in groups by Tier-0 category. PE imports group by DLL in
+/// library order first, and each item names its DLL. An import by ordinal shows `#<ordinal>`.
 fn imports(c: &Ctx<'_>) -> Part {
     let p = c.program;
-    let mut grouped: BTreeMap<(usize, String), Value> = BTreeMap::new();
+    let libraries: Vec<String> = (p.binary().libraries.iter())
+        .map(|l| fs::safe(&l.render(Caps::DETAILED).text))
+        .collect();
+    let mut grouped: BTreeMap<(usize, usize, String), Value> = BTreeMap::new();
     for row in p.imports().values() {
-        let name = row
-            .id
-            .name()
-            .map_or_else(|| row.id.to_string(), str::to_owned);
+        let name = match (row.id.name(), row.id.ordinal()) {
+            (Some(n), _) => n.to_owned(),
+            (None, Some(o)) => format!("#{o}"),
+            (None, None) => row.id.to_string(),
+        };
         let category = Types::prototype(&name).map(|proto| proto.category);
         let order = category.map_or(usize::MAX, |cat| {
             ghidorah_types::Category::ALL
@@ -268,8 +273,17 @@ fn imports(c: &Ctx<'_>) -> Part {
                 .position(|x| *x == cat)
                 .unwrap_or(usize::MAX)
         });
+        let dll = row.id.lib();
+        let group = dll.map_or(0, |d| {
+            (libraries.iter())
+                .position(|x| x.eq_ignore_ascii_case(d))
+                .unwrap_or(usize::MAX)
+        });
         let mut out = Object::new();
         out.push("id", Value::from(row.id.to_string()));
+        if let Some(d) = dll {
+            out.push("dll", Value::from(fs::safe(d)));
+        }
         out.push("name", Value::from(c.namer.text(&name)));
         out.push(
             "category",
@@ -278,15 +292,10 @@ fn imports(c: &Ctx<'_>) -> Part {
         if row.delay {
             out.push("delay", Value::Bool(true));
         }
-        grouped.insert((order, row.id.to_string()), Value::Object(out));
+        grouped.insert((group, order, row.id.to_string()), Value::Object(out));
     }
-    let libraries = p
-        .binary()
-        .libraries
-        .iter()
-        .map(|l| Value::from(fs::safe(&l.render(Caps::DETAILED).text)))
-        .collect();
     let mut head = Object::new();
+    let libraries = libraries.into_iter().map(Value::from).collect();
     head.push("libraries", Value::Array(libraries));
     Part::listed(
         head,

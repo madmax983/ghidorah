@@ -20,9 +20,10 @@ fn types_start_with_the_prelude() {
     assert!(types.store().lookup_typedef("size_t").is_some());
     assert!(types.store().lookup_tag("sockaddr_in").is_some());
     assert_eq!(*types.model(), DataModel::X86_64_SYSV);
-    for format in [Format::Elf64Le, Format::Raw, Format::Pe32Plus] {
+    for format in [Format::Elf64Le, Format::Raw] {
         assert_eq!(model_for(format), DataModel::X86_64_SYSV);
     }
+    assert_eq!(model_for(Format::Pe32Plus), DataModel::X86_64_WIN);
     let size_t = types.store().lookup_typedef("size_t").unwrap();
     let r = types.type_ref(size_t).unwrap();
     assert_eq!(r, TypeRef::named("size_t").unwrap());

@@ -6,6 +6,7 @@
 //! | File | Code pointer |
 //! |---|---|
 //! | a file with `R_X86_64_RELATIVE` or `R_X86_64_64` relocations | the value that such a relocation puts in its slot |
+//! | a PE file with `DIR64` base relocations | the value in the slot: the image base plus the RVA |
 //! | a file without such relocations | a value in a run of [`MIN_RUN`] or more code pointers |
 //!
 //! The analyzer tests each target. A target that passes the tests starts a function with the
@@ -28,7 +29,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use ghidorah_base::{Address, Limits, Range};
 use ghidorah_db::{FactKey, FlowOverride, Program, StartReason};
 use ghidorah_kernel::RangeSet;
-use ghidorah_loader::{Perms, Reloc, RelocForm, Section, SectionKind};
+use ghidorah_loader::pe::REL_DIR64;
+use ghidorah_loader::{Format, Perms, Reloc, RelocForm, Section, SectionKind};
 use ghidorah_x86::{Flow, Mnem};
 
 use crate::analyzers::refs::reloc_target;
@@ -155,13 +157,23 @@ fn slot_ok(program: &Program, at: u64) -> bool {
         })
 }
 
-/// Tells if `r` is a pointer relocation: `R_X86_64_RELATIVE` or `R_X86_64_64`.
-const fn is_pointer_reloc(r: &Reloc) -> bool {
+/// Tells if `r` is a pointer relocation: `R_X86_64_RELATIVE` or `R_X86_64_64`, or a PE
+/// `DIR64` base relocation.
+fn is_pointer_reloc(program: &Program, r: &Reloc) -> bool {
+    if program.meta().format == Format::Pe32Plus {
+        return r.kind.0 == REL_DIR64;
+    }
     matches!(r.kind.0, R_RELATIVE | R_64)
 }
 
-/// Gives the value that the pointer relocation `r` puts in its slot.
+/// Gives the value that the pointer relocation `r` puts in its slot. A PE `DIR64` slot holds
+/// the value in place: the image base plus the RVA of the target.
 fn reloc_value(program: &Program, r: &Reloc) -> Option<u64> {
+    if program.meta().format == Format::Pe32Plus {
+        return (r.kind.0 == REL_DIR64)
+            .then(|| read_u64(program, r.offset))
+            .flatten();
+    }
     match r.kind.0 {
         R_RELATIVE => match r.form {
             RelocForm::Rela => Some(r.addend.cast_unsigned()),
@@ -256,7 +268,7 @@ pub fn pointers(program: &Program) -> Vec<Pointer> {
     }
     let mut out = BTreeMap::new();
     let mut seen = BTreeSet::new();
-    for r in b.relocs.iter().filter(|r| is_pointer_reloc(r)) {
+    for r in b.relocs.iter().filter(|r| is_pointer_reloc(program, r)) {
         if !seen.insert(r.offset) {
             continue;
         }

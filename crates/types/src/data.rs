@@ -8,6 +8,9 @@ use std::fmt;
 /// The ELF noreturn list, `data/noreturn_elf.txt`.
 pub const NORETURN_ELF_TXT: &str = include_str!("../data/noreturn_elf.txt");
 
+/// The PE noreturn list, `data/noreturn_pe.txt`.
+pub const NORETURN_PE_TXT: &str = include_str!("../data/noreturn_pe.txt");
+
 /// The x86-64 syscall table, `data/syscalls_x86_64.txt`.
 pub const SYSCALLS_X86_64_TXT: &str = include_str!("../data/syscalls_x86_64.txt");
 

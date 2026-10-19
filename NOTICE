@@ -13,6 +13,9 @@ Vendored data files:
 - crates/types/data/noreturn_elf.txt: the ELF list of functions that do not return
   (Ghidra/Features/Base/data/ElfFunctionsThatDoNotReturn of Ghidra, https://github.com/NationalSecurityAgency/ghidra, branch master).
   Copyright the Ghidra authors. Apache License, Version 2.0.
+- crates/types/data/noreturn_pe.txt: the PE list of functions that do not return
+  (Ghidra/Features/Base/data/PEFunctionsThatDoNotReturn of Ghidra, https://github.com/NationalSecurityAgency/ghidra, branch master).
+  Copyright the Ghidra authors. Apache License, Version 2.0.
 - crates/types/data/syscalls_x86_64.txt: the x86-64 syscall numbers and names of the Linux 6.8 uapi
   header asm/unistd_64.h, recorded as interface facts with no header text. Apache License, Version 2.0, as a part of ghidorah.
 

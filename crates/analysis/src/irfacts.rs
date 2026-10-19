@@ -10,6 +10,7 @@
 //! | `varargs` | `CallingConvention` | the `varargs` flag of the function |
 //! | `syscalls` | `Syscalls` | an `EOL` comment `sys:<name>` at the site |
 //! | `conflicts` | `JumpTables` | `W_AGENT_OVERRIDE_CONFLICT` with the analysis value |
+//! | `thunks` | `IatThunks` | the `thunk` flag and a `FUNCTION` symbol with the import name |
 //!
 //! A record whose owner is not in the set does not go into the set. The agent noreturn flag
 //! of the base layer also gives `W_AGENT_OVERRIDE_CONFLICT` when the flow disagrees. A call
@@ -25,6 +26,7 @@ use ghidorah_db::{
 };
 use ghidorah_json::Value;
 
+use crate::analyzers::iat::ThunkRec;
 use crate::ctx::AnalysisCtx;
 use crate::fir::{self, FirError, FuncIr, Input, Opts, Unit};
 use crate::why::Why;
@@ -84,6 +86,8 @@ pub(crate) struct IrFacts {
     pub syscalls: BTreeMap<u64, SysRec>,
     /// The disagreements with agent jump tables by function entry.
     pub conflicts: BTreeMap<u64, BTreeSet<Conflict>>,
+    /// The IAT thunks by function entry.
+    pub thunks: BTreeMap<u64, ThunkRec>,
 }
 
 impl AnalysisCtx<'_> {
@@ -219,6 +223,24 @@ pub(crate) fn rows(
             whys.insert(main_key(*entry), why.clone());
         }
     }
+    for (entry, rec) in &work.ir.thunks {
+        let addr = Address::ram(*entry);
+        if !kept.contains(entry) || program.base().symbols().primary(addr).is_some() {
+            continue;
+        }
+        let edit = Edit::SetName {
+            addr,
+            key: Some(SymKey(0)),
+            kind: SymKind::Function,
+            primary: true,
+            name: Some(o.fact(rec.name.clone())),
+            evidence: Vec::new(),
+        };
+        out.symbols.push(Value::object(
+            ["addr", "key", "kind", "primary", "name"].map(|m| (m, member(&edit, m))),
+        ));
+        whys.insert(main_key(*entry), rec.why.clone());
+    }
     for (site, rec) in &work.ir.syscalls {
         if !owns(rec.owner, *site) {
             continue;
@@ -348,7 +370,7 @@ const fn note_key(site: u64) -> FactKey {
     FactKey::Comment(Address::ram(site), CommentKind::Eol)
 }
 
-/// Gives the key of the `main` symbol.
+/// Gives the key of the `main` symbol, or of the symbol of an IAT thunk.
 const fn main_key(entry: u64) -> FactKey {
     FactKey::Symbol(Address::ram(entry), SymKey(0))
 }

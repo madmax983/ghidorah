@@ -23,7 +23,9 @@
 //! | An unknown name or ID | `NOT_FOUND` with did-you-mean candidates |
 //! | Text that does not parse, or an offset that wraps | `ADDRESS_INVALID` |
 //!
-//! The [`table`] module maps the result to the addresses of each tool family.
+//! The [`table`] module maps the result to the addresses of each tool family. An `imp:` ID
+//! stands for the PLT stub of an ELF import or the IAT thunk of a PE import. Else it stands
+//! for the import slot ([`import_entry`]).
 
 mod errors;
 mod rules;
@@ -32,13 +34,32 @@ pub mod table;
 use ghidorah_base::{
     Address, ExportId, FuncId, IdKind, ImportId, JumpTableId, StringId, SyscallId, addr_expr,
 };
-use ghidorah_db::Program;
+use ghidorah_db::{ImportRow, Program};
 use ghidorah_json::Value;
 
 use crate::errors::ToolError;
 use crate::hints::Call;
 
 pub use table::{Family, Target, accepted, address, function, target, value_of};
+
+/// Gives the entry of the stub or thunk of an import. A PLT stub of the loader comes first.
+/// Else the entry is the function with the `thunk` flag that jumps through the import slot.
+#[must_use]
+pub fn import_entry(program: &Program, row: &ImportRow) -> Option<Address> {
+    if row.stub.is_some() {
+        return row.stub;
+    }
+    program
+        .refs_to(row.ext)
+        .iter()
+        .map(|r| r.value.key.from)
+        .filter(|from| {
+            program
+                .func(FuncId(*from))
+                .is_some_and(|f| f.func.flags.thunk)
+        })
+        .min()
+}
 
 /// The rule that resolved an input.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

@@ -34,16 +34,16 @@ fn golden_calls() -> (BTreeMap<u64, BTreeSet<u64>>, BTreeMap<u64, BTreeSet<u64>>
     let mut direct: BTreeMap<u64, BTreeSet<u64>> = BTreeMap::new();
     let mut slots: BTreeMap<u64, BTreeSet<u64>> = BTreeMap::new();
     for line in text.lines() {
+        // A line is `<addr>: <bytes>`, a tab, the mnemonic, a tab and the operands.
         let mut parts = line.split('\t');
-        let (Some(at), Some(_), Some(op), Some(arg)) =
-            (parts.next(), parts.next(), parts.next(), parts.next())
-        else {
+        let (Some(head), Some(op), Some(arg)) = (parts.next(), parts.next(), parts.next()) else {
             continue;
         };
         if op != "call" {
             continue;
         }
-        let at = u64::from_str_radix(at.trim().trim_end_matches(':'), 16).expect("an address");
+        let at = head.split(':').next().unwrap_or_default().trim();
+        let at = u64::from_str_radix(at, 16).expect("an address");
         if let Some(rest) = arg.strip_prefix("0x") {
             let to = rest.split_whitespace().next().unwrap_or_default();
             let to = u64::from_str_radix(to, 16).expect("a target");
@@ -122,10 +122,14 @@ fn import_ids_resolve_to_thunks_and_slots() {
     let slot = call(
         &mut session,
         "addr_info",
-        r#"{"at":"imp:kernel32.dll!GetTickCount"}"#,
+        r#"{"target":"imp:kernel32.dll!GetTickCount"}"#,
     );
     assert_eq!(text_at(&slot, "/data/addr"), "0x140002198", "{slot}");
-    let ordinal = call(&mut session, "addr_info", r#"{"at":"imp:alpha.dll!#5"}"#);
+    let ordinal = call(
+        &mut session,
+        "addr_info",
+        r#"{"target":"imp:alpha.dll!#5"}"#,
+    );
     assert_eq!(text_at(&ordinal, "/data/addr"), "0x1400021b0", "{ordinal}");
 }
 

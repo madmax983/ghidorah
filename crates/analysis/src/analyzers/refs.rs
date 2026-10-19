@@ -29,7 +29,8 @@ use ghidorah_db::codec::edit_to_json;
 use ghidorah_db::{DataDef, Edit, FactKey, Origin, Program, Ref, RefKey, RefType};
 use ghidorah_json::Value;
 use ghidorah_kernel::RangeSet;
-use ghidorah_loader::{Kind, Perms, Reloc, RelocForm, SectionKind, Sym, SymTable};
+use ghidorah_loader::pe::{REL_DIR64, REL_HIGHLOW};
+use ghidorah_loader::{Format, Kind, Perms, Reloc, RelocForm, SectionKind, Sym, SymTable};
 use ghidorah_types::{Prim, Type, TypeId};
 use ghidorah_x86::{Access, Insn, Operand};
 
@@ -204,6 +205,9 @@ impl<'p> Names<'p> {
     }
 
     fn target(&self, program: &Program, r: &Reloc) -> Option<Address> {
+        if program.meta().format == Format::Pe32Plus {
+            return pe_target(program, r);
+        }
         let in_place = || read_u64(program, r.offset).map(u64::cast_signed);
         let addend = match r.form {
             RelocForm::Rela => Some(r.addend),
@@ -219,6 +223,20 @@ impl<'p> Names<'p> {
             _ => None,
         }
     }
+}
+
+/// Gives the target of a PE base relocation: the value in its slot, 8 bytes for `DIR64` and
+/// 4 bytes for `HIGHLOW`.
+fn pe_target(program: &Program, r: &Reloc) -> Option<Address> {
+    let to = match r.kind.0 {
+        REL_DIR64 => read_u64(program, r.offset)?,
+        REL_HIGHLOW => {
+            let bytes = program.mem().read(r.offset, 4, &Limits::DEFAULT).ok()?;
+            u64::from(u32::from_le_bytes(bytes.get(..4)?.try_into().ok()?))
+        }
+        _ => return None,
+    };
+    is_mapped(program, to).then_some(Address::ram(to))
 }
 
 /// Gives the target of the pointer that the relocation `reloc` puts in its slot.

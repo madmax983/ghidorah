@@ -9,12 +9,13 @@
 //! | [`ty`] | [`Type`], [`TypeId`], [`Prim`], [`Record`], [`Sig`] | Section 9.1 |
 //! | [`store`] | [`TypeStore`] and [`StoreError`] | Section 9.1 |
 //! | [`ctext`] | Canonical C text and [`TypeRef`](ghidorah_base::TypeRef) | Sections 3.5, 9.1 |
-//! | [`model`] | [`DataModel`] and its preset [`DataModel::X86_64_SYSV`] | Section 9.1 |
+//! | [`model`] | [`DataModel`] and its presets [`DataModel::X86_64_SYSV`] and [`DataModel::X86_64_WIN`] | Section 9.1 |
 //! | [`layout`] | The natural layout engine [`layout::sysv`] | Section 9.3 |
 //! | [`cparse`] | The C parser: [`parse_sig`] and [`parse_type`] | Section 9.2 |
 //! | [`prelude`] | The built-in prelude types | Section 9.2 |
 //! | [`proto`] | The Tier-0 prototypes [`Tier0`] | Section 9.4 |
 //! | [`cc`] | Calling-convention tables, [`cc::SYSV_X86_64`] | Section 7.10 |
+//! | [`msx64`] | The MS x64 table [`cc::MS_X64`] of PE binaries | Section 7.10 |
 //! | [`noreturn`] | Lists of functions that do not return | Section 7.7 |
 //! | [`syscalls`] | The x86-64 syscall table | Section 7.11 |
 //! | [`data`] | The embedded data files | Section 2.6 |
@@ -52,7 +53,7 @@ pub use ty::{
 };
 
 /// The calling-convention tables. An agent signature names a table by its name.
-pub const CALL_CONVS: &[&CallConv] = &[&cc::SYSV_X86_64];
+pub const CALL_CONVS: &[&CallConv] = &[&cc::SYSV_X86_64, &cc::MS_X64];
 
 /// Gives the calling-convention table with the name `name`.
 #[must_use]
@@ -64,7 +65,8 @@ pub fn call_conv(name: &str) -> Option<&'static CallConv> {
 pub type NoreturnFn = fn() -> Result<&'static NoreturnList, &'static DataError>;
 
 /// The noreturn list of each binary format. The key is the format name of the loader.
-pub const NORETURN_BY_FORMAT: &[(&str, NoreturnFn)] = &[("elf64-le", noreturn::elf)];
+pub const NORETURN_BY_FORMAT: &[(&str, NoreturnFn)] =
+    &[("elf64-le", noreturn::elf), ("pe32+-x86_64", noreturn::pe)];
 
 /// Gives the noreturn list of the binary format `format`, for example `elf64-le`.
 ///

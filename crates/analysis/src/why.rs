@@ -33,6 +33,8 @@
 //! | `R_DATA_CODE_PTR` | a function at a code pointer in data | the relocation, or the data slot of a pointer run |
 //! | `R_ADDR_TAKEN` | a function at address-taken code | the code unit of the `lea` or the `mov` |
 //! | `R_GAP_COMPONENT` | a function at the entry of a code component in a gap | none: the bytes |
+//! | `R_PDATA_START` | a function at a `.pdata` `BeginAddress` that is not a fragment | none: the `.pdata` entry |
+//! | `R_IAT_THUNK` | the thunk flag and the import name of a `jmp [rip+IAT]` function | the function and the import |
 
 use std::fmt;
 
@@ -95,11 +97,15 @@ pub enum Rule {
     AddrTaken,
     /// `R_GAP_COMPONENT`.
     GapComponent,
+    /// `R_PDATA_START`.
+    PdataStart,
+    /// `R_IAT_THUNK`.
+    IatThunk,
 }
 
 impl Rule {
     /// All rules in catalog order.
-    pub const ALL: [Self; 26] = [
+    pub const ALL: [Self; 28] = [
         Self::Entry,
         Self::SymbolFunc,
         Self::PltRelocSlot,
@@ -126,6 +132,8 @@ impl Rule {
         Self::DataCodePtr,
         Self::AddrTaken,
         Self::GapComponent,
+        Self::PdataStart,
+        Self::IatThunk,
     ];
 
     /// Gives the rule code, for example `R_FDE_START`.
@@ -158,6 +166,8 @@ impl Rule {
             Self::DataCodePtr => "R_DATA_CODE_PTR",
             Self::AddrTaken => "R_ADDR_TAKEN",
             Self::GapComponent => "R_GAP_COMPONENT",
+            Self::PdataStart => "R_PDATA_START",
+            Self::IatThunk => "R_IAT_THUNK",
         }
     }
 
@@ -204,6 +214,12 @@ impl Rule {
             Self::AddrTaken => "An instruction takes the address of code that no function holds.",
             Self::GapComponent => {
                 "A connected code component in a gap ends each path and has no other entry."
+            }
+            Self::PdataStart => {
+                "The BeginAddress of a .pdata entry that is not a fragment starts a function."
+            }
+            Self::IatThunk => {
+                "The first instruction of the function jumps through the IAT slot of an import."
             }
         }
     }

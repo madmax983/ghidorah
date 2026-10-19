@@ -77,7 +77,7 @@ const ARGS: &[ArgSpec] = &[
     ArgSpec::new(
         "file_format",
         Role::Param,
-        ArgKind::Enum(&["auto", "elf", "raw"]),
+        ArgKind::Enum(&["auto", "elf", "pe", "raw"]),
         "The file format. The value auto lets the probe find the format.",
     )
     .default_json("\"auto\""),
@@ -140,8 +140,8 @@ const FIELDS: &[Field] = &[
 /// `binary_load`.
 pub const SPEC: ToolSpec<Session> = ToolSpec {
     title: "Load a binary",
-    summary: "Load a binary for analysis: an ELF file under a root, a raw blob, the built-in demo or an open binary by its ID.",
-    description: "Load a binary for analysis: an ELF file under a root, a raw blob, the built-in demo or an open binary by its ID. \
+    summary: "Load a binary for analysis: an ELF or PE file under a root, a raw blob, the built-in demo or an open binary by its ID.",
+    description: "Load a binary for analysis: an ELF or PE file under a root, a raw blob, the built-in demo or an open binary by its ID. \
                   Send exactly one of path, builtin and binary_id. \
                   Send file_format raw and base for a blob of x86-64 code. \
                   The analysis runs after the load within max_steps. \
@@ -305,6 +305,11 @@ fn make_program(session: &Session, args: &Args, bytes: &[u8]) -> Result<Program,
     if args.str("file_format") == Some("elf") && !matches!(probe(bytes), Detected::Elf { .. }) {
         return Err(malformed(
             &Diagnostic::new(DiagCode::BadMagic, "elf.ident").at(0),
+        ));
+    }
+    if args.str("file_format") == Some("pe") && !matches!(probe(bytes), Detected::Pe { .. }) {
+        return Err(malformed(
+            &Diagnostic::new(DiagCode::BadMagic, "pe.signature").at(0),
         ));
     }
     let (binary, mem) = loader::load(bytes, &opts, &limits).map_err(|e| load_error(&e))?;

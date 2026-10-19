@@ -14,4 +14,5 @@ Rules:
 |---|---|---|---|
 | `tests/data/jsontestsuite/*.json` (318 files, license text in `tests/data/jsontestsuite/LICENSE`) | JSONTestSuite, `test_parsing` at commit `1ef36fa0` (<https://github.com/nst/JSONTestSuite>) | MIT | WP-04 |
 | `crates/types/data/noreturn_elf.txt` (21 names) | Ghidra, `Ghidra/Features/Base/data/ElfFunctionsThatDoNotReturn` (<https://github.com/NationalSecurityAgency/ghidra>) | Apache-2.0 | WP-10 |
+| `crates/types/data/noreturn_pe.txt` (21 names) | Ghidra, `Ghidra/Features/Base/data/PEFunctionsThatDoNotReturn` (<https://github.com/NationalSecurityAgency/ghidra>) | Apache-2.0 | WP-30 |
 | `crates/types/data/syscalls_x86_64.txt` (373 entries) | Linux 6.8 uapi `asm/unistd_64.h`, the `__NR_` names and numbers recorded as interface facts, no header text | Apache-2.0 (part of ghidorah) | WP-10 |
