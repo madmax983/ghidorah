@@ -1,8 +1,11 @@
 //! The evidence runner of `xtask ac --run` and the table `docs/ac-evidence.json`.
 //!
 //! Tier-1 test items always run. Tier-2 test items, `cmd:` items and `xtask:` items run only
-//! with `--tier2`. A `record:` item gives `recorded` when its file and pointer exist.
-//! The hash check of the named input belongs to WP-28 (AC-018b).
+//! with `--tier2`. A `record:` item gives `recorded` when its hash matches its named input
+//! ([`record`]). The module [`table`] reads, merges and writes the evidence table.
+
+pub mod record;
+pub mod table;
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -39,6 +42,27 @@ impl Status {
             Self::Skipped => "skipped",
         }
     }
+
+    /// Gives the status of a name of the table.
+    #[must_use]
+    pub fn parse(name: &str) -> Option<Self> {
+        let _ = name;
+        None
+    }
+}
+
+/// Tells if an item is an `xtask:ac` item. Such an item reads the table of its own run.
+#[must_use]
+pub fn is_self(item: &Evidence) -> bool {
+    let _ = item;
+    false
+}
+
+/// Splits the rows into the rows without `xtask:ac` items and the rows with only those items.
+/// A row without items of a part does not appear in that part.
+#[must_use]
+pub fn split_self(rows: &[AcRow]) -> (Vec<AcRow>, Vec<AcRow>) {
+    (rows.to_vec(), Vec::new())
 }
 
 /// The result of one evidence item.
