@@ -129,9 +129,9 @@ fn exec_load(bytes: &[u8]) -> usize {
         bytes[at..at + n]
             .iter()
             .rev()
-            .fold(0u64, |v, b| (v << 8) | u64::from(*b))
+            .fold(0usize, |v, b| (v << 8) | usize::from(*b))
     };
-    let (phoff, phnum) = (word(32, 8) as usize, word(56, 2) as usize);
+    let (phoff, phnum) = (word(32, 8), word(56, 2));
     (0..phnum)
         .find(|i| {
             let at = phoff + i * 56;

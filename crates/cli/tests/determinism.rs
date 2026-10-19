@@ -56,18 +56,18 @@ fn three_processes(name: &str, list: &[Fixture]) {
     assert!(!list.is_empty(), "the tier has fixtures");
     let lines = load_and_survey(list);
     let runs: Vec<(String, BTreeMap<String, Vec<u8>>)> = std::thread::scope(|scope| {
-        let handles: Vec<_> = (0..3)
-            .map(|k| {
-                let lines = &lines;
-                scope.spawn(move || {
-                    let projects = scratch(&format!("{name}_{k}"));
-                    let out = jsonl(&projects, lines);
-                    let snaps = snapshots(&projects);
-                    let _ = std::fs::remove_dir_all(&projects);
-                    (out, snaps)
-                })
-            })
-            .collect();
+        // The three processes run at the same time.
+        let mut handles = Vec::new();
+        for k in 0..3 {
+            let lines = &lines;
+            handles.push(scope.spawn(move || {
+                let projects = scratch(&format!("{name}_{k}"));
+                let out = jsonl(&projects, lines);
+                let snaps = snapshots(&projects);
+                let _ = std::fs::remove_dir_all(&projects);
+                (out, snaps)
+            }));
+        }
         handles
             .into_iter()
             .map(|h| h.join().expect("a run thread"))

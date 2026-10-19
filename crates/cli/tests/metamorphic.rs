@@ -13,6 +13,7 @@ mod common;
 mod hardening;
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt::Write as _;
 use std::path::PathBuf;
 
 use ghidorah_base::FixedClock;
@@ -57,25 +58,24 @@ fn analyzed(path: &str, engine: Engine) -> (String, Vec<&'static str>) {
 fn ac_189a_seed_order() {
     let list = fixtures("T1");
     let shuffled_rows = std::thread::scope(|scope| {
-        let handles: Vec<_> = list
-            .chunks(list.len().div_ceil(4).max(1))
-            .map(|chunk| {
-                scope.spawn(move || {
-                    let mut moved = 0usize;
-                    for f in chunk {
-                        let (hash, rows) = analyzed(&f.path, Engine::default());
-                        let seed = fnv1a64(f.name.as_bytes());
-                        let (other, other_rows) = analyzed(&f.path, Engine::with_seed_order(seed));
-                        assert_eq!(other, hash, "{}: the seed order changes the state", f.name);
-                        let a: BTreeSet<_> = rows.iter().collect();
-                        let b: BTreeSet<_> = other_rows.iter().collect();
-                        assert_eq!(a, b, "{}: the same analyzers run", f.name);
-                        moved += usize::from(rows != other_rows);
-                    }
-                    moved
-                })
-            })
-            .collect();
+        // Four threads share the fixtures.
+        let mut handles = Vec::new();
+        for chunk in list.chunks(list.len().div_ceil(4).max(1)) {
+            handles.push(scope.spawn(move || {
+                let mut moved = 0usize;
+                for f in chunk {
+                    let (hash, rows) = analyzed(&f.path, Engine::default());
+                    let seed = fnv1a64(f.name.as_bytes());
+                    let (other, other_rows) = analyzed(&f.path, Engine::with_seed_order(seed));
+                    assert_eq!(other, hash, "{}: the seed order changes the state", f.name);
+                    let a: BTreeSet<_> = rows.iter().collect();
+                    let b: BTreeSet<_> = other_rows.iter().collect();
+                    assert_eq!(a, b, "{}: the same analyzers run", f.name);
+                    moved += usize::from(rows != other_rows);
+                }
+                moved
+            }));
+        }
         handles
             .into_iter()
             .map(|h| h.join().expect("a seed-order thread"))
@@ -145,7 +145,7 @@ fn ac_189b_strip() {
             .unwrap_or_default();
         let total = worklist.get("total").and_then(Value::as_u64).unwrap_or(0);
         assert!(
-            total as usize == items.len() || items.len() >= 5,
+            usize::try_from(total).is_ok_and(|t| t == items.len()) || items.len() >= 5,
             "the worklist items"
         );
         let gaps: BTreeSet<String> = items
@@ -342,7 +342,7 @@ fn unbase(text: &str, base: u64) -> String {
         match u64::from_str_radix(word, 16) {
             Ok(n) if hex && (base..base + 0x10_0000).contains(&n) => {
                 let width = if named { len } else { 0 };
-                out.push_str(&format!("{:0width$x}", n - base));
+                let _ = write!(out, "{:0width$x}", n - base);
             }
             _ => out.push_str(word),
         }

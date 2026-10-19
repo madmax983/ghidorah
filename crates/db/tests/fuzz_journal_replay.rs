@@ -125,14 +125,14 @@ fn fuzz_journal_replay() {
     let replay = fuzz::replay_regress(&regress_dir(), run)
         .unwrap_or_else(|e| panic!("replay of the regression files: {e}"));
     assert!(replay.ok(), "regression files fail: {:?}", replay.crashes);
-    let mut config = Config::new("journal_replay", 600);
+    let mut config = Config::new("journal_replay", 2_000);
     config.stages = STAGES.iter().map(|s| (*s).to_owned()).collect();
     config.pending_dir = Some(regress_dir());
     config.max_len = 16_384;
     config.stack_size = 8 * 1024 * 1024;
     let report =
         fuzz::run(&config, &corpus, run).unwrap_or_else(|e| panic!("the fuzz harness fails: {e}"));
-    assert_eq!(report.cases, 600);
+    assert_eq!(report.cases, 2_000);
     assert!(
         report.ok(),
         "{} panics, {} violations: {:?}",

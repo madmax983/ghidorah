@@ -20,13 +20,16 @@ use ghidorah_testkit::rng::{Xoshiro256ss, below, fnv1a64};
 use ghidorah_tools::args::globals_of;
 use ghidorah_tools::budget::PROTOCOL_RESERVE;
 use ghidorah_tools::content::chars;
+use ghidorah_tools::content::result_chars;
+use ghidorah_tools::errors::ERROR_CAP;
 use ghidorah_tools::registry::shipped;
 use ghidorah_tools::{
-    ArgKind, ArgSpec, Request, Roots, Session, SessionConfig, ToolSpec, dispatch_with, handlers,
+    ArgKind, ArgSpec, ContentMode, Request, Roots, Session, SessionConfig, ToolSpec, dispatch_with,
+    handlers,
 };
 
 /// The number of calls of each tool.
-const CASES_PER_TOOL: u64 = 40;
+const CASES_PER_TOOL: u64 = 200;
 
 /// The deepest nesting of a generated value.
 const MAX_DEPTH: u32 = 3;
@@ -75,17 +78,17 @@ struct Call {
     first: String,
     /// The envelope of session B as compact JSON.
     second: String,
-    /// The state hashes of session A before and after the call.
-    hashes: (String, String),
-    /// `true` when the tool writes no fact.
-    read_only: bool,
     /// The character cap of the call.
     cap: u64,
+    /// The content mode of the call: plain, or both MCP copies.
+    mode: ContentMode,
 }
 
 /// The results of the run.
 struct Run {
     calls: Vec<Call>,
+    /// The state hashes of session A before and after the calls of each read-only tool.
+    states: Vec<(&'static str, String, String)>,
     panics: u64,
 }
 
@@ -206,7 +209,7 @@ fn value(rng: &mut Xoshiro256ss, kind: &ArgKind, depth: u32) -> Value {
         ArgKind::Bool => Value::Bool(below(rng, 2) == 0),
         ArgKind::Obj(specs) => {
             let mut out = Object::new();
-            for spec in specs.iter() {
+            for spec in *specs {
                 if below(rng, 2) == 0 {
                     out.insert(spec.name, value(rng, &spec.kind, depth + 1));
                 }
@@ -268,9 +271,11 @@ fn cap_of(tool: &ToolSpec<Session>, args: &Value) -> u64 {
         .unwrap_or_else(|| u64::from(tool.max_chars))
 }
 
-fn call(session: &mut Session, tool: &str, args: &Value) -> String {
+fn call(session: &mut Session, tool: &str, args: &Value, mode: ContentMode) -> String {
     let registry = session.active_registry();
-    let envelope = dispatch_with(&registry, session, &Request::new(tool, args.clone()));
+    let mut request = Request::new(tool, args.clone());
+    request.content = mode;
+    let envelope = dispatch_with(&registry, session, &request);
     ghidorah_json::write(&envelope.to_json())
 }
 
@@ -282,29 +287,38 @@ fn run_all() -> Run {
     let mut a = demo_session();
     let mut b = demo_session();
     let mut calls = Vec::new();
+    let mut states = Vec::new();
     for tool in registry.tools() {
         let mut specs: Vec<ArgSpec> = tool.args.to_vec();
         specs.extend(globals_of(tool));
         let mut rng = Xoshiro256ss::seed_from_u64(fnv1a64(tool.name.as_bytes()));
+        // The state hash is for the read-only check of AC-191c only.
+        let start = state(&a);
         for _ in 0..CASES_PER_TOOL {
             let args = case(&mut rng, tool, &specs);
-            let start = state(&a);
-            let first = call(&mut a, tool.name, &args);
-            let end = state(&a);
-            let second = call(&mut b, tool.name, &args);
+            let mode = if below(&mut rng, 2) == 0 {
+                ContentMode::Both
+            } else {
+                ContentMode::Plain
+            };
+            let first = call(&mut a, tool.name, &args, mode);
+            let second = call(&mut b, tool.name, &args, mode);
             calls.push(Call {
                 tool: tool.name,
                 cap: cap_of(tool, &args),
+                mode,
                 args,
                 first,
                 second,
-                hashes: (start, end),
-                read_only: !tool.mutating,
             });
+        }
+        if !tool.mutating {
+            states.push((tool.name, start, state(&a)));
         }
     }
     Run {
         calls,
+        states,
         panics: panic_count().saturating_sub(before),
     }
 }
@@ -372,10 +386,19 @@ fn problems(c: &Call) -> Vec<String> {
             out.push(format!("warning code {code:?} is not in the registry"));
         }
     }
-    let size = chars(&c.first);
-    let limit = c.cap.saturating_sub(PROTOCOL_RESERVE);
-    if size > limit {
-        out.push(format!("{size} characters above the cap {limit}"));
+    // A result fits `max_chars` less the protocol reserve. An error object has its own cap
+    // (design Section 10.9): a result that does not fit becomes `OUTPUT_BUDGET_EXCEEDED`.
+    if let Some(error) = e.get("error") {
+        let size = chars(&ghidorah_json::write(error));
+        if size > ERROR_CAP {
+            out.push(format!("an error of {size} characters above {ERROR_CAP}"));
+        }
+    } else {
+        let size = result_chars(&e, false, c.mode);
+        let limit = c.cap.saturating_sub(PROTOCOL_RESERVE);
+        if size > limit {
+            out.push(format!("{size} characters above the cap {limit}"));
+        }
     }
     out
 }
@@ -407,16 +430,15 @@ fn ac_191c_repeats_equal() {
         "{} calls differ: {differ:#?}",
         differ.len()
     );
-    let changed: Vec<String> = run
-        .calls
+    let changed: Vec<&str> = run
+        .states
         .iter()
-        .filter(|c| c.read_only && c.hashes.0 != c.hashes.1)
-        .map(label)
+        .filter(|(_, before, after)| before != after)
+        .map(|(tool, _, _)| *tool)
         .collect();
     assert!(
         changed.is_empty(),
-        "read-only calls change the state: {changed:#?}"
+        "read-only tools change the state: {changed:?}"
     );
-    let read_only = run.calls.iter().filter(|c| c.read_only).count();
-    assert!(read_only > 0, "the run has read-only calls");
+    assert!(run.states.len() > 10, "the run has read-only tools");
 }

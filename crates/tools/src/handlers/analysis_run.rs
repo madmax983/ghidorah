@@ -20,7 +20,7 @@
 use std::collections::BTreeMap;
 use std::collections::btree_map::Entry;
 
-use ghidorah_analysis::{AnalyzerRow, Changed, RunState, Scheduler, Until as Band};
+use ghidorah_analysis::{ANALYZERS, AnalyzerRow, Changed, RunState, Scheduler, Until as Band};
 use ghidorah_base::{BinaryId, ErrorCode, Fuel};
 use ghidorah_json::{Object, Value};
 
@@ -53,19 +53,48 @@ pub const TEXTS: &[&str] = &[WHY_RESUME];
 #[derive(Debug, Default)]
 pub struct Engine {
     schedulers: BTreeMap<BinaryId, Scheduler>,
+    /// The seed of the analyzer order of a first analysis, or `None` for the shipped order.
+    order: Option<u64>,
 }
 
 impl Engine {
-    /// Makes an engine whose first analysis of each binary seeds the analyzers in an order
-    /// that `seed` shuffles: the seed-order relation of design Section 13.4 (AC-189a).
+    /// Makes an engine that shuffles the analyzer order of the first analysis of each binary
+    /// with `seed`. This is the seed-order relation of design Section 13.4 (AC-189a).
     ///
     /// The scheduler picks its steps by priority and name, so the state hash stays the same.
     /// Only the row order of the `analyzers` list changes.
     #[must_use]
     pub fn with_seed_order(seed: u64) -> Self {
-        let _ = seed;
-        Self::default()
+        Self {
+            order: Some(seed),
+            ..Self::default()
+        }
     }
+}
+
+/// Gives the scheduler of the first analysis of a binary: the shipped analyzer order, or the
+/// order that `seed` shuffles.
+fn first_scheduler(order: Option<u64>) -> Scheduler {
+    order.map_or_else(Scheduler::new, |seed| {
+        Scheduler::with_analyzers(shuffled(ANALYZERS, seed))
+    })
+}
+
+/// Gives `items` in the order of a Fisher-Yates shuffle with a `SplitMix64` stream from `seed`.
+fn shuffled<T: Copy>(items: &[T], seed: u64) -> Vec<T> {
+    let mut out = items.to_vec();
+    let mut state = seed;
+    for i in (1..out.len()).rev() {
+        state = state.wrapping_add(0x9e37_79b9_7f4a_7c15);
+        let mut z = state;
+        z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+        z ^= z >> 31;
+        let bound = u64::try_from(i).map_or(u64::MAX, |n| n.saturating_add(1));
+        let j = usize::try_from(z % bound).unwrap_or(0);
+        out.swap(i, j);
+    }
+    out
 }
 
 /// Gives the envelope state of a run state.
@@ -106,11 +135,12 @@ impl AnalysisEngine for Engine {
             Until::Triage => Band::Triage,
             Until::Full => Band::Full,
         };
+        let order = self.order;
         let scheduler = match self.schedulers.entry(binary.id) {
             Entry::Occupied(found) => found.into_mut(),
             Entry::Vacant(slot) => match binary.analysis.map(|a| a.state) {
                 // The first analysis after a load publishes after each run.
-                None => slot.insert(Scheduler::new()),
+                None => slot.insert(first_scheduler(order)),
                 // A project with a current analysis needs no new run.
                 Some(AnalysisState::Complete) => {
                     return Ok(RunReport {

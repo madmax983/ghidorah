@@ -16,13 +16,10 @@ use std::path::Path;
 
 use ghidorah_testkit::fuzz::{self, Config, Outcome};
 
-use crate::pipeline::{ELF_STAGES, Load, elf_seeds, elf_stage, regress_dir, run, work_dir};
+use crate::pipeline::{ELF_STAGES, Load, elf_seeds, elf_stage, root, run, work_dir};
 
-/// The target name.
-const TARGET: &str = "pipeline_elf";
-
-/// The number of cases of one tier-1 run.
-const CASES: u32 = 2_000;
+/// The regression directory of the target, relative to the workspace root.
+const REGRESS: &str = "tests/regress/pipeline_elf";
 
 fn target(dir: &Path, input: &[u8]) -> Outcome {
     let stage = elf_stage(input);
@@ -34,18 +31,18 @@ fn target(dir: &Path, input: &[u8]) -> Outcome {
 
 #[test]
 fn fuzz_pipeline_elf() {
-    let dir = work_dir(TARGET);
-    let replay = fuzz::replay_regress(&regress_dir(TARGET), |input| target(&dir, input))
+    let dir = work_dir("pipeline_elf");
+    let replay = fuzz::replay_regress(&root().join(REGRESS), |input| target(&dir, input))
         .unwrap_or_else(|e| panic!("replay of the regression files: {e}"));
     assert!(replay.ok(), "regression files fail: {:?}", replay.crashes);
 
-    let mut config = Config::new(TARGET, CASES);
+    let mut config = Config::new("pipeline_elf", 2_000);
     config.stages = ELF_STAGES.iter().map(|s| (*s).to_owned()).collect();
-    config.pending_dir = Some(regress_dir(TARGET));
+    config.pending_dir = Some(root().join(REGRESS));
     config.max_len = 64 << 10;
     let report = fuzz::run(&config, &elf_seeds(), |input| target(&dir, input))
         .unwrap_or_else(|e| panic!("the fuzz harness fails: {e}"));
-    assert_eq!(report.cases, CASES);
+    assert_eq!(report.cases, 2_000);
     assert!(
         report.ok(),
         "{} panics, {} violations: {:?}",

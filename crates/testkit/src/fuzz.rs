@@ -8,6 +8,9 @@
 //! Each case returns the deepest stage that it reached. The report counts the
 //! cases per stage. A panic hook counts every panic in the test binary, also
 //! the panics that a target catches. Put each fuzz target in its own test binary.
+//!
+//! `xtask fuzz` runs long batches of a target binary with [`SEED_ENV`]. Then each batch
+//! uses a new seed, and the run saves the shrunk input of each failed case.
 
 mod havoc;
 
@@ -226,18 +229,48 @@ pub fn mutate(rng: &mut Xoshiro256ss, input: &[u8], max_len: usize) -> Vec<u8> {
     havoc::mutate(rng, input, max_len)
 }
 
+/// The `SplitMix64` output function: it spreads the bits of one batch number.
+const fn splitmix(value: u64) -> u64 {
+    let mut z = value.wrapping_add(0x9e37_79b9_7f4a_7c15);
+    z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    z ^ (z >> 31)
+}
+
 /// Gives the seed of a run: `seed` alone, or `seed` mixed with the batch seed of a long run.
 #[must_use]
 pub const fn batch_seed(seed: u64, batch: Option<u64>) -> u64 {
-    let _ = batch;
-    seed
+    match batch {
+        None => seed,
+        Some(b) => seed ^ splitmix(b.wrapping_add(1)),
+    }
+}
+
+/// Reads the batch seed of [`SEED_ENV`]: a decimal or `0x` hex number.
+fn env_batch() -> Option<u64> {
+    let text = std::env::var(SEED_ENV).ok()?;
+    let text = text.trim();
+    text.strip_prefix("0x").map_or_else(
+        || text.parse().ok(),
+        |hex| u64::from_str_radix(hex, 16).ok(),
+    )
 }
 
 /// Gives the file name of the saved input of the failed case `case`: `crash-<case>.input`.
 #[must_use]
 pub fn crash_name(case: u32) -> String {
-    let _ = case;
-    String::new()
+    format!("crash-{case}.{CRASH_EXT}")
+}
+
+/// Tells if one run of `target` on `input` panics or gives a violation.
+fn case_fails<F>(target: &F, input: &[u8]) -> bool
+where
+    F: Fn(&[u8]) -> Outcome,
+{
+    IN_CASE.with(|c| c.set(true));
+    let result = catch_unwind(AssertUnwindSafe(|| target(input)));
+    IN_CASE.with(|c| c.set(false));
+    result.map_or(true, |outcome| outcome.violation.is_some())
 }
 
 /// Shrinks the failing input `input` of `target` with at most `budget` target runs.
@@ -248,8 +281,31 @@ pub fn shrink_input<F>(input: &[u8], target: &F, budget: u32) -> Vec<u8>
 where
     F: Fn(&[u8]) -> Outcome,
 {
-    let _ = (target, budget);
-    input.to_vec()
+    if !case_fails(target, input) {
+        return input.to_vec();
+    }
+    let to_bytes = |c: &[u64]| -> Vec<u8> {
+        c.iter()
+            .map(|&v| u8::try_from(v).unwrap_or(u8::MAX))
+            .collect()
+    };
+    let wide: Vec<u64> = input.iter().map(|&b| u64::from(b)).collect();
+    let shrunk =
+        crate::pbt::shrink_with_budget(&wide, budget, |c| case_fails(target, &to_bytes(c)));
+    to_bytes(&shrunk)
+}
+
+/// Saves the shrunk input of each failed case of `report` in `dir` (a long run).
+fn save_crashes<F>(dir: &Path, report: &Report, target: &F) -> Result<(), FuzzError>
+where
+    F: Fn(&[u8]) -> Outcome,
+{
+    for crash in &report.crashes {
+        let small = shrink_input(&crash.input, target, SHRINK_BUDGET);
+        let path = dir.join(crash_name(crash.case));
+        std::fs::write(&path, small).map_err(|e| io_error(&path, &e))?;
+    }
+    Ok(())
 }
 
 fn io_error(path: &Path, e: &std::io::Error) -> FuzzError {
@@ -328,6 +384,7 @@ where
     F: Fn(&[u8]) -> Outcome + Sync,
 {
     install_panic_counter();
+    let batch = env_batch();
     let pending = match &config.pending_dir {
         Some(dir) => {
             std::fs::create_dir_all(dir).map_err(|e| io_error(dir, &e))?;
@@ -336,7 +393,7 @@ where
         None => None,
     };
     in_thread(&config.target, config.stack_size, || {
-        let mut rng = Xoshiro256ss::seed_from_u64(config.seed);
+        let mut rng = Xoshiro256ss::seed_from_u64(batch_seed(config.seed, batch));
         let mut report = Report {
             target: config.target.clone(),
             reached: vec![0; config.stages.len()],
@@ -359,6 +416,9 @@ where
                 &mut report,
                 config.max_crashes,
             )?;
+        }
+        if let (Some(_), Some(dir)) = (batch, config.pending_dir.as_deref()) {
+            save_crashes(dir, &report, &target)?;
         }
         Ok(report)
     })

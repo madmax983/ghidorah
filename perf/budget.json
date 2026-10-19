@@ -1,3 +1,8 @@
 {
+  "analysis_t2_ms": 2500,
+  "call_overhead_us": 250,
+  "cold_start_ms": 100,
+  "decode_us": 6000,
+  "load_ms": 60,
   "similar_2k_ms": 5000
 }

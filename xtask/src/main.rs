@@ -17,7 +17,7 @@ use xtask::{
 };
 
 const USAGE: &str =
-    "cargo xtask <gates|deps|ci|cov|ac|ste|verify|fixtures|eval|golden|oracle|fuzz|bench> [args]";
+    "cargo xtask <gates|deps|ci|cov|ac|ste|verify|fixtures|eval|fuzz|bench|golden|oracle> [args]";
 
 fn dispatch(command: &str, rest: &[String]) -> Result<Value, Error> {
     let root = workspace::root();

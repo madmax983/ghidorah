@@ -197,7 +197,7 @@ fn ac_190a_parser_targets() {
         assert!(
             workspace::PACKAGES
                 .iter()
-                .any(|p| p.dir == t.dir && p.name == t.package),
+                .any(|p| (p.dir, p.name) == (t.dir, t.package)),
             "{} names a workspace package",
             t.name
         );
@@ -369,4 +369,37 @@ fn ac_202_bench_budgets() {
     let none = bench::verdict(cold, &stats, None);
     assert_eq!(none.get("ok").and_then(Value::as_bool), Some(false));
     assert!(bench::run(&workspace::root(), &strings(&["no_such_bench"])).is_err());
+}
+
+/// The step reads `git log`, so it runs in tier 2 (the hermetic run has no `git`).
+#[test]
+#[ignore = "tier2"]
+fn ac_234_fix_commits_step() {
+    let args = strings(&["--steps", "fix_commits"]);
+    let report = ci::run(&workspace::root(), &args).expect("xtask ci runs");
+    assert_eq!(
+        report.pointer("/steps/fix_commits/ok"),
+        Some(&Value::Bool(true)),
+        "{report}"
+    );
+}
+
+/// Two batches of the `calc` target in child processes.
+#[test]
+#[ignore = "tier2"]
+fn ac_190b_fuzz_batches() {
+    let args = strings(&["calc", "--iters", "4000", "--seed", "11"]);
+    let report = fuzz::run(&workspace::root(), &args).expect("xtask fuzz runs");
+    assert_eq!(
+        report.pointer("/violations").and_then(Value::as_u64),
+        Some(0),
+        "{report}"
+    );
+    assert_eq!(
+        report
+            .pointer("/targets/calc/batches")
+            .and_then(Value::as_u64),
+        Some(2),
+        "{report}"
+    );
 }

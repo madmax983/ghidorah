@@ -383,8 +383,9 @@ fn strings_slicing_and_idempotence() {
     }
 }
 
-/// The fuzz target `pipeline_elf` found a 0.9 s strings step with a fuel cap of 500: a region
-/// with a few file bytes and a large zero fill. The sweep reads the file bytes and 2 more.
+/// The fuzz target `pipeline_elf` found a strings step of 0.9 s with a fuel cap of 500. Its
+/// input has a region with a few file bytes and a large zero fill. The sweep reads the file
+/// bytes and 2 more.
 #[test]
 fn regress_strings_zero_fill_scan() {
     let builder = ElfBuilder::exec()

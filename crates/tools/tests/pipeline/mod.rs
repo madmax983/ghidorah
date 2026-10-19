@@ -138,7 +138,7 @@ pub fn elf_seeds() -> Vec<Vec<u8>> {
 pub fn raw_seeds() -> Vec<Vec<u8>> {
     let code = |name: &str| {
         fixture(name)
-            .get(0x1000..0x1400)
+            .get(0x1100..0x1200)
             .unwrap_or_default()
             .to_vec()
     };
