@@ -44,7 +44,34 @@ pub fn corpus(
     cache: &mut VectorCache,
     fuel: &mut Fuel,
 ) -> Result<Index, OutOfFuel> {
-    let _ = (programs, cache);
-    fuel.tick()?;
-    Ok(Index::build(Vec::new()))
+    Ok(Index::build(docs(programs, cache, fuel)?))
+}
+
+/// Gives the documents of the corpus of `programs` in the order of [`corpus`].
+///
+/// # Errors
+///
+/// Returns [`OutOfFuel`] when `fuel` runs out (see [`corpus`]).
+pub fn docs(
+    programs: &[&Program],
+    cache: &mut VectorCache,
+    fuel: &mut Fuel,
+) -> Result<Vec<Doc>, OutOfFuel> {
+    let mut sorted: Vec<&Program> = programs.to_vec();
+    sorted.sort_by_key(|p| p.meta().binary_id);
+    let mut out = Vec::new();
+    for program in sorted {
+        let ctx = Context::new(program);
+        let binary = program.meta().binary_id;
+        for f in program.funcs() {
+            let func = f.id();
+            let vector = cache.vector(&ctx, func, fuel)?;
+            out.push(Doc {
+                binary,
+                func,
+                vector,
+            });
+        }
+    }
+    Ok(out)
 }

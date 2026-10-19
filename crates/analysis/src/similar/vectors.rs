@@ -5,19 +5,22 @@
 //! entry: the entry keeps the lowest kind and the lowest text. The paths use no hash map
 //! (ADR-0012).
 //!
-//! Vectors are derived data. The journal never holds them (design Section 3.9). The
-//! [`VectorCache`] keeps at most its capacity of vectors. Its key is the binary, the function,
-//! the function epoch and a hash of the facts that the vector reads ([`inputs_hash`]). The
-//! hash keeps two programs of one binary apart when their revisions give the same epoch.
-//! A full cache drops the entry with the oldest use. The use counter is a plain counter, so
-//! the order is deterministic.
+//! Vectors are derived data. The journal never holds them (design Section 3.9).
+//!
+//! The [`VectorCache`] keeps at most its capacity of vectors. Its key is the binary, the
+//! function, the function epoch and a hash of the facts that the vector reads
+//! ([`inputs_hash`]). The hash keeps two programs of one binary apart when their revisions
+//! give the same epoch. A full cache drops the entry with the oldest use. The use counter is a
+//! plain counter, so the order is deterministic.
 
 use std::collections::BTreeMap;
+use std::collections::btree_map::Entry as Slot;
 use std::sync::Arc;
 
-use ghidorah_base::{BinaryId, Fuel, FuncId, OutOfFuel, Rev};
+use ghidorah_base::{Address, BinaryId, Fnv1a64, Fuel, FuncId, OutOfFuel, Rev};
 
 use super::features::{Context, Feature, Kind};
+use crate::fir::{cases_of, units_of};
 
 /// The largest count of one entry.
 pub const MAX_COUNT: u16 = 65_535;
@@ -48,8 +51,30 @@ impl Vector {
     /// Makes the vector of a feature stream.
     #[must_use]
     pub fn new(features: Vec<Feature>) -> Self {
-        let _ = features;
-        Self::default()
+        let mut map: BTreeMap<u64, Entry> = BTreeMap::new();
+        for f in features {
+            match map.entry(f.key) {
+                Slot::Vacant(slot) => {
+                    slot.insert(Entry {
+                        key: f.key,
+                        kind: f.kind,
+                        count: 1,
+                        text: f.text,
+                    });
+                }
+                Slot::Occupied(mut slot) => {
+                    let e = slot.get_mut();
+                    e.count = e.count.saturating_add(1);
+                    if (f.kind, f.text.as_str()) < (e.kind, e.text.as_str()) {
+                        e.kind = f.kind;
+                        e.text = f.text;
+                    }
+                }
+            }
+        }
+        Self {
+            entries: map.into_values().collect(),
+        }
     }
 
     /// Gives the entries in key order.
@@ -102,12 +127,53 @@ pub struct CacheKey {
     pub inputs: u64,
 }
 
-/// Gives the hash of the facts that the vector of `func` reads: the code units of the body,
-/// the jump-table cases, the references from the body and the facts at their targets.
+/// Gives the hash of the facts that the vector of `func` reads.
+///
+/// These facts are the code units of the body, the jump-table cases, the references from the
+/// body and the facts at their targets.
 #[must_use]
 pub fn inputs_hash(ctx: &Context<'_>, func: FuncId) -> u64 {
-    let _ = (ctx, func);
-    0
+    let program = ctx.program();
+    let mut h = Fnv1a64::new();
+    write_addr(&mut h, func.0);
+    let Some(units) = units_of(program, func) else {
+        return h.finish();
+    };
+    for (at, u) in &units {
+        h.write(&at.to_le_bytes());
+        h.write(&[u.len, u.flags]);
+        h.write(u.flow.name().as_bytes());
+        for r in program.refs_from(Address::ram(*at)) {
+            let key = r.value.key;
+            write_addr(&mut h, key.to);
+            h.write(&[key.kind.code(), key.op_index.to_le_bytes()[0]]);
+            if let Some(id) = ctx.import_at(key.to) {
+                h.write(id.to_string().as_bytes());
+            }
+            if key.to.is_ram() {
+                if let Some(s) = program.string(key.to.off) {
+                    h.write(&s.len.to_le_bytes());
+                }
+                if let Some(f) = program.func(FuncId(key.to)) {
+                    h.write_u8(1);
+                    h.write_u8(f.noreturn.map_or(2, |n| u8::from(n.value)));
+                }
+            }
+        }
+    }
+    for (at, targets) in cases_of(program, &units) {
+        h.write(&at.to_le_bytes());
+        for t in targets {
+            h.write(&t.to_le_bytes());
+        }
+    }
+    h.finish()
+}
+
+/// Writes an address: its space and its offset.
+fn write_addr(h: &mut Fnv1a64, a: Address) {
+    h.write_u8(u8::from(a.is_ram()));
+    h.write(&a.off.to_le_bytes());
 }
 
 /// Gives the cache key of the vector of `func`.
@@ -186,15 +252,34 @@ impl VectorCache {
 
     /// Gives the vector of `key` and counts a hit, or counts a miss.
     pub fn get(&mut self, key: &CacheKey) -> Option<Arc<Vector>> {
-        let _ = (key, self.tick, &self.uses);
-        self.stats.misses = self.stats.misses.saturating_add(1);
-        None
+        let Some((used, vector)) = self.entries.get_mut(key) else {
+            self.stats.misses = self.stats.misses.saturating_add(1);
+            return None;
+        };
+        self.uses.remove(used);
+        self.tick = self.tick.saturating_add(1);
+        *used = self.tick;
+        self.uses.insert(self.tick, *key);
+        self.stats.hits = self.stats.hits.saturating_add(1);
+        Some(Arc::clone(vector))
     }
 
     /// Puts the vector of `key`. A full cache drops the vector with the oldest use first.
     pub fn put(&mut self, key: CacheKey, vector: Vector) -> Arc<Vector> {
-        let _ = key;
-        Arc::new(vector)
+        if let Some((used, _)) = self.entries.remove(&key) {
+            self.uses.remove(&used);
+        }
+        while self.entries.len() >= self.capacity {
+            let Some((_, old)) = self.uses.pop_first() else {
+                break;
+            };
+            self.entries.remove(&old);
+        }
+        let vector = Arc::new(vector);
+        self.tick = self.tick.saturating_add(1);
+        self.entries.insert(key, (self.tick, Arc::clone(&vector)));
+        self.uses.insert(self.tick, key);
+        vector
     }
 
     /// Gives the cached vector of `func`, or builds it and puts it in the cache.
