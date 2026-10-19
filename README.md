@@ -193,6 +193,8 @@ Other checks:
 | `cargo xtask gates` | The static workspace gates. |
 | `cargo xtask cov` | Line coverage per crate. |
 | `cargo xtask ste` | The ASD-STE100 check of docs and comments. |
+| `cargo xtask fuzz` | Long fuzz runs of each target with 100,000 cases. Failed inputs go to `tests/regress/`. |
+| `cargo xtask bench` | The release benchmarks against the budgets of `perf/budget.json`. |
 | `cargo xtask ac --run --tier2` | The evidence of each acceptance criterion. It writes `docs/ac-evidence.json`. |
 
 ## Documents
