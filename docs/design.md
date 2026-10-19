@@ -2910,7 +2910,10 @@ Rules for this section:
   - `cmd:<argv>`: an exact command that must exit 0 in tier 2.
   - `xtask:<subcommand>#<pointer> <op> <value>`: a value in the JSON output of an xtask command.
   - `record:<file>#<pointer>@sha256=<input>`: a checked-in record that must match the hash of its named input, for example `tree` (the kernel tree hash) or `host-bash`.
-- `xtask ac` writes `docs/ac-evidence.json` with rows `{ ac, tier, kind, status: pass | fail | recorded | skipped, commit }`.
+- Record inputs: `tree` compares the `tree_sha256` member of the record with the tree hash of Section 13.3. `host-<name>` compares the `sha256` member of the object at the pointer with the SHA-256 of the host file at its `path` member. A host file that does not exist gives `skipped`. A different hash gives `fail`.
+- `xtask ac` writes `docs/ac-evidence.json` with rows `{ ac, tier, kind, status: pass | fail | recorded | skipped, commit }`. A run with a list of ACs replaces only the rows of those ACs.
+- `xtask ac` without `--run` reads the table and reports `failed`: one `{ ac, kind, tier }` item for each `fail` row. It checks each record item again, so a record row of the table does not count.
+- An `xtask:ac` item reads the table of the same run. The runner runs the other items first, writes the table, then runs the `xtask:ac` items.
 - Closes: the WP that closes the AC. "13a/25" means that the test starts green in WP-13a over the tools registered then, and closes in WP-25.
 - Needs: the other WPs whose code the evidence runs, beyond the closing WP and its listed dependencies. `xtask ac` fails when a Needs WP comes in a later pair, or in the same pair without the register rebase of Section 14.1 (AC-018c).
 - A row "Moved to stretch" or "Removed in revision 3" keeps its number and is not an MVP gate. Section 15.20 holds the SSA and decompiler ACs. Section 15.21 holds the ACs that revision 2 appended. Section 15.22 holds the ACs that revision 3 appended.
@@ -2965,12 +2968,12 @@ Rules for this section:
 
 | AC | Statement | Evidence | Closes | Needs |
 |---|---|---|---|---|
-| AC-023a | `docs/design.md`, `docs/adr/README.md`, each listed ADR with a `Status` line, `CLAUDE.md`, `docs/GLOSSARY.md` and `docs/errors.md` exist. | `test:xtask::ac_023a_docs_present@T1` | 28 | - |
-| AC-023b | Every ADR has an `## Alternatives` section and a `Verified by:` line. | `test:xtask::ac_023b_adr_sections@T1` | 28 | - |
+| AC-023a | `README.md`, `docs/design.md`, `docs/adr/README.md`, each listed ADR with a `Status` line, `CLAUDE.md`, `docs/GLOSSARY.md` and `docs/errors.md` exist. Each relative link of `README.md` names an existing path, and the ADR index lists each ADR file once with its status. | `test:xtask::ac_023a_docs_present@T1` | 28 | - |
+| AC-023b | Every ADR has an `## Alternatives` section and a `Verified by:` line, and each AC ID of that line names an AC row of this section. | `test:xtask::ac_023b_adr_sections@T1` | 28 | - |
 | AC-024 | Every tool description, action line, error and warning message, hint and the server instructions pass the STE checker in deny mode. | `test:tools::ac_024_ste_agent_text@T1` | 13a/25 | 24 |
 | AC-025 | The STE checker reports no finding on docs and comments outside `docs/ste-allowlist.txt`, `docs/research.md` and `docs/planning/`. | `test:testkit::ac_025_ste_docs@T1` | 02 | - |
 | AC-026 | `docs/errors.md` equals the text generated from `ErrorCode`, `WarningCode` and `DiagCode`. | `test:base::ac_026_errors_doc_golden@T1` | 05 | - |
-| AC-027 | `NOTICE` and `docs/licenses.md` list every vendored data file, and each data file names its source and license. | `test:xtask::ac_027_license_ledger@T1` | 28 | - |
+| AC-027 | `NOTICE` and `docs/licenses.md` list every vendored data file, and each data file names its source and license. A data file is vendored when its header names a copyright holder other than ghidorah or its directory holds a `LICENSE` file. | `test:xtask::ac_027_license_ledger@T1` | 28 | - |
 
 ### 15.4 Verification
 
