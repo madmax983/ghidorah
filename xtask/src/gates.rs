@@ -2,9 +2,10 @@
 //!
 //! Each gate maps one AC to a check over the repository.
 //! The tests in `xtask/tests/gates.rs` and `xtask/tests/docs.rs` run the same gates.
-//! The module [`docs`] holds the doc gates of WP-28.
+//! The modules [`docs`] and [`ledger`] hold the doc gates of WP-28.
 
 pub mod docs;
+pub mod ledger;
 
 use std::path::{Path, PathBuf};
 
@@ -227,7 +228,7 @@ pub const GATES: &[Gate] = &[
     gate(
         "AC-027",
         "NOTICE and the ledger list each vendored data file.",
-        |r| docs::check_ledger(&r.root),
+        |r| ledger::check_ledger(&r.root),
     ),
     gate("AC-223", "No crate changes the process environment.", |r| {
         r.each_rust_file(|_| true, scan::no_set_var)

@@ -46,23 +46,39 @@ impl Status {
     /// Gives the status of a name of the table.
     #[must_use]
     pub fn parse(name: &str) -> Option<Self> {
-        let _ = name;
-        None
+        [Self::Pass, Self::Fail, Self::Recorded, Self::Skipped]
+            .into_iter()
+            .find(|s| s.name() == name)
     }
 }
 
 /// Tells if an item is an `xtask:ac` item. Such an item reads the table of its own run.
 #[must_use]
 pub fn is_self(item: &Evidence) -> bool {
-    let _ = item;
-    false
+    matches!(item, Evidence::Xtask { sub, .. } if sub == "ac")
 }
 
 /// Splits the rows into the rows without `xtask:ac` items and the rows with only those items.
 /// A row without items of a part does not appear in that part.
 #[must_use]
 pub fn split_self(rows: &[AcRow]) -> (Vec<AcRow>, Vec<AcRow>) {
-    (rows.to_vec(), Vec::new())
+    let part = |own: bool| -> Vec<AcRow> {
+        rows.iter()
+            .filter_map(|row| {
+                let evidence: Vec<Evidence> = row
+                    .evidence
+                    .iter()
+                    .filter(|item| is_self(item) == own)
+                    .cloned()
+                    .collect();
+                (!evidence.is_empty()).then(|| AcRow {
+                    evidence,
+                    ..row.clone()
+                })
+            })
+            .collect()
+    };
+    (part(false), part(true))
 }
 
 /// The result of one evidence item.
@@ -210,14 +226,6 @@ fn run_xtask(
     Ok(value)
 }
 
-fn record_status(root: &Path, file: &str, pointer: &str) -> Status {
-    std::fs::read_to_string(root.join(file))
-        .ok()
-        .and_then(|text| json::parse(&text).ok())
-        .filter(|value| value.pointer(pointer).is_some())
-        .map_or(Status::Fail, |_| Status::Recorded)
-}
-
 fn cmd_status(root: &Path, argv: &str) -> Result<Status, Error> {
     let mut words = argv.split_whitespace();
     let Some(program) = words.next() else {
@@ -283,7 +291,11 @@ pub fn run_rows(root: &Path, rows: &[AcRow], tier2: bool) -> Result<Vec<Outcome>
                         Status::Fail
                     }
                 }
-                Evidence::Record { file, pointer, .. } => record_status(root, file, pointer),
+                Evidence::Record {
+                    file,
+                    pointer,
+                    input,
+                } => record::status(root, file, pointer, input),
             };
             outcomes.push(Outcome {
                 ac: row.id.clone(),
@@ -294,44 +306,4 @@ pub fn run_rows(root: &Path, rows: &[AcRow], tier2: bool) -> Result<Vec<Outcome>
         }
     }
     Ok(outcomes)
-}
-
-/// Writes the evidence table with the commit of `HEAD`.
-///
-/// The file holds one JSON array with one row per line, so a diff shows each change.
-///
-/// # Errors
-///
-/// Returns an error when `git` or the file write fails.
-pub fn write_table(root: &Path, outcomes: &[Outcome]) -> Result<Value, Error> {
-    let head = proc::run_ok(
-        Command::new("git")
-            .args(["rev-parse", "HEAD"])
-            .current_dir(root),
-    )?;
-    let commit = head.stdout.trim().to_owned();
-    let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
-    let mut lines = Vec::new();
-    for outcome in outcomes {
-        *counts.entry(outcome.status.name()).or_default() += 1;
-        let tier = if outcome.tier == Tier::T1 { "T1" } else { "T2" };
-        let row = Value::object([
-            ("ac", Value::from(outcome.ac.as_str())),
-            ("tier", Value::from(tier)),
-            ("kind", Value::from(outcome.kind)),
-            ("status", Value::from(outcome.status.name())),
-            ("commit", Value::from(commit.as_str())),
-        ]);
-        lines.push(json::write(&row));
-    }
-    let text = format!("[\n{}\n]\n", lines.join(",\n"));
-    let path = root.join(TABLE_PATH);
-    std::fs::write(&path, text).map_err(|e| Error::io(&path, e))?;
-    let mut summary: Vec<(&str, Value)> = counts
-        .into_iter()
-        .map(|(k, v)| (k, Value::from(v)))
-        .collect();
-    summary.push(("path", Value::from(TABLE_PATH)));
-    summary.push(("commit", Value::from(commit)));
-    Ok(Value::object(summary))
 }

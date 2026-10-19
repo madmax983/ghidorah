@@ -2973,7 +2973,7 @@ Rules for this section:
 | AC-024 | Every tool description, action line, error and warning message, hint and the server instructions pass the STE checker in deny mode. | `test:tools::ac_024_ste_agent_text@T1` | 13a/25 | 24 |
 | AC-025 | The STE checker reports no finding on docs and comments outside `docs/ste-allowlist.txt`, `docs/research.md` and `docs/planning/`. | `test:testkit::ac_025_ste_docs@T1` | 02 | - |
 | AC-026 | `docs/errors.md` equals the text generated from `ErrorCode`, `WarningCode` and `DiagCode`. | `test:base::ac_026_errors_doc_golden@T1` | 05 | - |
-| AC-027 | `NOTICE` and `docs/licenses.md` list every vendored data file, and each data file names its source and license. A data file is vendored when its header names a copyright holder other than ghidorah or its directory holds a `LICENSE` file. | `test:xtask::ac_027_license_ledger@T1` | 28 | - |
+| AC-027 | `NOTICE` and `docs/licenses.md` list every vendored data file, and each data file names its source and license. A vendored data file has a header that names a copyright holder other than ghidorah, or it is in a directory with a `LICENSE` file. | `test:xtask::ac_027_license_ledger@T1` | 28 | - |
 
 ### 15.4 Verification
 

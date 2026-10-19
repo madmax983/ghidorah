@@ -12,7 +12,8 @@ use std::path::PathBuf;
 use xtask::ac::{self, AcRow, Evidence, Op, Tier};
 use xtask::acrun::table::{self, Row};
 use xtask::acrun::{self, Outcome, Status, record};
-use xtask::gates::docs::{self, DataFile};
+use xtask::gates::docs;
+use xtask::gates::ledger::{self, DataFile};
 use xtask::json::{self, Value};
 use xtask::{Finding, workspace};
 
@@ -145,27 +146,27 @@ fn ac_023b_adr_sections() {
 
 #[test]
 fn ac_027_license_ledger() {
-    let found = docs::check_ledger(&root()).expect("the check runs");
+    let found = ledger::check_ledger(&root()).expect("the check runs");
     assert!(found.is_empty(), "{}", render(&found));
-    let files = docs::data_files(&root()).expect("data files read");
+    let files = ledger::data_files(&root()).expect("data files read");
     assert!(
         files
             .iter()
             .any(|f| f.path == "crates/types/data/noreturn_elf.txt")
     );
-    assert!(docs::glob_match(
+    assert!(ledger::glob_match(
         "tests/data/jsontestsuite/*.json",
         "tests/data/jsontestsuite/y_true.json"
     ));
-    assert!(!docs::glob_match(
+    assert!(!ledger::glob_match(
         "tests/data/jsontestsuite/*.json",
         "tests/data/jsontestsuite/LICENSE"
     ));
-    assert!(!docs::glob_match(
+    assert!(!ledger::glob_match(
         "tests/data/*.json",
         "tests/data/a/b.json"
     ));
-    assert!(docs::glob_match("a/b.txt", "a/b.txt"));
+    assert!(ledger::glob_match("a/b.txt", "a/b.txt"));
 
     let ledger = "| File | Source | License | Added by |\n|---|---|---|---|\n\
                   | `crates/x/data/list.txt` (2 names) | Upstream | MIT | WP-10 |\n\
@@ -195,9 +196,9 @@ fn ac_027_license_ledger() {
         },
         text("tests/data/own.jsonl", "{\"a\":1}\n"),
     ];
-    let found = docs::license_ledger(notice, ledger, &good);
+    let found = ledger::license_ledger(notice, ledger, &good);
     assert!(found.is_empty(), "{}", render(&found));
-    let rows = docs::ledger_rows(ledger);
+    let rows = ledger::ledger_rows(ledger);
     assert_eq!(rows.len(), 2);
     assert_eq!(rows[0].pattern, "crates/x/data/list.txt");
     assert_eq!(rows[1].license, "MIT");
@@ -207,32 +208,35 @@ fn ac_027_license_ledger() {
         "tests/data/other.txt",
         "# Copyright 2019 Another. BSD.\n",
     ));
-    assert_eq!(docs::license_ledger(notice, ledger, &unlisted).len(), 1);
+    assert_eq!(ledger::license_ledger(notice, ledger, &unlisted).len(), 1);
     let mut corpus = good.clone();
     corpus.push(text("tests/data/corpus2/LICENSE", "MIT License\n"));
     corpus.push(DataFile {
         path: "tests/data/corpus2/b.json".to_owned(),
         head: None,
     });
-    let found = docs::license_ledger(notice, ledger, &corpus);
+    let found = ledger::license_ledger(notice, ledger, &corpus);
     assert!(
-        found.iter().any(|f| f.detail.contains("corpus2/b.json")),
+        found.iter().any(|f| f.path == "tests/data/corpus2/b.json"),
         "{}",
         render(&found)
     );
     let no_notice = notice.replace("- crates/x/data/list.txt: a list.\n", "");
-    assert_eq!(docs::license_ledger(&no_notice, ledger, &good).len(), 1);
+    assert_eq!(ledger::license_ledger(&no_notice, ledger, &good).len(), 1);
     let extra_notice = format!("{notice}- tests/data/gone.txt: a file.\n");
-    assert_eq!(docs::license_ledger(&extra_notice, ledger, &good).len(), 1);
+    assert_eq!(
+        ledger::license_ledger(&extra_notice, ledger, &good).len(),
+        1
+    );
     let no_file: Vec<DataFile> = good
         .iter()
         .filter(|f| f.path != "crates/x/data/list.txt")
         .cloned()
         .collect();
-    assert_eq!(docs::license_ledger(notice, ledger, &no_file).len(), 1);
+    assert_eq!(ledger::license_ledger(notice, ledger, &no_file).len(), 1);
     let mut no_source = good;
     no_source[1] = text("crates/x/data/own.txt", "# A list of names.\n");
-    assert_eq!(docs::license_ledger(notice, ledger, &no_source).len(), 1);
+    assert_eq!(ledger::license_ledger(notice, ledger, &no_source).len(), 1);
 }
 
 #[test]
