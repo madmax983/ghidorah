@@ -12,11 +12,12 @@ use std::process::ExitCode;
 
 use xtask::json::{self, Value};
 use xtask::{
-    Error, ac, ci, cov, dag, eval, fixtures, gates, golden, oracle, ste, verify, workspace,
+    Error, ac, bench, ci, cov, dag, eval, fixtures, fuzz, gates, golden, oracle, ste, verify,
+    workspace,
 };
 
 const USAGE: &str =
-    "cargo xtask <gates|deps|ci|cov|ac|ste|verify|fixtures|eval|golden|oracle> [args]";
+    "cargo xtask <gates|deps|ci|cov|ac|ste|verify|fixtures|eval|golden|oracle|fuzz|bench> [args]";
 
 fn dispatch(command: &str, rest: &[String]) -> Result<Value, Error> {
     let root = workspace::root();
@@ -32,6 +33,8 @@ fn dispatch(command: &str, rest: &[String]) -> Result<Value, Error> {
         "golden" => golden::run(&root, rest),
         "oracle" => oracle::run(&root, rest),
         "eval" => eval::run(&root, rest),
+        "fuzz" => fuzz::run(&root, rest),
+        "bench" => bench::run(&root, rest),
         _ => Err(Error::Usage(USAGE.to_owned())),
     }
 }

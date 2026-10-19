@@ -19,9 +19,12 @@
 //! | `xtask golden` | [`golden`] | Blesses goldens and checks their headers. |
 //! | `xtask oracle` | [`oracle`] | Writes the native semantic vectors and the host boundary record (WP-16). |
 //! | `xtask eval` | [`eval`] | Runs the eval harness, blesses its baselines and replays call records (WP-26). |
+//! | `xtask fuzz` | [`fuzz`] | Runs long fuzz batches of every target in child processes (WP-27). |
+//! | `xtask bench` | [`bench`] | Runs the release benchmarks against `perf/budget.json` (WP-27). |
 
 pub mod ac;
 pub mod acrun;
+pub mod bench;
 pub mod ci;
 pub mod cov;
 pub mod dag;
@@ -30,6 +33,7 @@ pub mod eval;
 pub mod finding;
 pub mod fixtures;
 pub mod fixtures_pe;
+pub mod fuzz;
 pub mod gates;
 pub mod golden;
 pub mod json;

@@ -44,6 +44,19 @@ pub const DEFAULT_STACK: usize = 256 * 1024;
 /// The default largest input length.
 pub const DEFAULT_MAX_LEN: usize = 4096;
 
+/// The variable that gives the batch seed of a long run (`xtask fuzz`, design Section 13.5).
+///
+/// Without it, a run uses the fixed seed of its [`Config`]. With it, the run mixes the batch
+/// seed into that seed. Then it shrinks each failed case and saves its input in the pending
+/// directory as `crash-<case>.input`.
+pub const SEED_ENV: &str = "FUZZ_SEED";
+
+/// The file extension of a failing input that a long run saves.
+pub const CRASH_EXT: &str = "input";
+
+/// The largest number of target runs of one shrink in a long run.
+pub const SHRINK_BUDGET: u32 = 2_000;
+
 /// The settings of one fuzz run.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Config {
@@ -211,6 +224,32 @@ impl std::error::Error for FuzzError {}
 /// 1 to 35, delete block and insert byte. The result has at most `max_len` bytes.
 pub fn mutate(rng: &mut Xoshiro256ss, input: &[u8], max_len: usize) -> Vec<u8> {
     havoc::mutate(rng, input, max_len)
+}
+
+/// Gives the seed of a run: `seed` alone, or `seed` mixed with the batch seed of a long run.
+#[must_use]
+pub const fn batch_seed(seed: u64, batch: Option<u64>) -> u64 {
+    let _ = batch;
+    seed
+}
+
+/// Gives the file name of the saved input of the failed case `case`: `crash-<case>.input`.
+#[must_use]
+pub fn crash_name(case: u32) -> String {
+    let _ = case;
+    String::new()
+}
+
+/// Shrinks the failing input `input` of `target` with at most `budget` target runs.
+///
+/// A case fails when the target panics or gives a violation. The result fails too. An input
+/// that does not fail comes back unchanged.
+pub fn shrink_input<F>(input: &[u8], target: &F, budget: u32) -> Vec<u8>
+where
+    F: Fn(&[u8]) -> Outcome,
+{
+    let _ = (target, budget);
+    input.to_vec()
 }
 
 fn io_error(path: &Path, e: &std::io::Error) -> FuzzError {

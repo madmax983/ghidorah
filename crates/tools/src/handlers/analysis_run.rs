@@ -55,6 +55,19 @@ pub struct Engine {
     schedulers: BTreeMap<BinaryId, Scheduler>,
 }
 
+impl Engine {
+    /// Makes an engine whose first analysis of each binary seeds the analyzers in an order
+    /// that `seed` shuffles: the seed-order relation of design Section 13.4 (AC-189a).
+    ///
+    /// The scheduler picks its steps by priority and name, so the state hash stays the same.
+    /// Only the row order of the `analyzers` list changes.
+    #[must_use]
+    pub fn with_seed_order(seed: u64) -> Self {
+        let _ = seed;
+        Self::default()
+    }
+}
+
 /// Gives the envelope state of a run state.
 const fn state_of(state: RunState) -> AnalysisState {
     match state {

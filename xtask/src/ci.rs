@@ -2,7 +2,11 @@
 //!
 //! Output: `{ ok, steps: { <step>: { ok, seconds, .. } } }`.
 //! AC-002 reads `/steps/offline_build/ok`. AC-021 reads `/steps/tier1/seconds`.
-//! AC-224 reads `/steps/test_times/max_seconds`.
+//! AC-224 reads `/steps/test_times/max_seconds`. AC-020 reads `/steps/test_hermetic/ok`.
+//! AC-234 reads `/steps/fix_commits/ok`.
+
+mod fixes;
+mod hermetic;
 
 use std::collections::BTreeMap;
 use std::io::{BufRead as _, BufReader};
@@ -13,8 +17,16 @@ use std::time::Instant;
 use crate::json::Value;
 use crate::{Error, proc};
 
+pub use fixes::{
+    FIX_PREFIX, LOG_FORMAT, fix_commit_count, fix_commits_without_tests, is_test_file,
+};
+pub use hermetic::{REMOVED_VARS, TestBinary, hermetic_env, test_binaries};
+
 /// The time cap of one tier-1 test in milliseconds (AC-224).
 pub const TEST_CAP_MS: u64 = 15_000;
+
+/// The time cap of the tier-1 run in seconds on the 4-core build host (AC-021).
+pub const TIER1_CAP_SECS: u64 = 120;
 
 /// The number of slow tests that the `test_times` step lists.
 const SLOWEST: usize = 10;
@@ -36,6 +48,10 @@ pub enum Step {
     Tier2,
     /// A tier-1 run with one test thread that records the time of each test.
     TestTimes,
+    /// The tier-1 test binaries with `PATH` reduced to the toolchain and an empty `HOME`.
+    TestHermetic,
+    /// Each `fix:` commit changes at least one test file.
+    FixCommits,
 }
 
 impl Step {
@@ -48,6 +64,8 @@ impl Step {
         Self::Tier1,
         Self::Tier2,
         Self::TestTimes,
+        Self::TestHermetic,
+        Self::FixCommits,
     ];
 
     /// The steps of a run without `--steps` and without `--tier2`.
@@ -71,6 +89,8 @@ impl Step {
             Self::Tier1 => "tier1",
             Self::Tier2 => "tier2",
             Self::TestTimes => "test_times",
+            Self::TestHermetic => "test_hermetic",
+            Self::FixCommits => "fix_commits",
         }
     }
 
@@ -184,6 +204,7 @@ pub fn command(root: &Path, step: Step) -> Command {
             "--",
             "--test-threads=1",
         ]),
+        Step::TestHermetic | Step::FixCommits => proc::cargo_cmd(&["--version"]),
     };
     if matches!(step, Step::Tier1 | Step::Tier2 | Step::TestTimes) {
         cmd.env("GHIDORAH_REQUIRE_PROOFS", "1");
@@ -238,6 +259,20 @@ pub fn parse_test_times(lines: &[(u64, String)]) -> Vec<TestTime> {
         last = *at;
     }
     times
+}
+
+/// Tells if a tier-1 run of `ms` milliseconds is within [`TIER1_CAP_SECS`].
+#[must_use]
+pub const fn tier1_within_cap(ms: u64) -> bool {
+    let _ = ms;
+    false
+}
+
+/// Gives the tests above [`TEST_CAP_MS`], slowest first.
+#[must_use]
+pub fn over_cap(times: &[TestTime]) -> Vec<&TestTime> {
+    let _ = times;
+    Vec::new()
 }
 
 fn elapsed_ms(start: Instant) -> u64 {
