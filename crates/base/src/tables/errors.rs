@@ -164,7 +164,7 @@ pub(crate) const fn info(code: ErrorCode) -> CodeInfo {
             N,
             false,
             "The parser cannot read the main header of the file. The magic value is wrong, or the header is not complete. Read details.diagnostic.",
-            "Use format raw to load the file as a raw blob.",
+            "Use file_format raw to load the file as a raw blob.",
         ),
         E::CursorInvalid => row(
             code,

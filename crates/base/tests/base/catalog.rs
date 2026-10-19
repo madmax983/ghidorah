@@ -276,3 +276,11 @@ fn ac_026_errors_doc_golden() {
     );
     golden::assert_text(&repo_root().join(ERRORS_DOC_PATH), &header, &body);
 }
+
+/// The hint of `FORMAT_MALFORMED` names the `binary_load` argument `file_format`. The global
+/// argument `format` selects the output form, so `format raw` is not a valid repair.
+#[test]
+fn regress_format_malformed_hint_names_file_format() {
+    let hint = ErrorCode::FormatMalformed.info().hint;
+    assert!(hint.contains("file_format raw"), "{hint}");
+}

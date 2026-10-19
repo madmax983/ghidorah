@@ -9,9 +9,10 @@
 //! | xtask | `xtask:<subcommand>#<pointer> <op> <value>` |
 //! | record | `record:<file>#<pointer>@sha256=<input>` |
 
+use std::collections::BTreeSet;
 use std::path::Path;
 
-use crate::acrun;
+use crate::acrun::{self, record, table};
 use crate::json::Value;
 use crate::{Error, Finding};
 
@@ -410,21 +411,60 @@ fn findings_json(found: &[Finding]) -> Value {
     Value::from(found.iter().map(Finding::to_json).collect::<Vec<_>>())
 }
 
+/// Gives the effective rows of a check without `--run`: the table rows, with each record
+/// row replaced by a live check of its record.
+fn checked_rows(root: &Path, rows: &[AcRow], commit: &str) -> Result<Vec<table::Row>, Error> {
+    let old = table::read(root)?;
+    let live: Vec<table::Row> = record::live(root, rows)
+        .iter()
+        .map(|o| table::Row::new(o, commit))
+        .collect();
+    let kept: Vec<table::Row> = old.into_iter().filter(|r| r.kind != "record").collect();
+    Ok(table::merge(&kept, &BTreeSet::new(), &live, rows))
+}
+
+/// Runs the evidence of `selected` and writes the table. Gives the outcomes of the run and the
+/// summary of the table.
+///
+/// The `xtask:ac` items run last, after the first write, so they read the table of this run.
+fn execute(
+    root: &Path,
+    rows: &[AcRow],
+    selected: &[AcRow],
+    tier2: bool,
+) -> Result<(Vec<acrun::Outcome>, Vec<table::Row>), Error> {
+    let commit = table::head_commit(root)?;
+    let old = table::read(root)?;
+    let ran: BTreeSet<String> = selected.iter().map(|r| r.id.clone()).collect();
+    let (first, last) = acrun::split_self(selected);
+    let mut outcomes = acrun::run_rows(root, &first, tier2)?;
+    let to_rows = |list: &[acrun::Outcome]| -> Vec<table::Row> {
+        list.iter().map(|o| table::Row::new(o, &commit)).collect()
+    };
+    table::write(root, &table::merge(&old, &ran, &to_rows(&outcomes), rows))?;
+    outcomes.extend(acrun::run_rows(root, &last, tier2)?);
+    let merged = table::merge(&old, &ran, &to_rows(&outcomes), rows);
+    Ok((outcomes, merged))
+}
+
 /// Runs `xtask ac [--run] [--tier2] [AC...]`.
 ///
-/// Without `--run`, the command checks the grammar, the Needs order and missing evidence.
-/// With `--run`, it also runs the evidence and writes `docs/ac-evidence.json`.
+/// Without `--run`, the command checks the grammar, the Needs order and missing evidence. It
+/// also reports `failed` from the evidence table, with each record item checked again. With
+/// `--run`, it also runs the evidence and writes `docs/ac-evidence.json`. A list of ACs runs
+/// only those ACs and replaces only their rows of the table.
 ///
 /// # Errors
 ///
-/// Returns an error when the design does not read or an evidence run fails to start.
+/// Returns an error when the design or the table does not read, or an evidence run fails to
+/// start.
 pub fn run(root: &Path, args: &[String]) -> Result<Value, Error> {
-    let mut execute = false;
+    let mut execute_items = false;
     let mut tier2 = false;
     let mut only = Vec::new();
     for arg in args {
         match arg.as_str() {
-            "--run" => execute = true,
+            "--run" => execute_items = true,
             "--tier2" => tier2 = true,
             id if is_ac_id(id) => only.push(id.to_owned()),
             _ => {
@@ -436,7 +476,7 @@ pub fn run(root: &Path, args: &[String]) -> Result<Value, Error> {
     }
     let path = root.join(DESIGN_PATH);
     let text = std::fs::read_to_string(&path).map_err(|e| Error::io(&path, e))?;
-    let (mut rows, grammar) = parse_rows(&text);
+    let (rows, grammar) = parse_rows(&text);
     let order = needs_order(&rows);
     let absent = missing(&rows);
     let mut ok = grammar.is_empty() && order.is_empty() && absent.is_empty();
@@ -449,13 +489,22 @@ pub fn run(root: &Path, args: &[String]) -> Result<Value, Error> {
             Value::from(absent.into_iter().map(Value::from).collect::<Vec<_>>()),
         ),
     ];
-    if execute {
-        if !only.is_empty() {
-            rows.retain(|r| only.contains(&r.id));
-        }
-        let outcomes = acrun::run_rows(root, &rows, tier2)?;
+    if execute_items {
+        let selected: Vec<AcRow> = rows
+            .iter()
+            .filter(|r| only.is_empty() || only.contains(&r.id))
+            .cloned()
+            .collect();
+        let (outcomes, table_rows) = execute(root, &rows, &selected, tier2)?;
         ok &= outcomes.iter().all(|o| o.status != acrun::Status::Fail);
-        report.push(("evidence", acrun::write_table(root, &outcomes)?));
+        report.push(("evidence", table::write(root, &table_rows)?));
+        report.push(("failed", table::failed(&table_rows)));
+    } else {
+        let commit = table::head_commit(root).unwrap_or_default();
+        report.push((
+            "failed",
+            table::failed(&checked_rows(root, &rows, &commit)?),
+        ));
     }
     report.push(("ok", Value::from(ok)));
     Ok(Value::object(report))

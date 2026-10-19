@@ -1,6 +1,6 @@
 # ADR-0020: Test tiers, fixtures, oracles, evidence and xtask scope
 
-Status: Accepted (amended 2026-10-17, revision 3)
+Status: Accepted (amended 2026-10-17, revision 3, and 2026-10-19)
 Date: 2026-10-16
 Verified by: AC-018a, AC-018b, AC-018c, AC-020, AC-021, AC-022, AC-224
 
@@ -46,3 +46,11 @@ Verified by: AC-018a, AC-018b, AC-018c, AC-020, AC-021, AC-022, AC-224
 - `xtask loc` is removed (ADR-0018).
 - T1 gets the PE32+ fixtures of WP-30. `xtask fixtures build` makes them offline with `clang --target=x86_64-pc-windows-msvc` and `rust-lld -flavor link`, and the goldens come from `llvm-readobj` and `llvm-objdump` of the pinned toolchain. `PeBuilder` in `ghidorah-testkit` makes malformed variants.
 - The `pe_load` fuzz target runs 10,000 fixed-seed cases in tier 1.
+
+## Amendment 2026-10-19
+
+- A `record:` item checks the hash of its named input. The input `tree` compares the `tree_sha256` of the record with the tree hash of the proof inputs. The input `host-<name>` compares the `sha256` of the object at the pointer with the SHA-256 of the host file at its `path`. A missing host file gives `skipped`.
+- `xtask ac` without `--run` reports `failed` from `docs/ac-evidence.json`, and it checks each record item again. AC-018b reads this list.
+- A run with a list of ACs replaces only the rows of those ACs in the table.
+- An `xtask:ac` item reads the table of its own run. The runner writes the table before it runs these items.
+- The doc gates AC-023a, AC-023b and AC-027 are in `xtask gates`.

@@ -1,7 +1,11 @@
 //! The static workspace gates and the `xtask gates` command.
 //!
 //! Each gate maps one AC to a check over the repository.
-//! The tests in `xtask/tests/gates.rs` run the same gates.
+//! The tests in `xtask/tests/gates.rs` and `xtask/tests/docs.rs` run the same gates.
+//! The modules [`docs`] and [`ledger`] hold the doc gates of WP-28.
+
+pub mod docs;
+pub mod ledger;
 
 use std::path::{Path, PathBuf};
 
@@ -210,6 +214,21 @@ pub const GATES: &[Gate] = &[
         "AC-019",
         "The CI workflow has its tiers and only allowed actions.",
         |r| Ok(workflow::check(&r.read(workflow::PATH)?)),
+    ),
+    gate(
+        "AC-023a",
+        "The required docs exist, README links resolve and the ADR index matches.",
+        |r| docs::check_present(&r.root),
+    ),
+    gate(
+        "AC-023b",
+        "Each ADR has Alternatives and a Verified-by line with MVP ACs.",
+        |r| docs::check_adrs(&r.root),
+    ),
+    gate(
+        "AC-027",
+        "NOTICE and the ledger list each vendored data file.",
+        |r| ledger::check_ledger(&r.root),
     ),
     gate("AC-223", "No crate changes the process environment.", |r| {
         r.each_rust_file(|_| true, scan::no_set_var)
