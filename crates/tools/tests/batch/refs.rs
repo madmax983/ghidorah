@@ -209,3 +209,23 @@ fn ac_179c_truncated_source() {
         .map(<[Value]>::len);
     assert_eq!(items, Some(2), "{envelope}");
 }
+
+/// The repair call of `PLUCK_TOO_LONG` runs: the source step gets a limit, and the reference
+/// accepts the truncated page (found by WP-26).
+#[test]
+fn regress_pluck_repair_runs() {
+    let mut s = demo();
+    let envelope = batch(
+        &mut s,
+        r#"{"steps":[
+            {"id":"s1","tool":"func_list","args":{}},
+            {"id":"s2","tool":"fact_check","args":{"explain":{"$ref":"s1","ptr":"/data/items/*/id"}}}
+        ]}"#,
+    );
+    assert_eq!(step_code(&envelope, 1), "PLUCK_TOO_LONG", "{envelope}");
+    let (tool, fixed) = next0(&envelope);
+    assert_eq!(tool, "batch_run");
+    let again = call_value(&mut s, "batch_run", fixed);
+    assert_eq!(step_code(&again, 1), "", "{again}");
+    assert_eq!(again.get("ok"), Some(&Value::Bool(true)), "{again}");
+}
