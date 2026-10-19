@@ -3,6 +3,9 @@
 //! A proposal needs the four rules of [`propose`]. The rank-1 candidate must also be the first
 //! match, so `min_score` can hide it. The margin of rule 4 reads every ranked candidate, so
 //! `limit` does not change a proposal. A name that needs an escape gives no proposal.
+//!
+//! The evidence is the texts of the top features of the rank-1 match. A text with an escape or
+//! with more than 200 characters stays out, so each entry is valid for `symbol_rename`.
 
 use ghidorah_analysis::similar::{Index, Match, Named, Scope, Scored, propose};
 use ghidorah_base::{Address, BinaryId, ErrorCode, Fuel, FuncId, OutOfFuel};
@@ -208,7 +211,7 @@ fn proposal(
         .top
         .iter()
         .map(|t| t.text.clone())
-        .filter(|t| t.chars().count() <= MAX_EVIDENCE_CHARS)
+        .filter(|t| t.chars().count() <= MAX_EVIDENCE_CHARS && fs::safe(t) == *t)
         .take(MAX_EVIDENCE)
         .collect();
     Some(Proposal {

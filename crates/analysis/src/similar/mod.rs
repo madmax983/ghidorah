@@ -10,9 +10,10 @@
 //! | [`vectors`] | Sparse count vectors and the vector cache by `(FuncId, func_epoch)` |
 //! | [`index`] | The corpus index: Q16 TF-IDF weights, cosine scores, matches and name proposals |
 //!
-//! The corpus is every function of every open binary. [`corpus`] builds the vectors in
-//! binary ID order, then in entry order. Each new vector goes into the cache at once, so a
-//! call that runs out of fuel keeps the vectors that it built.
+//! The corpus is every function of every open binary. [`docs`] gives the vectors in binary ID
+//! order, then in entry order, and [`corpus`] builds the index of these documents. Each new
+//! vector goes into the cache at once, so a call that runs out of fuel keeps the vectors that
+//! it built.
 
 pub mod features;
 pub mod index;

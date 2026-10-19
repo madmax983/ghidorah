@@ -7,8 +7,8 @@ use ghidorah_json::Value;
 use ghidorah_tools::Profile;
 
 use crate::support::{
-    FULL, STRIPPED, call, call_value, code, data, default_named, int_at, list_at, next_calls, open,
-    open_in, program, similar_args, text_at,
+    FULL, STRIPPED, call, call_value, code, data, default_named, int_at, json, list_at, next_calls,
+    open, open_in, program, similar_args, text_at,
 };
 
 /// Gives the arguments of a proposal call over up to 20 default-named functions of `id`.
@@ -211,5 +211,79 @@ fn hint_has_no_binary_names() {
             .iter()
             .all(|(tool, _)| tool != "batch_run"),
         "the readonly profile gets no rename batch: {envelope}"
+    );
+}
+
+#[test]
+fn bad_target_fails_the_call() {
+    let (mut s, _) = open(&[FULL]);
+    let envelope = call(&mut s, "func_similar", r#"{"target":"0x900000"}"#);
+    assert_eq!(code(&envelope), "ADDRESS_UNMAPPED", "{envelope}");
+    assert_eq!(text_at(&envelope, "/error/field_path"), "/target");
+}
+
+#[test]
+fn budget_cuts_matches() {
+    let (mut s, ids) = open(&[FULL]);
+    let targets: Vec<Value> = program(&s, ids[0])
+        .funcs()
+        .iter()
+        .take(8)
+        .map(|f| Value::from(f.id().to_string()))
+        .collect();
+    let mut args = json(r#"{"min_score":0,"limit":10,"max_chars":4000}"#);
+    if let Value::Object(object) = &mut args {
+        object.push("targets", Value::Array(targets));
+    }
+    let envelope = call_value(&mut s, "func_similar", args);
+    let d = data(&envelope);
+    let omitted = int_at(d, "/omitted/matches");
+    assert!(omitted > 0 && omitted < u64::MAX, "{envelope}");
+    assert!(ghidorah_json::write(&envelope).chars().count() <= 4_000);
+    let lens: Vec<usize> = list_at(d, "/items")
+        .iter()
+        .map(|i| list_at(i, "/matches").len())
+        .collect();
+    assert_eq!(lens.len(), 8);
+    let (min, max) = (lens.iter().min(), lens.iter().max());
+    assert!(
+        max.zip(min).is_some_and(|(a, b)| a - b <= 1),
+        "the cut takes the longest lists first: {lens:?}"
+    );
+}
+
+#[test]
+fn fuel_stop_resumes() {
+    let (mut s, ids) = open(&[STRIPPED, FULL]);
+    let args = format!(
+        r#"{{"binary_id":"{}","target":"main","scope":"open","max_steps":1000}}"#,
+        ids[0]
+    );
+    let mut envelope = call(&mut s, "func_similar", &args);
+    assert_eq!(code(&envelope), "BUDGET_EXCEEDED", "{envelope}");
+    let mut stops = 0;
+    while code(&envelope) == "BUDGET_EXCEEDED" {
+        stops += 1;
+        assert!(stops < 1_000, "the retries make progress");
+        let calls = next_calls(&envelope);
+        assert_eq!(calls[0].0, "func_similar", "{envelope}");
+        envelope = call_value(&mut s, "func_similar", calls[0].1.clone());
+    }
+    assert!(stops > 1, "{stops} stops");
+    let resumed = data(&envelope).clone();
+    let (mut fresh, _) = open(&[STRIPPED, FULL]);
+    let full = call(
+        &mut fresh,
+        "func_similar",
+        &args.replace(",\"max_steps\":1000", ""),
+    );
+    assert_eq!(
+        &resumed,
+        data(&full),
+        "the resumed call gives the full result"
+    );
+    assert!(
+        !list_at(&resumed, "/items/0/matches").is_empty(),
+        "{envelope}"
     );
 }

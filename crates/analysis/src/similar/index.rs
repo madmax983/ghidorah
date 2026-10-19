@@ -99,6 +99,15 @@ impl Scope {
     /// The output names in order.
     pub const NAMES: [&'static str; 2] = ["binary", "open"];
 
+    /// Gives the output name, for example `binary`.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Binary => "binary",
+            Self::Open => "open",
+        }
+    }
+
     /// Gives the scope of an output name.
     #[must_use]
     pub fn parse(name: &str) -> Option<Self> {

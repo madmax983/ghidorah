@@ -265,13 +265,9 @@ fn batch(index: &Index, bound: BinaryId, args: &Args, items: &[Item]) -> Value {
             Item::Bad { .. } => None,
         })
         .collect();
-    let scope = match opts.scope {
-        ghidorah_analysis::similar::Scope::Binary => "binary",
-        ghidorah_analysis::similar::Scope::Open => "open",
-    };
     let s1 = Value::object([
         ("targets", Value::Array(targets)),
-        ("scope", Value::from(scope)),
+        ("scope", Value::from(opts.scope.name())),
         ("min_score", Value::from(opts.min_score)),
         ("limit", Value::from(u64::try_from(opts.limit).unwrap_or(0))),
         ("propose_names", Value::Bool(true)),

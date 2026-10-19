@@ -29,6 +29,7 @@ mod find;
 mod render;
 mod state;
 
+use ghidorah_analysis::similar::Scope;
 use ghidorah_base::ErrorCode;
 use ghidorah_db::Program;
 
@@ -92,7 +93,7 @@ const ARGS: &[ArgSpec] = &[
     ArgSpec::new(
         "scope",
         Role::Param,
-        ArgKind::Enum(&["binary", "open"]),
+        ArgKind::Enum(&Scope::NAMES),
         "The candidates: binary for the other functions of the bound binary, open for every open binary.",
     )
     .default_json("\"binary\""),

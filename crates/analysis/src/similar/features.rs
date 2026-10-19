@@ -393,11 +393,7 @@ fn operands(ctx: &Context<'_>, ir: &FuncIr, out: &mut Vec<Feature>) {
                     Operand::Mem(m) if m.base.is_none() && m.index.is_none() => m.disp,
                     _ => continue,
                 };
-                #[expect(
-                    clippy::cast_sign_loss,
-                    reason = "a negative value maps to its two's complement address"
-                )]
-                let mapped = program.mem().region_at(v as u64).is_some();
+                let mapped = program.mem().region_at(v.cast_unsigned()).is_some();
                 if v.unsigned_abs() > MIN_CONST && !mapped {
                     out.push(Feature::new(
                         Kind::Const,
