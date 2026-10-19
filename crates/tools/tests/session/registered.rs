@@ -23,6 +23,7 @@ const CATALOG: &[(usize, &str)] = &[
     (19, "func_edit"),
     (20, "type_edit"),
     (22, "batch_run"),
+    (23, "func_similar"),
 ];
 
 #[test]
@@ -35,7 +36,7 @@ fn shipped_registry_holds_the_memory_and_override_tools() {
         assert_eq!(index + 1, *number, "{name} is at the index {index}");
     }
     let names = shipped.names();
-    assert_eq!(names.last(), Some(&"batch_run"), "{names:?}");
+    assert_eq!(names.last(), Some(&"func_similar"), "{names:?}");
     for spec in [
         &handlers::session_brief::SPEC,
         &handlers::symbol_rename::SPEC,

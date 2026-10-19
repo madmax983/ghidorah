@@ -7,38 +7,11 @@ use ghidorah_base::{BinaryId, FixedClock};
 use ghidorah_db::Program;
 use ghidorah_json::{Limits, Value};
 use ghidorah_testkit::fixture::cached;
+use ghidorah_tools::registry::shipped;
 use ghidorah_tools::{
     AnalysisInfo, OpenBinary, Profile, ProfileSet, Registry, Request, Roots, Session,
-    SessionConfig, ToolSpec, dispatch_with, handlers,
+    SessionConfig, dispatch_with, handlers,
 };
-
-/// The tools of the tests: the shipped tools and `func_similar`, in the `tools/list` order of
-/// design Section 10.3.
-pub static SIMILAR: &[&ToolSpec<Session>] = &[
-    &handlers::load::SPEC,
-    &handlers::survey::SPEC,
-    &handlers::analysis_run::SPEC,
-    &handlers::func_list::SPEC,
-    &handlers::func_get::SPEC,
-    &handlers::xref_list::SPEC,
-    &handlers::search::SPEC,
-    &handlers::mem_read::SPEC,
-    &handlers::addr_info::SPEC,
-    &handlers::calc::SPEC,
-    &handlers::fact_check::SPEC,
-    &handlers::type_get::SPEC,
-    &handlers::history_list::SPEC,
-    &handlers::session_brief::SPEC,
-    &handlers::tool_search::SPEC,
-    &handlers::symbol_rename::SPEC,
-    &handlers::comment_set::SPEC,
-    &handlers::note_write::SPEC,
-    &handlers::func_edit::SPEC,
-    &handlers::type_edit::SPEC,
-    &handlers::history_undo::SPEC,
-    &handlers::batch_run::SPEC,
-    &handlers::func_similar::SPEC,
-];
 
 /// The stripped twin of the demo binary.
 pub const STRIPPED: &str = "crackme.gcc-O2.stripped";
@@ -46,9 +19,10 @@ pub const STRIPPED: &str = "crackme.gcc-O2.stripped";
 /// The unstripped demo binary.
 pub const FULL: &str = "crackme.gcc-O2";
 
-/// The registry of the tests.
+/// Gives the registry of the tests: the shipped registry, which holds `func_similar` at its
+/// catalog place.
 pub fn registry() -> Registry<Session> {
-    Registry::new(SIMILAR)
+    shipped()
 }
 
 /// Gives the workspace root.

@@ -123,3 +123,26 @@ fn func_similar_examples_are_deterministic() {
         assert_eq!(run_example(example.args), run_example(example.args));
     }
 }
+
+#[test]
+fn tool_search_finds_func_similar() {
+    let mut s = session_in(Profile::Full);
+    for query in [
+        "similar functions",
+        "clone",
+        "bsim",
+        "a clone of a function",
+    ] {
+        let envelope = call(&mut s, "tool_search", &format!(r#"{{"query":"{query}"}}"#));
+        let first = envelope
+            .pointer("/data/items/0/name")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        assert_eq!(first, "func_similar", "{query}: {envelope}");
+    }
+    let mini = session_in(Profile::Mini);
+    assert!(
+        !mini.in_profile("func_similar"),
+        "mini keeps its cap of 10 tools"
+    );
+}

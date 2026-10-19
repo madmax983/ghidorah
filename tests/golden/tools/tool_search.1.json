@@ -37,6 +37,16 @@
         }
       },
       {
+        "name": "func_similar",
+        "summary": "Find functions similar to target functions in the open binaries, explain each match and propose names.",
+        "annotations": {
+          "readOnlyHint": true,
+          "destructiveHint": false,
+          "idempotentHint": true,
+          "openWorldHint": false
+        }
+      },
+      {
         "name": "fact_check",
         "summary": "Check claims with supported, refuted or unknown verdicts, and explain why a fact exists.",
         "annotations": {
@@ -69,8 +79,8 @@
     ]
   },
   "page": {
-    "returned": 6,
-    "total": 6,
+    "returned": 7,
+    "total": 7,
     "truncated": false
   }
 }

@@ -37,6 +37,7 @@ pub static READ: &[&ToolSpec<Session>] = &[
     &handlers::type_edit::SPEC,
     &handlers::history_undo::SPEC,
     &handlers::batch_run::SPEC,
+    &handlers::func_similar::SPEC,
 ];
 
 /// The read tools of WP-17b in catalog order.

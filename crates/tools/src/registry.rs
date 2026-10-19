@@ -114,6 +114,7 @@ static SHIPPED: &[&ToolSpec<Session>] = &[
     &crate::handlers::type_edit::SPEC,
     &crate::handlers::history_undo::SPEC,
     &crate::handlers::batch_run::SPEC,
+    &crate::handlers::func_similar::SPEC,
 ];
 
 /// Gives the shipped registry: the plain list of the shipped tools.

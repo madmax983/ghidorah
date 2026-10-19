@@ -2,8 +2,8 @@
 //! (AC-239), the rename batch (AC-241), the argument caps and the hints.
 //!
 //! The tests run the tool through the dispatcher on a [`ghidorah_tools::Session`].
-//! `support.rs` holds the registry of the tests: the shipped tools and `func_similar` in the
-//! catalog order of design Section 10.3. It also caches one analyzed program per fixture.
+//! `support.rs` holds the registry of the tests: the shipped registry with `func_similar` at
+//! its catalog place. It also caches one analyzed program per fixture.
 
 #![allow(
     clippy::expect_used,
