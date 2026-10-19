@@ -5,13 +5,18 @@
 //! `FUZZ_SEED`. The harness of `testkit::fuzz` mixes the batch seed into its fixed seed, so
 //! each batch runs new cases. A wall-clock watchdog stops a batch that hangs.
 //!
-//! After a failed batch, the command moves each failing input to
+//! After each batch, the command moves each failing input to
 //! `tests/regress/<target>/<sha8>.bin`. The harness shrinks a panic or a violation before it
 //! saves the input. A `pending.bin` from an abort, a stack overflow or a hang keeps its bytes.
 //! Every later test run replays the regression files.
 //!
+//! A batch with a saved input, a hang or a signal is a violation. A batch that fails with an
+//! exit code and saves no input is a stage miss: an assertion of the test outside the cases
+//! fails. An example is a stage share of design Section 13.5 with a new batch seed. The tier-1
+//! run with the fixed seed is the gate of these assertions.
+//!
 //! Output: `{ ok, iters, seed, violations, targets: { <target>: { batches, cases, failed,
-//! hangs, saved } } }`. AC-190b reads `/violations`.
+//! hangs, stage_misses, saved } } }`. AC-190b reads `/violations`.
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -298,13 +303,38 @@ pub fn collect(dir: &Path) -> Result<Vec<String>, Error> {
 
 /// The end of one batch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum End {
+pub enum End {
     /// The test passed.
     Pass,
-    /// The test failed or the process stopped on a signal.
-    Fail,
+    /// The test failed.
+    Fail {
+        /// `true` when a signal stopped the process, for example on an abort.
+        signal: bool,
+    },
     /// The watchdog stopped the process.
     Hang,
+}
+
+/// The verdict of one batch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Verdict {
+    /// The batch passed and saved no input.
+    Pass,
+    /// A case failed, the process stopped on a signal or the watchdog stopped it.
+    Violation,
+    /// The test failed with an exit code and saved no input.
+    StageMiss,
+}
+
+/// Gives the verdict of a batch with the end `end`. `saved` is `true` when the batch saved a
+/// failing input.
+#[must_use]
+pub const fn classify(end: End, saved: bool) -> Verdict {
+    match (end, saved) {
+        (_, true) | (End::Hang | End::Fail { signal: true }, false) => Verdict::Violation,
+        (End::Fail { signal: false }, false) => Verdict::StageMiss,
+        (End::Pass, false) => Verdict::Pass,
+    }
 }
 
 /// Builds the test binary of `target` and gives its executable and package directory.
@@ -356,7 +386,9 @@ fn run_batch(
             return Ok(if status.success() {
                 End::Pass
             } else {
-                End::Fail
+                End::Fail {
+                    signal: status.code().is_none(),
+                }
             });
         }
         if start.elapsed() > timeout {
@@ -374,6 +406,7 @@ struct Summary {
     batches: u64,
     failed: u64,
     hangs: u64,
+    stage_misses: u64,
     saved: Vec<String>,
 }
 
@@ -390,14 +423,16 @@ fn run_target(root: &Path, target: &Target, options: &Options) -> Result<Summary
     for batch in 0..batches(options.iters, target.cases) {
         let end = run_batch(&binary, &test, batch_seed(options.seed, batch), timeout)?;
         out.batches = out.batches.saturating_add(1);
-        if end == End::Pass {
-            continue;
-        }
-        out.failed = out.failed.saturating_add(1);
+        let saved = collect(&dir)?;
         if end == End::Hang {
             out.hangs = out.hangs.saturating_add(1);
         }
-        out.saved.extend(collect(&dir)?);
+        match classify(end, !saved.is_empty()) {
+            Verdict::Pass => {}
+            Verdict::StageMiss => out.stage_misses = out.stage_misses.saturating_add(1),
+            Verdict::Violation => out.failed = out.failed.saturating_add(1),
+        }
+        out.saved.extend(saved);
         if out.failed >= MAX_FAILED_BATCHES {
             break;
         }
@@ -429,6 +464,7 @@ pub fn run(root: &Path, args: &[String]) -> Result<Value, Error> {
                 ),
                 ("failed", Value::from(s.failed)),
                 ("hangs", Value::from(s.hangs)),
+                ("stage_misses", Value::from(s.stage_misses)),
                 ("saved", Value::from(saved)),
             ]),
         );

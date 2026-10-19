@@ -292,6 +292,28 @@ fn collect_moves_failing_inputs() {
     );
 }
 
+/// The first full `xtask fuzz` run gave 9 violations with no saved input and no hang. A stage
+/// share assertion of the test failed for some batch seeds. No case failed.
+#[test]
+fn regress_fuzz_stage_miss_is_not_violation() {
+    use fuzz::{End, Verdict, classify};
+    assert_eq!(classify(End::Pass, false), Verdict::Pass);
+    assert_eq!(
+        classify(End::Fail { signal: false }, false),
+        Verdict::StageMiss
+    );
+    assert_eq!(
+        classify(End::Fail { signal: false }, true),
+        Verdict::Violation
+    );
+    assert_eq!(
+        classify(End::Fail { signal: true }, false),
+        Verdict::Violation
+    );
+    assert_eq!(classify(End::Hang, false), Verdict::Violation);
+    assert_eq!(classify(End::Pass, true), Verdict::Violation);
+}
+
 #[test]
 fn long_run_hooks() {
     assert_eq!(tkfuzz::SEED_ENV, "FUZZ_SEED");
