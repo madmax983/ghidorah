@@ -1,6 +1,6 @@
 # ADR-0014: Composition layer is batch_run
 
-Status: Accepted (hypothesis; the decision rule below confirms or refutes it; amended 2026-10-17)
+Status: Accepted (hypothesis; the decision rule below confirms or refutes it; amended 2026-10-17 and 2026-10-19)
 Date: 2026-10-16
 Verified by: AC-175 to AC-185 (all sub-ACs), AC-219
 
@@ -42,3 +42,7 @@ Verified by: AC-175 to AC-185 (all sub-ACs), AC-219
 ## Amendment 2026-10-17
 
 - The `*` pointer replaced `pluck`. The output schema, the globals rule, the destructive-step rule, the trim rule, resume bindings and the decision rule are new. What-if diffs moved to stretch S18.
+
+## Amendment 2026-10-19
+
+- Each `ghidorah call` is a new session. A script composes calls through one `ghidorah jsonl` process, because that process keeps one session. `ghidorah call --select` stays for one call (design Section 11.10).
