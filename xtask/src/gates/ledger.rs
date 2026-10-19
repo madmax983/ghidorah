@@ -140,63 +140,60 @@ fn names_source_and_license(head: &str) -> bool {
     head.contains("Source") && (head.contains("License") || head.contains("license"))
 }
 
-/// AC-027: checks the ledger, the notice and the data files.
-#[must_use]
-pub fn license_ledger(notice: &str, ledger: &str, files: &[DataFile]) -> Vec<Finding> {
-    let rows = ledger_rows(ledger);
-    let mut found = Vec::new();
-    let mut push = |path: &str, line: usize, detail: String| {
-        found.push(Finding::new("AC-027", path, line, detail));
-    };
+/// Makes one AC-027 finding.
+fn finding(path: &str, line: usize, detail: impl Into<String>) -> Finding {
+    Finding::new("AC-027", path, line, detail)
+}
+
+/// Checks each ledger row: its columns, its data file and its `NOTICE` entry.
+fn check_rows(rows: &[LedgerRow], notice: &str, files: &[DataFile], found: &mut Vec<Finding>) {
+    for row in rows {
+        if row.source.is_empty() || row.license.is_empty() {
+            found.push(finding(LEDGER, row.line, "name the source and the license"));
+        }
+        if !files.iter().any(|f| glob_match(&row.pattern, &f.path)) {
+            let detail = format!("`{}` matches no data file", row.pattern);
+            found.push(finding(LEDGER, row.line, detail));
+        }
+        if !notice.contains(&row.pattern) {
+            found.push(finding(NOTICE, 0, format!("list `{}`", row.pattern)));
+        }
+    }
+}
+
+/// Checks that each data entry `- <path>: ..` of `NOTICE` has a ledger row.
+fn check_notice(rows: &[LedgerRow], notice: &str, found: &mut Vec<Finding>) {
+    for (index, line) in notice.lines().enumerate() {
+        let Some((path, _)) = line.strip_prefix("- ").and_then(|l| l.split_once(": ")) else {
+            continue;
+        };
+        if !rows.iter().any(|r| r.pattern == path) {
+            let detail = format!("`{path}` has no ledger row");
+            found.push(finding(NOTICE, index + 1, detail));
+        }
+    }
+}
+
+/// Checks that each vendored file has a ledger row. Each file of a row and each embedded
+/// file must name its source and its license.
+fn check_files(rows: &[LedgerRow], files: &[DataFile], found: &mut Vec<Finding>) {
     let by_path: BTreeMap<&str, &DataFile> = files.iter().map(|f| (f.path.as_str(), f)).collect();
     let licensed: BTreeSet<String> = files
         .iter()
         .filter_map(|f| f.path.strip_suffix("/LICENSE"))
         .map(str::to_owned)
         .collect();
-    let covered = |path: &str| rows.iter().any(|r| glob_match(&r.pattern, path));
-    for row in &rows {
-        if row.source.is_empty() || row.license.is_empty() {
-            push(
-                LEDGER,
-                row.line,
-                "name the source and the license".to_owned(),
-            );
-        }
-        if !files.iter().any(|f| glob_match(&row.pattern, &f.path)) {
-            push(
-                LEDGER,
-                row.line,
-                format!("`{}` matches no data file", row.pattern),
-            );
-        }
-        if !notice.contains(&row.pattern) {
-            push(NOTICE, 0, format!("list `{}`", row.pattern));
-        }
-    }
-    for (index, line) in notice.lines().enumerate() {
-        let Some(entry) = line.strip_prefix("- ").and_then(|l| l.split_once(": ")) else {
-            continue;
-        };
-        if !rows.iter().any(|r| r.pattern == entry.0) {
-            push(
-                NOTICE,
-                index + 1,
-                format!("`{}` has no ledger row", entry.0),
-            );
-        }
-    }
     for file in files.iter().filter(|f| is_data(&f.path)) {
         let dir = licensed_dir(&file.path, &licensed);
         let head = file.head.as_deref();
         let vendored = dir.is_some() || head.is_some_and(foreign_copyright);
-        let listed = covered(&file.path);
+        let listed = rows.iter().any(|r| glob_match(&r.pattern, &file.path));
         if vendored && !listed {
-            push(
+            found.push(finding(
                 &file.path,
                 0,
-                "add the vendored file to the ledger".to_owned(),
-            );
+                "add the vendored file to the ledger",
+            ));
         }
         if !(listed || is_embedded(&file.path)) {
             continue;
@@ -211,11 +208,21 @@ pub fn license_ledger(notice: &str, ledger: &str, files: &[DataFile]) -> Vec<Fin
         };
         match header {
             Some(text) if names_source_and_license(text) => {}
-            Some(_) => push(&file.path, 1, "name the source and the license".to_owned()),
-            None if listed => push(&file.path, 0, "add a README.md with the source".to_owned()),
+            Some(_) => found.push(finding(&file.path, 1, "name the source and the license")),
+            None if listed => found.push(finding(&file.path, 0, "add a README.md with the source")),
             None => {}
         }
     }
+}
+
+/// AC-027: checks the ledger, the notice and the data files.
+#[must_use]
+pub fn license_ledger(notice: &str, ledger: &str, files: &[DataFile]) -> Vec<Finding> {
+    let rows = ledger_rows(ledger);
+    let mut found = Vec::new();
+    check_rows(&rows, notice, files, &mut found);
+    check_notice(&rows, notice, &mut found);
+    check_files(&rows, files, &mut found);
     found
 }
 

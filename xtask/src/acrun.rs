@@ -25,9 +25,9 @@ pub enum Status {
     Pass,
     /// The item ran and failed.
     Fail,
-    /// The record exists, and its pointer resolves.
+    /// The record matches the hash of its named input.
     Recorded,
-    /// The item did not run in this tier.
+    /// The item did not run in this tier, or the host has no input file of the record.
     Skipped,
 }
 

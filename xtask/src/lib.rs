@@ -7,7 +7,7 @@
 //!
 //! | Command | Module | Purpose |
 //! |---|---|---|
-//! | `xtask gates` | [`gates`] | Runs the static workspace gates (AC-001 to AC-019, AC-223). |
+//! | `xtask gates` | [`gates`] | Runs the static workspace gates (AC-001 to AC-027, AC-223). |
 //! | `xtask deps` | [`dag`] | Checks the crate edges and writes `docs/architecture/crates.mmd`. |
 //! | `xtask ci` | [`ci`] | Runs the CI steps and records the time of each test. |
 //! | `xtask cov` | [`cov`] | Measures line coverage with `llvm-tools` (ADR-0027). |
