@@ -16,7 +16,7 @@
 //! An instruction that jumps to its own address without a CFG edge is a `rep` loop. L1 cannot show its loop, so
 //! its flow ops are not control flow, and it gets `W_LIFT_UNSUPPORTED`.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use ghidorah_base::WarningCode;
 use ghidorah_ir::{Arg, IntrinsicId, Node, Op, OpId, Opc, Val};
@@ -304,15 +304,16 @@ pub(crate) fn block(ex: &Ex<'_>, b: Node) -> Raw {
     let mut warnings = Vec::new();
     let mut addrs: Vec<u64> = tagged.iter().map(|(_, o)| o.id.addr).collect();
     addrs.dedup();
+    // One pass groups the instruction ops by address, so a long block costs no square time.
+    let mut by_addr: BTreeMap<u64, Vec<(u32, Op)>> = BTreeMap::new();
+    for &(i, o) in tagged.iter().filter(|(i, _)| f.ssa.is_insn_op(*i)) {
+        by_addr.entry(o.id.addr).or_default().push((i, o));
+    }
     let mut looping: BTreeSet<u64> = BTreeSet::new();
     for addr in addrs {
-        let insn: Vec<(u32, Op)> = tagged
-            .iter()
-            .filter(|(i, o)| o.id.addr == addr && f.ssa.is_insn_op(*i))
-            .copied()
-            .collect();
+        let insn = by_addr.get(&addr).map_or(&[][..], Vec::as_slice);
         let modeled = f.ssa.block_at(addr) == Some(b) && f.ssa.cfg().succs(b).contains(&b);
-        if !modeled && loops_on_itself(&insn, addr) {
+        if !modeled && loops_on_itself(insn, addr) {
             looping.insert(addr);
             warnings.push(Warning {
                 code: WarningCode::LiftUnsupported,

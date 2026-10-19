@@ -37,18 +37,25 @@ jobs:
         run: cargo xtask cov
 
   tier2:
-    name: tier 2 (ignored tests, offline build, test times)
+    name: tier 2 (ignored tests, offline build, test times, hermetic run, fuzz, bench)
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The fix_commits step reads the full history.
+          fetch-depth: 0
       - name: Install clang and llvm
         run: sudo apt-get update && sudo apt-get install -y clang llvm
       - name: Install the pinned toolchain
         run: rustup show active-toolchain || rustup toolchain install
       - name: Tier-2 tests
         run: cargo test --workspace -- --include-ignored
-      - name: Offline build and test times
-        run: cargo xtask ci --steps offline_build,test_times
+      - name: Offline build, test times, hermetic run and fix commits
+        run: cargo xtask ci --steps offline_build,tier1,test_times,test_hermetic,fix_commits
+      - name: Long fuzz runs (100,000 cases per target)
+        run: cargo xtask fuzz
+      - name: Benchmarks against perf/budget.json
+        run: cargo xtask bench
 
   verus:
     name: verus (kernel proofs)

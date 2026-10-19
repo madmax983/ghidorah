@@ -2,7 +2,11 @@
 //!
 //! Output: `{ ok, steps: { <step>: { ok, seconds, .. } } }`.
 //! AC-002 reads `/steps/offline_build/ok`. AC-021 reads `/steps/tier1/seconds`.
-//! AC-224 reads `/steps/test_times/max_seconds`.
+//! AC-224 reads `/steps/test_times/max_seconds`. AC-020 reads `/steps/test_hermetic/ok`.
+//! AC-234 reads `/steps/fix_commits/ok`.
+
+mod fixes;
+mod hermetic;
 
 use std::collections::BTreeMap;
 use std::io::{BufRead as _, BufReader};
@@ -13,8 +17,16 @@ use std::time::Instant;
 use crate::json::Value;
 use crate::{Error, proc};
 
+pub use fixes::{
+    FIX_PREFIX, LOG_FORMAT, fix_commit_count, fix_commits_without_tests, is_test_file,
+};
+pub use hermetic::{REMOVED_VARS, TestBinary, hermetic_env, run_hermetic, test_binaries};
+
 /// The time cap of one tier-1 test in milliseconds (AC-224).
 pub const TEST_CAP_MS: u64 = 15_000;
+
+/// The time cap of the tier-1 run in seconds on the 4-core build host (AC-021).
+pub const TIER1_CAP_SECS: u64 = 120;
 
 /// The number of slow tests that the `test_times` step lists.
 const SLOWEST: usize = 10;
@@ -36,6 +48,10 @@ pub enum Step {
     Tier2,
     /// A tier-1 run with one test thread that records the time of each test.
     TestTimes,
+    /// The tier-1 test binaries with `PATH` reduced to the toolchain and an empty `HOME`.
+    TestHermetic,
+    /// Each `fix:` commit changes at least one test file.
+    FixCommits,
 }
 
 impl Step {
@@ -48,6 +64,8 @@ impl Step {
         Self::Tier1,
         Self::Tier2,
         Self::TestTimes,
+        Self::TestHermetic,
+        Self::FixCommits,
     ];
 
     /// The steps of a run without `--steps` and without `--tier2`.
@@ -58,6 +76,8 @@ impl Step {
         Self::OfflineBuild,
         Self::Tier1,
         Self::TestTimes,
+        Self::TestHermetic,
+        Self::FixCommits,
     ];
 
     /// Gives the step name of the JSON output.
@@ -71,6 +91,8 @@ impl Step {
             Self::Tier1 => "tier1",
             Self::Tier2 => "tier2",
             Self::TestTimes => "test_times",
+            Self::TestHermetic => "test_hermetic",
+            Self::FixCommits => "fix_commits",
         }
     }
 
@@ -184,6 +206,8 @@ pub fn command(root: &Path, step: Step) -> Command {
             "--",
             "--test-threads=1",
         ]),
+        Step::TestHermetic => hermetic::build_command(root),
+        Step::FixCommits => fixes::log_command(root),
     };
     if matches!(step, Step::Tier1 | Step::Tier2 | Step::TestTimes) {
         cmd.env("GHIDORAH_REQUIRE_PROOFS", "1");
@@ -240,6 +264,20 @@ pub fn parse_test_times(lines: &[(u64, String)]) -> Vec<TestTime> {
     times
 }
 
+/// Tells if a tier-1 run of `ms` milliseconds is within [`TIER1_CAP_SECS`].
+#[must_use]
+pub const fn tier1_within_cap(ms: u64) -> bool {
+    ms <= TIER1_CAP_SECS.saturating_mul(1_000)
+}
+
+/// Gives the tests above [`TEST_CAP_MS`], slowest first.
+#[must_use]
+pub fn over_cap(times: &[TestTime]) -> Vec<&TestTime> {
+    let mut out: Vec<&TestTime> = times.iter().filter(|t| t.ms > TEST_CAP_MS).collect();
+    out.sort_by(|a, b| b.ms.cmp(&a.ms).then_with(|| a.name.cmp(&b.name)));
+    out
+}
+
 fn elapsed_ms(start: Instant) -> u64 {
     u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX)
 }
@@ -262,11 +300,16 @@ fn run_plain(root: &Path, step: Step) -> Result<Value, Error> {
     }
     let start = Instant::now();
     let out = proc::run(&mut command(root, step))?;
+    let ms = elapsed_ms(start);
     let mut extra = vec![(
         "code",
         out.code
             .map_or(Value::Null, |c| Value::Number(c.to_string())),
     )];
+    if step == Step::Tier1 {
+        extra.push(("cap_seconds", Value::from(TIER1_CAP_SECS)));
+        extra.push(("within_cap", Value::from(tier1_within_cap(ms))));
+    }
     if !out.ok() {
         let tail = format!(
             "{}\n{}",
@@ -275,7 +318,53 @@ fn run_plain(root: &Path, step: Step) -> Result<Value, Error> {
         );
         extra.push(("tail", Value::from(tail)));
     }
-    Ok(step_report(out.ok(), elapsed_ms(start), extra))
+    Ok(step_report(out.ok(), ms, extra))
+}
+
+/// Runs the `test_hermetic` step (AC-020).
+fn run_hermetic_step(root: &Path) -> Result<Value, Error> {
+    let start = Instant::now();
+    let run = run_hermetic(root)?;
+    let failed: Vec<Value> = run
+        .failed
+        .iter()
+        .map(|(name, tail)| {
+            Value::object([
+                ("binary", Value::from(name.as_str())),
+                ("tail", Value::from(tail.as_str())),
+            ])
+        })
+        .collect();
+    Ok(step_report(
+        run.failed.is_empty() && run.binaries > 0,
+        elapsed_ms(start),
+        [
+            ("binaries", Value::from(run.binaries)),
+            (
+                "toolchain",
+                Value::from(run.toolchain.display().to_string()),
+            ),
+            ("failed", Value::from(failed)),
+        ],
+    ))
+}
+
+/// Runs the `fix_commits` step (AC-234).
+fn run_fix_step(root: &Path) -> Result<Value, Error> {
+    let start = Instant::now();
+    let log = proc::run_ok(&mut fixes::log_command(root))?;
+    let missing: Vec<Value> = fix_commits_without_tests(&log.stdout)
+        .into_iter()
+        .map(Value::from)
+        .collect();
+    Ok(step_report(
+        missing.is_empty(),
+        elapsed_ms(start),
+        [
+            ("commits", Value::from(fix_commit_count(&log.stdout))),
+            ("missing", Value::from(missing)),
+        ],
+    ))
 }
 
 fn run_times(root: &Path) -> Result<Value, Error> {
@@ -339,10 +428,11 @@ pub fn run(root: &Path, args: &[String]) -> Result<Value, Error> {
     let mut ok = true;
     let mut steps = BTreeMap::new();
     for &step in &options.steps {
-        let report = if step == Step::TestTimes {
-            run_times(root)?
-        } else {
-            run_plain(root, step)?
+        let report = match step {
+            Step::TestTimes => run_times(root)?,
+            Step::TestHermetic => run_hermetic_step(root)?,
+            Step::FixCommits => run_fix_step(root)?,
+            _ => run_plain(root, step)?,
         };
         ok &= report.get("ok").and_then(Value::as_bool) == Some(true);
         steps.insert(step.name().to_owned(), report);
