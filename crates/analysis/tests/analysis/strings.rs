@@ -382,3 +382,32 @@ fn strings_slicing_and_idempotence() {
         }
     }
 }
+
+/// The fuzz target `pipeline_elf` found a 0.9 s strings step with a fuel cap of 500: a region
+/// with a few file bytes and a large zero fill. The sweep reads the file bytes and 2 more.
+#[test]
+fn regress_strings_zero_fill_scan() {
+    let builder = ElfBuilder::exec()
+        .section(Section::code(".text", &[0xc3]))
+        .section(Section::rodata(".rodata", b"read-only text\0"))
+        .section(Section::data(".data", b"in the data\0"))
+        .section(Section::bss(".bss", 1 << 30))
+        .strip_section_headers();
+    let (p, _) = built(&builder);
+    let scope = strings::scope(&p);
+    assert!(!scope.is_empty(), "the regions without execute permission");
+    let mut zero_fill = false;
+    for r in scope.ranges() {
+        let region = p.mem().region_at(r.first).expect("a scope range is mapped");
+        let read = strings::scan_len(&p, r);
+        assert!(read <= region.file_size + 2, "{read} bytes of {r:?}");
+        zero_fill |= u64::try_from(r.len()).unwrap_or(u64::MAX) > strings::MAX_SCAN;
+    }
+    assert!(zero_fill, "a scope range has the large zero fill");
+    let found: Vec<Vec<u8>> = strings::scan(&p)
+        .iter()
+        .filter_map(|(at, info)| strings::bytes(&p, *at, info))
+        .collect();
+    assert!(found.contains(&b"read-only text".to_vec()), "{found:?}");
+    assert!(found.contains(&b"in the data".to_vec()), "{found:?}");
+}

@@ -366,13 +366,49 @@ fn sweep_bytes(base: u64, bytes: &[u8], spans: &mut Spans, out: &mut BTreeMap<u6
     }
 }
 
+/// Gives the number of bytes of the scope range `r` that the sweep reads.
+///
+/// The read stops 2 bytes after the last byte that can come from the file. The bytes after it
+/// read as zero, and zero bytes hold no string. The 2 bytes keep the terminator of a byte
+/// string and of a UTF-16LE string. A range with an unmapped byte in its first [`MAX_SCAN`]
+/// bytes gives 0, because a read of it fails. A range with no file bytes gives 0 too.
+#[must_use]
+pub fn scan_len(program: &Program, r: &Range) -> u64 {
+    let len = u64::try_from(r.len()).unwrap_or(u64::MAX).min(MAX_SCAN);
+    let Some(last) = len.checked_sub(1).and_then(|n| r.first.checked_add(n)) else {
+        return 0;
+    };
+    // `end` is the first address after the last byte that can come from the file.
+    let mut end: Option<u64> = None;
+    let mut cur = r.first;
+    // Each pass moves past one region, so the regions of the map bound the loop.
+    loop {
+        let Some(region) = program.mem().region_at(cur) else {
+            return 0;
+        };
+        let stop = region.va.last.min(last);
+        let backed = region.va.first.saturating_add(region.file_size);
+        if backed > cur {
+            end = Some(backed.min(stop.saturating_add(1)));
+        }
+        if stop >= last {
+            break;
+        }
+        cur = stop.saturating_add(1);
+    }
+    end.map_or(0, |e| e.saturating_sub(r.first).saturating_add(2).min(len))
+}
+
 /// Runs step 2 over the scan scope of `program` with the spans of step 1.
 fn sweep(program: &Program, spans: &mut Spans, out: &mut BTreeMap<u64, StrInfo>) -> u64 {
     let mut work = 0u64;
     for r in scope(program).ranges() {
         let len = u64::try_from(r.len()).unwrap_or(u64::MAX).min(MAX_SCAN);
         work = work.saturating_add(len / BYTES_PER_UNIT);
-        let Ok(bytes) = program.mem().read(r.first, len, &Limits::DEFAULT) else {
+        let Ok(bytes) = program
+            .mem()
+            .read(r.first, scan_len(program, r), &Limits::DEFAULT)
+        else {
             continue;
         };
         sweep_wide(r.first, &bytes, spans, out);
