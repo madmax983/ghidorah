@@ -543,6 +543,14 @@ pub fn run(root: &Path, check: bool) -> Result<Value, Error> {
         }
     }
     state.check_vectors_agree()?;
+    // The PE fixtures of WP-30 keep their entries. `fixtures_pe::run` writes them.
+    if let Ok(old) = manifest::read(root) {
+        let pe = old
+            .entries
+            .into_iter()
+            .filter(|e| e.path.starts_with("fixtures/bin/pe/"));
+        state.entries.extend(pe);
+    }
     state.entries.sort_by(|a, b| a.name.cmp(&b.name));
     let manifest = Manifest {
         tools: state.tools.map(),

@@ -1038,6 +1038,105 @@
     },
     {
       "build": "clang-O2",
+      "cflags": ["--target=x86_64-pc-windows-msvc","-O2"],
+      "compiler": "clang 18.1.3",
+      "ldflags": [
+        "/subsystem:console",
+        "/nodefaultlib",
+        "/Brepro",
+        "/debug",
+        "/machine:x64",
+        "/entry:cc_start",
+        "/pdbaltpath:pe_cc.pdb",
+        "/pdbsourcepath:/src"
+      ],
+      "name": "pe_cc.exe",
+      "path": "fixtures/bin/pe/pe_cc.exe",
+      "program": "pe_cc",
+      "sha256": "ef0afb15757115e861050d1da25b2f33bf4d0899e697b791879bc4dd60d70f06",
+      "size": 4096,
+      "tier": "PE",
+      "truth": "fixtures/truth/pe/pe_cc.json",
+      "variant": "none"
+    },
+    {
+      "build": "clang-O2",
+      "cflags": ["--target=x86_64-pc-windows-msvc","-O2"],
+      "compiler": "clang 18.1.3",
+      "ldflags": [
+        "/subsystem:console",
+        "/nodefaultlib",
+        "/Brepro",
+        "/debug",
+        "/machine:x64",
+        "/entry:dll_entry",
+        "/pdbaltpath:pe_dll.pdb",
+        "/pdbsourcepath:/src",
+        "/dll",
+        "/def:pe_dll.def"
+      ],
+      "name": "pe_dll.dll",
+      "path": "fixtures/bin/pe/pe_dll.dll",
+      "program": "pe_dll",
+      "sha256": "eed8fdde4c9eeb00745dc700e3ce083a7bae007eef2f38206614e91a64d18b5f",
+      "size": 2560,
+      "tier": "PE",
+      "truth": "fixtures/truth/pe/pe_dll.json",
+      "variant": "none"
+    },
+    {
+      "build": "clang-O2",
+      "cflags": ["--target=x86_64-pc-windows-msvc","-O2"],
+      "compiler": "clang 18.1.3",
+      "ldflags": [
+        "/subsystem:console",
+        "/nodefaultlib",
+        "/Brepro",
+        "/debug",
+        "/machine:x64",
+        "/entry:pe_start",
+        "/pdbaltpath:pe_flags.pdb",
+        "/pdbsourcepath:/src",
+        "/delayload:beta.dll",
+        "/guard:cf",
+        "/integritycheck",
+        "/highentropyva:no"
+      ],
+      "name": "pe_flags.exe",
+      "path": "fixtures/bin/pe/pe_flags.exe",
+      "program": "pe_flags",
+      "sha256": "a4dd43acd23608ebcda8962db5c08867e595f124200996c622fc7080e1c0d7e0",
+      "size": 5632,
+      "tier": "PE",
+      "truth": "fixtures/truth/pe/pe_flags.json",
+      "variant": "none"
+    },
+    {
+      "build": "clang-O2",
+      "cflags": ["--target=x86_64-pc-windows-msvc","-O2"],
+      "compiler": "clang 18.1.3",
+      "ldflags": [
+        "/subsystem:console",
+        "/nodefaultlib",
+        "/Brepro",
+        "/debug",
+        "/machine:x64",
+        "/entry:pe_start",
+        "/pdbaltpath:pe_main.pdb",
+        "/pdbsourcepath:/src",
+        "/delayload:beta.dll"
+      ],
+      "name": "pe_main.exe",
+      "path": "fixtures/bin/pe/pe_main.exe",
+      "program": "pe_main",
+      "sha256": "f3905fe6e8eb5b1f9e8a5562f7f589b5c8bad44ab321478675162951d598dbc5",
+      "size": 5632,
+      "tier": "PE",
+      "truth": "fixtures/truth/pe/pe_main.json",
+      "variant": "none"
+    },
+    {
+      "build": "clang-O2",
       "cflags": ["-O2"],
       "compiler": "clang 18.1.3",
       "ldflags": [],
@@ -1967,6 +2066,6 @@
     "clang": "18.1.3",
     "gcc": "13.3.0"
   },
-  "total_bytes": 2561928,
+  "total_bytes": 2579848,
   "version": "1"
 }

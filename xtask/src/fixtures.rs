@@ -6,6 +6,7 @@
 //! |---|---|
 //! | `xtask fixtures build` | Builds every fixture of [`spec::fixtures`] with gcc and clang. Writes the binaries, the truth files, the manifest and the goldens. |
 //! | `xtask fixtures build --check` | Builds into `target/fixtures-check` and compares each output file with the checked-in file. |
+//! | `xtask fixtures build-pe [--check]` | Builds only the PE32+ fixtures of [`crate::fixtures_pe`]. `build` runs it too. |
 //! | `xtask fixtures gen-large` | Writes `fixtures/src/large.c` from the generator of [`large`]. |
 //! | `xtask fixtures check` | Runs the tier-1 checks: manifest hashes, golden headers, truth schema, leaf vectors, frozen answers and hash locks. |
 //!
@@ -65,7 +66,7 @@ pub const GOLDEN_AREAS: &[&str] = &["loader", "ehframe", "objdump", "semantics/l
 /// The largest total size of the checked-in fixture binaries (design Section 12.3).
 pub const MAX_TOTAL_BYTES: u64 = 3 * 1024 * 1024;
 
-const USAGE: &str = "cargo xtask fixtures <build [--check]|gen-large|check>";
+const USAGE: &str = "cargo xtask fixtures <build [--check]|build-pe [--check]|gen-large|check>";
 
 /// Runs every tier-1 check over the checked-in corpus and gives the findings.
 ///
@@ -83,7 +84,25 @@ pub fn check_all(root: &Path) -> Result<Vec<Finding>, Error> {
     found.extend(leaf::check_vectors(root, &manifest)?);
     found.extend(questions::check_answers(root)?);
     found.extend(questions::check_locks(root)?);
+    found.extend(crate::fixtures_pe::check(root, &manifest)?);
     Ok(found)
+}
+
+/// Runs the PE build of WP-30 after the ELF build and puts its report in `pe`.
+///
+/// # Errors
+///
+/// Returns the error of the PE build.
+fn with_pe(root: &Path, elf: Value, check: bool) -> Result<Value, Error> {
+    let pe = crate::fixtures_pe::run(root, check)?;
+    let ok = elf.get("ok").and_then(Value::as_bool) == Some(true)
+        && pe.get("ok").and_then(Value::as_bool) == Some(true);
+    let Value::Object(mut out) = elf else {
+        return Ok(elf);
+    };
+    out.insert("ok".to_owned(), Value::from(ok));
+    out.insert("pe".to_owned(), pe);
+    Ok(Value::Object(out))
 }
 
 /// Runs `xtask fixtures <command>`.
@@ -94,8 +113,10 @@ pub fn check_all(root: &Path) -> Result<Vec<Finding>, Error> {
 pub fn run(root: &Path, args: &[String]) -> Result<Value, Error> {
     let words: Vec<&str> = args.iter().map(String::as_str).collect();
     match words.as_slice() {
-        ["build"] => build::run(root, false),
-        ["build", "--check"] => build::run(root, true),
+        ["build"] => with_pe(root, build::run(root, false)?, false),
+        ["build", "--check"] => with_pe(root, build::run(root, true)?, true),
+        ["build-pe"] => crate::fixtures_pe::run(root, false),
+        ["build-pe", "--check"] => crate::fixtures_pe::run(root, true),
         ["gen-large"] => {
             let path = root.join(large::SOURCE_PATH);
             std::fs::write(&path, large::generate()).map_err(|e| Error::io(path, e))?;

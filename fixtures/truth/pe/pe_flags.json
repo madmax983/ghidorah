@@ -1,0 +1,203 @@
+{
+  "binaries": [
+    {
+      "name": "pe_flags.exe",
+      "sha256": "a4dd43acd23608ebcda8962db5c08867e595f124200996c622fc7080e1c0d7e0"
+    }
+  ],
+  "build": {
+    "cflags": ["--target=x86_64-pc-windows-msvc","-O2"],
+    "compiler": "clang 18.1.3",
+    "ldflags": [
+      "/subsystem:console",
+      "/nodefaultlib",
+      "/Brepro",
+      "/debug",
+      "/machine:x64",
+      "/entry:pe_start",
+      "/pdbaltpath:pe_flags.pdb",
+      "/pdbsourcepath:/src",
+      "/delayload:beta.dll",
+      "/guard:cf",
+      "/integritycheck",
+      "/highentropyva:no"
+    ]
+  },
+  "codeview": {
+    "age": 1,
+    "guid": "CDB15E32-D8AA-3947-4C4C-44205044422E",
+    "pdb": "pe_flags.pdb"
+  },
+  "entry": "0x140001130",
+  "exports": [],
+  "fixture": "pe_flags.exe",
+  "functions": [
+    {
+      "addr": "0x140001000",
+      "name": "__delayLoadHelper2",
+      "params": 2,
+      "pdata": false
+    },
+    {
+      "addr": "0x140001010",
+      "name": "classify",
+      "params": 1,
+      "pdata": false
+    },
+    {
+      "addr": "0x140001090",
+      "name": "twice",
+      "params": 1,
+      "pdata": false
+    },
+    {
+      "addr": "0x1400010a0",
+      "name": "thrice",
+      "params": 1,
+      "pdata": false
+    },
+    {
+      "addr": "0x1400010b0",
+      "name": "dispatch",
+      "params": 2,
+      "pdata": true
+    },
+    {
+      "addr": "0x1400010e0",
+      "name": "imports",
+      "params": 1,
+      "pdata": true
+    },
+    {
+      "addr": "0x140001110",
+      "name": "finish",
+      "params": 1,
+      "pdata": true
+    },
+    {
+      "addr": "0x140001130",
+      "name": "pe_start",
+      "params": 0,
+      "pdata": true
+    },
+    {
+      "addr": "0x1400011d0",
+      "name": "tls_callback_one",
+      "params": 3,
+      "pdata": false
+    }
+  ],
+  "generator": {
+    "name": "xtask-fixtures",
+    "version": "1"
+  },
+  "image_base": "0x140000000",
+  "imports": [
+    {
+      "delay": false,
+      "dll": "alpha.dll",
+      "id": "imp:alpha.dll!#5",
+      "name": null,
+      "ordinal": 5,
+      "slot": "0x1400021d8"
+    },
+    {
+      "delay": false,
+      "dll": "alpha.dll",
+      "id": "imp:alpha.dll!alpha_named",
+      "name": "alpha_named",
+      "ordinal": null,
+      "slot": "0x1400021e0"
+    },
+    {
+      "delay": true,
+      "dll": "beta.dll",
+      "id": "imp:beta.dll!beta_delayed",
+      "name": "beta_delayed",
+      "ordinal": null,
+      "slot": "0x140003018"
+    },
+    {
+      "delay": false,
+      "dll": "kernel32.dll",
+      "id": "imp:kernel32.dll!ExitProcess",
+      "name": "ExitProcess",
+      "ordinal": null,
+      "slot": "0x1400021b8"
+    },
+    {
+      "delay": false,
+      "dll": "kernel32.dll",
+      "id": "imp:kernel32.dll!GetTickCount",
+      "name": "GetTickCount",
+      "ordinal": null,
+      "slot": "0x1400021c0"
+    },
+    {
+      "delay": false,
+      "dll": "kernel32.dll",
+      "id": "imp:kernel32.dll!Sleep",
+      "name": "Sleep",
+      "ordinal": null,
+      "slot": "0x1400021c8"
+    }
+  ],
+  "program": "pe_flags",
+  "protections": {
+    "dynamic_base": true,
+    "force_integrity": true,
+    "guard_cf": true,
+    "high_entropy_va": false,
+    "nx_compat": true
+  },
+  "switch": {
+    "addr": "0x140001010",
+    "cases": 8,
+    "func": "classify"
+  },
+  "thunks": [
+    {
+      "addr": "0x1400011e0",
+      "called": true,
+      "import": "imp:kernel32.dll!Sleep",
+      "name": "Sleep"
+    },
+    {
+      "addr": "0x1400011f0",
+      "called": false,
+      "import": "imp:kernel32.dll!ExitProcess",
+      "name": "ExitProcess"
+    },
+    {
+      "addr": "0x140001200",
+      "called": false,
+      "import": "imp:kernel32.dll!GetTickCount",
+      "name": "GetTickCount"
+    },
+    {
+      "addr": "0x140001210",
+      "called": false,
+      "import": "imp:alpha.dll!#5",
+      "name": "alpha_five"
+    },
+    {
+      "addr": "0x140001220",
+      "called": true,
+      "import": "imp:alpha.dll!alpha_named",
+      "name": "alpha_named"
+    },
+    {
+      "addr": "0x140001230",
+      "called": false,
+      "import": "imp:beta.dll!beta_delayed",
+      "name": "beta_delayed"
+    }
+  ],
+  "tier": "PE",
+  "tls_callbacks": [
+    {
+      "addr": "0x1400011d0",
+      "name": "tls_callback_one"
+    }
+  ]
+}

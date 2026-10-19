@@ -1,0 +1,112 @@
+{
+  "binaries": [
+    {
+      "name": "pe_dll.dll",
+      "sha256": "eed8fdde4c9eeb00745dc700e3ce083a7bae007eef2f38206614e91a64d18b5f"
+    }
+  ],
+  "build": {
+    "cflags": ["--target=x86_64-pc-windows-msvc","-O2"],
+    "compiler": "clang 18.1.3",
+    "ldflags": [
+      "/subsystem:console",
+      "/nodefaultlib",
+      "/Brepro",
+      "/debug",
+      "/machine:x64",
+      "/entry:dll_entry",
+      "/pdbaltpath:pe_dll.pdb",
+      "/pdbsourcepath:/src",
+      "/dll",
+      "/def:pe_dll.def"
+    ]
+  },
+  "codeview": {
+    "age": 1,
+    "guid": "444E1A66-63BB-7DA0-4C4C-44205044422E",
+    "pdb": "pe_dll.pdb"
+  },
+  "entry": "0x180001050",
+  "exports": [
+    {
+      "addr": "0x180001000",
+      "forwarder": null,
+      "id": "exp:dll_add",
+      "name": "dll_add",
+      "ordinal": 1
+    },
+    {
+      "addr": "0x180001010",
+      "forwarder": null,
+      "id": "exp:dll_mul",
+      "name": "dll_mul",
+      "ordinal": 2
+    },
+    {
+      "addr": null,
+      "forwarder": "kernel32.ExitProcess",
+      "id": "exp:ExitNow",
+      "name": "ExitNow",
+      "ordinal": 3
+    },
+    {
+      "addr": null,
+      "forwarder": "alpha.#5",
+      "id": "exp:AlphaFive",
+      "name": "AlphaFive",
+      "ordinal": 4
+    },
+    {
+      "addr": "0x180001020",
+      "forwarder": null,
+      "id": "exp:#7",
+      "name": null,
+      "ordinal": 7
+    }
+  ],
+  "fixture": "pe_dll.dll",
+  "functions": [
+    {
+      "addr": "0x180001000",
+      "name": "dll_add",
+      "params": 2,
+      "pdata": false
+    },
+    {
+      "addr": "0x180001010",
+      "name": "dll_mul",
+      "params": 2,
+      "pdata": false
+    },
+    {
+      "addr": "0x180001020",
+      "name": "dll_secret",
+      "params": 1,
+      "pdata": true
+    },
+    {
+      "addr": "0x180001050",
+      "name": "dll_entry",
+      "params": 3,
+      "pdata": false
+    }
+  ],
+  "generator": {
+    "name": "xtask-fixtures",
+    "version": "1"
+  },
+  "image_base": "0x180000000",
+  "imports": [],
+  "program": "pe_dll",
+  "protections": {
+    "dynamic_base": true,
+    "force_integrity": false,
+    "guard_cf": false,
+    "high_entropy_va": true,
+    "nx_compat": true
+  },
+  "switch": null,
+  "thunks": [],
+  "tier": "PE",
+  "tls_callbacks": []
+}

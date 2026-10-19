@@ -1,0 +1,262 @@
+# golden: generator=xtask-fixtures version=1 fixture=pe_dll.dll fixture_sha256=eed8fdde4c9eeb00745dc700e3ce083a7bae007eef2f38206614e91a64d18b5f llvm=22.1.6
+
+File: pe_dll.dll
+Format: COFF-x86-64
+Arch: x86_64
+AddressSize: 64bit
+ImageFileHeader {
+  Machine: IMAGE_FILE_MACHINE_AMD64 (0x8664)
+  SectionCount: 4
+  TimeDateStamp: 2042-02-26 12:04:17 (0x87B8B4C1)
+  PointerToSymbolTable: 0x0
+  SymbolCount: 0
+  StringTableSize: 0
+  OptionalHeaderSize: 240
+  Characteristics [ (0x2022)
+    IMAGE_FILE_DLL (0x2000)
+    IMAGE_FILE_EXECUTABLE_IMAGE (0x2)
+    IMAGE_FILE_LARGE_ADDRESS_AWARE (0x20)
+  ]
+}
+ImageOptionalHeader {
+  Magic: 0x20B
+  MajorLinkerVersion: 14
+  MinorLinkerVersion: 0
+  SizeOfCode: 512
+  SizeOfInitializedData: 1024
+  SizeOfUninitializedData: 0
+  AddressOfEntryPoint: 0x1050
+  BaseOfCode: 0x1000
+  ImageBase: 0x180000000
+  SectionAlignment: 4096
+  FileAlignment: 512
+  MajorOperatingSystemVersion: 6
+  MinorOperatingSystemVersion: 0
+  MajorImageVersion: 0
+  MinorImageVersion: 0
+  MajorSubsystemVersion: 6
+  MinorSubsystemVersion: 0
+  SizeOfImage: 20480
+  SizeOfHeaders: 1024
+  CheckSum: 0x0
+  Subsystem: IMAGE_SUBSYSTEM_WINDOWS_CUI (0x3)
+  Characteristics [ (0x160)
+    IMAGE_DLL_CHARACTERISTICS_DYNAMIC_BASE (0x40)
+    IMAGE_DLL_CHARACTERISTICS_HIGH_ENTROPY_VA (0x20)
+    IMAGE_DLL_CHARACTERISTICS_NX_COMPAT (0x100)
+  ]
+  SizeOfStackReserve: 1048576
+  SizeOfStackCommit: 4096
+  SizeOfHeapReserve: 1048576
+  SizeOfHeapCommit: 4096
+  NumberOfRvaAndSize: 16
+  DataDirectory {
+    ExportTableRVA: 0x205B
+    ExportTableSize: 0xA7
+    ImportTableRVA: 0x0
+    ImportTableSize: 0x0
+    ResourceTableRVA: 0x0
+    ResourceTableSize: 0x0
+    ExceptionTableRVA: 0x4000
+    ExceptionTableSize: 0xC
+    CertificateTableRVA: 0x0
+    CertificateTableSize: 0x0
+    BaseRelocationTableRVA: 0x0
+    BaseRelocationTableSize: 0x0
+    DebugRVA: 0x2000
+    DebugSize: 0x38
+    ArchitectureRVA: 0x0
+    ArchitectureSize: 0x0
+    GlobalPtrRVA: 0x0
+    GlobalPtrSize: 0x0
+    TLSTableRVA: 0x0
+    TLSTableSize: 0x0
+    LoadConfigTableRVA: 0x0
+    LoadConfigTableSize: 0x0
+    BoundImportRVA: 0x0
+    BoundImportSize: 0x0
+    IATRVA: 0x0
+    IATSize: 0x0
+    DelayImportDescriptorRVA: 0x0
+    DelayImportDescriptorSize: 0x0
+    CLRRuntimeHeaderRVA: 0x0
+    CLRRuntimeHeaderSize: 0x0
+    ReservedRVA: 0x0
+    ReservedSize: 0x0
+  }
+}
+DOSHeader {
+  Magic: MZ
+  UsedBytesInTheLastPage: 120
+  FileSizeInPages: 1
+  NumberOfRelocationItems: 0
+  HeaderSizeInParagraphs: 4
+  MinimumExtraParagraphs: 0
+  MaximumExtraParagraphs: 0
+  InitialRelativeSS: 0
+  InitialSP: 0
+  Checksum: 0
+  InitialIP: 0
+  InitialRelativeCS: 0
+  AddressOfRelocationTable: 64
+  OverlayNumber: 0
+  OEMid: 0
+  OEMinfo: 0
+  AddressOfNewExeHeader: 120
+}
+Sections [
+  Section {
+    Number: 1
+    Name: .text (2E 74 65 78 74 00 00 00)
+    VirtualSize: 0x5C
+    VirtualAddress: 0x1000
+    RawDataSize: 512
+    PointerToRawData: 0x400
+    PointerToRelocations: 0x0
+    PointerToLineNumbers: 0x0
+    RelocationCount: 0
+    LineNumberCount: 0
+    Characteristics [ (0x60000020)
+      IMAGE_SCN_CNT_CODE (0x20)
+      IMAGE_SCN_MEM_EXECUTE (0x20000000)
+      IMAGE_SCN_MEM_READ (0x40000000)
+    ]
+  }
+  Section {
+    Number: 2
+    Name: .rdata (2E 72 64 61 74 61 00 00)
+    VirtualSize: 0x110
+    VirtualAddress: 0x2000
+    RawDataSize: 512
+    PointerToRawData: 0x600
+    PointerToRelocations: 0x0
+    PointerToLineNumbers: 0x0
+    RelocationCount: 0
+    LineNumberCount: 0
+    Characteristics [ (0x40000040)
+      IMAGE_SCN_CNT_INITIALIZED_DATA (0x40)
+      IMAGE_SCN_MEM_READ (0x40000000)
+    ]
+  }
+  Section {
+    Number: 3
+    Name: .data (2E 64 61 74 61 00 00 00)
+    VirtualSize: 0x8
+    VirtualAddress: 0x3000
+    RawDataSize: 0
+    PointerToRawData: 0x0
+    PointerToRelocations: 0x0
+    PointerToLineNumbers: 0x0
+    RelocationCount: 0
+    LineNumberCount: 0
+    Characteristics [ (0xC0000040)
+      IMAGE_SCN_CNT_INITIALIZED_DATA (0x40)
+      IMAGE_SCN_MEM_READ (0x40000000)
+      IMAGE_SCN_MEM_WRITE (0x80000000)
+    ]
+  }
+  Section {
+    Number: 4
+    Name: .pdata (2E 70 64 61 74 61 00 00)
+    VirtualSize: 0xC
+    VirtualAddress: 0x4000
+    RawDataSize: 512
+    PointerToRawData: 0x800
+    PointerToRelocations: 0x0
+    PointerToLineNumbers: 0x0
+    RelocationCount: 0
+    LineNumberCount: 0
+    Characteristics [ (0x40000040)
+      IMAGE_SCN_CNT_INITIALIZED_DATA (0x40)
+      IMAGE_SCN_MEM_READ (0x40000000)
+    ]
+  }
+]
+UnwindInformation [
+  RuntimeFunction {
+    StartAddress: (0x180001020)
+    EndAddress: (0x180001049)
+    UnwindInfoAddress: (0x180002104)
+    UnwindInfo {
+      Version: 1
+      Flags [ (0x0)
+      ]
+      PrologSize: 6
+      FrameRegister: -
+      FrameOffset: -
+      UnwindCodeCount: 3
+      UnwindCodes [
+        0x06: ALLOC_SMALL size=40
+        0x02: PUSH_NONVOL reg=RDI
+        0x01: PUSH_NONVOL reg=RSI
+      ]
+    }
+  }
+]
+Export {
+  Ordinal: 1
+  Name: dll_add
+  RVA: 0x1000
+}
+Export {
+  Ordinal: 2
+  Name: dll_mul
+  RVA: 0x1010
+}
+Export {
+  Ordinal: 3
+  Name: ExitNow
+  ForwardedTo: kernel32.ExitProcess
+}
+Export {
+  Ordinal: 4
+  Name: AlphaFive
+  ForwardedTo: alpha.#5
+}
+Export {
+  Ordinal: 5
+  Name: 
+  RVA: 0x0
+}
+Export {
+  Ordinal: 6
+  Name: 
+  RVA: 0x0
+}
+Export {
+  Ordinal: 7
+  Name: 
+  RVA: 0x1020
+}
+BaseReloc [
+]
+DebugDirectory [
+  DebugEntry {
+    Characteristics: 0x0
+    TimeDateStamp: 2042-02-26 12:04:17 (0x87B8B4C1)
+    MajorVersion: 0x0
+    MinorVersion: 0x0
+    Type: CodeView (0x2)
+    SizeOfData: 0x23
+    AddressOfRawData: 0x2038
+    PointerToRawData: 0x638
+    PDBInfo {
+      PDBSignature: 0x53445352
+      PDBGUID: {444E1A66-63BB-7DA0-4C4C-44205044422E}
+      PDBAge: 1
+      PDBFileName: pe_dll.pdb
+    }
+  }
+  DebugEntry {
+    Characteristics: 0x0
+    TimeDateStamp: 2042-02-26 12:04:17 (0x87B8B4C1)
+    MajorVersion: 0x0
+    MinorVersion: 0x0
+    Type: Repro (0x10)
+    SizeOfData: 0x0
+    AddressOfRawData: 0x0
+    PointerToRawData: 0x0
+  }
+]
+TLSDirectory {
+}
