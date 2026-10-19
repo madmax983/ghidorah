@@ -274,7 +274,7 @@ pub fn hint_graph(root: &Path) -> HintGraph {
     let mut no_next = BTreeSet::new();
     bfs.run(&mut session, GRAPH_CALLS, &mut |tool, response| {
         reached.insert(tool.to_owned());
-        let ok = response.get("ok").and_then(Value::as_bool) == Some(true);
+        let ok = host::ok(response);
         if ok && response.get("next").is_none() {
             no_next.insert(tool.to_owned());
         }

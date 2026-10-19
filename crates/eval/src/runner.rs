@@ -51,6 +51,29 @@ pub struct Outcome {
     pub sent: Vec<Value>,
 }
 
+impl Outcome {
+    /// Makes the outcome of a run that fails before its first call, with the reason `error`.
+    #[must_use]
+    pub fn failed(id: &str, question: &str, category: &str, error: &str) -> Self {
+        Self {
+            id: id.to_owned(),
+            question: question.to_owned(),
+            category: category.to_owned(),
+            pass: false,
+            answer_ok: false,
+            budget_ok: false,
+            answer: None,
+            error: Some(error.to_owned()),
+            calls: 0,
+            chars: 0,
+            peak: 0,
+            est_tokens: 0,
+            responses: Vec::new(),
+            sent: Vec::new(),
+        }
+    }
+}
+
 /// Replaces each `$turn` object in `args` with its value.
 ///
 /// # Errors
@@ -138,22 +161,8 @@ pub fn run_shaped(
     per_token: u64,
     table: bool,
 ) -> Outcome {
-    let mut out = Outcome {
-        id: scenario.id.clone(),
-        question: question.id.clone(),
-        category: question.category.clone(),
-        pass: false,
-        answer_ok: false,
-        budget_ok: false,
-        answer: None,
-        error: None,
-        calls: 0,
-        chars: 0,
-        peak: 0,
-        est_tokens: 0,
-        responses: Vec::new(),
-        sent: Vec::new(),
-    };
+    let mut out = Outcome::failed(&scenario.id, &question.id, &question.category, "");
+    out.error = None;
     let needs_disk = scenario.turns.iter().any(|t| t.restart);
     let projects = if needs_disk {
         match Scratch::new(&scenario.id) {
@@ -269,6 +278,9 @@ pub fn threads() -> usize {
     std::thread::available_parallelism().map_or(1, |n| n.get().min(4))
 }
 
+/// The reason of a run whose scenario names no frozen question.
+pub const NO_QUESTION: &str = "the scenario names no frozen question";
+
 /// Runs each scenario against its question in parallel and gives the outcomes in order.
 ///
 /// A scenario whose question does not exist fails with an error.
@@ -281,22 +293,7 @@ pub fn run_all(
 ) -> Vec<Outcome> {
     parallel(scenarios, threads(), |s| {
         questions.iter().find(|q| q.id == s.question).map_or_else(
-            || Outcome {
-                id: s.id.clone(),
-                question: s.question.clone(),
-                category: String::new(),
-                pass: false,
-                answer_ok: false,
-                budget_ok: false,
-                answer: None,
-                error: Some("the question does not exist".to_owned()),
-                calls: 0,
-                chars: 0,
-                peak: 0,
-                est_tokens: 0,
-                responses: Vec::new(),
-                sent: Vec::new(),
-            },
+            || Outcome::failed(&s.id, &s.question, "", NO_QUESTION),
             |q| run(root, s, q, per_token),
         )
     })

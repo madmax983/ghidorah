@@ -134,7 +134,7 @@ pub fn one(root: &Path, name: &str, path: &str, facts: &[(String, String)]) -> F
         "binary_load",
         Value::object([("path", Value::from(path))]),
     );
-    let survey = host::call(&mut session, "binary_survey", Value::object::<&str>([]));
+    let survey = host::call(&mut session, "binary_survey", host::empty());
     let data = survey.get("data").cloned().unwrap_or(Value::Null);
     for (kind, value) in facts {
         if shows(&data, kind, value) {

@@ -2,11 +2,8 @@
 
 use ghidorah_json::Value;
 
+use crate::host::texts;
 use crate::report::Report;
-
-fn texts(v: &[String]) -> Value {
-    Value::Array(v.iter().map(|s| Value::from(s.as_str())).collect())
-}
 
 impl Report {
     /// Gives the failures of the run as one JSON object. It lists the failed scenarios, the

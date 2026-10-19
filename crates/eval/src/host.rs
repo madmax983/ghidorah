@@ -48,6 +48,18 @@ pub fn empty() -> Value {
     Value::Object(ghidorah_json::Object::new())
 }
 
+/// Tells if an envelope is a success: `ok` is `true`.
+#[must_use]
+pub fn ok(envelope: &Value) -> bool {
+    envelope.get("ok").and_then(Value::as_bool) == Some(true)
+}
+
+/// Gives a JSON array of texts.
+#[must_use]
+pub fn texts(v: &[String]) -> Value {
+    Value::Array(v.iter().map(|s| Value::from(s.as_str())).collect())
+}
+
 /// Runs one call and gives the envelope JSON.
 pub fn call(session: &mut Session, tool: &str, args: Value) -> Value {
     dispatch(session, &Request::new(tool, args)).to_json()

@@ -265,10 +265,6 @@ impl Recall {
     }
 }
 
-fn ok(response: &Value) -> bool {
-    response.get("ok").and_then(Value::as_bool) == Some(true)
-}
-
 /// Runs part 1, the noise edits when `with_noise`, the reset and the reads.
 ///
 /// # Errors
@@ -281,7 +277,7 @@ pub fn run(root: &Path, spec: &Spec, with_noise: bool) -> Result<Recall, EvalErr
         "binary_load",
         Value::object([("path", Value::from(spec.binary.as_str()))]),
     );
-    if !ok(&load) {
+    if !host::ok(&load) {
         return Err(EvalError::data(
             SPEC,
             &format!("the binary does not load: {load}"),
@@ -290,7 +286,7 @@ pub fn run(root: &Path, spec: &Spec, with_noise: bool) -> Result<Recall, EvalErr
     for fact in &spec.facts {
         let (tool, args) = fact.call();
         let r = host::call(&mut session, tool, args);
-        if !ok(&r) {
+        if !host::ok(&r) {
             return Err(EvalError::data(SPEC, &format!("a fact call fails: {r}")));
         }
     }
@@ -321,12 +317,12 @@ pub fn run(root: &Path, spec: &Spec, with_noise: bool) -> Result<Recall, EvalErr
                 }
                 other => other,
             };
-            if ok(&host::call(&mut session, tool, args)) {
+            if host::ok(&host::call(&mut session, tool, args)) {
                 applied = applied.saturating_add(1);
             }
         }
     }
-    let brief = host::call(&mut session, "session_brief", Value::object::<&str>([]));
+    let brief = host::call(&mut session, "session_brief", host::empty());
     let mut reads = vec![ghidorah_json::write(&brief)];
     for hint in brief
         .get("next")

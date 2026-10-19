@@ -118,32 +118,14 @@ impl Inputs {
     fn outcome(&self, root: &Path, s: &Scenario, table: bool) -> Outcome {
         let per_token = self.thresholds.chars_per_token;
         self.question(s).map_or_else(
-            || Outcome {
-                id: s.id.clone(),
-                ..missing()
-            },
+            || Outcome::failed(&s.id, &s.question, "", runner::NO_QUESTION),
             |q| runner::run_shaped(root, s, q, per_token, table),
         )
     }
 }
 
 fn missing() -> Outcome {
-    Outcome {
-        id: String::new(),
-        question: String::new(),
-        category: String::new(),
-        pass: false,
-        answer_ok: false,
-        budget_ok: false,
-        answer: None,
-        error: Some("the scenario has no question".to_owned()),
-        calls: 0,
-        chars: 0,
-        peak: 0,
-        est_tokens: 0,
-        responses: Vec::new(),
-        sent: Vec::new(),
-    }
+    Outcome::failed("", "", "", "the job gives no result")
 }
 
 fn run_job(root: &Path, inputs: &Inputs, job: Job) -> Done {

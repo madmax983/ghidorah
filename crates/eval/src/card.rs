@@ -6,6 +6,7 @@
 use ghidorah_json::{Object, Value};
 
 use crate::ab;
+use crate::host::texts;
 use crate::milli::Milli;
 use crate::report::Report;
 
@@ -15,10 +16,6 @@ fn int(n: u64) -> Value {
 
 fn count(n: usize) -> Value {
     Value::from(u64::try_from(n).unwrap_or(u64::MAX))
-}
-
-fn texts(v: &[String]) -> Value {
-    Value::Array(v.iter().map(|s| Value::from(s.as_str())).collect())
 }
 
 impl Report {

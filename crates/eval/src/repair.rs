@@ -281,7 +281,7 @@ pub fn attempt(root: &Path, m: &Mistake) -> Attempt {
         "R" => {
             if let Some((tool, args)) = first {
                 let r = host::call(&mut session, &tool, args);
-                out.ok = r.get("ok").and_then(Value::as_bool) == Some(true) && codes(&r).is_empty();
+                out.ok = host::ok(&r) && codes(&r).is_empty();
             }
         }
         "C" => {
