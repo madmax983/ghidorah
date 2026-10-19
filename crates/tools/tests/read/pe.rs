@@ -143,6 +143,12 @@ fn survey_groups_pe_imports_by_dll() {
     );
     let d = data(&survey);
     assert_eq!(text_at(d, "/identity/format"), "pe32+-x86_64");
+    assert_eq!(
+        text_at(d, "/identity/codeview/guid"),
+        "F08D7E34-3817-8A43-4C4C-44205044422E"
+    );
+    assert_eq!(d.pointer("/identity/codeview/age"), Some(&Value::from(1u64)));
+    assert_eq!(text_at(d, "/identity/codeview/pdb/text"), "pe_main.pdb");
     let imports = d.get("imports").expect("the imports section");
     let libraries: Vec<String> = imports
         .get("libraries")
