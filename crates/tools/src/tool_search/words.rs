@@ -30,6 +30,8 @@ pub const SYNONYMS: &[(&str, &str)] = &[
     ("undo", "history_undo"),
     ("redo", "history_undo"),
     ("similar", "func_similar"),
+    ("clone", "func_similar"),
+    ("bsim", "func_similar"),
     ("bookmark", "note_write"),
     ("find", "search"),
     ("hexdump", "mem_read"),

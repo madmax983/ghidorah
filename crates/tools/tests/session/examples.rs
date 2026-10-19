@@ -20,7 +20,7 @@ const NEEDS_EDIT: &[&str] = &["history_list", "history_undo"];
 
 /// The tools whose examples need the facts of the analysis engine: the read tools of WP-17b
 /// and the memory tools of WP-22a. The override and type tools of WP-22b, the claim tool of
-/// WP-24 and the batch tool of WP-25 also need them.
+/// WP-24 and the batch tool of WP-25 also need them. The similarity tool of WP-29 needs them.
 const NEEDS_ANALYSIS: &[&str] = &[
     "binary_survey",
     "func_list",
@@ -38,6 +38,7 @@ const NEEDS_ANALYSIS: &[&str] = &[
     "func_edit",
     "type_edit",
     "batch_run",
+    "func_similar",
 ];
 
 /// Gives the session of the examples of `tool`: the demo binary. A read, claim, memory,

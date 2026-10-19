@@ -25,6 +25,7 @@
 //! | [`cc`] | `CallingConvention` (800): parameters and varargs | Section 7.10 |
 //! | [`syscalls`] | `Syscalls` (810) | Section 7.11 |
 //! | [`callargs`] | The argument values of a call site | Section 7.11 |
+//! | [`similar`] | Function similarity: feature streams, vectors, the corpus index and name proposals | Section 7.13, ADR-0028 |
 //!
 //! The analyzers write into a work state. A publish step makes the analysis set of the
 //! program from the work state. So a read sees one consistent set after each fuel slice.
@@ -47,6 +48,7 @@ pub mod overrides;
 pub mod publish;
 pub mod registry;
 pub mod sched;
+pub mod similar;
 pub mod spec;
 pub mod stack;
 pub mod syscalls;

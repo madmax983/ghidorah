@@ -1439,5 +1439,56 @@
       "idempotentHint": false,
       "openWorldHint": false
     }
+  },
+  {
+    "name": "func_similar",
+    "title": "Find similar functions",
+    "description": "Find functions similar to target functions in the open binaries, explain each match and propose names. Send target, or targets for up to 20 functions. Scope binary compares with the other functions of the bound binary, and scope open compares with every open binary. Each match gives a score from 0 to 1000 and its top shared features. With propose_names true, a strong match with a real name gives a proposal, and next[0] applies the proposals in one batch.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "target": {
+          "type": [
+            "integer",
+            "string"
+          ]
+        },
+        "targets": {
+          "type": "array",
+          "items": {
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
+          "maxItems": 20
+        },
+        "scope": {
+          "enum": [
+            "binary",
+            "open"
+          ]
+        },
+        "min_score": {
+          "type": "integer"
+        },
+        "limit": {
+          "type": "integer"
+        },
+        "propose_names": {
+          "type": "boolean"
+        },
+        "binary_id": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
   }
 ]

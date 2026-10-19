@@ -46,3 +46,4 @@
 {"tool":"batch_run","args":{"steps":[{"id":"a","tool":"tool_search","args":{"query":"rename","level":"summaries"}},{"id":"b","tool":"tool_search","args":{"topic":"batch"}},{"id":"c","tool":"tool_search","args":{"topic":"budgets"}},{"id":"d","tool":"tool_search","args":{"topic":"errors"}},{"id":"e","tool":"tool_search","args":{"topic":"ids"}},{"id":"f","tool":"tool_search","args":{"topic":"profiles"}},{"id":"g","tool":"tool_search","args":{"topic":"relations"}},{"id":"h","tool":"tool_search","args":{"topic":"resume"}},{"id":"i","tool":"tool_search","args":{"topic":"rules"}}]}}
 {"tool":"type_get","args":{"c":"struct sockaddr_in","include":["layout"]}}
 {"tool":"xref_list","args":{"targets":["fn:0x11e0"],"direction":"to","kinds":["call","jump","read","write","data","ptr","string","syscall"]}}
+{"tool":"func_similar","args":{"target":"fn:0x11e0","scope":"open","propose_names":true}}
