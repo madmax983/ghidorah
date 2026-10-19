@@ -212,10 +212,11 @@ fn fixtures_build_reproduces_checked_in_files() {
     let tools = fixtures::toolchain::detect().expect("gcc, clang and binutils are on PATH");
     let manifest = manifest::read(&root).expect("the manifest reads");
     let report = fixtures::build::run(&root, true).expect("the fixture build runs");
+    // The manifest of the build keeps the PE entries of WP-30.
     let count = report.get("fixtures").and_then(Value::as_u64);
     assert_eq!(
         count,
-        u64::try_from(spec::fixtures().len()).ok(),
+        u64::try_from(spec::fixtures().len() + xtask::fixtures_pe::IMAGES.len()).ok(),
         "{report}"
     );
     if tools.map() == manifest.tools {
