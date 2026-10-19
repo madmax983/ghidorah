@@ -20,7 +20,7 @@
 //! | `xtask oracle` | [`oracle`] | Writes the native semantic vectors and the host boundary record (WP-16). |
 //! | `xtask eval` | [`eval`] | Runs the eval harness, blesses its baselines and replays call records (WP-26). |
 //! | `xtask fuzz` | [`fuzz`] | Runs long fuzz batches of every target in child processes (WP-27). |
-//! | `xtask bench` | [`bench`] | Runs the release benchmarks against `perf/budget.json` (WP-27). |
+//! | `xtask bench` | [`bench`](mod@bench) | Runs the release benchmarks against `perf/budget.json` (WP-27). |
 
 pub mod ac;
 pub mod acrun;

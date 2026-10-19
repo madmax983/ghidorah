@@ -92,11 +92,6 @@ pub fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
-/// Gives the regression directory of `target`.
-pub fn regress_dir(target: &str) -> PathBuf {
-    root().join("tests/regress").join(target)
-}
-
 /// Gives a new empty work directory for the case files of `target`.
 pub fn work_dir(target: &str) -> PathBuf {
     let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
