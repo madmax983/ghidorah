@@ -9,7 +9,7 @@
 //! |---|---|---|
 //! | [`inputs`] | The frozen questions, the intents and the thresholds | Section 12.2 |
 //! | [`scenario`] | The scenario call scripts | Section 12.2 |
-//! | [`derive`] | Answer sources, derive steps and answer checks | Section 12.2 |
+//! | [`derive`](mod@derive) | Answer sources, derive steps and answer checks | Section 12.2 |
 //! | [`expr`] | The C integer expressions of the `xor` derive step | Section 12.2 |
 //! | [`host`] | Sessions, calls and sizes | Section 12.1 |
 //! | [`runner`] | The scenario runner and the worker pool | Section 12.1 |
