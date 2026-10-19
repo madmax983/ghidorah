@@ -118,7 +118,6 @@ pub fn fixtures(root: &Path) -> Result<Vec<FixtureFacts>, EvalError> {
 /// Measures the survey recall of one fixture: `name`, its binary `path` and its `facts`.
 #[must_use]
 pub fn one(root: &Path, name: &str, path: &str, facts: &[(String, String)]) -> FixtureRecall {
-    return FixtureRecall { fixture: name.to_owned(), found: 0, total: u64::try_from(facts.len()).unwrap_or(0), missed: Vec::new() };
     let total = u64::try_from(facts.len()).unwrap_or(u64::MAX);
     let mut out = FixtureRecall {
         fixture: name.to_owned(),

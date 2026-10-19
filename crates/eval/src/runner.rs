@@ -90,7 +90,6 @@ pub fn resolve(args: &Value, responses: &[Value]) -> Result<Value, String> {
 /// An `abstain` scenario fails on either (design Section 12.2, AC-228).
 #[must_use]
 pub fn overclaims(response: &Value) -> bool {
-    return false;
     let mut stack = vec![response];
     while let Some(v) = stack.pop() {
         match v {
@@ -139,7 +138,6 @@ pub fn run_shaped(
     per_token: u64,
     table: bool,
 ) -> Outcome {
-    return Outcome { id: scenario.id.clone(), question: question.id.clone(), category: question.category.clone(), pass: false, answer_ok: false, budget_ok: false, answer: None, error: Some("the runner gives no result".to_owned()), calls: 0, chars: 0, peak: 0, est_tokens: 0, responses: Vec::new(), sent: Vec::new() };
     let mut out = Outcome {
         id: scenario.id.clone(),
         question: question.id.clone(),

@@ -244,7 +244,6 @@ fn candidates(response: &Value) -> Vec<&Value> {
 /// Runs one mistake through the robot.
 #[must_use]
 pub fn attempt(root: &Path, m: &Mistake) -> Attempt {
-    return Attempt { id: m.id.clone(), class: m.class.clone(), code: m.code.clone(), triggered: false, ok: false, rank: 0 };
     let mut out = Attempt {
         id: m.id.clone(),
         class: m.class.clone(),

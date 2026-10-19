@@ -13,7 +13,7 @@
 //! | `progress` | `{ functions, visited, named, typed, commented, pct }` |
 //! | `open_notes` | `{ todo, hypothesis, total, top }`: the counts of the open notes and the newest open notes |
 //! | `recent_findings` | the newest findings |
-//! | `recent_edits` | the newest changed facts of the history |
+//! | `recent_edits` | the newest changed facts of the history: those of the own session first, then those of other sessions |
 //! | `changed_since_last_brief` | `{ since_rev, count, by_kind }`: the facts that changed after the last brief of the session |
 //! | `weak_names` | the functions of the highest priority that still have a default name |
 //! | `orphans` | the agent facts that lost their anchor after a complete analysis: `{ kind, at, id }` |
@@ -318,7 +318,7 @@ fn run(session: &mut Session, _args: &Args, ctx: &mut Ctx) -> Result<Payload, To
             .mark(&label)
             .map_or(Rev(0), |m| m.last_brief_rev);
         (
-            Facts::gather(binary, rows, history, since),
+            Facts::gather(binary, rows, history, since, label.as_str()),
             binary.program.rev(),
         )
     };

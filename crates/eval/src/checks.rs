@@ -30,7 +30,6 @@ pub struct Catalog {
 ///
 /// Returns an [`EvalError`] when the session does not open.
 pub fn catalog(root: &Path) -> Result<Catalog, EvalError> {
-    return Ok(Catalog::default());
     let registry = shipped();
     let size = |p: Profile| host::chars(&ProfileSet::new(p, None).tools_list(&registry));
     let session = host::session(root, None, Profile::Full)?;
@@ -91,7 +90,6 @@ fn fuzz_one(session: &mut Session, out: &mut Fuzz, tool: &str, args: Value) {
 ///
 /// Returns an [`EvalError`] when the session does not open.
 pub fn fuzz(root: &Path) -> Result<Fuzz, EvalError> {
-    return Ok(Fuzz::default());
     let mut session = host::session(root, None, Profile::Full)?;
     host::call(
         &mut session,
@@ -188,7 +186,6 @@ fn list(s: &mut Session) -> Vec<(u64, u64, String)> {
 ///
 /// Returns an [`EvalError`] when a session does not open.
 pub fn metamorphic(root: &Path) -> Result<Metamorphic, EvalError> {
-    return Ok(Metamorphic::default());
     let full = functions(root, "fixtures/bin/hello.gcc-O2")?;
     let stripped = functions(root, "fixtures/bin/hello.gcc-O2.stripped")?;
     let starts = |l: &[(u64, u64, String)]| l.iter().map(|f| (f.0, f.1)).collect::<Vec<_>>();

@@ -275,7 +275,6 @@ fn ok(response: &Value) -> bool {
 ///
 /// Returns an [`EvalError`] when the session does not open or a part-1 call fails.
 pub fn run(root: &Path, spec: &Spec, with_noise: bool) -> Result<Recall, EvalError> {
-    return Ok(Recall { found: 0, total: 0, missed: Vec::new(), noise: 0 });
     let mut session = host::session(root, None, Profile::Full)?;
     let load = host::call(
         &mut session,

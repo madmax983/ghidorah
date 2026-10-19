@@ -111,7 +111,6 @@ impl Report {
     /// Gives the value of each metric where higher is better, by threshold name.
     #[must_use]
     pub fn metrics(&self) -> BTreeMap<String, Milli> {
-        return BTreeMap::new();
         let runs = self.all_runs();
         let (values, findings) = self.provenance();
         let bad = u64::try_from(findings.len())

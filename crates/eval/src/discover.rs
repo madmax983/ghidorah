@@ -96,7 +96,6 @@ pub fn raw_entries() -> Vec<(String, BTreeSet<String>)> {
 ///
 /// Returns an [`EvalError`] when the session does not open.
 pub fn run(root: &Path, intents: &[Intent]) -> Result<Discover, EvalError> {
-    return Ok(Discover::default());
     let mut session = host::session(root, None, Profile::Full)?;
     let entries = raw_entries();
     let mut out = Discover::default();

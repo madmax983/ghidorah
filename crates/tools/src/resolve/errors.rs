@@ -50,8 +50,8 @@ pub(super) fn address_invalid(site: &Site<'_>, repair: Option<String>) -> ToolEr
     }
 }
 
-/// Adds the repair call of an `ADDRESS_INVALID` error: the same call with the `0x` prefix on
-/// the address text at the field path of the error (design Section 10.8).
+/// Adds the repair call of an `ADDRESS_INVALID` error (design Section 10.8). The repair call is
+/// the same call with `0x` before the address text at the field path of the error.
 ///
 /// Only a text of 1 to 16 hex digits with at least one letter gets the call. Other errors and
 /// errors with a repair call stay the same.

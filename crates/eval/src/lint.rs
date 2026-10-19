@@ -418,7 +418,6 @@ pub fn lint(
     outcome: &Outcome,
     instructions: &str,
 ) -> Report {
-    return Report::default();
     let check = Check {
         question,
         outcome,

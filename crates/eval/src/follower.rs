@@ -185,7 +185,6 @@ impl Bfs {
 /// Walks the hints for one scenario.
 #[must_use]
 pub fn walk(root: &Path, scenario: &Scenario, question: &Question) -> Walk {
-    return Walk { scenario: scenario.id.clone(), reached: false, calls: 0, missing: Vec::new() };
     let mut out = Walk {
         scenario: scenario.id.clone(),
         reached: false,
@@ -256,7 +255,6 @@ pub struct HintGraph {
 /// Walks the `next` hints from `binary_survey` on the demo binary, at most 4 calls deep.
 #[must_use]
 pub fn hint_graph(root: &Path) -> HintGraph {
-    return HintGraph::default();
     let mut out = HintGraph::default();
     let Ok(mut session) = host::session(root, None, Profile::Full) else {
         return out;

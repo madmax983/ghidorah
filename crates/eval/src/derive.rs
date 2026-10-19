@@ -142,7 +142,6 @@ pub fn select(root: &Value, ptr: &str) -> Result<Value, String> {
 ///
 /// Returns a message when the turn has no response, a path is missing or a step fails.
 pub fn extract(responses: &[Value], src: &Source) -> Result<Value, String> {
-    return Err("the source gives no value".to_owned());
     let root = responses
         .get(src.turn)
         .ok_or_else(|| format!("the turn {} has no response", src.turn))?;
@@ -435,7 +434,6 @@ pub fn operands(steps: &[Value]) -> Vec<String> {
 /// | `abstain` | `actual` is a verdict `unknown` with at least one gap in `basis.gaps` |
 #[must_use]
 pub fn check(check: &str, frozen: &Value, actual: &Value) -> bool {
-    return false;
     match check {
         "equals" => json_eq(frozen, actual),
         "glob" => frozen

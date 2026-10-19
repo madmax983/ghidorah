@@ -153,7 +153,6 @@ pub fn log_findings(
     costs: &BTreeMap<String, Cost>,
     log: &[LogLine],
 ) -> Vec<String> {
-    return vec!["the bless log gives no check".to_owned()];
     let mut last: BTreeMap<&str, &LogLine> = BTreeMap::new();
     let mut out = Vec::new();
     for line in log {
@@ -252,7 +251,6 @@ pub fn bless(
     commit: &str,
     reason: &str,
 ) -> Result<Vec<LogLine>, EvalError> {
-    return Err(EvalError::Bless { message: "the bless writes nothing".to_owned() });
     let lowered = lowered_floors(t);
     if !lowered.is_empty() {
         return Err(EvalError::Bless {

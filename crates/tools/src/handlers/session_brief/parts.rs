@@ -162,6 +162,14 @@ fn changes(history: &History, p: &Program, since: Rev) -> Vec<Row> {
     rows
 }
 
+/// Gives `rows` with the rows of the session `label` first. Each part keeps its order, newest
+/// first. So after a context reset, the brief shows the own edits before those of a script.
+fn own_first(rows: Vec<Row>, label: &str) -> Vec<Row> {
+    let (mut own, other): (Vec<Row>, Vec<Row>) = rows.into_iter().partition(|r| r.session == label);
+    own.extend(other);
+    own
+}
+
 /// Gives the orphaned facts of `b` in order: none while the analysis is not complete.
 fn orphans(b: &OpenBinary) -> Vec<Orphan> {
     if b.analysis
@@ -223,6 +231,7 @@ impl Facts {
         binaries: Vec<Value>,
         history: &History,
         since: Rev,
+        label: &str,
     ) -> Self {
         let p = &b.program;
         let open = newest(p, is_open);
@@ -260,7 +269,10 @@ impl Facts {
                 .iter()
                 .map(|n| note_row(n))
                 .collect(),
-            edits: changes(history, p, Rev(0)).iter().map(edit_row).collect(),
+            edits: own_first(changes(history, p, Rev(0)), label)
+                .iter()
+                .map(edit_row)
+                .collect(),
             changed: (since.0, by_kind),
             weak,
             orphans: orphans(b),

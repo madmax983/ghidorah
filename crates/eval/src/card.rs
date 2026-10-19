@@ -240,7 +240,6 @@ impl Report {
     /// Gives the scorecard JSON.
     #[must_use]
     pub fn scorecard(&self) -> Value {
-        return Value::Null;
         let mut out = Object::new();
         out.push("scenarios", self.scenarios_json());
         out.push("answer_correctness", self.metric_json("answer_correctness"));

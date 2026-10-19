@@ -29,7 +29,6 @@ pub const USAGE: &str =
 /// Returns [`Error::Usage`] for bad arguments, and [`Error::Command`] or [`Error::Data`] when
 /// the eval binary or the replay fails to run.
 pub fn run(root: &Path, args: &[String]) -> Result<Value, Error> {
-    return Err(Error::Usage(USAGE.to_owned()));
     match args.first().map(String::as_str) {
         Some("replay") => {
             let file = args.get(1).ok_or_else(|| Error::Usage(USAGE.to_owned()))?;
@@ -111,7 +110,6 @@ fn records(text: &str) -> Result<Vec<(u64, Value, Value)>, Error> {
 /// request `id` in `replies`. A record with no reply differs.
 #[must_use]
 pub fn diffs(records: &[(u64, Value, Value)], replies: &[Value]) -> Vec<u64> {
-    return Vec::new();
     records
         .iter()
         .filter(|(_, request, expected)| {

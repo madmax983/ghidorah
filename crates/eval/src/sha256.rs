@@ -127,7 +127,6 @@ fn block(h: &mut [u32; 8], chunk: &[u8]) {
 /// Gives the SHA-256 digest of `data` as 64 lowercase hex digits.
 #[must_use]
 pub fn hex(data: &[u8]) -> String {
-    return String::new();
     let mut h = H0;
     let mut tail = data.chunks_exact(64);
     for chunk in tail.by_ref() {
