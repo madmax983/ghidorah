@@ -1,0 +1,73 @@
+{
+  "id": "annotate-04",
+  "question": "q-annotate-04",
+  "turns": [
+    {
+      "call": {
+        "tool": "binary_load",
+        "args": {
+          "path": "fixtures/bin/func_ptrs.gcc-O2.stripped"
+        }
+      }
+    },
+    {
+      "call": {
+        "tool": "func_list",
+        "args": {
+          "filter": {
+            "start_reason": [
+              "fde"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "call": {
+        "tool": "func_get",
+        "args": {
+          "targets": {
+            "$turn": 1,
+            "ptr": "/data/items/*/id"
+          },
+          "include": [
+            "decomp"
+          ]
+        }
+      }
+    },
+    {
+      "call": {
+        "tool": "symbol_rename",
+        "args": {
+          "target": {
+            "$turn": 2,
+            "ptr": "/data/items/0/input"
+          },
+          "name": "op_plus"
+        }
+      }
+    }
+  ],
+  "answer": {
+    "turn": 3,
+    "ptr": "/data/items/0/id",
+    "steps": [
+      {
+        "op": "trim_prefix",
+        "text": "fn:"
+      }
+    ]
+  },
+  "provenance": {
+    "/turns/0/call/args/path": "question:binaries/0",
+    "/turns/1/call/args/filter/start_reason/0": "schema:func_list.filter.start_reason",
+    "/turns/2/call/args/include/0": "instructions",
+    "/turns/3/call/args/name": "question"
+  },
+  "budgets": {
+    "max_calls": 4,
+    "max_chars": 12800,
+    "max_peak_chars": 10000
+  }
+}

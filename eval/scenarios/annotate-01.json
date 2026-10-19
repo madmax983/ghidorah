@@ -1,0 +1,56 @@
+{
+  "id": "annotate-01",
+  "question": "q-annotate-01",
+  "turns": [
+    {
+      "call": {
+        "tool": "binary_load",
+        "args": {
+          "path": "fixtures/bin/hello.gcc-O2.stripped"
+        }
+      }
+    },
+    {
+      "call": {
+        "tool": "binary_survey",
+        "args": {
+          "include": [
+            "strings"
+          ]
+        }
+      }
+    },
+    {
+      "call": {
+        "tool": "symbol_rename",
+        "args": {
+          "target": {
+            "$turn": 1,
+            "ptr": "/data/strings/items/0/funcs/0"
+          },
+          "name": "print_greeting"
+        }
+      }
+    }
+  ],
+  "answer": {
+    "turn": 2,
+    "ptr": "/data/items/0/id",
+    "steps": [
+      {
+        "op": "trim_prefix",
+        "text": "fn:"
+      }
+    ]
+  },
+  "provenance": {
+    "/turns/0/call/args/path": "question:binaries/0",
+    "/turns/1/call/args/include/0": "schema:binary_survey.include",
+    "/turns/2/call/args/name": "question"
+  },
+  "budgets": {
+    "max_calls": 3,
+    "max_chars": 2400,
+    "max_peak_chars": 1200
+  }
+}

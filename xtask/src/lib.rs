@@ -18,6 +18,7 @@
 //! | `xtask fixtures build-pe` | [`fixtures_pe`] | Builds the PE32+ fixtures, their truth and their goldens (WP-30). |
 //! | `xtask golden` | [`golden`] | Blesses goldens and checks their headers. |
 //! | `xtask oracle` | [`oracle`] | Writes the native semantic vectors and the host boundary record (WP-16). |
+//! | `xtask eval` | [`eval`] | Runs the eval harness, blesses its baselines and replays call records (WP-26). |
 
 pub mod ac;
 pub mod acrun;
@@ -25,6 +26,7 @@ pub mod ci;
 pub mod cov;
 pub mod dag;
 pub mod error;
+pub mod eval;
 pub mod finding;
 pub mod fixtures;
 pub mod fixtures_pe;

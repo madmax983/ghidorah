@@ -1,0 +1,40 @@
+{
+  "id": "triage-02",
+  "question": "q-triage-02",
+  "turns": [
+    {
+      "call": {
+        "tool": "binary_load",
+        "args": {
+          "path": "fixtures/bin/hello.gcc-O2.stripped"
+        }
+      }
+    },
+    {
+      "call": {
+        "tool": "binary_survey",
+        "args": {
+          "include": [
+            "imports"
+          ]
+        }
+      }
+    }
+  ],
+  "answer": {
+    "turn": 1,
+    "ptr": "/data/imports/libraries"
+  },
+  "provenance": {
+    "/turns/0/call/args/path": "question:binaries/0",
+    "/turns/1/call/args/include/0": "schema:binary_survey.include"
+  },
+  "budgets": {
+    "max_calls": 2,
+    "max_chars": 2100,
+    "max_peak_chars": 1300
+  },
+  "evidence": [
+    "libc.so.6"
+  ]
+}

@@ -1,0 +1,45 @@
+{
+  "id": "verify-03",
+  "question": "q-verify-03",
+  "turns": [
+    {
+      "call": {
+        "tool": "binary_load",
+        "args": {
+          "path": "fixtures/bin/syscall_only.gcc-O2"
+        }
+      }
+    },
+    {
+      "call": {
+        "tool": "fact_check",
+        "args": {
+          "claims": [
+            {
+              "rel": "has_syscall",
+              "args": [
+                "emit_banner",
+                "write"
+              ]
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "answer": {
+    "turn": 1,
+    "ptr": "/data/verdicts/0"
+  },
+  "provenance": {
+    "/turns/0/call/args/path": "question:binaries/0",
+    "/turns/1/call/args/claims/0/rel": "schema:fact_check.claims.rel",
+    "/turns/1/call/args/claims/0/args/0": "question",
+    "/turns/1/call/args/claims/0/args/1": "question"
+  },
+  "budgets": {
+    "max_calls": 2,
+    "max_chars": 1200,
+    "max_peak_chars": 800
+  }
+}

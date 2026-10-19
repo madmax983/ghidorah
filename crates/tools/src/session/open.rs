@@ -50,6 +50,16 @@ const fn state_of(state: RunState) -> AnalysisState {
 }
 
 impl Session {
+    /// Makes a session of the shipped registry whose clock stays at `ms` milliseconds.
+    ///
+    /// The eval harness uses it: it has no clock of its own, and two runs must give
+    /// byte-equal responses (design Section 12.4).
+    #[must_use]
+    pub fn fixed(mut config: super::SessionConfig, ms: u64) -> Self {
+        config.run.fixed_time = Some(ms);
+        Self::new(config, Box::new(ghidorah_base::FixedClock::new(ms)))
+    }
+
     /// Replaces the file system of the projects, for example with a simulated one in tests.
     pub fn set_fs(&mut self, fs: Box<dyn ghidorah_db::Fs>) {
         self.fs = fs;

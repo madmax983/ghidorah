@@ -1,0 +1,51 @@
+{
+  "id": "triage-04",
+  "question": "q-triage-04",
+  "turns": [
+    {
+      "call": {
+        "tool": "binary_load",
+        "args": {
+          "path": "fixtures/bin/syscall_only.gcc-O2.stripped"
+        }
+      }
+    },
+    {
+      "call": {
+        "tool": "binary_survey",
+        "args": {
+          "include": [
+            "syscalls"
+          ]
+        }
+      }
+    }
+  ],
+  "answer": {
+    "turn": 1,
+    "ptr": "/data/syscalls/items",
+    "steps": [
+      {
+        "op": "pick",
+        "ptr": "/name"
+      },
+      {
+        "op": "sort"
+      }
+    ]
+  },
+  "provenance": {
+    "/turns/0/call/args/path": "question:binaries/0",
+    "/turns/1/call/args/include/0": "schema:binary_survey.include"
+  },
+  "budgets": {
+    "max_calls": 2,
+    "max_chars": 1400,
+    "max_peak_chars": 800
+  },
+  "evidence": [
+    "sys:exit",
+    "sys:getpid",
+    "sys:write"
+  ]
+}

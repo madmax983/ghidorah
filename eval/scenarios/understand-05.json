@@ -1,0 +1,53 @@
+{
+  "id": "understand-05",
+  "question": "q-understand-05",
+  "turns": [
+    {
+      "call": {
+        "tool": "binary_load",
+        "args": {
+          "path": "fixtures/bin/noreturn_wrappers.gcc-O2"
+        }
+      }
+    },
+    {
+      "call": {
+        "tool": "func_list",
+        "args": {
+          "filter": {
+            "start_reason": [
+              "symbol"
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "answer": {
+    "turn": 1,
+    "ptr": "/data/items",
+    "steps": [
+      {
+        "op": "where",
+        "ptr": "/flags",
+        "has": "noreturn"
+      },
+      {
+        "op": "pick",
+        "ptr": "/name"
+      },
+      {
+        "op": "sort"
+      }
+    ]
+  },
+  "provenance": {
+    "/turns/0/call/args/path": "question:binaries/0",
+    "/turns/1/call/args/filter/start_reason/0": "schema:func_list.filter.start_reason"
+  },
+  "budgets": {
+    "max_calls": 2,
+    "max_chars": 2500,
+    "max_peak_chars": 1700
+  }
+}

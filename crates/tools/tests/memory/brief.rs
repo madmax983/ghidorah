@@ -172,6 +172,47 @@ fn ac_155_session_brief() {
     }
 }
 
+/// After a context reset, the edits of the own session come first, before the edits of a script
+/// with another session label (found by WP-26, AC-229).
+#[test]
+fn brief_lists_own_session_edits_first() {
+    let (mut session, _) = fixture(STRIPPED);
+    let rename = call(
+        &mut session,
+        "symbol_rename",
+        r#"{"target":"FUN_000011e0","name":"check_password"}"#,
+    );
+    assert_eq!(code(&rename), "", "{rename}");
+    for i in 0..12u64 {
+        let args = format!(
+            r#"{{"target":"{:#x}","kind":"eol","text":"Script comment {i}.","session":"script"}}"#,
+            0x1080 + i * 4
+        );
+        let comment = call(&mut session, "comment_set", &args);
+        assert_eq!(code(&comment), "", "{comment}");
+    }
+    let brief = call(&mut session, "session_brief", "{}");
+    let edits = list(&brief, "recent_edits");
+    let own = text_at(&brief, "/session");
+    assert_eq!(
+        edits.first().map(|e| str_of(e, "value")).as_deref(),
+        Some("check_password"),
+        "{brief}"
+    );
+    assert_eq!(
+        edits.first().map(|e| str_of(e, "session")),
+        Some(own),
+        "{brief}"
+    );
+    assert!(
+        edits
+            .iter()
+            .skip(1)
+            .all(|e| str_of(e, "session") == "script"),
+        "{brief}"
+    );
+}
+
 #[test]
 fn brief_marks_and_changes() {
     let (mut session, id) = fixture(STRIPPED);

@@ -1,0 +1,75 @@
+{
+  "id": "recover-01",
+  "question": "q-recover-01",
+  "turns": [
+    {
+      "call": {
+        "tool": "binary_load",
+        "args": {
+          "path": "fixtures/bin/crackme.gcc-O2.stripped"
+        }
+      }
+    },
+    {
+      "call": {
+        "tool": "binary_survey",
+        "args": {
+          "include": [
+            "coverage"
+          ]
+        }
+      }
+    },
+    {
+      "call": {
+        "tool": "func_edit",
+        "args": {
+          "action": "create",
+          "target": {
+            "$turn": 1,
+            "ptr": "/data/coverage/worklist/items",
+            "steps": [
+              {
+                "op": "where",
+                "ptr": "/kind",
+                "eq": "gap"
+              },
+              {
+                "op": "pick",
+                "ptr": "/at"
+              },
+              {
+                "op": "first"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "call": {
+        "tool": "func_get",
+        "args": {
+          "target": {
+            "$turn": 2,
+            "ptr": "/data/target"
+          }
+        }
+      }
+    }
+  ],
+  "answer": {
+    "turn": 3,
+    "ptr": "/data/size"
+  },
+  "provenance": {
+    "/turns/0/call/args/path": "question:binaries/0",
+    "/turns/1/call/args/include/0": "schema:binary_survey.include",
+    "/turns/2/call/args/action": "schema:func_edit.action"
+  },
+  "budgets": {
+    "max_calls": 4,
+    "max_chars": 3000,
+    "max_peak_chars": 1300
+  }
+}

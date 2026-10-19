@@ -1,0 +1,58 @@
+{
+  "id": "triage-01",
+  "question": "q-triage-01",
+  "turns": [
+    {
+      "call": {
+        "tool": "binary_load",
+        "args": {
+          "path": "fixtures/bin/socket_client.gcc-O2"
+        }
+      }
+    },
+    {
+      "call": {
+        "tool": "binary_survey",
+        "args": {
+          "include": [
+            "imports"
+          ]
+        }
+      }
+    }
+  ],
+  "answer": {
+    "turn": 1,
+    "ptr": "/data/imports/items",
+    "steps": [
+      {
+        "op": "where",
+        "ptr": "/category",
+        "eq": "network"
+      },
+      {
+        "op": "pick",
+        "ptr": "/name"
+      },
+      {
+        "op": "sort"
+      }
+    ]
+  },
+  "provenance": {
+    "/turns/0/call/args/path": "question:binaries/0",
+    "/turns/1/call/args/include/0": "schema:binary_survey.include"
+  },
+  "budgets": {
+    "max_calls": 2,
+    "max_chars": 2500,
+    "max_peak_chars": 1700
+  },
+  "evidence": [
+    "imp:connect",
+    "imp:inet_pton",
+    "imp:recv",
+    "imp:send",
+    "imp:socket"
+  ]
+}

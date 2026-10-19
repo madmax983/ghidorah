@@ -1,0 +1,44 @@
+{"id":"m01","session":"demo","class":"R","code":"UNKNOWN_ARGUMENT","call":{"tool":"func_list","args":{"sortt":"addr"}}}
+{"id":"m02","session":"demo","class":"R","code":"UNKNOWN_ARGUMENT","call":{"tool":"func_get","args":{"target":"main","includ":["summary"]}}}
+{"id":"m03","session":"demo","class":"R","code":"UNKNOWN_ARGUMENT","call":{"tool":"xref_list","args":{"targets":["main"],"directon":"to"}}}
+{"id":"m04","session":"demo","class":"R","code":"UNKNOWN_ARGUMENT","call":{"tool":"search","args":{"kind":"string","qery":"Access"}}}
+{"id":"m05","session":"demo","class":"R","code":"UNKNOWN_ARGUMENT","call":{"tool":"func_list","args":{"colour":"red"}}}
+{"id":"m06","session":"demo","class":"R","code":"UNKNOWN_ARGUMENT","call":{"tool":"mem_read","args":{"target":"0x2004","lenght":16}}}
+{"id":"m07","session":"demo","class":"R","code":"UNKNOWN_ARGUMENT","call":{"tool":"binary_survey","args":{"includes":["imports"]}}}
+{"id":"m08","session":"demo","class":"R","code":"UNKNOWN_ARGUMENT","call":{"tool":"note_write","args":{"kind":"note","txt":"The main function prints the result."}}}
+{"id":"m09","session":"stripped","class":"R","code":"UNKNOWN_ARGUMENT","call":{"tool":"symbol_rename","args":{"target":"FUN_000011e0","nmae":"check_input"}}}
+{"id":"m10","session":"demo","class":"R","code":"UNKNOWN_ARGUMENT","call":{"tool":"comment_set","args":{"target":"main","kind":"eol","txet":"Entry of the check."}}}
+{"id":"m11","session":"demo","class":"R","code":"UNKNOWN_ARGUMENT","call":{"tool":"fact_check","args":{"claim":[{"rel":"calls","args":["main","puts"]}]}}}
+{"id":"m12","session":"two","class":"R","code":"BINARY_REQUIRED","call":{"tool":"func_list","args":{}}}
+{"id":"m13","session":"two","class":"R","code":"BINARY_REQUIRED","call":{"tool":"binary_survey","args":{"include":["identity"]}}}
+{"id":"m14","session":"two","class":"R","code":"BINARY_REQUIRED","call":{"tool":"search","args":{"kind":"string","query":"Access"}}}
+{"id":"m15","session":"demo","class":"R","code":"CURSOR_INVALID","call":{"tool":"func_list","args":{"cursor":"zz"}}}
+{"id":"m16","session":"demo","class":"R","code":"CURSOR_INVALID","call":{"tool":"search","args":{"kind":"name","cursor":"0011"}}}
+{"id":"m17","session":"demo","class":"R","code":"CURSOR_INVALID","call":{"tool":"xref_list","args":{"targets":["imp:puts"],"cursor":"abc"}}}
+{"id":"m18","session":"stripped","class":"R","code":"CURSOR_STALE","setup":[{"tool":"func_list","args":{"sort":"name","limit":2}},{"tool":"symbol_rename","args":{"target":{"$turn":0,"ptr":"/data/items/1/id"},"name":"zz_renamed"}}],"call":{"tool":"func_list","args":{"sort":"name","limit":2,"cursor":{"$turn":0,"ptr":"/page/next_cursor"}}}}
+{"id":"m19","session":"demo","class":"R","code":"LIMIT_EXCEEDED","call":{"tool":"func_list","args":{"limit":5000}}}
+{"id":"m20","session":"demo","class":"R","code":"LIMIT_EXCEEDED","call":{"tool":"search","args":{"kind":"name","limit":2000}}}
+{"id":"m21","session":"demo","class":"R","code":"ADDRESS_INVALID","call":{"tool":"mem_read","args":{"target":"201e"}}}
+{"id":"m22","session":"reopen","class":"R","code":"UNKNOWN_BINARY","call":{"tool":"func_list","args":{"binary_id":"467a43b75d95c826"}}}
+{"id":"m23","session":"stripped","class":"R","code":"CONFLICT","call":{"tool":"symbol_rename","args":{"target":"FUN_000011e0","name":"entry_main","expected_rev":99}}}
+{"id":"m24","session":"demo","class":"R","code":"CONFLICT","call":{"tool":"comment_set","args":{"target":"main","kind":"eol","text":"The entry of the program.","expected_rev":0}}}
+{"id":"m25","session":"demo","class":"R","code":"PLUCK_TOO_LONG","call":{"tool":"batch_run","args":{"steps":[{"id":"s1","tool":"func_list","args":{}},{"id":"s2","tool":"fact_check","args":{"explain":{"$ref":"s1","ptr":"/data/items/*/id"}}}]}}}
+{"id":"m26","session":"demo","class":"R","code":"BUDGET_EXCEEDED","call":{"tool":"func_similar","args":{"target":"main","max_steps":1000}}}
+{"id":"m27","session":"demo","class":"C","code":"ADDRESS_BASE_AMBIGUOUS","call":{"tool":"func_get","args":{"target":"4576"}},"target":"0x11e0"}
+{"id":"m28","session":"demo","class":"C","code":"ADDRESS_BASE_AMBIGUOUS","call":{"tool":"mem_read","args":{"target":"8196"}},"target":"0x2004"}
+{"id":"m29","session":"helpers","class":"C","code":"AMBIGUOUS_NAME","call":{"tool":"func_get","args":{"target":"helper"}},"target":"0x11c0"}
+{"id":"m30","session":"helpers","class":"C","code":"AMBIGUOUS_NAME","call":{"tool":"addr_info","args":{"target":"helper"}},"target":"0x1190"}
+{"id":"m31","session":"demo","class":"C","code":"NOT_FOUND","call":{"tool":"func_get","args":{"target":"chek_password"}},"target":"check_password"}
+{"id":"m32","session":"demo","class":"C","code":"NOT_FOUND","call":{"tool":"func_get","args":{"target":"mian"}},"target":"main"}
+{"id":"m33","session":"demo","class":"C","code":"NOT_FOUND","call":{"tool":"symbol_rename","args":{"target":"check_pasword","name":"check_input"}},"target":"check_password"}
+{"id":"m34","session":"demo","class":"C","code":"NOT_FOUND","call":{"tool":"func_get","args":{"target":"imp:put"}},"target":"imp:puts"}
+{"id":"m35","session":"demo","class":"C","code":"ADDRESS_UNMAPPED","call":{"tool":"mem_read","args":{"target":"0x3d00"}},"target":"0x3db0"}
+{"id":"m36","session":"demo","class":"C","code":"BAD_REFERENCE","call":{"tool":"batch_run","args":{"steps":[{"id":"s1","tool":"func_list","args":{}},{"id":"s2","tool":"func_get","args":{"targets":{"$ref":"s1","ptr":"/data/itms/*/id"}}}]}},"target":"/data/items"}
+{"id":"m37","session":"demo","class":"H","code":"MISSING_ARGUMENT","call":{"tool":"func_get","args":{}},"intended":"func_get"}
+{"id":"m38","session":"demo","class":"H","code":"MISSING_ARGUMENT","call":{"tool":"xref_list","args":{}},"intended":"xref_list"}
+{"id":"m39","session":"demo","class":"H","code":"MISSING_ARGUMENT","call":{"tool":"mem_read","args":{"as":"hex"}},"intended":"mem_read"}
+{"id":"m40","session":"demo","class":"H","code":"UNKNOWN_TOOL","call":{"tool":"decompile","args":{"target":"main"}},"intended":"func_get"}
+{"id":"m41","session":"demo","class":"H","code":"UNKNOWN_TOOL","call":{"tool":"list_functions","args":{}},"intended":"func_list"}
+{"id":"m42","session":"demo","class":"H","code":"UNKNOWN_TOOL","call":{"tool":"rename_symbol","args":{"target":"main","name":"entry"}},"intended":"symbol_rename"}
+{"id":"m43","session":"mini","class":"H","code":"TOOL_NOT_IN_PROFILE","call":{"tool":"mem_read","args":{"target":"0x2004"}},"intended":"search"}
+{"id":"m44","session":"reopen","class":"H","code":"NO_BINARY_OPEN","call":{"tool":"func_list","args":{}},"intended":"binary_load"}
