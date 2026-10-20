@@ -4,7 +4,7 @@
 //! |---|---|
 //! | `xtask oracle semantics` | Runs each form of `ghidorah-oracle` in a child process and writes `tests/golden/semantics/x86/<file>.jsonl`. |
 //! | `xtask oracle semantics --check` | Runs the forms and compares the result with the checked-in files. Writes no file. Skips a file whose header names another CPU. |
-//! | `xtask oracle bash` | Runs the tier-2 host boundary test of `ghidorah-x86` on host bash and libc and writes `verify/oracle-results.json` (AC-066). |
+//! | `xtask oracle bash` | Runs the tier-2 host boundary test of `ghidorah-x86` on host bash and libc and writes `verify/oracle-results.json` (AC-066). A failed run writes `verify/oracle-results.failed.json` and keeps the record. |
 //!
 //! The vector files hold host evidence. Their header names the CPU model, so a run on
 //! another CPU can differ in the flags that the hardware leaves undefined.
@@ -23,6 +23,9 @@ pub const SEMANTICS_DIR: &str = "tests/golden/semantics/x86";
 
 /// The record of the host boundary oracle, relative to the workspace root.
 pub const RECORD: &str = "verify/oracle-results.json";
+
+/// The record of a failed host boundary run, relative to the workspace root.
+pub const FAILED_RECORD: &str = "verify/oracle-results.failed.json";
 
 /// The generator name in the headers.
 pub const GENERATOR: &str = "xtask-oracle";
@@ -233,25 +236,52 @@ fn semantics(root: &Path, check: bool) -> Result<Value, Error> {
     ]))
 }
 
-fn bash(root: &Path) -> Result<Value, Error> {
-    let mut cmd = proc::cargo_cmd(BASH_TEST);
-    let out = proc::run(cmd.current_dir(root))?;
-    let record = bash_record(&out.stdout)?;
-    let path = root.join(RECORD);
-    let text = format!("{}\n", json::write(&record));
-    std::fs::write(&path, text).map_err(|e| Error::io(&path, e))?;
-    let mismatches = |key: &str| {
+/// Tells if the entry `key` of a host boundary record agrees on every instruction.
+fn full_agreement(record: &Value, key: &str) -> bool {
+    let number = |field: &str| {
         record
-            .pointer(&format!("/{key}/mismatches"))
+            .pointer(&format!("/{key}/{field}"))
             .and_then(Value::as_u64)
     };
-    let ok = out.ok() && mismatches("bash") == Some(0) && mismatches("libc") == Some(0);
+    number("mismatches") == Some(0) && number("insns").is_some_and(|n| number("agree") == Some(n))
+}
+
+/// Writes the record of a host boundary run and gives the report.
+///
+/// `test_ok` tells if the test process exits with code 0. `test_stdout` is its output.
+/// A run is good when the test passes and bash and libc agree on every instruction.
+/// A good run writes [`RECORD`] and removes [`FAILED_RECORD`]. A failed run writes
+/// [`FAILED_RECORD`] and keeps [`RECORD`]. The report names the written file in `record`.
+///
+/// # Errors
+///
+/// Returns the errors of [`bash_record`] and [`Error::Io`] when a file does not write.
+pub fn bash_report(root: &Path, test_ok: bool, test_stdout: &str) -> Result<Value, Error> {
+    let record = bash_record(test_stdout)?;
+    let ok = test_ok && full_agreement(&record, "bash") && full_agreement(&record, "libc");
+    let written = if ok { RECORD } else { FAILED_RECORD };
+    let path = root.join(written);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| Error::io(parent, e))?;
+    }
+    let text = format!("{}\n", json::write(&record));
+    std::fs::write(&path, text).map_err(|e| Error::io(&path, e))?;
+    let failed = root.join(FAILED_RECORD);
+    if ok && failed.exists() {
+        std::fs::remove_file(&failed).map_err(|e| Error::io(&failed, e))?;
+    }
     Ok(Value::object([
         ("ok", Value::from(ok)),
-        ("record", Value::from(RECORD)),
+        ("record", Value::from(written)),
         ("bash", record.get("bash").cloned().unwrap_or(Value::Null)),
         ("libc", record.get("libc").cloned().unwrap_or(Value::Null)),
     ]))
+}
+
+fn bash(root: &Path) -> Result<Value, Error> {
+    let mut cmd = proc::cargo_cmd(BASH_TEST);
+    let out = proc::run(cmd.current_dir(root))?;
+    bash_report(root, out.ok(), &out.stdout)
 }
 
 /// Runs `xtask oracle <semantics [--check]|bash>`.

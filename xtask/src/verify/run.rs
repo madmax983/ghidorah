@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use super::{ARGV, KERNELS, Kernel, RESULTS_PATH, Tools, patch, tree};
+use super::{ARGV, FAILED_PATH, KERNELS, Kernel, RESULTS_PATH, Tools, patch, tree};
 use crate::json::{self, Value};
 use crate::{Error, proc};
 
@@ -256,12 +256,18 @@ pub(super) fn proofs(root: &Path, verus: &Path, z3: Option<&Path>) -> Result<Val
     record.insert("kernels".to_owned(), Value::Object(kernels));
     record.insert("negatives".to_owned(), Value::Array(negatives));
     let record = Value::Object(record);
-    let path = root.join(RESULTS_PATH);
+    // Only a good run replaces the record. A failed run keeps the record of the last good run.
+    let written = if all_ok { RESULTS_PATH } else { FAILED_PATH };
+    let path = root.join(written);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| Error::io(parent, e))?;
     }
     std::fs::write(&path, format!("{}\n", json::write(&record)))
         .map_err(|e| Error::io(&path, e))?;
+    let failed = root.join(FAILED_PATH);
+    if all_ok && failed.exists() {
+        std::fs::remove_file(&failed).map_err(|e| Error::io(&failed, e))?;
+    }
     let Value::Object(mut report) = record else {
         return Err(Error::data("verify", "the record is not an object"));
     };
@@ -270,6 +276,6 @@ pub(super) fn proofs(root: &Path, verus: &Path, z3: Option<&Path>) -> Result<Val
         "status".to_owned(),
         Value::from(if all_ok { "verified" } else { "failed" }),
     );
-    report.insert("results".to_owned(), Value::from(RESULTS_PATH));
+    report.insert("results".to_owned(), Value::from(written));
     Ok(Value::Object(report))
 }

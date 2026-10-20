@@ -601,8 +601,32 @@ fn verify_run_with_a_fake_verus() {
             .all(|l| l.starts_with("--cfg verus_only --no-cheating")),
         "{log}"
     );
+}
 
-    // A stale negative patch makes the run fail.
+#[cfg(unix)]
+#[test]
+fn regress_verify_failed_run_keeps_the_record() {
+    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("verify_fake_failed");
+    let _ = std::fs::remove_dir_all(&dir);
+    copy_inputs(&dir);
+    let verus = fake_verus(
+        &dir,
+        &report_with(500, 0, &kernel_functions(&dir)),
+        &report(2, 1),
+    );
+    let settings = Settings {
+        verus: Some(verus),
+        z3: None,
+        optional: false,
+    };
+    let record = dir.join(tree::RESULTS_PATH);
+    let failed = dir.join(verify::FAILED_PATH);
+    let out = verify::run_with(&dir, &settings).expect("the run gives a report");
+    assert_eq!(out.get("ok").and_then(Value::as_bool), Some(true), "{out}");
+    let good = std::fs::read_to_string(&record).expect("a good run writes the record");
+    assert!(!failed.exists(), "a good run writes no failed record");
+
+    // A stale negative patch makes the run fail. The failed run keeps the good record.
     let k1 = dir.join("verify/negative/K1.patch");
     let stale = std::fs::read_to_string(&k1)
         .expect("K1.patch exists")
@@ -610,4 +634,27 @@ fn verify_run_with_a_fake_verus() {
     std::fs::write(&k1, stale).expect("the patch is writable");
     let out = verify::run_with(&dir, &settings).expect("the run gives a report");
     assert_eq!(out.get("ok").and_then(Value::as_bool), Some(false), "{out}");
+    assert_eq!(
+        out.get("results").and_then(Value::as_str),
+        Some(verify::FAILED_PATH)
+    );
+    assert_eq!(
+        std::fs::read_to_string(&record).expect("the record stays"),
+        good
+    );
+    let text = std::fs::read_to_string(&failed).expect("a failed run writes the failed record");
+    let row = json::parse(&text)
+        .expect("the failed record is JSON")
+        .pointer("/negatives/0/ok")
+        .cloned();
+    assert_eq!(row, Some(Value::Bool(false)), "{text}");
+
+    // The next good run removes the failed record.
+    copy_dir(
+        &root().join("verify/negative"),
+        &dir.join("verify/negative"),
+    );
+    let out = verify::run_with(&dir, &settings).expect("the run gives a report");
+    assert_eq!(out.get("ok").and_then(Value::as_bool), Some(true), "{out}");
+    assert!(!failed.exists(), "a good run removes the failed record");
 }

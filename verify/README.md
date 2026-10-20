@@ -4,7 +4,9 @@ This directory holds the proof record of `ghidorah-kernel` (design Sections 13.1
 
 | File | Content |
 |---|---|
-| `results.json` | The record of the last `cargo xtask verify` run. |
+| `results.json` | The record of the last good `cargo xtask verify` run. |
+| `results.failed.json` | The record of a failed run. A good run removes it. Do not commit it. |
+| `oracle-results.json` | The record of the last good `cargo xtask oracle bash` run (AC-066). A failed run writes `oracle-results.failed.json`. |
 | `negative/<kernel>.patch` | One hunk that breaks one kernel. Its Verus run must fail. |
 
 ## Run the proofs
@@ -22,6 +24,8 @@ Verus does not list an `external` function, so such a function makes the kernel 
 Then the command applies each negative patch to a copy of the kernel in `target/xtask-verify/` and runs Verus again.
 A negative run must give `postcondition not satisfied`, `assertion failed` or `precondition not satisfied`.
 It must also verify at least one item. A compile error does not count.
+
+Only a good run writes `results.json`. A failed run writes `results.failed.json`, keeps `results.json` and exits with code 1.
 
 Without Verus, the command fails with `status: missing`.
 With `GHIDORAH_VERUS_OPTIONAL=1`, it gives `status: skipped` and exit code 0.

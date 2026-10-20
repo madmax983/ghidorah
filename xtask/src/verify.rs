@@ -7,7 +7,9 @@
 //!
 //! Then the command applies the negative patch of each kernel to a copy of the kernel and runs Verus again.
 //! A negative run must fail with a verification error and at least one verified item.
-//! The command writes [`RESULTS_PATH`] and prints the same object with `ok` and `status`.
+//! A good run writes [`RESULTS_PATH`]. A failed run writes [`FAILED_PATH`] and keeps
+//! [`RESULTS_PATH`], so the record always holds a good run. The command prints the written
+//! object with `ok`, `status` and `results`, the path of the written file.
 //!
 //! Without Verus, the command fails. With `GHIDORAH_VERUS_OPTIONAL=1`, it prints
 //! `{ "ok": true, "status": "skipped" }` and exits with code 0.
@@ -84,6 +86,9 @@ pub const KERNELS: &[Kernel] = &[
         module: "source",
     },
 ];
+
+/// The record of a failed run, relative to the workspace root. A good run removes it.
+pub const FAILED_PATH: &str = "verify/results.failed.json";
 
 /// The Verus messages that count as a verification error of a negative run.
 pub const VERIFY_ERRORS: &[&str] = &[
