@@ -16,7 +16,8 @@
 //! | Run settings and clock | `GHIDORAH_FIXED_TIME` and `GHIDORAH_EVAL` through [`crate::RunConfig`] |
 //!
 //! `--open BIN_ID` opens the project of each ID at the start. A project that does not open is
-//! an open error.
+//! an open error. [`Backend::for_examples`] keeps no projects, so the examples of `doctor`
+//! and the surface tests change nothing on disk.
 
 use ghidorah_base::BinaryId;
 use ghidorah_json::Value;
@@ -106,8 +107,13 @@ impl Backend for Session {
         Ok(session)
     }
 
+    /// Opens a session with no projects root and the demo binary. So the examples, also those
+    /// that edit, change no project on disk, and two runs give the same results.
     fn for_examples(options: &Options) -> Result<Self, OpenError> {
-        let mut session = <Self as Backend>::open(options)?;
+        let mut options = options.clone();
+        options.project_root = None;
+        options.open.clear();
+        let mut session = <Self as Backend>::open(&options)?;
         let args = Value::object([("builtin", Value::from(EXAMPLE_BINARY))]);
         let envelope = dispatch(&mut session, &Request::new("binary_load", args)).to_json();
         match envelope.pointer("/error/code").and_then(Value::as_str) {

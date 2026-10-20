@@ -103,6 +103,24 @@ fn doctor_fails_without_a_projects_root() {
 }
 
 #[test]
+fn regress_doctor_is_hermetic() {
+    // A HOME outside every git working tree, so the default projects root is valid.
+    let home = std::env::temp_dir().join(format!("ghidorah-doctor-home-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&home);
+    std::fs::create_dir_all(&home).expect("the temp HOME");
+    let mut env = env("doctor_hermetic");
+    env.home = Some(home.clone());
+    env.xdg_data_home = None;
+    let first = run_in::<Session>(&["doctor"], "", &env);
+    let second = run_in::<Session>(&["doctor"], "", &env);
+    let made = home.join(".local").exists();
+    let _ = std::fs::remove_dir_all(&home);
+    assert_eq!(first.code, 0, "{}", first.stdout);
+    assert_eq!(first.stdout, second.stdout, "two runs give the same report");
+    assert!(!made, "the doctor makes no projects root and no project");
+}
+
+#[test]
 fn regress_doctor_refuses_root_in_git_tree() {
     let mut env = env("doctor_git_home");
     let home = env.cwd.join("home");

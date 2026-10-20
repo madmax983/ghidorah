@@ -7,10 +7,12 @@
 //! |---|---|
 //! | `registry_lint` | The registry lint finds nothing. |
 //! | `examples` | Each registry example runs with no `INTERNAL_ERROR`, and each result fits 60,000 characters in each content mode. The check gives the sizes. |
-//! | `project_dir` | The projects root obeys the root rule of ADR-0022, and a probe file in it writes and syncs. |
+//! | `project_dir` | The projects root obeys the root rule of ADR-0022, and a probe file in it writes and syncs. A root that does not exist gets `exists: false`, and the probe writes in its nearest parent. |
 //! | `era` | The era rules answer both handshakes and `server/discover`. |
 //!
-//! The exit code is 0 when all checks pass, else 1. Output holds no absolute path.
+//! The exit code is 0 when all checks pass, else 1. Output holds no absolute path. The
+//! examples run in a session with no projects root, and the probe makes no directory. So the
+//! doctor changes no project, and two runs give the same report.
 
 use std::fs;
 use std::io::Write;
@@ -157,16 +159,16 @@ fn examples<B: Backend>(options: &Options) -> Value {
     check("examples", all_ok, vec![("results", Value::Array(results))])
 }
 
-/// Writes, syncs and removes the probe file in `root`.
-fn probe(root: &Path) -> std::io::Result<()> {
-    fs::create_dir_all(root)?;
-    let path = root.join(PROBE);
+/// Writes, syncs and removes the probe file in the directory `dir`. The probe makes no
+/// directory.
+fn probe(dir: &Path) -> std::io::Result<()> {
+    let path = dir.join(PROBE);
     let mut file = fs::File::create(&path)?;
     file.write_all(b"ghidorah doctor probe\n")?;
     file.sync_all()?;
     drop(file);
     fs::remove_file(&path)?;
-    fs::File::open(root)?.sync_all()
+    fs::File::open(dir)?.sync_all()
 }
 
 fn project_dir(options: &Options) -> Value {
@@ -195,8 +197,13 @@ fn project_dir(options: &Options) -> Value {
             vec![("reason", Value::from(IN_GIT_TREE))],
         );
     }
-    match probe(root) {
-        Ok(()) => check("project_dir", true, Vec::new()),
+    // A root that does not exist yet stays so: the probe writes in its nearest parent, and
+    // the first project makes the root.
+    let exists = root.is_dir();
+    let dir = root.ancestors().find(|d| d.is_dir()).unwrap_or(root);
+    match probe(dir) {
+        Ok(()) if exists => check("project_dir", true, Vec::new()),
+        Ok(()) => check("project_dir", true, vec![("exists", Value::Bool(false))]),
         Err(error) => check(
             "project_dir",
             false,
