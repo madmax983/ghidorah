@@ -141,7 +141,7 @@ fn ac_169c_era_errors() {
     assert_eq!(
         version.pointer("/error/data"),
         Some(&json(
-            r#"{"supported":["2026-07-28","2025-11-25","2025-06-18"],"requested":"2025-03-26"}"#
+            r#"{"supported":["2026-07-28"],"requested":"2025-03-26"}"#
         ))
     );
     assert_eq!(code(&replies(&steps, 3)[0]), Some(rpc::INVALID_PARAMS));
@@ -239,4 +239,41 @@ fn decide_follows_the_rule_order() {
     let finished = era::finish(era::Era::Modern, json("{}"));
     assert_eq!(finished, json(r#"{"resultType":"complete"}"#));
     assert_eq!(era::finish(era::Era::Legacy, json("{}")), json("{}"));
+}
+
+/// A legacy version in `_meta` gives -32022 whose `data.supported` holds only the versions
+/// that `_meta` takes. The message tells that a legacy version needs `initialize`
+/// (agent-protocol-11).
+#[test]
+fn regress_meta_legacy_version_not_listed() {
+    let mut s = server();
+    let line = format!(
+        r#"{{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{{"name":"echo_text","arguments":{{"text":"hi"}},"_meta":{{"{}":"2025-11-25","{}":{{}}}}}}}}"#,
+        era::VERSION_KEY,
+        era::CAPABILITIES_KEY
+    );
+    let lines = s.handle_line(line.as_bytes());
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    let reply = json(&lines[0]);
+    assert_eq!(code(&reply), Some(rpc::UNSUPPORTED_VERSION), "{reply}");
+    assert_eq!(
+        reply.pointer("/error/data"),
+        Some(&json(
+            r#"{"supported":["2026-07-28"],"requested":"2025-11-25"}"#
+        )),
+        "{reply}"
+    );
+    let message = reply
+        .pointer("/error/message")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    assert!(message.contains("initialize"), "{reply}");
+    let mut state = EraState::default();
+    let params = json(&format!(
+        r#"{{"_meta":{{"{}":"2025-06-18"}}}}"#,
+        era::VERSION_KEY
+    ));
+    let rejected = era::decide(&mut state, "tools/list", Some(&params)).expect_err("legacy");
+    let supported = rejected.data.as_ref().and_then(|d| d.get("supported"));
+    assert_eq!(supported, Some(&json(r#"["2026-07-28"]"#)));
 }
