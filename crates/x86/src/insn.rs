@@ -4,6 +4,7 @@
 //! address form, two immediates and four operand slots. [`Insn::op`] builds an
 //! [`Operand`] from these fields.
 
+use crate::fields::RegFields;
 pub use crate::fields::{Encoding, Map, OpaqueForm, PrefixSet, RawFields};
 use crate::flags::FlagSet;
 use crate::flow::Flow;
@@ -84,6 +85,8 @@ pub struct Insn {
     pub(crate) imm_at: u8,
     /// The opcode offset in bits 0 to 3. Bit 4: a `ModRM` byte. Bit 5: a SIB byte.
     pub(crate) hdr: u8,
+    /// The register fields of a VEX, EVEX or XOP prefix, as `fields::vex_fields` packs them.
+    pub(crate) vex: u16,
 }
 
 /// The operands of an instruction, in order.
@@ -218,6 +221,85 @@ impl Insn {
             disp_size: self.disp_at & 0xf,
             imm_off: self.imm_at >> 4,
             imm_size: self.imm_at & 0xf,
+        }
+    }
+
+    /// Gives the opcode map.
+    pub(crate) const fn map(&self) -> Map {
+        self.map
+    }
+
+    /// Gives the opcode byte.
+    pub(crate) const fn opcode(&self) -> u8 {
+        self.opcode
+    }
+
+    /// Gives the `ModRM` byte, or `None` without one.
+    pub(crate) const fn modrm(&self) -> Option<u8> {
+        if self.hdr & 0x10 != 0 {
+            Some(self.modrm)
+        } else {
+            None
+        }
+    }
+
+    /// Gives the extension bits of `reg`, SIB `index` and `rm` or `base`, in that order.
+    fn ext(&self) -> (u8, u8, u8) {
+        let two = |lo: u16, hi: u16| -> u8 {
+            u8::try_from(((lo & 1) << 3) | ((hi & 1) << 4)).unwrap_or(0)
+        };
+        let v = self.vex;
+        let r = u16::from(self.rex);
+        match self.enc {
+            // A REX byte has bits 4 to 7 fixed, so only REX2 has the fourth bit.
+            Encoding::Legacy => (two(r >> 2, 0), two(r >> 1, 0), two(r, 0)),
+            Encoding::Rex2 => (two(r >> 2, r >> 6), two(r >> 1, r >> 5), two(r, r >> 4)),
+            _ => (
+                two(v >> 5, v >> 6),
+                two(v >> 7, v >> 8),
+                two(v >> 9, v >> 10),
+            ),
+        }
+    }
+
+    /// Gives the register numbers that the encoding fields name.
+    pub(crate) fn reg_fields(&self) -> RegFields {
+        let (rx, xx, bx) = self.ext();
+        let modrm = self.modrm().unwrap_or(0);
+        let (md, reg, rm) = (modrm >> 6, (modrm >> 3) & 7, modrm & 7);
+        let has_modrm = self.modrm().is_some();
+        let (base, index) = if !has_modrm || md == 3 {
+            (None, None)
+        } else if self.hdr & 0x20 != 0 {
+            let index = ((self.sib >> 3) & 7) | xx;
+            let base = self.sib & 7;
+            (
+                (base != 5 || md != 0).then_some(base | bx),
+                (index != 4).then_some(index),
+            )
+        } else if md == 0 && rm == 5 {
+            (None, None)
+        } else {
+            (Some(rm | bx), None)
+        };
+        let legacy = matches!(self.enc, Encoding::Legacy | Encoding::Rex2);
+        let pp = if !legacy {
+            u8::try_from((self.vex >> 11) & 3).unwrap_or(0)
+        } else if self.pfx.repne() {
+            3
+        } else if self.pfx.rep() {
+            2
+        } else {
+            u8::from(self.pfx.osz())
+        };
+        RegFields {
+            reg: reg | rx,
+            rm: (has_modrm && md == 3).then_some(rm | bx),
+            vvvv: u8::try_from(self.vex & 0x1f).unwrap_or(0),
+            base,
+            index,
+            pp,
+            mask: u8::try_from(self.vex >> 13).unwrap_or(0),
         }
     }
 
@@ -368,8 +450,8 @@ impl Insn {
     /// Gives the full registers that the instruction reads, implicit registers included.
     ///
     /// A write of an 8-bit or 16-bit register also reads its full register, because
-    /// the write keeps the other bits. An opaque form gives all general-purpose and
-    /// vector registers.
+    /// the write keeps the other bits. An opaque form gives the vector registers and the
+    /// general-purpose registers that its encoding names (design Section 5.1).
     #[must_use]
     pub fn regs_read(&self) -> RegSet {
         implicit::regs(self).0
@@ -377,7 +459,8 @@ impl Insn {
 
     /// Gives the full registers that the instruction writes, implicit registers included.
     ///
-    /// An opaque form gives all general-purpose and vector registers.
+    /// An opaque form gives the vector registers and the general-purpose registers that its
+    /// encoding names (design Section 5.1).
     #[must_use]
     pub fn regs_written(&self) -> RegSet {
         implicit::regs(self).1

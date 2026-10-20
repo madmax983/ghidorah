@@ -7,7 +7,7 @@ use ghidorah_ir::{
     MemEffect, NoImage, Op, Opc, StopReason,
 };
 use ghidorah_x86::lift::{self, LiftKind, ROWS, Template};
-use ghidorah_x86::{LiftError, Mnem, Reg, lift as lift_insn};
+use ghidorah_x86::{LiftError, Mnem, Reg, RegClass, RegSet, lift as lift_insn};
 
 use crate::common::{dec, hex};
 
@@ -193,11 +193,14 @@ fn intrinsic_effects() {
         .expect("an Intrinsic");
     assert_eq!(arena.effect(op), Some(&e));
     assert_ne!(op.a[1], Arg::Nil, "the memory address");
-    // A VEX form writes and reads every register and the flags.
+    // A VEX vector form writes and reads every vector register and the flags. It reads the
+    // base of its memory operand and no other general register.
     let insn = dec(&hex("c5 f9 6f 06"), AT).expect("decode");
     let e = lift::effect(&insn);
     assert!(e.defs.contains(Loc::Flags) && e.uses.contains(Loc::Flags));
-    assert!(e.defs.contains(Loc::RSP) && e.uses.contains(xmm0));
+    assert!(e.defs.contains(xmm0) && e.uses.contains(xmm0));
+    assert_eq!(gprs(&e.uses), vec![Loc::RSI]);
+    assert!(gprs(&e.defs).is_empty(), "{:?}", e.defs);
     assert_eq!(e.mem, MemEffect::ReadWrite { size: 0 });
     // syscall
     let arena = lifted("0f 05");
@@ -224,6 +227,120 @@ fn intrinsic_effects() {
     let arena = lifted("0f 0b");
     let stop = Interp::new(&arena, &NoImage, Config::default()).run(AT, &mut Fuel::new(10));
     assert_eq!(stop.reason, StopReason::Intrinsic);
+}
+
+/// Gives the general registers of a location set in [`Loc`] order.
+fn gprs(set: &LocSet) -> Vec<Loc> {
+    set.iter().filter(|l| l.is_gpr()).collect()
+}
+
+#[test]
+fn regress_opaque_vex_names_only_encoded_gprs() {
+    let effect = |bytes: &str| lift::effect(&dec(&hex(bytes), AT).expect("decode"));
+    // vzeroupper is vector-only and writes no flags.
+    let e = effect("c5 f8 77");
+    assert!(
+        !e.defs.is_empty() && e.defs.iter().all(Loc::is_xmm),
+        "{:?}",
+        e.defs
+    );
+    assert!(
+        !e.uses.is_empty() && e.uses.iter().all(Loc::is_xmm),
+        "{:?}",
+        e.uses
+    );
+    assert!(!e.defs.contains(Loc::Flags) && !e.uses.contains(Loc::Flags));
+    // shlx rax, rdi, rsi: rax from ModRM.reg, rdi from ModRM.rm, rsi from VEX.vvvv.
+    let shlx = effect("c4 e2 c9 f7 c7");
+    assert_eq!(gprs(&shlx.defs), vec![Loc::RAX]);
+    assert_eq!(gprs(&shlx.uses), vec![Loc::RSI, Loc::RDI]);
+    // movbe eax, dword ptr [rdi]
+    let movbe = effect("0f 38 f0 07");
+    assert!(movbe.uses.contains(Loc::RDI), "{:?}", movbe.uses);
+    assert!(movbe.defs.contains(Loc::RAX), "{:?}", movbe.defs);
+    for e in [&e, &shlx, &movbe] {
+        for loc in [Loc::RSP, Loc::RBP] {
+            assert!(!e.defs.contains(loc) && !e.uses.contains(loc), "{e:?}");
+        }
+    }
+}
+
+/// Gives the general register names of a register set in bit order.
+fn gpr_names(set: RegSet) -> Vec<&'static str> {
+    set.iter()
+        .filter(|r| r.class() == RegClass::Gpr)
+        .map(Reg::name)
+        .collect()
+}
+
+#[test]
+fn opaque_forms_name_their_field_registers() {
+    // Each row: the bytes, the general registers read and the general registers written.
+    let rows: [(&str, &[&str], &[&str]); 23] = [
+        // kmovw k1, eax and kmovw eax, k1
+        ("c5 f8 92 c8", &["rax"], &[]),
+        ("c5 f8 93 c1", &[], &["rax"]),
+        // kandw k1, k2, k3
+        ("c5 ec 41 cb", &[], &[]),
+        // vmovd eax, xmm0; vpextrd eax, xmm1, 1; vpinsrd xmm0, xmm0, eax, 1
+        ("c5 f9 7e c0", &[], &["rax"]),
+        ("c4 e3 79 16 c8 01", &[], &["rax"]),
+        ("c4 e3 79 22 c0 01", &["rax"], &[]),
+        // vcvttss2si eax, xmm0
+        ("c5 fa 2c c0", &[], &["rax"]),
+        // mulx rax, rcx, rbx reads rdx.
+        ("c4 e2 f3 f6 c3", &["rdx", "rbx"], &["rax", "rcx"]),
+        // andn rax, rcx, rbx; blsr rcx, rbx; rorx rax, rbx, 5
+        ("c4 e2 f0 f2 c3", &["rcx", "rbx"], &["rax"]),
+        ("c4 e2 f0 f3 cb", &["rbx"], &["rcx"]),
+        ("c4 e3 fb f0 c3 05", &["rbx"], &["rax"]),
+        // cmpoxadd [rdi], eax, ecx
+        ("c4 e2 71 e0 07", &["rax", "rcx", "rdi"], &["rax"]),
+        // pcmpestri xmm0, xmm1, 0 reads rax and rdx and writes rcx.
+        ("66 0f 3a 61 c1 00", &["rax", "rdx"], &["rcx"]),
+        // crc32 eax, ecx; adcx eax, ecx; movbe [rdi], eax
+        ("f2 0f 38 f1 c1", &["rax", "rcx"], &["rax"]),
+        ("66 0f 38 f6 c1", &["rax", "rcx"], &["rax"]),
+        ("0f 38 f1 07", &["rax", "rdi"], &[]),
+        // vpbroadcastd zmm0, eax
+        ("62 f2 7d 48 7c c0", &["rax"], &[]),
+        // blcfill ecx, ebx (TBM)
+        ("8f e9 70 01 cb", &["rbx"], &["rcx"]),
+        // vmaskmovdqu xmm0, xmm1 reads rdi.
+        ("c5 f9 f7 c1", &["rdi"], &[]),
+        // vzeroall
+        ("c5 fc 77", &[], &[]),
+        // vgatherdps xmm0, [rax+xmm1*4], xmm2: the VSIB index is a vector register.
+        ("c4 e2 69 92 04 88", &["rax"], &[]),
+        // vmovdqu32 zmm0{k1}, [rax]
+        ("62 f1 7e 49 6f 00", &["rax"], &[]),
+        // vpaddd ymm4, ymm5, ymm12: no general register, rsp and rbp included.
+        ("c4 c1 55 fe e4", &[], &[]),
+    ];
+    for (bytes, read, written) in rows {
+        let insn = dec(&hex(bytes), AT).unwrap_or_else(|e| panic!("{bytes}: {e}"));
+        assert!(insn.is_opaque(), "{bytes}");
+        assert_eq!(gpr_names(insn.regs_read()), read, "{bytes}: read");
+        assert_eq!(gpr_names(insn.regs_written()), written, "{bytes}: written");
+    }
+    let masked = dec(&hex("62 f1 7e 49 6f 00"), AT).expect("decode");
+    assert!(masked.regs_read().iter().any(|r| r.name() == "k1"));
+    let kand = dec(&hex("c5 ec 41 cb"), AT).expect("decode");
+    assert!(
+        kand.regs_written()
+            .iter()
+            .any(|r| r.class() == RegClass::Mask)
+    );
+    assert!(
+        kand.regs_written()
+            .iter()
+            .all(|r| r.class() == RegClass::Mask)
+    );
+    // An APX form keeps all general registers: add r16d, eax with REX2.
+    let apx = dec(&hex("d5 10 01 c0"), AT).expect("decode");
+    assert!(apx.is_opaque());
+    assert!(apx.regs_written().contains(Reg::RSP));
+    assert!(lift::effect(&apx).defs.contains(Loc::Flags));
 }
 
 #[test]
@@ -273,9 +390,99 @@ fn memory_operand_addresses() {
     assert_eq!(interp.loc(Loc::RAX), 1);
 }
 
+/// Tells if the IR reads `rax` with a `Get`.
+fn gets_rax(arena: &Arena) -> bool {
+    has(arena, |op| {
+        op.opc == Opc::Get && op.a[0] == Arg::L(Loc::RAX)
+    })
+}
+
+#[test]
+fn regress_segment_rip_relative_address() {
+    // mov rax, qword ptr gs:[rip+0x10] at 0x1000 reads at gs_base + 0x1018.
+    let arena = lifted("65 48 8b 05 10 00 00 00");
+    assert!(!gets_rax(&arena), "{:?}", arena.ops());
+    let image = FlatImage::new(0x10_1018, (1u8..=8).collect(), false);
+    let interp = run(
+        &arena,
+        &image,
+        &[(Loc::GS_BASE, 0x10_0000), (Loc::RAX, 0x2000)],
+    );
+    assert_eq!(
+        interp.loc(Loc::RAX),
+        u128::from(u64::from_le_bytes([1, 2, 3, 4, 5, 6, 7, 8]))
+    );
+    // lea rax, gs:[rip+0x10] does not add the segment base.
+    let arena = lifted("65 48 8d 05 10 00 00 00");
+    assert!(!gets_rax(&arena), "{:?}", arena.ops());
+    let empty = FlatImage::default();
+    let interp = run(
+        &arena,
+        &empty,
+        &[(Loc::GS_BASE, 0x10_0000), (Loc::RAX, 0x2000)],
+    );
+    assert_eq!(interp.loc(Loc::RAX), 0x1018);
+    // mov eax, dword ptr fs:[rip+0x10] at 0x1000 reads at fs_base + 0x1017.
+    let arena = lifted("64 8b 05 10 00 00 00");
+    assert!(!gets_rax(&arena), "{:?}", arena.ops());
+    let image = FlatImage::new(0x7000 + 0x1017, vec![0x44, 0x33, 0x22, 0x11], false);
+    let interp = run(
+        &arena,
+        &image,
+        &[(Loc::FS_BASE, 0x7000), (Loc::RAX, 0x2000)],
+    );
+    assert_eq!(interp.loc(Loc::RAX), 0x1122_3344);
+}
+
 #[test]
 fn divide_by_zero_stops() {
     let arena = lifted("f7 f1");
     let stop = Interp::new(&arena, &NoImage, Config::default()).run(AT, &mut Fuel::new(100));
     assert_eq!(stop.reason, StopReason::DivZero);
+}
+
+/// Lifts the instructions of `bytes` from [`AT`] in one block context. Gives the arena and
+/// the lift kind of each instruction.
+fn lifted_block(bytes: &str) -> (Arena, Vec<LiftKind>) {
+    let code = hex(bytes);
+    let mut cx = lift::BlockLift::new();
+    let mut b = Builder::new();
+    let mut kinds = Vec::new();
+    let mut at = 0usize;
+    while at < code.len() {
+        let addr = AT + u64::try_from(at).expect("an offset");
+        let insn = dec(&code[at..], addr).expect("decode");
+        kinds.push(cx.kind(&insn));
+        cx.lift(&insn, &mut b).expect("the instruction lifts");
+        at += usize::from(insn.len());
+    }
+    (b.finish(), kinds)
+}
+
+/// Tells if a lift kind is the string template.
+fn is_string(kind: LiftKind) -> bool {
+    matches!(kind, LiftKind::Template(r) if r.template == Template::String)
+}
+
+#[test]
+fn regress_std_string_op_not_forward() {
+    // std; rep movsb; cld: the copy can run backward, so it lifts to an Intrinsic.
+    let (arena, kinds) = lifted_block("fd f3 a4 fc");
+    assert_eq!(kinds[1], LiftKind::Intrinsic);
+    let movs = arena.insn_ops(AT + 1);
+    assert!(movs.iter().any(|op| op.opc == Opc::Intrinsic), "{movs:?}");
+    assert!(
+        !movs
+            .iter()
+            .any(|op| op.opc == Opc::Add && op.a[1] == Arg::k(1)),
+        "{movs:?}"
+    );
+    // rep movsb alone, or after cld, uses the string template.
+    let alone = dec(&hex("f3 a4"), AT).expect("decode");
+    assert!(is_string(lift::kind(&alone)));
+    assert!(is_string(lifted_block("f3 a4").1[0]));
+    assert!(is_string(lifted_block("fd fc f3 a4").1[2]));
+    // The rule goes on through a conditional branch. A return starts a new block.
+    assert_eq!(lifted_block("fd 74 00 f3 a4").1[2], LiftKind::Intrinsic);
+    assert!(is_string(lifted_block("fd c3 f3 a4").1[2]));
 }

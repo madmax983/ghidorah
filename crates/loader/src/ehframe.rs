@@ -8,8 +8,8 @@
 //!
 //! | Field | Rule |
 //! |---|---|
-//! | length | 4 bytes. `0xffffffff` escapes to an 8-byte length and an 8-byte ID. 0 ends the list. |
-//! | CIE ID | 0 marks a CIE. Another value is the backward CIE pointer of an FDE. |
+//! | length | 4 bytes. `0xffffffff` escapes to an 8-byte length. 0 ends the list. |
+//! | CIE ID | 4 bytes after both length forms (LSB). 0 marks a CIE. Another value is the backward CIE pointer of an FDE. |
 //! | CIE version | 1, 3 or 4. Another value gives `E_BAD_MAGIC`. |
 //! | augmentation | `z`, then `L`, `P`, `R`, `S`, `B` or `G`. An empty text is valid. |
 //! | FDE pointers | The `R` encoding. The default is `DW_EH_PE_absptr`. |
@@ -250,13 +250,15 @@ impl<'a> Walker<'a, '_> {
         let Ok(len32) = r.u32() else {
             return cut(4);
         };
-        let (len, id_size) = match len32 {
+        // In `.eh_frame` the ID has 4 bytes after both length forms (LSB).
+        let id_size = 4;
+        let len = match len32 {
             0 => return Frame::End,
             0xffff_ffff => match r.u64() {
-                Ok(len) => (len, 8),
+                Ok(len) => len,
                 Err(_) => return cut(12),
             },
-            other => (u64::from(other), 4),
+            other => u64::from(other),
         };
         let id_at = r.pos();
         let next = usize::try_from(len)
@@ -274,11 +276,7 @@ impl<'a> Walker<'a, '_> {
                 .hint("the record is shorter than its ID");
             return Frame::Short(d, next);
         }
-        let id = if id_size == 8 {
-            r.u64().unwrap_or(u64::MAX)
-        } else {
-            u64::from(r.u32().unwrap_or(u32::MAX))
-        };
+        let id = u64::from(r.u32().unwrap_or(u32::MAX));
         Frame::Record(Record {
             start: off,
             id_at,

@@ -171,6 +171,9 @@ impl<'a> StrTab<'a> {
 }
 
 /// Reads fixed-width little-endian fields from one table entry.
+///
+/// A short entry gives 0 for the field that does not fit and for each field after it. A
+/// failed read of K1 keeps the position, so [`Fields`] moves to the end of the entry.
 pub(crate) struct Fields<'a> {
     reader: ghidorah_kernel::Reader<'a>,
 }
@@ -183,24 +186,36 @@ impl<'a> Fields<'a> {
         }
     }
 
+    /// Gives the value of a read. A failed read gives 0 and moves to the end of the entry.
+    fn value<T: Default>(&mut self, read: Result<T, ghidorah_kernel::ReadError>) -> T {
+        read.unwrap_or_else(|_| {
+            let _ = self.reader.skip(self.reader.remaining());
+            T::default()
+        })
+    }
+
     /// Reads a `u8`. A short entry gives 0.
     pub(crate) fn u8(&mut self) -> u8 {
-        self.reader.u8().unwrap_or(0)
+        let read = self.reader.u8();
+        self.value(read)
     }
 
     /// Reads a `u16`. A short entry gives 0.
     pub(crate) fn u16(&mut self) -> u16 {
-        self.reader.u16().unwrap_or(0)
+        let read = self.reader.u16();
+        self.value(read)
     }
 
     /// Reads a `u32`. A short entry gives 0.
     pub(crate) fn u32(&mut self) -> u32 {
-        self.reader.u32().unwrap_or(0)
+        let read = self.reader.u32();
+        self.value(read)
     }
 
     /// Reads a `u64`. A short entry gives 0.
     pub(crate) fn u64(&mut self) -> u64 {
-        self.reader.u64().unwrap_or(0)
+        let read = self.reader.u64();
+        self.value(read)
     }
 }
 

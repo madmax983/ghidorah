@@ -10,6 +10,10 @@
 //! Each import gets `slot`: the VA of its IAT entry, or of its delay IAT entry. Each slot gets
 //! the symbol `__imp_<name>`, or `__imp_<dll>!#<ordinal>` for an import by ordinal (table
 //! `Iat`). `libraries` lists the DLLs in descriptor order, the delay DLLs last.
+//!
+//! Descriptors can share one lookup table, so the file bytes do not bound the count. Each
+//! import takes one unit from the import cap of the load (file size / 16 + 32,768). When the
+//! cap is empty, the walk stops all descriptors with one `E_LIMIT`.
 
 use ghidorah_base::{BinText, DiagCode};
 
@@ -65,8 +69,17 @@ fn lookup(px: &mut Px<'_>, value: u64, va_form: bool, path: &str) -> Option<Look
     Some(Lookup::Name(hint, name))
 }
 
+/// The end of the walk of one DLL.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Walk {
+    /// The walk can go on with the next descriptor.
+    Next,
+    /// The import cap is empty, so the walk stops all descriptors.
+    Full,
+}
+
 /// Reads the imports of one DLL into `b`.
-fn walk(px: &mut Px<'_>, t: &Tables, at: usize, kind: &str, b: &mut Binary) {
+fn walk(px: &mut Px<'_>, t: &Tables, at: usize, kind: &str, b: &mut Binary) -> Walk {
     let limit = px.budget.limits.pe_imports_per_dll;
     let mut count = 0u64;
     loop {
@@ -93,9 +106,13 @@ fn walk(px: &mut Px<'_>, t: &Tables, at: usize, kind: &str, b: &mut Binary) {
         let Some(entry) = lookup(px, value, t.va_form, &path) else {
             continue;
         };
+        if px.budget.take_imports(1, &path, &mut px.diags) == 0 {
+            return Walk::Full;
+        }
         let slot = px.va(slot_rva, &path);
         add(px, t, entry, slot, b);
     }
+    Walk::Next
 }
 
 /// Adds one import and the symbol of its slot.
@@ -191,7 +208,9 @@ pub(crate) fn load(px: &mut Px<'_>, rva: u32, b: &mut Binary) {
             delay: false,
             va_form: false,
         };
-        walk(px, &tables, i, "import", b);
+        if walk(px, &tables, i, "import", b) == Walk::Full {
+            break;
+        }
     }
 }
 
@@ -246,6 +265,8 @@ pub(crate) fn load_delay(px: &mut Px<'_>, rva: u32, b: &mut Binary) {
             delay: true,
             va_form,
         };
-        walk(px, &tables, i, "delay", b);
+        if walk(px, &tables, i, "delay", b) == Walk::Full {
+            break;
+        }
     }
 }

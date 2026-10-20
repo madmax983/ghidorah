@@ -83,7 +83,7 @@ pub(crate) struct Counts {
 /// Resolves `e_phnum`, `e_shnum` and `e_shstrndx` through section 0.
 ///
 /// `e_phnum == 0xffff` reads `sh_info`, `e_shnum == 0` reads `sh_size` and
-/// `e_shstrndx == 0xffff` reads `sh_link` of section 0.
+/// `e_shstrndx == 0xffff` reads `sh_link` of section 0. A cut section 0 gives no table.
 pub(crate) fn counts(cx: &mut Cx<'_>, h: &Header) -> Counts {
     let mut out = Counts {
         phnum: u64::from(h.phnum),
@@ -104,8 +104,13 @@ pub(crate) fn counts(cx: &mut Cx<'_>, h: &Header) -> Counts {
         out.shnum = 0;
         return out;
     }
-    let Some(s0) = cx.file_range(h.shoff, SHDR_SIZE, "elf.shdr[0]") else {
+    // A cut section 0 means no table: its escape values are not in the file.
+    let s0 = cx
+        .file_range(h.shoff, SHDR_SIZE, "elf.shdr[0]")
+        .filter(|s| u64::try_from(s.len()).is_ok_and(|n| n >= SHDR_SIZE));
+    let Some(s0) = s0 else {
         out.shnum = 0;
+        out.shstrndx = 0;
         return out;
     };
     let mut f = Fields::new(s0.get(32..).unwrap_or_default());

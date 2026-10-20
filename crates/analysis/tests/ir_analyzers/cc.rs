@@ -2,6 +2,7 @@
 
 use ghidorah_analysis::cc::{self, ParamSource, Params};
 use ghidorah_base::Fuel;
+use ghidorah_ir::{Loc, Opc};
 use ghidorah_json::Value;
 use ghidorah_types::cc::SYSV_X86_64;
 
@@ -71,6 +72,31 @@ fn varargs_prologues() {
             if varargs {
                 assert_eq!(got.count(), count, "{} {name}: named params", f.path);
             }
+        }
+    }
+}
+
+#[test]
+fn regress_shlx_prototype_two_params() {
+    // shlx rax, rdi, rsi; ret
+    let mut p = crate::blob::load(&[0xc4, 0xe2, 0xc9, 0xf7, 0xc7, 0xc3], 0);
+    let _ = crate::support::analyze(&mut p);
+    let base = crate::blob::BASE;
+    let (params, source) = cc::params(&p, fid(base), &mut Fuel::unlimited()).expect("params");
+    assert_eq!(source, ParamSource::Recovered);
+    assert!(params.count() <= 2, "{params:?}");
+    let ir = fir_of(&p, base);
+    let effects: Vec<_> = ir
+        .arena
+        .ops()
+        .iter()
+        .filter(|op| op.opc == Opc::Intrinsic)
+        .filter_map(|op| ir.arena.effect(op))
+        .collect();
+    assert_eq!(effects.len(), 1, "the shlx intrinsic");
+    for e in effects {
+        for loc in [Loc::RSP, Loc::RBP] {
+            assert!(!e.uses.contains(loc) && !e.defs.contains(loc), "{e:?}");
         }
     }
 }

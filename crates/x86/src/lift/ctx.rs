@@ -170,12 +170,44 @@ impl Cx<'_> {
         Ok(Arg::V(self.b.cond(cc, f)?))
     }
 
+    /// Gives the value of a `rip` or `eip` base: the address of the next instruction, cut to
+    /// 32 bits for `eip`.
+    fn ip_value(&self, ip: Reg) -> u64 {
+        let next = self.insn.next_addr();
+        if ip == Reg::EIP {
+            next & mask(32)
+        } else {
+            next
+        }
+    }
+
+    /// Gives the value of a base register. A `rip` or `eip` base is a constant, so it never
+    /// reads a register.
+    fn base(&mut self, base: Reg) -> Res<Arg> {
+        if base.class() == RegClass::Ip {
+            Ok(Arg::k(self.ip_value(base)))
+        } else {
+            self.get(Loc::Reg(u16::from(base.number())))
+        }
+    }
+
     /// Gives the address of a memory operand. `seg` adds the `fs` or `gs` base.
+    ///
+    /// A RIP-relative operand with an `fs` or `gs` override has no absolute target. Its
+    /// address is the next instruction address plus the displacement and the segment base.
     pub(super) fn addr(&mut self, m: &Mem, seg: bool) -> Res<Arg> {
         let mut acc = m.abs_target.map(Arg::k);
+        let ip = m.base.filter(|b| b.class() == RegClass::Ip);
+        if acc.is_none()
+            && m.index.is_none()
+            && let Some(ip) = ip
+        {
+            let a = self.ip_value(ip).wrapping_add_signed(m.disp);
+            acc = Some(Arg::k(if m.addr_width == 32 { a & mask(32) } else { a }));
+        }
         if acc.is_none() {
             if let Some(base) = m.base {
-                acc = Some(self.get(Loc::Reg(u16::from(base.number())))?);
+                acc = Some(self.base(base)?);
             }
             if let Some(index) = m.index {
                 let mut scaled = self.get(Loc::Reg(u16::from(index.number())))?;

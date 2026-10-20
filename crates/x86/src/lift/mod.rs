@@ -18,9 +18,16 @@
 //!   an `Insert` into `Get(reg)`. A read of a narrow register is `Trunc` or `Extract`.
 //! - A flag write is `Put(flags, Flags(op, a, b, c))`, the lazy thunk of design Section 6.2.
 //! - A memory operand gives its address from the base, the index, the displacement and the
-//!   `fs` or `gs` base. A RIP-relative operand gives a constant address.
+//!   `fs` or `gs` base. A RIP-relative operand gives a constant address, plus the `fs` or
+//!   `gs` base with a segment override. A `rip` base never reads a register. `lea` adds no
+//!   segment base.
 //! - A `rep` string instruction is a loop on its own address. It stops when `rcx` is 0.
-//! - The direction flag is 0, as the System V ABI requires at a call boundary.
+//! - The direction flag is 0, as the System V ABI requires at a call boundary. A
+//!   [`BlockLift`] run keeps one more bit: `std` makes the direction unknown and `cld` makes
+//!   it 0 again. While it is unknown, the `string` template does not fit, so a string
+//!   instruction lifts to one `Intrinsic` op. The bit goes on through sequential
+//!   instructions and conditional branches. A gap, a jump, a call, a return or a trap
+//!   clears it.
 //! - A quotient that does not fit in its register gives its low bits. The hardware raises
 //!   a divide error there.
 //! - An `Intrinsic` op of an instruction names the instruction by [`IntrinsicId`]: the
@@ -210,8 +217,9 @@ impl From<BuildError> for LiftError {
     }
 }
 
-/// Tells if a template supports the operands of an instruction.
-fn fits(row: Row, insn: &Insn) -> bool {
+/// Tells if a template supports the operands of an instruction. `dir_unknown` tells that a
+/// `std` can be in effect.
+fn fits(row: Row, insn: &Insn, dir_unknown: bool) -> bool {
     match row.template {
         Template::Lea => {
             matches!(insn.op(1), Some(Operand::Mem(m)) if mem_ok(&m))
@@ -231,15 +239,7 @@ fn fits(row: Row, insn: &Insn) -> bool {
             let short_leave = row.mnem == Mnem::Leave && insn.prefixes().osz();
             !short_leave && operands_ok(insn, false)
         }
-        Template::String => insn.ops().all(|op| match op {
-            Operand::Mem(m) => {
-                m.addr_width == 64
-                    && matches!(m.seg, Some(Seg::Es | Seg::Ds))
-                    && matches!(m.width_bytes, 1 | 2 | 4 | 8)
-            }
-            Operand::Reg { reg, .. } => ctx::reg_ok(reg, false),
-            _ => false,
-        }),
+        Template::String => flow::string_fits(insn, dir_unknown),
         Template::SseMove => sse::move_fits(insn),
         Template::SseZero => sse::zero_fits(insn),
         Template::Single => match row.mnem {
@@ -254,11 +254,16 @@ fn fits(row: Row, insn: &Insn) -> bool {
 /// Tells what [`lift`] does with `insn`. The function adds no op.
 #[must_use]
 pub fn kind(insn: &Insn) -> LiftKind {
+    kind_in(insn, false)
+}
+
+/// Tells what the lift does with `insn`. `dir_unknown` tells that a `std` can be in effect.
+fn kind_in(insn: &Insn, dir_unknown: bool) -> LiftKind {
     if insn.mnem() == Mnem::Syscall {
         return LiftKind::Syscall;
     }
     match row(insn.mnem()) {
-        Some(r) if fits(*r, insn) => LiftKind::Template(r),
+        Some(r) if fits(*r, insn, dir_unknown) => LiftKind::Template(r),
         _ if matches!(insn.flow(), Flow::Seq | Flow::Trap) => LiftKind::Intrinsic,
         _ => LiftKind::Unimpl,
     }
@@ -324,9 +329,14 @@ fn intrinsic(cx: &mut Cx<'_>) -> Res<()> {
 /// Returns [`LiftError::Build`] when the builder refuses the instruction or an op. An
 /// example is an address that is not above the address of the instruction before it.
 pub fn lift(insn: &Insn, b: &mut Builder) -> Result<(), LiftError> {
+    lift_in(insn, b, false)
+}
+
+/// Adds the ops of `insn` to `b`. `dir_unknown` tells that a `std` can be in effect.
+fn lift_in(insn: &Insn, b: &mut Builder, dir_unknown: bool) -> Result<(), LiftError> {
     b.begin(insn.addr(), insn.len())?;
     let mut cx = Cx { b, insn };
-    let done = match kind(insn) {
+    let done = match kind_in(insn, dir_unknown) {
         LiftKind::Template(r) => template(&mut cx, *r),
         LiftKind::Syscall => Ok(cx.b.effect_op(Opc::Syscall, syscall_effect(), Arg::Nil)?),
         LiftKind::Intrinsic => intrinsic(&mut cx),
@@ -339,19 +349,73 @@ pub fn lift(insn: &Insn, b: &mut Builder) -> Result<(), LiftError> {
     }
 }
 
+/// The lift context of a run of instructions: the direction flag rule of the module doc.
+///
+/// A caller lifts the instructions of a function in address order through one context. Each
+/// instruction that does not follow the one before it starts a new block.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct BlockLift {
+    /// The address after the last instruction, while its block goes on.
+    next: Option<u64>,
+    /// A `std` can be in effect at `next`.
+    dir_unknown: bool,
+}
+
+impl BlockLift {
+    /// Makes the context of a new block. The direction flag is 0 there.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            next: None,
+            dir_unknown: false,
+        }
+    }
+
+    /// Tells if a `std` can be in effect at `insn`.
+    fn unknown_at(&self, insn: &Insn) -> bool {
+        self.dir_unknown && self.next == Some(insn.addr())
+    }
+
+    /// Tells what [`BlockLift::lift`] does with `insn`. The function adds no op.
+    #[must_use]
+    pub fn kind(&self, insn: &Insn) -> LiftKind {
+        kind_in(insn, self.unknown_at(insn))
+    }
+
+    /// Adds the ops of `insn` to `b` as [`lift`] does, and updates the context.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LiftError::Build`] when the builder refuses the instruction or an op, as
+    /// [`lift`] does.
+    pub fn lift(&mut self, insn: &Insn, b: &mut Builder) -> Result<(), LiftError> {
+        let unknown = self.unknown_at(insn);
+        let done = lift_in(insn, b, unknown);
+        let goes_on = matches!(insn.flow(), Flow::Seq | Flow::Jcc);
+        let after = match insn.mnem() {
+            Mnem::Std => true,
+            Mnem::Cld => false,
+            _ => unknown,
+        };
+        self.dir_unknown = after && goes_on;
+        self.next = goes_on.then(|| insn.next_addr());
+        done
+    }
+}
+
 /// Gives the effect of the `Intrinsic` op of `insn`: its name, the locations that it
 /// writes and reads, and its memory effect.
 ///
 /// The defs and uses hold the general and XMM registers of [`Insn::regs_written`] and
 /// [`Insn::regs_read`]. They hold the flags word when the instruction writes or reads a
-/// status flag. The uses hold the `fs` or `gs` base of a memory operand. An opaque form also writes and reads the
-/// flags word. The memory effect comes from the first memory operand. A size of 0 means an
-/// unknown size.
+/// status flag. The uses hold the `fs` or `gs` base of a memory operand. An opaque form
+/// also writes and reads the flags word, except `vzeroupper` and `vzeroall`. The memory
+/// effect comes from the first memory operand. A size of 0 means an unknown size.
 #[must_use]
 pub fn effect(insn: &Insn) -> Effect {
     let mut defs: LocSet = insn.regs_written().iter().filter_map(loc).collect();
     let mut uses: LocSet = insn.regs_read().iter().filter_map(loc).collect();
-    let opaque = insn.is_opaque();
+    let opaque = insn.is_opaque() && crate::implicit::opaque_flags(insn);
     if opaque || !insn.flags_written().is_empty() {
         defs.insert(Loc::Flags);
     }

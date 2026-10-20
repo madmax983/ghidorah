@@ -40,10 +40,10 @@ fn ac_245_rva_mapping_variants() {
     );
     assert!(codes(&b).is_empty(), "{:?}", b.diagnostics);
 
-    // `VirtualSize` 0 means `SizeOfRawData`.
+    // `VirtualSize` 0 means `SizeOfRawData`. The region rounds up to `SectionAlignment`.
     let (_, map) = load_variant("vsize_zero");
     let zv = map.region_at(EXE_BASE + 0x3000).expect(".zv");
-    assert_eq!(zv.va.len(), 0x200);
+    assert_eq!((zv.file_size, zv.va.len()), (0x200, 0x1000));
     assert_eq!(read(&map, EXE_BASE + 0x3000, 0x40), vec![0x22; 0x40]);
     assert_eq!(read(&map, EXE_BASE + 0x3040, 0x10), vec![0; 0x10]);
 
@@ -97,14 +97,51 @@ fn ac_245_rva_mapping_variants() {
     assert_eq!(far.file_size, 0);
     assert_eq!(read(&map, EXE_BASE + 0x3000, 0x10), vec![0; 0x10]);
 
-    // A zero-fill section has no file bytes.
+    // A zero-fill section without raw data has no file bytes.
     let (_, map) = load_variant("bss");
     let bss = map.region_at(EXE_BASE + 0x3000).expect(".bss");
-    assert_eq!((bss.file_size, bss.va.len()), (0, 0x80));
+    assert_eq!((bss.file_size, bss.va.len()), (0, 0x1000));
 
     // `NumberOfRvaAndSizes` above 16 counts as 16.
     let (b, _) = load_variant("dirs_32");
     assert_eq!(b.data_dirs.len(), 16);
+}
+
+#[test]
+fn regress_pe_low_alignment_maps_flat() {
+    let (b, map) = load_variant("low_alignment");
+    assert_eq!(
+        read(&map, EXE_BASE + 0x280, 4),
+        [0x31, 0xc0, 0xc3, 0x90],
+        "the entry reads the bytes at file offset 0x280"
+    );
+    assert_eq!(
+        map.region_at(EXE_BASE + 0x280).map(|r| r.file_off),
+        Some(0x280)
+    );
+    assert!(b.diagnostics.is_empty(), "{:?}", b.diagnostics);
+}
+
+#[test]
+fn regress_pe_section_slack_and_uninit_raw() {
+    // VirtualSize 0x10 at RVA 0x1000, the next section at 0x2000: the slack reads zeros.
+    let (b, map) = load_variant("vsize_slack");
+    assert_eq!(read(&map, EXE_BASE + 0x1100, 4), [0; 4]);
+    assert_eq!(read(&map, EXE_BASE + 0x1000, 4), [0x48, 0x83, 0xec, 0x28]);
+    let text = map.region_at(EXE_BASE + 0x1000).expect(".text");
+    assert_eq!((text.va.len(), text.file_size), (0x1000, 0x10));
+    let s = b
+        .sections
+        .first()
+        .and_then(|s| s.va)
+        .expect("the .text range");
+    assert_eq!(s.len(), 0x10, "the section keeps its VirtualSize");
+    assert!(b.diagnostics.is_empty(), "{:?}", b.diagnostics);
+
+    // CNT_UNINITIALIZED_DATA with SizeOfRawData 0x200 reads its file bytes.
+    let (b, map) = load_variant("uninit_raw");
+    assert_eq!(read(&map, EXE_BASE + 0x3000, 4), [0x48, 0x31, 0xc0, 0xc3]);
+    assert!(b.diagnostics.is_empty(), "{:?}", b.diagnostics);
 }
 
 #[test]

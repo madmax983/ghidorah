@@ -3,6 +3,9 @@
 //!
 //! The base file has `.text` at RVA 0x1000 (0x200 bytes, one function at 0x1000) and
 //! `.data` at RVA 0x2000 (0x40 bytes of 0x11). The entry is 0x1000.
+//!
+//! [`builder`] also gives the large variants `shared_ilt` and `shared_ilt_ordinal`.
+//! [`builders`] and [`variants`] leave them out, so the fuzz seeds stay small.
 
 use super::{
     CodeView, DelayDll, Dll, ExportItem, Exports, PeBuilder, REL_DIR64, REL_HIGHLOW, RelocBlock,
@@ -170,7 +173,45 @@ fn mapping_variants() -> Vec<(&'static str, PeBuilder)> {
         ),
         ("pe32plus_arm64", base().machine(0xaa64)),
         ("mz_no_pe", base().no_pe_signature()),
+        ("low_alignment", low_alignment()),
+        (
+            "vsize_slack",
+            PeBuilder::exe()
+                .entry(0x1000)
+                .section(Section::code(".text", 0x1000, &code()).vsize(0x10))
+                .section(Section::data(".data", 0x2000, &[0x11; 0x40])),
+        ),
+        (
+            "uninit_raw",
+            base().section(
+                Section::with(".bss", 0x3000, &[0x48, 0x31, 0xc0, 0xc3], super::SCN_BSS)
+                    .vsize(0x200),
+            ),
+        ),
     ]
+}
+
+/// The file offset of `SectionAlignment` in the optional header of the builder.
+const SECTION_ALIGNMENT_AT: usize = 0x78;
+
+/// The file offset of `FileAlignment` in the optional header of the builder.
+const FILE_ALIGNMENT_AT: usize = 0x7c;
+
+/// A low-alignment image: `SectionAlignment` and `FileAlignment` are 0x80, and `.text` is at
+/// RVA and file offset 0x280 with `xor eax, eax; ret; nop`. Such an image maps flat.
+fn low_alignment() -> PeBuilder {
+    let mut text = vec![0x31, 0xc0, 0xc3, 0x90];
+    text.resize(0x80, 0xcc);
+    PeBuilder::exe()
+        .entry(0x280)
+        .section(
+            Section::code(".text", 0x280, &[])
+                .vsize(0x80)
+                .at_raw(0x280, 0x80),
+        )
+        .patch(0x280, &text)
+        .patch(SECTION_ALIGNMENT_AT, &0x80u32.to_le_bytes())
+        .patch(FILE_ALIGNMENT_AT, &0x80u32.to_le_bytes())
 }
 
 fn import_variants() -> Vec<(&'static str, PeBuilder)> {
@@ -295,7 +336,63 @@ fn table_variants() -> Vec<(&'static str, PeBuilder)> {
     out
 }
 
-/// Gives the named builders of the variants in a fixed order.
+/// The import descriptors of the `shared_ilt` variants.
+const SHARED_DLLS: usize = 256;
+
+/// The lookup entries of the one table of the `shared_ilt` variants.
+const SHARED_ENTRIES: usize = 65_535;
+
+/// Gives the import directory of [`shared_ilt`] at `rva`: the descriptors, the DLL name, one
+/// hint-name entry and the shared lookup table. The table is also the IAT of each descriptor.
+fn shared_idata(rva: u32, ordinal: bool) -> (Vec<u8>, u32) {
+    let rva_of = |off: usize| rva.saturating_add(u32::try_from(off).unwrap_or(u32::MAX));
+    let desc_len = (SHARED_DLLS + 1) * 20;
+    let name_at = desc_len.next_multiple_of(16);
+    let hint_at = name_at + 16;
+    let ilt_at = hint_at + 16;
+    let mut out = vec![0u8; ilt_at + (SHARED_ENTRIES + 1) * 8];
+    let mut put = |at: usize, v: &[u8]| {
+        if let Some(p) = out.get_mut(at..at + v.len()) {
+            p.copy_from_slice(v);
+        }
+    };
+    for i in 0..SHARED_DLLS {
+        put(i * 20, &rva_of(ilt_at).to_le_bytes());
+        put(i * 20 + 12, &rva_of(name_at).to_le_bytes());
+        put(i * 20 + 16, &rva_of(ilt_at).to_le_bytes());
+    }
+    put(name_at, b"a.dll\0");
+    put(hint_at + 2, b"f\0");
+    let value = if ordinal {
+        (1u64 << 63) | 1
+    } else {
+        u64::from(rva_of(hint_at))
+    };
+    for k in 0..SHARED_ENTRIES {
+        put(ilt_at + k * 8, &value.to_le_bytes());
+    }
+    (out, u32::try_from(desc_len).unwrap_or(u32::MAX))
+}
+
+/// Gives the base file with 256 import descriptors that share one lookup table of 65,535
+/// entries: by name, or by ordinal with `ordinal`. The file has about 530 KB.
+fn shared_ilt(ordinal: bool) -> PeBuilder {
+    let (idata, desc_len) = shared_idata(0x3000, ordinal);
+    base()
+        .section(Section::data(".idata", 0x3000, &idata))
+        .dir(1, 0x3000, desc_len)
+}
+
+/// Gives the large variants. [`builder`] finds them, and [`builders`] leaves them out.
+fn large_variants() -> Vec<(&'static str, PeBuilder)> {
+    vec![
+        ("shared_ilt", shared_ilt(false)),
+        ("shared_ilt_ordinal", shared_ilt(true)),
+    ]
+}
+
+/// Gives the named builders of the variants in a fixed order. The large variants are not in
+/// the list.
 #[must_use]
 pub fn builders() -> Vec<(&'static str, PeBuilder)> {
     mapping_variants()
@@ -304,11 +401,12 @@ pub fn builders() -> Vec<(&'static str, PeBuilder)> {
         .collect()
 }
 
-/// Gives the builder of the variant `name`.
+/// Gives the builder of the variant `name`, a large variant included.
 #[must_use]
 pub fn builder(name: &str) -> Option<PeBuilder> {
     builders()
         .into_iter()
+        .chain(large_variants())
         .find(|(n, _)| *n == name)
         .map(|(_, b)| b)
 }

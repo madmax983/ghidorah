@@ -257,14 +257,15 @@ fn exports_forwarders_and_counts() {
         .map(|e| text(e.forwarder.as_ref()))
         .collect();
     assert_eq!(fwd, vec!["self.b", "self.a"]);
-    // A huge `NumberOfNames` clamps to the bytes left, with a diagnostic.
+    // A huge `NumberOfNames` clamps to the bytes left, with a diagnostic. The bytes left
+    // stop at the end of the one-page region of `.gen`, its zero tail included.
     let (huge, _) = load_variant("huge_names");
     assert!(
         codes(&huge)
             .iter()
             .any(|c| matches!(c, DiagCode::Limit | DiagCode::Oob))
     );
-    assert!(huge.exports.len() < 64, "{}", huge.exports.len());
+    assert!(huge.exports.len() < 0x1000 / 4, "{}", huge.exports.len());
 }
 
 #[test]
