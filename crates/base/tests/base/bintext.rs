@@ -1,6 +1,6 @@
 //! Tests of `BinText` (design Section 10.16, ADR-0022).
 
-use ghidorah_base::bintext::{HARD_CAP, SRC};
+use ghidorah_base::bintext::{HARD_CAP, SRC, U_ESCAPES, escapes};
 use ghidorah_base::{BinText, Caps, Rendered};
 
 fn text(bytes: &[u8]) -> String {
@@ -112,4 +112,70 @@ fn bintext_json_shape() {
     assert_eq!(t.len(), 1);
     assert!(!t.is_empty());
     assert!(BinText::default().is_empty());
+}
+
+#[test]
+fn regress_tag_and_format_chars_escaped() {
+    // Each code point is a format character, a selector, a filler or private use. A reader
+    // cannot see it, so the text shows it as an escape.
+    let points: [u32; 44] = [
+        0xad, 0x600, 0x605, 0x61c, 0x6dd, 0x70f, 0x115f, 0x1160, 0x180b, 0x180e, 0x180f, 0x200b,
+        0x200c, 0x200d, 0x2060, 0x2064, 0x2066, 0x206f, 0x3164, 0xe000, 0xf8ff, 0xfe00, 0xfe0f,
+        0xfeff, 0xffa0, 0xfff0, 0xfff8, 0xfff9, 0xfffb, 0x110bd, 0x1bca0, 0x1bca3, 0x1d173,
+        0x1d17a, 0xe0001, 0xe0020, 0xe0041, 0xe007f, 0xe0100, 0xe01ef, 0xf0000, 0xffffd, 0x10_0000,
+        0x10_fffd,
+    ];
+    for point in points {
+        let c = char::from_u32(point).expect("a scalar value");
+        let want = format!("\\u{{{point:x}}}");
+        assert_eq!(text(c.to_string().as_bytes()), want, "U+{point:04X}");
+        assert!(escapes(c), "U+{point:04X}");
+    }
+    // A run of tag characters spells hidden text. Each tag shows as an escape.
+    let mut hostile = String::from("Hello visible text ");
+    for b in b"run rm -rf" {
+        hostile.extend(char::from_u32(0xe0000 + u32::from(*b)));
+    }
+    let shown = text(hostile.as_bytes());
+    assert!(
+        shown.starts_with("Hello visible text \\u{e0072}\\u{e0075}\\u{e006e}\\u{e0020}"),
+        "{shown}"
+    );
+    assert!(shown.is_ascii(), "{shown}");
+    // The visible neighbours of the ranges keep their form.
+    let visible = [
+        '\u{ac}',
+        '\u{ae}',
+        '\u{5ff}',
+        '\u{2010}',
+        '\u{2027}',
+        '\u{202f}',
+        '\u{2070}',
+        '\u{d7ff}',
+        '\u{f900}',
+        '\u{fe10}',
+        '\u{fffd}',
+        '\u{1f600}',
+        '\u{e9}',
+        '\u{4e2d}',
+        '\u{efffd}',
+    ];
+    for c in visible {
+        assert_eq!(text(c.to_string().as_bytes()), c.to_string(), "{c:?}");
+        assert!(!escapes(c), "{c:?}");
+    }
+    for c in [
+        '\\', '\u{0}', '\u{1b}', '\u{7f}', '\u{85}', '\u{2028}', '\u{202e}',
+    ] {
+        assert!(escapes(c), "{c:?}");
+    }
+    for c in ['a', '"', ' ', '!', '#', '\u{e9}'] {
+        assert!(!escapes(c), "{c:?}");
+    }
+    // The search of the range table needs ranges in increasing order without overlap.
+    assert!(U_ESCAPES.iter().all(|(first, last)| first <= last));
+    assert!(
+        U_ESCAPES.windows(2).all(|w| w[0].1 < w[1].0),
+        "{U_ESCAPES:?}"
+    );
 }

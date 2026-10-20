@@ -3,6 +3,7 @@
 
 use ghidorah_json::Value;
 use ghidorah_testkit::elf::{ElfBuilder, ImportKind, Loc, Section, Symbol};
+use ghidorah_tools::Session;
 
 use crate::support::{
     WP17B, call, call_value, chars, code, fixture, is_bin_text, items, json, load_bytes, session,
@@ -85,12 +86,17 @@ const HOSTILE: [&str; 3] = [
 /// Gives the envelopes of a battery of read calls on a hostile fixture.
 fn hostile_outputs(name: &'static str) -> Vec<Value> {
     let (mut session, _) = fixture(name);
+    hostile_calls(&mut session)
+}
+
+/// Gives the envelopes of a battery of read calls on the binary of `session`.
+fn hostile_calls(session: &mut Session) -> Vec<Value> {
     let mut out = Vec::new();
     for (tool, args) in READS {
-        out.push(call(&mut session, tool, args));
+        out.push(call(session, tool, args));
     }
     let strings = items(&call(
-        &mut session,
+        session,
         "search",
         r#"{"kind":"string","include_unreferenced":true,"limit":100}"#,
     ));
@@ -104,32 +110,59 @@ fn hostile_outputs(name: &'static str) -> Vec<Value> {
                 ("target", Value::from(addr.as_str())),
                 ("as", Value::from(form)),
             ]);
-            out.push(call_value(&mut session, "mem_read", args));
+            out.push(call_value(session, "mem_read", args));
         }
         let args = Value::object([("target", Value::from(addr.as_str()))]);
-        out.push(call_value(&mut session, "addr_info", args));
+        out.push(call_value(session, "addr_info", args));
     }
     let args = Value::object([
         ("targets", Value::Array(targets)),
         ("args", Value::Bool(true)),
     ]);
-    out.push(call_value(&mut session, "xref_list", args));
-    for f in items(&call(&mut session, "func_list", "{}")) {
+    out.push(call_value(session, "xref_list", args));
+    for f in items(&call(session, "func_list", "{}")) {
         let args = Value::object([
             ("target", Value::from(str_of(&f, "id"))),
             ("include", json(r#"["strings","disasm","xrefs"]"#)),
         ]);
-        out.push(call_value(&mut session, "func_get", args));
+        out.push(call_value(session, "func_get", args));
     }
     let args = json(r#"{"targets":["imp:puts"],"args":true,"context":2}"#);
-    out.push(call_value(&mut session, "xref_list", args));
+    out.push(call_value(session, "xref_list", args));
     out
 }
 
 /// Tells if `c` is a character that output text must escape.
+///
+/// The list holds the controls, the bidi marks and the invisible characters: format
+/// characters, tag characters, selectors, fillers and private use.
 fn raw_control(c: char) -> bool {
     matches!(c, '\u{0}'..='\u{1f}' | '\u{7f}'..='\u{9f}' | '\u{2028}' | '\u{2029}' | '\u{61c}'
-        | '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
+        | '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}'
+        | '\u{ad}' | '\u{600}'..='\u{605}' | '\u{6dd}' | '\u{70f}' | '\u{115f}' | '\u{1160}'
+        | '\u{180b}'..='\u{180f}' | '\u{200b}'..='\u{200d}' | '\u{2060}'..='\u{2064}'
+        | '\u{206a}'..='\u{206f}' | '\u{3164}' | '\u{e000}'..='\u{f8ff}' | '\u{fe00}'..='\u{fe0f}'
+        | '\u{feff}' | '\u{ffa0}' | '\u{fff0}'..='\u{fffb}' | '\u{110bd}'
+        | '\u{1bca0}'..='\u{1bca3}' | '\u{1d173}'..='\u{1d17a}' | '\u{e0001}'
+        | '\u{e0020}'..='\u{e007f}' | '\u{e0100}'..='\u{e01ef}' | '\u{f0000}'..='\u{10ffff}')
+}
+
+/// Checks that no string and no key of `envelope` holds a raw control. Gives the number of
+/// strings that hold `marker`.
+fn check_escaped(name: &str, envelope: &Value, marker: &str) -> usize {
+    let mut count = 0;
+    walk(envelope, &mut |v| {
+        if let Value::String(text) = v {
+            assert!(!text.chars().any(raw_control), "{name}: {text:?}");
+            count += usize::from(text.contains(marker));
+        }
+        if let Value::Object(o) = v {
+            for (key, _) in o.iter() {
+                assert!(!key.chars().any(raw_control), "{name}: key {key:?}");
+            }
+        }
+    });
+    count
 }
 
 #[test]
@@ -137,20 +170,33 @@ fn ac_146a_controls_escaped() {
     for name in HOSTILE {
         let mut texts = 0;
         for envelope in hostile_outputs(name) {
-            walk(&envelope, &mut |v| {
-                texts += usize::from(is_bin_text(v));
-                if let Value::String(text) = v {
-                    assert!(!text.chars().any(raw_control), "{name}: {text:?}");
-                }
-                if let Value::Object(o) = v {
-                    for (key, _) in o.iter() {
-                        assert!(!key.chars().any(raw_control), "{name}: key {key:?}");
-                    }
-                }
-            });
+            walk(&envelope, &mut |v| texts += usize::from(is_bin_text(v)));
+            check_escaped(name, &envelope, "");
         }
         assert!(texts >= 20, "{name}: {texts} binary texts");
     }
+    // The checked-in blob holds a string and a function name with runs of tag characters.
+    // Its second string holds zero width characters, a byte order mark and a soft hyphen.
+    let mut session = session();
+    let load = call(
+        &mut session,
+        "binary_load",
+        r#"{"path":"tests/data/hostile/tag_strings.bin"}"#,
+    );
+    assert_eq!(load.get("ok"), Some(&Value::Bool(true)), "{load}");
+    let (mut tags, mut marks) = (0, 0);
+    for envelope in hostile_calls(&mut session) {
+        tags += check_escaped("tag_strings", &envelope, "text \\u{e0072}\\u{e0075}");
+        marks += check_escaped("tag_strings", &envelope, "zero\\u{200b}width\\u{feff}");
+    }
+    assert!(
+        tags >= 3,
+        "tag_strings: {tags} texts show the escaped tag run"
+    );
+    assert!(
+        marks >= 2,
+        "tag_strings: {marks} texts show the escaped marks"
+    );
 }
 
 #[test]

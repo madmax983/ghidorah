@@ -18,9 +18,16 @@
 //! | C1 controls (U+0080 to U+009F) | `\u{85}` |
 //! | U+2028, U+2029 | `\u{2028}` |
 //! | Bidi marks: U+061C, U+200E, U+200F, U+202A to U+202E, U+2066 to U+2069 | `\u{202e}` |
+//! | Format characters (`General_Category` Cf), for example U+00AD, U+200B to U+200D, U+2060, U+FEFF | `\u{200b}` |
+//! | Tag characters U+E0000 to U+E007F, and the other ignorable code points to U+E0FFF | `\u{e0041}` |
+//! | Variation selectors U+FE00 to U+FE0F and U+E0100 to U+E01EF, and U+180B to U+180F | `\u{fe0f}` |
+//! | Fillers U+115F, U+1160, U+3164, U+FFA0, and U+FFF0 to U+FFF8 | `\u{3164}` |
+//! | Private use U+E000 to U+F8FF and U+F0000 to U+10FFFF | `\u{e000}` |
 //! | Each byte of invalid UTF-8 | `\xff` |
 //!
-//! The text cap counts characters of the escaped text. It never cuts an escape.
+//! [`U_ESCAPES`] holds the full list of the `\u{..}` ranges. A reader cannot see most of these
+//! characters, so hidden text cannot pass to the agent. The text cap counts characters of the
+//! escaped text. It never cuts an escape.
 
 use crate::hex;
 
@@ -160,12 +167,85 @@ impl BinText {
     }
 }
 
-/// Tells if `c` is a bidi mark that the text escapes.
-const fn is_bidi(c: char) -> bool {
-    matches!(
-        c,
-        '\u{061c}' | '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}'
-    )
+/// The ranges of the characters that the text shows as `\u{..}`, in increasing order.
+///
+/// The ranges hold the C1 controls, the separators, the bidi marks and all format characters
+/// (`General_Category` Cf). They also hold the variation selectors, the fillers, the default
+/// ignorable code points and the private use areas.
+pub const U_ESCAPES: [(char, char); 28] = [
+    // C1 controls.
+    ('\u{80}', '\u{9f}'),
+    // The soft hyphen.
+    ('\u{ad}', '\u{ad}'),
+    // The combining grapheme joiner.
+    ('\u{34f}', '\u{34f}'),
+    // Arabic format characters.
+    ('\u{600}', '\u{605}'),
+    ('\u{61c}', '\u{61c}'),
+    ('\u{6dd}', '\u{6dd}'),
+    // The Syriac abbreviation mark.
+    ('\u{70f}', '\u{70f}'),
+    ('\u{890}', '\u{891}'),
+    ('\u{8e2}', '\u{8e2}'),
+    // Hangul fillers.
+    ('\u{115f}', '\u{1160}'),
+    // Khmer vowels without a form.
+    ('\u{17b4}', '\u{17b5}'),
+    // Mongolian variation selectors and the vowel separator.
+    ('\u{180b}', '\u{180f}'),
+    // Zero width characters and the bidi marks.
+    ('\u{200b}', '\u{200f}'),
+    // The line and paragraph separators and the bidi embeddings.
+    ('\u{2028}', '\u{202e}'),
+    // The word joiner, the invisible operators and the bidi isolates.
+    ('\u{2060}', '\u{206f}'),
+    // The Hangul filler.
+    ('\u{3164}', '\u{3164}'),
+    // Private use.
+    ('\u{e000}', '\u{f8ff}'),
+    // Variation selectors.
+    ('\u{fe00}', '\u{fe0f}'),
+    // The byte order mark.
+    ('\u{feff}', '\u{feff}'),
+    // The halfwidth Hangul filler.
+    ('\u{ffa0}', '\u{ffa0}'),
+    // Reserved specials and the interlinear annotation characters.
+    ('\u{fff0}', '\u{fffb}'),
+    // Kaithi number signs.
+    ('\u{110bd}', '\u{110bd}'),
+    ('\u{110cd}', '\u{110cd}'),
+    // The format controls of Egyptian hieroglyphs.
+    ('\u{13430}', '\u{1343f}'),
+    // Shorthand format controls.
+    ('\u{1bca0}', '\u{1bca3}'),
+    // The format controls of musical symbols.
+    ('\u{1d173}', '\u{1d17a}'),
+    // Tag characters, the variation selectors supplement and the reserved ignorable code points.
+    ('\u{e0000}', '\u{e0fff}'),
+    // Private use planes 15 and 16.
+    ('\u{f0000}', '\u{10ffff}'),
+];
+
+/// Tells if the text shows `c` as `\u{..}`.
+fn is_u_escaped(c: char) -> bool {
+    c >= '\u{80}'
+        && U_ESCAPES
+            .binary_search_by(|&(first, last)| {
+                if last < c {
+                    std::cmp::Ordering::Less
+                } else if first > c {
+                    std::cmp::Ordering::Greater
+                } else {
+                    std::cmp::Ordering::Equal
+                }
+            })
+            .is_ok()
+}
+
+/// Tells if the text of a [`BinText`] shows `c` as an escape.
+#[must_use]
+pub fn escapes(c: char) -> bool {
+    matches!(c, '\\' | '\u{0}'..='\u{1f}' | '\u{7f}') || is_u_escaped(c)
 }
 
 /// Gives the escape of one character, or `None` when the character needs no escape.
@@ -173,8 +253,7 @@ fn escape_char(c: char) -> Option<String> {
     match c {
         '\\' => Some("\\\\".to_string()),
         '\u{0}'..='\u{1f}' | '\u{7f}' => Some(format!("\\x{:02x}", u32::from(c))),
-        '\u{80}'..='\u{9f}' | '\u{2028}' | '\u{2029}' => Some(format!("\\u{{{:x}}}", u32::from(c))),
-        _ if is_bidi(c) => Some(format!("\\u{{{:x}}}", u32::from(c))),
+        _ if is_u_escaped(c) => Some(format!("\\u{{{:x}}}", u32::from(c))),
         _ => None,
     }
 }
