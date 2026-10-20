@@ -2142,7 +2142,7 @@ All Verus code lives in `ghidorah-kernel` (ADR-0011). Each kernel is at most 300
 
 - K3 implements `insert` and `remove` as a binary search for the affected run `[i, j)`, then a rebuild with `push` loops. It uses no `splice` and no `drain`.
 - K4 (undo law) is not in the MVP. The model-based undo test with a stack of full `Program` clones (AC-116) checks the real `Edit` inverses, which is stronger evidence (ADR-0011).
-- Negative patches: `verify/negative/<name>.patch` is a patch against the current source. A kernel can have more than one negative patch, for example `K1b` and `K5b` next to `K1` and `K5`. `KERNELS` in `xtask/src/verify.rs` gives the patches of each kernel and the expected error kind of each patch.
+- Negative patches: `verify/negative/<name>.patch` is a patch against the current source. A kernel can have more than one negative patch, for example `K1b` next to `K1`. `KERNELS` in `xtask/src/verify/kernels.rs` gives the patches of each kernel and the expected error kind of each patch.
 - `xtask verify` applies each patch to a temporary copy. It requires the expected verification error (`postcondition not satisfied`, `assertion failed` or `precondition not satisfied`) with `verified >= 1`. A different error kind or a compile error fails the run.
 - The first task of WP-03 is K1 `uleb128` in the measured form of Section 13.2. The other kernels follow.
 - Time box: each kernel gets at most one WP day of proof work. A kernel that does not verify in its time box gets `"status": "unproven"` in `verify/results.json`. Its tier-1 test then carries the gate, and an ADR amendment records the gap.
@@ -2168,6 +2168,8 @@ AC-006b checks that a function with a `cfg_attr` loop invariant and a `proof!{}`
 ### 13.3 Proof freshness
 
 - `xtask verify` (WP-03) runs Verus when `VERUS` and `VERUS_Z3_PATH` are set. It writes `verify/results.json`: `{ verus_commit: "ffc9d20", toolchain: "1.98.1", z3: "4.16.0", argv, tree_sha256, kernels: { <name>: { name, file, module, verified, errors, spec_items, status } }, negatives: [{ kernel, patch, error_kind, errors, verified, ok }] }`. Without Verus it prints `{ "status": "skipped" }`.
+- A kernel gets `status: verified` only when Verus gives no error and lists each `#[verus_spec]` function of the kernel module.
+- In `verify/results.failed.json`, a failed kernel row also has `error` and `unproved`, the spec functions without a Verus entry. A failed negative row also has `error` and `expected_kind`.
 - `xtask verify` writes `verify/results.json` only when the run is ok. A failing run writes `verify/results.failed.json` and exits 1. So a failed proof run never replaces the checked-in record.
 - `xtask oracle bash` follows the same rule. A run with a mismatch writes `verify/oracle-results.failed.json` and exits 1.
 - `xtask ac` checks the claims of each record item, not only its hash: the kernel status, the errors, the negative rows and the mismatches (Section 15).
