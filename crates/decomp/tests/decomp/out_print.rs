@@ -423,6 +423,65 @@ fn prints_gotos_labels_and_stores() {
     );
 }
 
+/// Two `Edge` nodes have the address of their target block 1. The block keeps `L_1010`, and
+/// each edge node gets its node number, so each `goto` names the label of its own node.
+#[test]
+fn edge_labels_name_their_own_node() {
+    let copy = |value: u64, i: usize| assign(1, k(value, 64), op(i, 0, 0));
+    let mut d = decomp(
+        vec![
+            Spec::branch(2, 3, v(0, 1), op(0, 0, 0)),
+            Spec::new(Exit::Stop, vec![ret(v(1, 64), op(1, 0, 0))]),
+            Spec::new(Exit::Fall(node(1)), vec![copy(1, 2)]),
+            Spec::new(Exit::Fall(node(1)), vec![copy(2, 3)]),
+        ],
+        vec![param(0, 1), temp("rax", 0x1000, 64)],
+        Tree::Seq(vec![
+            Tree::If {
+                cond: Cond::leaf(node(0)),
+                then: Box::new(Tree::Goto(node(2))),
+                els: None,
+            },
+            Tree::Goto(node(3)),
+            Tree::Label(node(1)),
+            Tree::Block(node(1)),
+            Tree::Label(node(2)),
+            Tree::Block(node(2)),
+            Tree::Goto(node(1)),
+            Tree::Label(node(3)),
+            Tree::Block(node(3)),
+            Tree::Goto(node(1)),
+        ]),
+    );
+    for i in [2, 3] {
+        if let Some(n) = d.view.shape.nodes.get_mut(i) {
+            n.addr = at_of(1);
+            n.kind = NodeKind::Edge {
+                from: node(0),
+                to: node(1),
+            };
+        }
+    }
+    assert_eq!(
+        text_of(&d)[2..],
+        [
+            "    if (param_1) {",
+            "        goto L_1010_2;",
+            "    }",
+            "    goto L_1010_3;",
+            "L_1010:",
+            "    return v1;",
+            "L_1010_2:",
+            "    v1 = 1;",
+            "    goto L_1010;",
+            "L_1010_3:",
+            "    v1 = 2;",
+            "    goto L_1010;",
+            "}",
+        ]
+    );
+}
+
 #[test]
 fn casts_only_where_widths_change() {
     let a = op(0, 0, 0);

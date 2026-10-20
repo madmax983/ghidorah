@@ -10,7 +10,7 @@
 //! | `If` | `if (c) {`, the branch, `} else {`, the other branch, `}` |
 //! | `Loop` | `while (c) {`, `for (init; c; step) {`, `do {` .. `} while (c);` or `while (true) {` |
 //! | `Switch` | `switch (x) {` over the table index, `case <bias + i>:` and `default:` lines, each arm with `break;` |
-//! | `Goto(n)`, `Label(n)` | `goto L_<addr>;` and `L_<addr>:` |
+//! | `Goto(n)`, `Label(n)` | `goto L_<addr>;` and `L_<addr>:`, or `L_<addr>_<n>` for an added node at the address of a block |
 //! | `Break`, `Continue` | `break;` and `continue;` |
 //!
 //! Rules of the text:
