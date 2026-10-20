@@ -244,7 +244,8 @@ impl Printer<'_> {
                 }
                 if matches!(op, Opc::TestZ | Opc::TestNZ) {
                     buf.op(*at);
-                    return self.test(*op == Opc::TestZ, x, y, buf);
+                    // The negation of `TestZ` is `TestNZ`, so a negated `TestNZ` prints `== 0`.
+                    return self.test(*op == Opc::TestNZ, x, y, buf);
                 }
             }
             Expr::Un {

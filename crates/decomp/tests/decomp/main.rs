@@ -20,6 +20,7 @@ mod out_print;
 mod out_units;
 mod progs;
 mod regress;
+mod regress_sema;
 mod shapes;
 mod structure;
 mod units;
