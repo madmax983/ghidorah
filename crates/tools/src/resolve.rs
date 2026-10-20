@@ -21,14 +21,15 @@
 //! | Digits only, or an offset of digits only | `ADDRESS_BASE_AMBIGUOUS` with both readings |
 //! | A name with more than one match | `AMBIGUOUS_NAME` with `name@0x..` or ID values in address order |
 //! | An unknown name or ID | `NOT_FOUND` with did-you-mean candidates |
-//! | Text that does not parse, or an offset that wraps | `ADDRESS_INVALID` |
+//! | A registered ID prefix with a body that does not parse | `INVALID_ARGUMENT` that names the ID kind |
+//! | Other text that does not parse, or an offset that wraps | `ADDRESS_INVALID` |
 //!
 //! The [`table`] module maps the result to the addresses of each tool family. An `imp:` ID
 //! stands for the PLT stub of an ELF import or the IAT thunk of a PE import. Else it stands
 //! for the import slot ([`import_entry`]).
 
 mod errors;
-pub(crate) use errors::hex_repair;
+pub(crate) use errors::{bad_id, hex_repair};
 mod rules;
 pub mod table;
 
@@ -199,8 +200,7 @@ pub fn resolve(program: &Program, input: &Value, site: &Site<'_>) -> Result<Reso
 ///
 /// Returns the errors of the module docs.
 pub fn resolve_text(program: &Program, text: &str, site: &Site<'_>) -> Result<Resolved, ToolError> {
-    let expr =
-        addr_expr::parse(text).map_err(|e| errors::address_invalid(site, e.repair_text()))?;
+    let expr = addr_expr::parse(text).map_err(|e| errors::syntax(text, e, site))?;
     let trimmed = text.trim_matches(|c: char| c.is_ascii_whitespace());
     rules::expr(program, &expr, trimmed, site)
 }

@@ -10,6 +10,8 @@
 //! | A value of the wrong type or range | `INVALID_ARGUMENT` with `details.expected` |
 //! | A value above its cap | `LIMIT_EXCEEDED`. `next[0]` clamps the value. |
 //! | Address text that does not parse | `ADDRESS_INVALID` |
+//! | An ID prefix with a body that does not parse | `INVALID_ARGUMENT` that names the ID kind |
+//! | An address in a list item | A type check only. The handler gives an error for that item. |
 //! | A required argument that is absent | `MISSING_ARGUMENT` with `details.example` |
 //! | A broken group rule | `MISSING_ARGUMENT` or `INVALID_ARGUMENT` |
 //! | An action rule of a selector tool | `MISSING_ARGUMENT` or `INVALID_ARGUMENT` with `details.action` |

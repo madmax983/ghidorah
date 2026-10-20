@@ -5,8 +5,8 @@
 
 use std::collections::BTreeSet;
 
-use ghidorah_base::addr_expr::Readings;
-use ghidorah_base::{Address, ErrorCode, Fuel, FuncId, did_you_mean, hex};
+use ghidorah_base::addr_expr::{AddrExprError, Readings};
+use ghidorah_base::{Address, ErrorCode, Fuel, FuncId, IdError, IdKind, did_you_mean, hex};
 use ghidorah_db::Program;
 use ghidorah_json::Value;
 
@@ -48,6 +48,32 @@ pub(super) fn address_invalid(site: &Site<'_>, repair: Option<String>) -> ToolEr
         (Some(text), Some(make)) => error.next(make(&text)),
         _ => error,
     }
+}
+
+/// Gives the error of the address text `text` that does not parse.
+///
+/// A text with a registered ID prefix and a bad body gives `INVALID_ARGUMENT` that names the ID
+/// kind ([`bad_id`]). Other syntax errors give `ADDRESS_INVALID`.
+pub(super) fn syntax(text: &str, error: AddrExprError, site: &Site<'_>) -> ToolError {
+    let trimmed = text.trim_matches(|c: char| c.is_ascii_whitespace());
+    match (error, IdKind::of_text(trimmed)) {
+        (AddrExprError::BadId(e), Some(kind)) => at(site, bad_id(field(site), kind, &e)),
+        _ => address_invalid(site, error.repair_text()),
+    }
+}
+
+/// Gives `INVALID_ARGUMENT` for a text with the ID prefix of `kind` and a body that does not
+/// parse. `details.expected` names the ID kind. `details.reason` tells which part is bad.
+pub(crate) fn bad_id(field: &str, kind: IdKind, error: &IdError) -> ToolError {
+    ToolError::new(ErrorCode::InvalidArgument)
+        .var("field", field)
+        .detail(
+            "expected",
+            Value::from(format!(
+                "an ID with the prefix {kind} and a body that parses"
+            )),
+        )
+        .detail("reason", Value::from(error.to_string()))
 }
 
 /// Adds the repair call of an `ADDRESS_INVALID` error (design Section 10.8). The repair call is
