@@ -174,8 +174,18 @@ impl Session {
         }
         let meta = ProjectMeta::new(&binary.program, &binary.file_name, load);
         let opts = self.open_options(false);
-        let project = Project::create(self.fs.boxed(), &root, meta, bytes, &binary.program, &opts)
-            .map_err(|e| project_error(&e))?;
+        let made = Project::create(self.fs.boxed(), &root, meta, bytes, &binary.program, &opts);
+        let project = match made {
+            Ok(project) => project,
+            // Another process can make the project after the check above. Then the project
+            // opens like a project that was there first.
+            Err(_) if Project::exists(self.fs.as_mut(), &Project::dir_of(&root, binary.id)) => {
+                return self
+                    .reopen(binary.id)?
+                    .ok_or_else(|| ToolError::new(ErrorCode::UnknownBinary));
+            }
+            Err(error) => return Err(project_error(&error)),
+        };
         self.stores.insert(
             binary.id,
             Store::on_disk(project, ghidorah_db::History::new()),

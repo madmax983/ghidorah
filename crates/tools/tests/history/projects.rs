@@ -1,9 +1,13 @@
 //! Projects in a session: reopen by `binary_id`, the lock, read-only mode, the torn tail
 //! warning, the reopen hint and the root rule of ADR-0022.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use ghidorah_base::BinaryId;
+use ghidorah_db::fs::EntryKind;
+use ghidorah_db::{Fs, FsError, RealFs};
 use ghidorah_json::Value;
 use ghidorah_tools::session::ProjectsConfig;
 
@@ -257,5 +261,90 @@ fn regress_git_tree_root_reports_not_persisted() {
             .and_then(Value::as_str)
             .is_some_and(|r| r.starts_with("The project file is bad")),
         "{error}"
+    );
+}
+
+/// The real file system, but the first checks of a project file say that it does not exist:
+/// the view of a process that checks just before another process makes the project.
+#[derive(Clone)]
+struct LateProject {
+    hidden: Arc<AtomicUsize>,
+}
+
+impl Fs for LateProject {
+    fn create_dir_all(&mut self, path: &Path) -> Result<(), FsError> {
+        RealFs.create_dir_all(path)
+    }
+    fn create_new(&mut self, path: &Path) -> Result<(), FsError> {
+        RealFs.create_new(path)
+    }
+    fn append(&mut self, path: &Path, bytes: &[u8]) -> Result<(), FsError> {
+        RealFs.append(path, bytes)
+    }
+    fn write_all(&mut self, path: &Path, bytes: &[u8]) -> Result<(), FsError> {
+        RealFs.write_all(path, bytes)
+    }
+    fn truncate(&mut self, path: &Path, len: u64) -> Result<(), FsError> {
+        RealFs.truncate(path, len)
+    }
+    fn sync_file(&mut self, path: &Path) -> Result<(), FsError> {
+        RealFs.sync_file(path)
+    }
+    fn rename(&mut self, from: &Path, to: &Path) -> Result<(), FsError> {
+        RealFs.rename(from, to)
+    }
+    fn link_new(&mut self, src: &Path, dst: &Path) -> Result<(), FsError> {
+        RealFs.link_new(src, dst)
+    }
+    fn sync_dir(&mut self, path: &Path) -> Result<(), FsError> {
+        RealFs.sync_dir(path)
+    }
+    fn remove(&mut self, path: &Path) -> Result<(), FsError> {
+        RealFs.remove(path)
+    }
+    fn read(&mut self, path: &Path) -> Result<Vec<u8>, FsError> {
+        RealFs.read(path)
+    }
+    fn set_read_only(&mut self, path: &Path) -> Result<(), FsError> {
+        RealFs.set_read_only(path)
+    }
+    fn list(&mut self, dir: &Path) -> Result<Vec<String>, FsError> {
+        RealFs.list(dir)
+    }
+    fn exists(&mut self, path: &Path) -> bool {
+        let hide = path.ends_with("project.json")
+            && self
+                .hidden
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
+                .is_ok();
+        !hide && RealFs.exists(path)
+    }
+    fn kind(&mut self, path: &Path) -> Option<EntryKind> {
+        RealFs.kind(path)
+    }
+    fn boxed(&self) -> Box<dyn Fs> {
+        Box::new(self.clone())
+    }
+}
+
+#[test]
+fn regress_admit_reopens_a_project_made_meanwhile() {
+    let dir = tmp("late_project");
+    {
+        let mut first = session_with(config_in(&dir));
+        load_demo(&mut first);
+    }
+    let mut s = session_with(config_in(&dir));
+    s.set_fs(Box::new(LateProject {
+        hidden: Arc::new(AtomicUsize::new(1)),
+    }));
+    // The check of admit misses the project, so the create finds the project file.
+    let envelope = call(&mut s, "binary_load", r#"{"builtin":"demo"}"#);
+    let got = data(&envelope);
+    assert_eq!(got.get("already_loaded"), Some(&Value::Bool(false)));
+    let id = BinaryId::parse(DEMO_ID).expect("the ID parses");
+    assert!(
+        s.store(id).and_then(|st| st.project()).is_some(),
+        "the session opens the project on disk"
     );
 }
