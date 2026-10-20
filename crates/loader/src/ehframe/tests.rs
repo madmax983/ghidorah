@@ -124,7 +124,7 @@ fn cie_fde(ext: bool) -> Vec<u8> {
     let mut out = Vec::new();
     record(&mut out, &cie, ext);
     let header = if ext { 12 } else { 4 };
-    let back = u32::try_from(out.len() + header).expect("a small offset");
+    let back = u32::try_from(out.len().saturating_add(header)).expect("a small offset");
     let mut fde = back.to_le_bytes().to_vec();
     fde.extend_from_slice(&0x0040_1000u32.to_le_bytes());
     fde.extend_from_slice(&0x1fu32.to_le_bytes());

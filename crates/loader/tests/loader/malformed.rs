@@ -293,12 +293,13 @@ fn regress_elf_cut_shdr0_no_bogus_shstrndx() {
     let bytes = cut_shdr0();
     assert_eq!(bytes.len(), 100);
     let (b, _) = load_ok(&bytes);
-    let bogus: Vec<_> = b
-        .diagnostics
-        .iter()
-        .filter(|d| d.path == "elf.ehdr.e_shstrndx")
-        .collect();
-    assert!(bogus.is_empty(), "{:?}", b.diagnostics);
+    assert!(
+        !b.diagnostics
+            .iter()
+            .any(|d| d.path == "elf.ehdr.e_shstrndx"),
+        "{:?}",
+        b.diagnostics
+    );
     assert!(
         b.diagnostics.iter().any(|d| d.path == "elf.shdr[0]"),
         "the cut section 0 has its own diagnostic: {:?}",
