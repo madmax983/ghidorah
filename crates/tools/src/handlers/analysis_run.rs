@@ -28,8 +28,10 @@ use std::collections::BTreeMap;
 use std::collections::btree_map::Entry;
 
 use ghidorah_analysis::{ANALYZERS, AnalyzerRow, Changed, RunState, Scheduler, Until as Band};
-use ghidorah_base::{BinaryId, ErrorCode, Fuel};
+use ghidorah_base::{BinaryId, ErrorCode, Fuel, Limits};
+use ghidorah_db::Program;
 use ghidorah_json::{Object, Value};
+use ghidorah_loader::{Binary, Sym};
 
 use crate::args::Args;
 use crate::dispatch::{Ctx, Payload};
@@ -102,11 +104,14 @@ pub struct Engine {
 }
 
 impl Engine {
-    /// Makes an engine that shuffles the analyzer order of the first analysis of each binary
-    /// with `seed`. This is the seed-order relation of design Section 13.4 (AC-189a).
+    /// Makes an engine for the seed-order relation of design Section 13.4 (AC-189a). It
+    /// shuffles the seed insertion order of the first analysis of each binary with `seed`.
     ///
-    /// The scheduler picks its steps by priority and name, so the state hash stays the same.
-    /// Only the row order of the `analyzers` list changes.
+    /// Before that analysis, the engine makes the program again from a copy of its binary
+    /// model. The copy has the symbols, FDEs, entry points, exports and `.pdata` entries in
+    /// shuffled order. The symbols at one address keep their order. The import order stays,
+    /// because it sets the EXTERNAL addresses. The rebuild uses the default limits. The
+    /// analyzer order of the scheduler also changes.
     #[must_use]
     pub fn with_seed_order(seed: u64) -> Self {
         Self {
@@ -124,11 +129,54 @@ fn first_scheduler(order: Option<u64>) -> Scheduler {
     })
 }
 
+/// Makes `program` again with the seed lists of its binary in the order that `seed` shuffles.
+/// A program with commits stays the same, because the rebuild loses them.
+fn reseed(program: &mut Program, seed: u64) -> Result<(), ToolError> {
+    if program.rev().0 != 0 {
+        return Ok(());
+    }
+    let binary = seeds_shuffled(program.binary(), seed);
+    *program =
+        Program::from_binary(binary, program.mem().clone(), &Limits::DEFAULT).map_err(|e| {
+            ToolError::new(ErrorCode::InternalError).detail("reason", Value::from(e.to_string()))
+        })?;
+    Ok(())
+}
+
+/// Gives a copy of `binary` with its seed lists in the order that `seed` shuffles.
+fn seeds_shuffled(binary: &Binary, seed: u64) -> Binary {
+    let mut out = binary.clone();
+    out.symbols = by_address(&binary.symbols, seed);
+    out.fdes = shuffled(&binary.fdes, seed.rotate_left(8));
+    out.entry_points = shuffled(&binary.entry_points, seed.rotate_left(16));
+    out.exports = shuffled(&binary.exports, seed.rotate_left(24));
+    out.pdata = shuffled(&binary.pdata, seed.rotate_left(32));
+    out
+}
+
+/// Gives `symbols` with their address groups in the order that `seed` shuffles. The symbols
+/// at one address keep their table order. The `Symbols` analyzer takes the premise of the last
+/// function symbol at an address.
+fn by_address(symbols: &[Sym], seed: u64) -> Vec<Sym> {
+    let mut groups: Vec<Vec<Sym>> = Vec::new();
+    let mut slots: BTreeMap<u64, usize> = BTreeMap::new();
+    for sym in symbols {
+        let slot = *slots.entry(sym.addr).or_insert(groups.len());
+        match groups.get_mut(slot) {
+            Some(group) => group.push(sym.clone()),
+            None => groups.push(vec![sym.clone()]),
+        }
+    }
+    shuffled(&groups, seed).into_iter().flatten().collect()
+}
+
 /// Gives `items` in the order of a Fisher-Yates shuffle with a `SplitMix64` stream from `seed`.
-fn shuffled<T: Copy>(items: &[T], seed: u64) -> Vec<T> {
-    let mut out = items.to_vec();
+/// A list of two or more items always moves: a shuffle that keeps the order turns into a
+/// rotation by one.
+fn shuffled<T: Clone>(items: &[T], seed: u64) -> Vec<T> {
+    let mut order: Vec<usize> = (0..items.len()).collect();
     let mut state = seed;
-    for i in (1..out.len()).rev() {
+    for i in (1..order.len()).rev() {
         state = state.wrapping_add(0x9e37_79b9_7f4a_7c15);
         let mut z = state;
         z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
@@ -136,9 +184,15 @@ fn shuffled<T: Copy>(items: &[T], seed: u64) -> Vec<T> {
         z ^= z >> 31;
         let bound = u64::try_from(i).map_or(u64::MAX, |n| n.saturating_add(1));
         let j = usize::try_from(z % bound).unwrap_or(0);
-        out.swap(i, j);
+        order.swap(i, j);
     }
-    out
+    if order.len() >= 2 && order.iter().enumerate().all(|(i, k)| i == *k) {
+        order.rotate_left(1);
+    }
+    order
+        .iter()
+        .filter_map(|i| items.get(*i).cloned())
+        .collect()
 }
 
 /// Gives the envelope state of a run state.
@@ -184,7 +238,12 @@ impl AnalysisEngine for Engine {
             Entry::Occupied(found) => found.into_mut(),
             Entry::Vacant(slot) => match binary.analysis.map(|a| a.state) {
                 // The first analysis after a load publishes after each run.
-                None => slot.insert(first_scheduler(order)),
+                None => {
+                    if let Some(seed) = order {
+                        reseed(&mut binary.program, seed)?;
+                    }
+                    slot.insert(first_scheduler(order))
+                }
                 // A project with a current analysis needs no new run.
                 Some(AnalysisState::Complete) => {
                     return Ok(RunReport {
