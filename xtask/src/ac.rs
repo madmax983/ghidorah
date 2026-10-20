@@ -10,6 +10,7 @@
 //! | record | `record:<file>#<pointer>@sha256=<input>` |
 //!
 //! The `<fn>` of a test item starts with `ac_<nnn>`, `fuzz_` or `regress_` (CLAUDE.md).
+//! [`TEST_NAME_EXCEPTIONS`] holds the tests outside this rule, each with a reason.
 
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -218,6 +219,32 @@ pub fn is_evidence_test_name(func: &str) -> bool {
     ac_name || TEST_PREFIXES.iter().any(|p| func.starts_with(p))
 }
 
+/// The reason of each golden test of the registry groups in [`TEST_NAME_EXCEPTIONS`].
+const GOLDEN_REASON: &str =
+    "the test of a tool group compares each example of the group with its golden (AC-132a)";
+
+/// The evidence tests that keep a name outside the naming rule, as `(crate, fn, reason)`.
+///
+/// Each test is in a file of a different work package. A rename of the test needs its owner.
+pub const TEST_NAME_EXCEPTIONS: &[(&str, &str, &str)] = &[
+    ("tools", "batch_examples_on_demo", GOLDEN_REASON),
+    ("tools", "examples_on_demo", GOLDEN_REASON),
+    ("tools", "fact_check_examples_on_demo", GOLDEN_REASON),
+    ("tools", "func_similar_examples_on_demo", GOLDEN_REASON),
+    ("tools", "history_examples_on_demo", GOLDEN_REASON),
+    ("tools", "memory_examples_on_demo", GOLDEN_REASON),
+    ("tools", "overrides_examples_on_demo", GOLDEN_REASON),
+    ("tools", "read_examples_on_demo", GOLDEN_REASON),
+];
+
+/// Tells if `<krate>::<func>` is in [`TEST_NAME_EXCEPTIONS`].
+#[must_use]
+pub fn is_listed_exception(krate: &str, func: &str) -> bool {
+    TEST_NAME_EXCEPTIONS
+        .iter()
+        .any(|(k, f, _)| *k == krate && *f == func)
+}
+
 fn parse_op(text: &str) -> Result<Op, String> {
     Ok(match text {
         "==" => Op::Eq,
@@ -349,8 +376,9 @@ pub fn parse_rows(text: &str) -> (Vec<AcRow>, Vec<Finding>) {
         for span in code_spans(evidence) {
             match parse_evidence(span) {
                 Ok(item) => {
-                    if let Evidence::Test { func, .. } = &item
+                    if let Evidence::Test { krate, func, .. } = &item
                         && !is_evidence_test_name(func)
+                        && !is_listed_exception(krate, func)
                     {
                         found.push(Finding::new(
                             "AC-018a",

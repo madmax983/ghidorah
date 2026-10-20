@@ -345,6 +345,65 @@ fn regress_evidence_test_names() {
     assert_eq!(rows[2].evidence.len(), 1);
 }
 
+/// Gives the test items of one AC row of the design as `<crate>::<fn>@<tier>` texts.
+fn design_tests(rows: &[ac::AcRow], id: &str) -> Vec<String> {
+    rows.iter()
+        .filter(|r| r.id == id)
+        .flat_map(|r| &r.evidence)
+        .filter_map(|item| match item {
+            Evidence::Test { krate, func, tier } => Some(format!("{krate}::{func}@{tier:?}")),
+            _ => None,
+        })
+        .collect()
+}
+
+/// A registry-wide AC names the tests of the shipped registry, not only the tests of the
+/// 5-tool test registry. AC-112a names its gcc and clang oracle, and AC-066 names libc.
+#[test]
+fn regress_registry_ac_evidence() {
+    let design = std::fs::read_to_string(xtask::workspace::root().join(ac::DESIGN_PATH))
+        .expect("design reads");
+    let (rows, findings) = ac::parse_rows(&design);
+    assert!(findings.is_empty(), "{findings:?}");
+    let full = "tools::ac_132a_137_143_full_registry_examples@T1";
+    for (id, wanted) in [
+        ("AC-132a", full),
+        ("AC-137", full),
+        ("AC-143", full),
+        ("AC-132a", "tools::examples_on_demo@T1"),
+        ("AC-132a", "tools::read_examples_on_demo@T1"),
+        ("AC-132a", "tools::batch_examples_on_demo@T1"),
+        ("AC-132b", "tools::ac_132b_full_argument_coverage@T1"),
+        ("AC-221", "tools::ac_221_full_selector_rules@T1"),
+        ("AC-112a", "types::ac_112a_layout_oracle_gcc_clang@T2"),
+    ] {
+        let tests = design_tests(&rows, id);
+        assert!(tests.iter().any(|t| t == wanted), "{id}: {tests:?}");
+    }
+    let libc = rows.iter().find(|r| r.id == "AC-066").is_some_and(|r| {
+        r.evidence.contains(&Evidence::Record {
+            file: "verify/oracle-results.json".to_owned(),
+            pointer: "/libc".to_owned(),
+            input: "host-libc".to_owned(),
+        })
+    });
+    assert!(libc, "AC-066 names the libc record");
+    // Each name exception has a reason, breaks the name rule and names a test item of the design.
+    for (krate, func, reason) in ac::TEST_NAME_EXCEPTIONS {
+        assert!(!reason.trim().is_empty(), "{func}");
+        assert!(
+            !ac::is_evidence_test_name(func),
+            "{func} needs no exception"
+        );
+        assert!(ac::is_listed_exception(krate, func));
+        let used = rows.iter().flat_map(|r| &r.evidence).any(|item| {
+            matches!(item, Evidence::Test { krate: k, func: f, .. } if k == krate && f == func)
+        });
+        assert!(used, "the exception {krate}::{func} names no evidence item");
+    }
+    assert!(!ac::is_listed_exception("kernel", "examples_on_demo"));
+}
+
 #[test]
 fn acrun_compare_and_statuses() {
     let num = |n: &str| Value::Number(n.to_owned());

@@ -3066,7 +3066,7 @@ Rules for this section:
 | AC-063b | Moved to stretch S10 (`insn_fields`). | - | - | - |
 | AC-064 | Intel display text of every fixture function equals the printer golden. | `test:x86::ac_064_printer_golden@T1` | 08 | - |
 | AC-065 | VEX, EVEX and REX2 forms of the enumeration golden decode with the oracle length as opaque forms. | `test:x86::ac_065_vex_evex_length@T1` | 08 | - |
-| AC-066 | Boundary agreement is 100% on host bash and libc, recorded with their sha256. | `record:verify/oracle-results.json#/bash@sha256=host-bash` | 16 | - |
+| AC-066 | Boundary agreement is 100% on host bash and libc, recorded with their sha256. | `record:verify/oracle-results.json#/bash@sha256=host-bash`, `record:verify/oracle-results.json#/libc@sha256=host-libc` | 16 | - |
 
 ### 15.8 IR and lifter
 
@@ -3133,7 +3133,7 @@ All decompiler ACs (AC-073, AC-075b, AC-075c, AC-086b, AC-098 to AC-106, AC-108,
 | AC-109 | All Tier-0 prototypes (at least 150) parse in `sig` mode with zero errors. | `test:types::ac_109_tier0_parse@T1` | 10 | - |
 | AC-110 | Bit-fields, `__attribute__` and `#pragma pack` give `C_PARSE_ERROR` detail `E_UNSUPPORTED` with line, column and a hint. | `test:types::ac_110_c_unsupported@T1` | 10 | - |
 | AC-111 | Parser bombs stay within limits in a 256 KiB stack and give structured errors with candidates. | `test:types::ac_111_c_parser_limits@T1` | 10 | - |
-| AC-112a | SysV layouts of records built through the `TypeStore` API equal the golden gcc and clang cases. | `test:types::ac_112a_sysv_layout@T1` | 10 | - |
+| AC-112a | SysV layouts of records built through the `TypeStore` API equal the golden gcc and clang cases. | `test:types::ac_112a_sysv_layout@T1`, `test:types::ac_112a_layout_oracle_gcc_clang@T2` | 10 | - |
 | AC-112b | Moved to stretch S13 (layouts from parsed declarations). | - | - | - |
 | AC-113 | After `type_edit {signature}`, `func_get` parameters and `xref_list` argument names equal `tests/golden/types/sig_apply.json`. | `test:tools::ac_113_signature_apply@T1` | 22b | 17b |
 | AC-114 | `mem_read { as: "type", c: "struct sockaddr_in" }` returns field paths, offsets and values equal to its golden. | `test:tools::ac_114_typed_read@T1` | 22b | - |
@@ -3181,22 +3181,22 @@ All decompiler ACs (AC-073, AC-075b, AC-075c, AC-086b, AC-098 to AC-106, AC-108,
 | AC-131a | `tools/list` of `full` is at most 24,000 characters. | `test:tools::ac_131a_full_catalog_size@T1` | 13b/25 | 24 |
 | AC-131b | `tools/list` of `mini` is at most 6,000 characters. | `test:tools::ac_131b_mini_catalog_size@T1` | 13b/25 | 24 |
 | AC-131c | The server instructions are at most 2,000 characters and name only tools of the active profile. | `test:tools::ac_131c_instructions@T1` | 13b/25 | 24 |
-| AC-132a | Every example parses with its `ArgSpec`, runs on the demo or a fixture, matches its golden and fits its `OutputShape`. | `test:tools::ac_132a_examples_executed@T1` | 13a/25 | 24 |
-| AC-132b | Every `ArgSpec`, enum value and global argument occurs in an executed example or a request of `tests/data/requests/`. | `test:tools::ac_132b_argument_coverage@T1` | 13a/25 | 24 |
+| AC-132a | Every example parses with its `ArgSpec`, runs on the demo or a fixture, matches its golden and fits its `OutputShape`. | `test:tools::ac_132a_examples_executed@T1`, `test:tools::ac_132a_137_143_full_registry_examples@T1`; goldens: `test:tools::examples_on_demo@T1`, `test:tools::read_examples_on_demo@T1`, `test:tools::memory_examples_on_demo@T1`, `test:tools::overrides_examples_on_demo@T1`, `test:tools::history_examples_on_demo@T1`, `test:tools::fact_check_examples_on_demo@T1`, `test:tools::batch_examples_on_demo@T1`, `test:tools::func_similar_examples_on_demo@T1` | 13a/25 | 24 |
+| AC-132b | Every `ArgSpec`, enum value and global argument occurs in an executed example or a request of `tests/data/requests/`. | `test:tools::ac_132b_argument_coverage@T1`, `test:tools::ac_132b_full_argument_coverage@T1` | 13a/25 | 24 |
 | AC-133 | Every example with `limit` at its cap stays within 60,000 characters on 5,000-function and 50,000-function synthetic ELFs. | `test:tools::ac_133_output_budget@T1` (5,000), `test:tools::ac_133_output_budget_large@T2` (50,000) | 17b/25 | 24 |
 | AC-134 | Every error object is at most 10,000 characters with at most 5 candidates plus `candidates_total`. | `test:tools::ac_134_error_cap@T1` | 13a | - |
 | AC-135 | For every list tool on every fixture, cursors lead to exactly `total` unique items in a stable order. | `test:tools::ac_135_pagination_conservation@T1` | 17b/25 | 24 |
 | AC-136a | A `symbol_rename` between pages keeps `addr`-sorted and `priority`-sorted `func_list` cursors valid. | `test:tools::ac_136a_rename_keeps_cursors@T1` | 22a | - |
 | AC-136b | A rename of the boundary item under `name` sort gives `CURSOR_STALE`. | `test:tools::ac_136b_name_sort_stale@T1` | 22a | - |
 | AC-136c | A tampered cursor gives `CURSOR_INVALID`. | `test:tools::ac_136c_tampered_cursor@T1` | 22a | - |
-| AC-137 | In every example result, address-like keys hold `^0x[0-9a-f]+$` strings, and every JSON number is below 2^53. | `test:tools::ac_137_hex_strings@T1` | 13a/25 | 24 |
+| AC-137 | In every example result, address-like keys hold `^0x[0-9a-f]+$` strings, and every JSON number is below 2^53. | `test:tools::ac_137_hex_strings@T1`, `test:tools::ac_132a_137_143_full_registry_examples@T1` | 13a/25 | 24 |
 | AC-138 | The `two_helpers` fixture gives `AMBIGUOUS_NAME` with both candidates for `helper`, and `helper@0x..` resolves. | `test:tools::ac_138_ambiguous_names@T1` | 13b | - |
 | AC-139 | Stringified arrays, objects, integers, booleans and enum case give results equal to native values plus `W_COERCED`. | `test:tools::ac_139_coercion_matrix@T1` | 13b | - |
 | AC-140 | An unknown key gives `UNKNOWN_ARGUMENT`, and its `next[0]` is a call that passes validation. | `test:tools::ac_140_unknown_argument@T1` | 13a | - |
 | AC-141a | Every `ErrorCode` and `WarningCode` has a frozen number, a message template, a hint, a retry flag and a repair class. | `test:base::ac_141a_catalog_complete@T1` | 05 | - |
 | AC-141b | Each line of `tests/data/code_triggers.jsonl` gives its code, and the lines cover both enums except `OUTPUT_BUDGET_EXCEEDED`. | `test:tools::ac_141b_code_triggers@T1` | 25b | 24 |
 | AC-142 | No error or warning text contains `Some(`, `Os {`, `Error {` or `panicked at`. | `test:tools::ac_142_no_debug_text@T1` | 13a/25 | 24 |
-| AC-143 | Every `next` call and remedy names a tool of the active profile and parses with its `ArgSpec`, and a result has at most 3. | `test:tools::ac_143_executable_hints@T1` | 13a/25 | 24 |
+| AC-143 | Every `next` call and remedy names a tool of the active profile and parses with its `ArgSpec`, and a result has at most 3. | `test:tools::ac_143_executable_hints@T1`, `test:tools::ac_132a_137_143_full_registry_examples@T1` | 13a/25 | 24 |
 | AC-144 | A list input with one bad item returns per-item results in input order and `ok: true` for the call. | `test:tools::ac_144_per_item_results@T1` | 17b | - |
 | AC-145 | Reads during incomplete analysis carry `partial: true` and the analysis state. | `test:tools::ac_145_partial_flag@T1` | 17b | - |
 | AC-146a | In the `hostile_strings` fixture, every output string escapes controls and bidi marks. | `test:tools::ac_146a_controls_escaped@T1` | 17b | - |
@@ -3375,7 +3375,7 @@ These ACs are normal MVP ACs since revision 3 (Section 1.7). AC-018a counts them
 | AC-218 | `search {ids}` returns the full record of each `note:`, `set:` and `jt:` ID, and pages set members by cursor. | `test:tools::ac_218_search_ids@T1` | 22a | - |
 | AC-219 | No batch step runs a destructive tool or action, and such a step gives `TOOL_NOT_IN_PROFILE` with the direct call in `next[0]`. | `test:tools::ac_219_destructive_rejected@T1` | 25 | - |
 | AC-220 | For each R-code line of `code_triggers.jsonl`, `next[0]` is a complete call that passes validation and repairs the failure. | `test:tools::ac_220_repair_calls@T1` | 25 | 24 |
-| AC-221 | Each selector action enforces its required and forbidden arguments, and `MISSING_ARGUMENT` names the action in `details`. | `test:tools::ac_221_selector_rules@T1` | 13a/25 | 24 |
+| AC-221 | Each selector action enforces its required and forbidden arguments, and `MISSING_ARGUMENT` names the action in `details`. | `test:tools::ac_221_selector_rules@T1`, `test:tools::ac_221_full_selector_rules@T1` | 13a/25 | 24 |
 | AC-222 | The registry lint fails when two tools give different names to the same argument kind and role. | `test:tools::ac_222_vocabulary_lint@T1` | 13a/25 | 24 |
 | AC-223 | No crate source calls `std::env::set_var` or `std::env::remove_var`. | `test:xtask::ac_223_no_set_var@T1` | 01 | - |
 | AC-224 | Each tier-1 test finishes in at most 15 s, and `xtask ci` reports the time of each test. | `xtask:ci#/steps/test_times/max_seconds <= 15` | 27 | - |
