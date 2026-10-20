@@ -1,7 +1,7 @@
 //! The evidence runner of `xtask ac --run` and the table `docs/ac-evidence.json`.
 //!
 //! Tier-1 test items always run. Tier-2 test items, `cmd:` items and `xtask:` items run only
-//! with `--tier2`. A `record:` item gives `recorded` when its hash matches its named input
+//! with `--tier2`. Test items run with `GHIDORAH_REQUIRE_PROOFS=1`. A `record:` item gives `recorded` when its hash matches its named input
 //! ([`record`]). The module [`table`] reads, merges and writes the evidence table.
 
 pub mod record;
@@ -155,16 +155,34 @@ fn package_of(krate: &str) -> Option<&'static str> {
         .map(|p| p.name)
 }
 
+/// Gives a cargo command of an evidence run.
+///
+/// The command sets `GHIDORAH_REQUIRE_PROOFS=1`, as `xtask ci` does (ADR-0011).
+/// So a stale proof record fails `ac_034_proof_freshness`. It does not give `pass` with a warning.
+fn evidence_cargo(root: &Path, args: &[&str]) -> Command {
+    let mut cmd = proc::cargo_cmd(args);
+    cmd.env("GHIDORAH_REQUIRE_PROOFS", "1").current_dir(root);
+    cmd
+}
+
+/// Gives the command that runs the named tests of `package` for the evidence table.
+///
+/// With `tier2`, the command also runs the ignored tests.
+#[must_use]
+pub fn test_command(root: &Path, package: &str, names: &[&str], tier2: bool) -> Command {
+    let mut cmd = evidence_cargo(root, &["test", "-p", package, "--no-fail-fast", "--"]);
+    if tier2 {
+        cmd.arg("--include-ignored");
+    }
+    cmd.args(names);
+    cmd
+}
+
 fn run_tests(root: &Path, krate: &str, names: &[&str], tier2: bool) -> Result<Vec<Status>, Error> {
     let Some(package) = package_of(krate) else {
         return Ok(vec![Status::Fail; names.len()]);
     };
-    let mut cmd = proc::cargo_cmd(&["test", "-p", package, "--no-fail-fast", "--"]);
-    if tier2 {
-        cmd.arg("--include-ignored");
-    }
-    cmd.args(names).current_dir(root);
-    let out = proc::run(&mut cmd)?;
+    let out = proc::run(&mut test_command(root, package, names, tier2))?;
     Ok(test_statuses(&out.stdout, names))
 }
 
@@ -201,8 +219,8 @@ fn run_template(root: &Path, krate: &str, func: &str) -> Result<Status, Error> {
         return Ok(Status::Fail);
     }
     for (package, stem) in binaries {
-        let mut cmd = proc::cargo_cmd(&["test", "-p", package, "--test", &stem]);
-        if !proc::run(cmd.current_dir(root))?.ok() {
+        let mut cmd = evidence_cargo(root, &["test", "-p", package, "--test", &stem]);
+        if !proc::run(&mut cmd)?.ok() {
             return Ok(Status::Fail);
         }
     }

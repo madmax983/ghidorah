@@ -1,0 +1,21 @@
+diff --git a/crates/kernel/src/flags.rs b/crates/kernel/src/flags.rs
+--- a/crates/kernel/src/flags.rs
++++ b/crates/kernel/src/flags.rs
+@@ -251,7 +251,7 @@
+         } else if k == 7 {
+             Some(Pred::UGt)
+         } else if k == 12 {
+-            Some(Pred::SLt)
++            Some(Pred::ULt)
+         } else if k == 13 {
+             Some(Pred::SGe)
+         } else if k == 14 {
+@@ -492,7 +492,7 @@
+             5 => Some(Pred::Ne),
+             6 => Some(Pred::ULe),
+             7 => Some(Pred::UGt),
+-            12 => Some(Pred::SLt),
++            12 => Some(Pred::ULt),
+             13 => Some(Pred::SGe),
+             14 => Some(Pred::SLe),
+             15 => Some(Pred::SGt),

@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use super::{ARGV, KERNELS, Kernel, RESULTS_PATH, Tools, patch, tree};
+use super::{ARGV, FAILED_PATH, KERNELS, Kernel, Negative, RESULTS_PATH, Tools, patch, tree};
 use crate::json::{self, Value};
 use crate::{Error, proc};
 
@@ -38,24 +38,23 @@ fn z3_version(z3: Option<&Path>) -> String {
         .unwrap_or_default()
 }
 
-/// Counts the spec items of the kernel files: the module file and its submodule directory.
-fn kernel_spec_items(root: &Path, kernel: &Kernel) -> Result<u64, Error> {
-    let file = root.join(kernel.file());
-    let text = std::fs::read_to_string(&file).map_err(|e| Error::io(&file, e))?;
-    let mut count = super::spec_items(&text);
+/// Gives the texts of the kernel files: the module file and the files of its submodule directory.
+fn kernel_texts(root: &Path, kernel: &Kernel) -> Result<Vec<String>, Error> {
+    let mut files = vec![root.join(kernel.file())];
     let dir = root.join(kernel.dir());
     if dir.is_dir() {
-        let mut files = Vec::new();
-        list_files(&dir, 0, &mut files)?;
-        for path in files
-            .iter()
-            .filter(|p| p.extension().is_some_and(|x| x == "rs"))
-        {
-            let text = std::fs::read_to_string(path).map_err(|e| Error::io(path, e))?;
-            count = count.saturating_add(super::spec_items(&text));
-        }
+        let mut found = Vec::new();
+        list_files(&dir, 0, &mut found)?;
+        files.extend(
+            found
+                .into_iter()
+                .filter(|p| p.extension().is_some_and(|x| x == "rs")),
+        );
     }
-    Ok(count)
+    files
+        .iter()
+        .map(|path| std::fs::read_to_string(path).map_err(|e| Error::io(path, e)))
+        .collect()
 }
 
 /// Adds each file under `dir` to `out`.
@@ -101,9 +100,22 @@ fn prove(
 ) -> Result<(Value, Tools), Error> {
     let out = verus_run(verus, z3, root, kernel.module)?;
     let counts = super::parse_counts(&out.stdout).unwrap_or_default();
-    let spec_items = kernel_spec_items(root, kernel)?;
-    let verified =
-        counts.success && counts.errors == 0 && spec_items > 0 && counts.verified >= spec_items;
+    let texts = kernel_texts(root, kernel)?;
+    let spec_items = texts
+        .iter()
+        .fold(0u64, |n, text| n.saturating_add(super::spec_items(text)));
+    let spec: Vec<String> = texts
+        .iter()
+        .flat_map(|t| super::spec_functions(t))
+        .collect();
+    // Each spec function needs its own entry. So an `external` function cannot hide in the count.
+    let proved = super::parse_functions(&out.stdout).unwrap_or_default();
+    let unproved = super::unproved(kernel.module, &spec, &proved);
+    let verified = counts.success
+        && counts.errors == 0
+        && spec_items > 0
+        && counts.verified >= spec_items
+        && unproved.is_empty();
     let mut row = vec![
         ("name", Value::from(kernel.name)),
         ("file", Value::from(kernel.file())),
@@ -118,6 +130,10 @@ fn prove(
     ];
     if !verified {
         row.push(("error", Value::from(proc::tail(&out.stderr, 20))));
+        row.push((
+            "unproved",
+            Value::Array(unproved.into_iter().map(Value::from).collect()),
+        ));
     }
     Ok((Value::object(row), super::parse_tools(&out.stdout, z3_text)))
 }
@@ -130,10 +146,10 @@ enum Prepared {
     Refused(String),
 }
 
-/// Applies the negative patch of `kernel` to a copy of the kernel sources.
-fn negative_copy(root: &Path, kernel: &Kernel) -> Result<Prepared, Error> {
-    let Ok(text) = std::fs::read_to_string(root.join(kernel.patch())) else {
-        return Ok(Prepared::Refused(format!("{} is missing", kernel.patch())));
+/// Applies the negative patch `negative` of `kernel` to a copy of the kernel sources.
+fn negative_copy(root: &Path, kernel: &Kernel, negative: &Negative) -> Result<Prepared, Error> {
+    let Ok(text) = std::fs::read_to_string(root.join(negative.path())) else {
+        return Ok(Prepared::Refused(format!("{} is missing", negative.path())));
     };
     let parsed = match patch::parse(&text) {
         Ok(parsed) => parsed,
@@ -147,7 +163,7 @@ fn negative_copy(root: &Path, kernel: &Kernel) -> Result<Prepared, Error> {
             parsed.path, kernel.name
         )));
     }
-    let copy = root.join(COPY_DIR).join(kernel.name);
+    let copy = root.join(COPY_DIR).join(negative.name);
     if copy.exists() {
         std::fs::remove_dir_all(&copy).map_err(|e| Error::io(&copy, e))?;
     }
@@ -166,13 +182,21 @@ fn negative_copy(root: &Path, kernel: &Kernel) -> Result<Prepared, Error> {
     }
 }
 
-/// Runs the negative patch of one kernel and gives its record row.
-fn negative(root: &Path, verus: &Path, z3: Option<&Path>, kernel: &Kernel) -> Result<Value, Error> {
+/// Runs one negative patch of one kernel and gives its record row.
+///
+/// The row has `ok: true` only when Verus fails with the expected error of the patch.
+fn negative(
+    root: &Path,
+    verus: &Path,
+    z3: Option<&Path>,
+    kernel: &Kernel,
+    negative: &Negative,
+) -> Result<Value, Error> {
     let mut row = vec![
         ("kernel", Value::from(kernel.name)),
-        ("patch", Value::from(kernel.patch())),
+        ("patch", Value::from(negative.path())),
     ];
-    match negative_copy(root, kernel)? {
+    match negative_copy(root, kernel, negative)? {
         Prepared::Refused(message) => {
             row.extend([
                 ("error_kind", Value::Null),
@@ -186,7 +210,7 @@ fn negative(root: &Path, verus: &Path, z3: Option<&Path>, kernel: &Kernel) -> Re
             let out = verus_run(verus, z3, &copy, kernel.module)?;
             let counts = super::parse_counts(&out.stdout).unwrap_or_default();
             let kind = super::error_kind(&out.stderr);
-            let ok = kind.is_some() && counts.verified >= 1 && !counts.success;
+            let ok = kind == Some(negative.kind) && counts.verified >= 1 && !counts.success;
             row.extend([
                 ("error_kind", kind.map_or(Value::Null, Value::from)),
                 ("verified", Value::from(counts.verified)),
@@ -194,6 +218,7 @@ fn negative(root: &Path, verus: &Path, z3: Option<&Path>, kernel: &Kernel) -> Re
                 ("ok", Value::from(ok)),
             ]);
             if !ok {
+                row.push(("expected_kind", Value::from(negative.kind)));
                 row.push(("error", Value::from(proc::tail(&out.stderr, 20))));
             }
         }
@@ -219,9 +244,11 @@ pub(super) fn proofs(root: &Path, verus: &Path, z3: Option<&Path>) -> Result<Val
     }
     let mut negatives = Vec::new();
     for kernel in KERNELS {
-        let row = negative(root, verus, z3, kernel)?;
-        all_ok &= row.get("ok").and_then(Value::as_bool) == Some(true);
-        negatives.push(row);
+        for item in kernel.negatives {
+            let row = negative(root, verus, z3, kernel, item)?;
+            all_ok &= row.get("ok").and_then(Value::as_bool) == Some(true);
+            negatives.push(row);
+        }
     }
     let copies = root.join(COPY_DIR);
     if copies.exists() {
@@ -240,12 +267,18 @@ pub(super) fn proofs(root: &Path, verus: &Path, z3: Option<&Path>) -> Result<Val
     record.insert("kernels".to_owned(), Value::Object(kernels));
     record.insert("negatives".to_owned(), Value::Array(negatives));
     let record = Value::Object(record);
-    let path = root.join(RESULTS_PATH);
+    // Only a good run replaces the record. A failed run keeps the record of the last good run.
+    let written = if all_ok { RESULTS_PATH } else { FAILED_PATH };
+    let path = root.join(written);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| Error::io(parent, e))?;
     }
     std::fs::write(&path, format!("{}\n", json::write(&record)))
         .map_err(|e| Error::io(&path, e))?;
+    let failed = root.join(FAILED_PATH);
+    if all_ok && failed.exists() {
+        std::fs::remove_file(&failed).map_err(|e| Error::io(&failed, e))?;
+    }
     let Value::Object(mut report) = record else {
         return Err(Error::data("verify", "the record is not an object"));
     };
@@ -254,6 +287,6 @@ pub(super) fn proofs(root: &Path, verus: &Path, z3: Option<&Path>) -> Result<Val
         "status".to_owned(),
         Value::from(if all_ok { "verified" } else { "failed" }),
     );
-    report.insert("results".to_owned(), Value::from(RESULTS_PATH));
+    report.insert("results".to_owned(), Value::from(written));
     Ok(Value::Object(report))
 }

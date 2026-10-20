@@ -101,6 +101,65 @@ fn oracle_bash_record() {
     assert!(matches!(oracle::bash_record(&bad), Err(Error::Data { .. })));
 }
 
+/// Gives the output of the host boundary test with `(insns, agree, mismatches)` of bash and libc.
+fn bash_stdout(bash: (u64, u64, u64), libc: (u64, u64, u64)) -> String {
+    let entry = |(insns, agree, mismatches): (u64, u64, u64)| {
+        format!(r#"{{"insns":{insns},"agree":{agree},"mismatches":{mismatches},"sha256":"aa"}}"#)
+    };
+    format!(
+        "running 1 test\n{RESULT_PREFIX}{{\"objdump\":\"GNU objdump 2.42\",\"bash\":{},\"libc\":{}}}\n",
+        entry(bash),
+        entry(libc)
+    )
+}
+
+#[test]
+fn regress_oracle_failed_run_keeps_the_record() {
+    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("oracle_failed_run");
+    let _ = std::fs::remove_dir_all(&dir);
+    let record = dir.join(RECORD);
+    let failed = dir.join(oracle::FAILED_RECORD);
+    let good = bash_stdout((10, 10, 0), (20, 20, 0));
+    let report = oracle::bash_report(&dir, true, &good).expect("a report");
+    assert_eq!(
+        report.get("ok").and_then(Value::as_bool),
+        Some(true),
+        "{report}"
+    );
+    let kept = std::fs::read_to_string(&record).expect("a good run writes the record");
+    assert!(!failed.exists());
+
+    let bad_runs = [
+        (true, bash_stdout((10, 7, 3), (20, 20, 0))),
+        (true, bash_stdout((10, 10, 0), (20, 19, 0))),
+        (false, good.clone()),
+    ];
+    for (test_ok, stdout) in bad_runs {
+        let report = oracle::bash_report(&dir, test_ok, &stdout).expect("a report");
+        assert_eq!(
+            report.get("ok").and_then(Value::as_bool),
+            Some(false),
+            "{report}"
+        );
+        assert_eq!(
+            report.get("record").and_then(Value::as_str),
+            Some(oracle::FAILED_RECORD)
+        );
+        assert_eq!(
+            std::fs::read_to_string(&record).expect("the record stays"),
+            kept
+        );
+        assert!(failed.exists(), "a failed run writes the failed record");
+    }
+    let report = oracle::bash_report(&dir, true, &good).expect("a report");
+    assert_eq!(
+        report.get("ok").and_then(Value::as_bool),
+        Some(true),
+        "{report}"
+    );
+    assert!(!failed.exists(), "a good run removes the failed record");
+}
+
 #[test]
 fn oracle_usage() {
     for args in [

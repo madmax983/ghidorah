@@ -2,17 +2,26 @@
 //!
 //! The command finds Verus in `VERUS`, else as `verus` on `PATH`. `VERUS_Z3_PATH` names z3.
 //! For each kernel of [`KERNELS`], it runs Verus with `--verify-module <module>`.
-//! Then it applies the negative patch of each kernel to a copy of the kernel and runs Verus again.
-//! A negative run must fail with a verification error and at least one verified item.
-//! The command writes [`RESULTS_PATH`] and prints the same object with `ok` and `status`.
+//! A kernel gets the status `verified` only when Verus gives no error and lists each
+//! `#[verus_spec]` function.
+//!
+//! Then the command applies each negative patch of each kernel to a copy of the kernel and runs
+//! Verus again. A negative run must fail with the expected error of its patch, one of
+//! [`VERIFY_ERRORS`], and at least one verified item.
+//! A good run writes [`RESULTS_PATH`]. A failed run writes [`FAILED_PATH`] and keeps
+//! [`RESULTS_PATH`], so the record always holds a good run. The command prints the written
+//! object with `ok`, `status` and `results`, the path of the written file.
 //!
 //! Without Verus, the command fails. With `GHIDORAH_VERUS_OPTIONAL=1`, it prints
 //! `{ "ok": true, "status": "skipped" }` and exits with code 0.
 //!
 //! Record: `{ verus_commit, toolchain, z3, argv, tree_sha256, kernels: { <name>: { name, file,
 //! module, verified, errors, spec_items, status } }, negatives: [{ kernel, patch, error_kind,
-//! verified, errors, ok }] }`.
+//! verified, errors, ok }] }`. A failed kernel row also has `error` and `unproved`, the spec
+//! functions without a Verus entry. A failed negative row also has `error` and, after a Verus
+//! run, `expected_kind`.
 
+mod kernels;
 pub mod patch;
 mod run;
 pub mod tree;
@@ -20,74 +29,16 @@ pub mod tree;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
+pub use kernels::{
+    ASSERTION, KERNELS, Kernel, Negative, POSTCONDITION, PRECONDITION, VERIFY_ERRORS,
+};
 pub use tree::{ARGV, RESULTS_PATH, tree_sha256};
 
 use crate::json::{self, Value};
 use crate::{Error, rustsrc};
 
-/// One kernel of design Section 13.1.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Kernel {
-    /// The kernel name, for example `K1`.
-    pub name: &'static str,
-    /// The module of the kernel in `ghidorah-kernel`.
-    pub module: &'static str,
-}
-
-impl Kernel {
-    /// Gives the main source file of the kernel, relative to the workspace root.
-    #[must_use]
-    pub fn file(&self) -> String {
-        format!("crates/kernel/src/{}.rs", self.module)
-    }
-
-    /// Gives the directory of the submodules of the kernel, relative to the workspace root.
-    #[must_use]
-    pub fn dir(&self) -> String {
-        format!("crates/kernel/src/{}", self.module)
-    }
-
-    /// Gives the negative patch of the kernel, relative to the workspace root.
-    #[must_use]
-    pub fn patch(&self) -> String {
-        format!("verify/negative/{}.patch", self.name)
-    }
-}
-
-/// The kernels that `xtask verify` proves, in name order.
-pub const KERNELS: &[Kernel] = &[
-    Kernel {
-        name: "K1",
-        module: "reader",
-    },
-    Kernel {
-        name: "K2",
-        module: "range",
-    },
-    Kernel {
-        name: "K3",
-        module: "rangeset",
-    },
-    Kernel {
-        name: "K5",
-        module: "flags",
-    },
-    Kernel {
-        name: "K6",
-        module: "budget",
-    },
-    Kernel {
-        name: "K7",
-        module: "source",
-    },
-];
-
-/// The Verus messages that count as a verification error of a negative run.
-pub const VERIFY_ERRORS: &[&str] = &[
-    "postcondition not satisfied",
-    "assertion failed",
-    "precondition not satisfied",
-];
+/// The record of a failed run, relative to the workspace root. A good run removes it.
+pub const FAILED_PATH: &str = "verify/results.failed.json";
 
 /// The environment values of one run.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -225,6 +176,95 @@ pub fn error_kind(stderr: &str) -> Option<&'static str> {
 pub fn spec_items(text: &str) -> u64 {
     let count = rustsrc::strip(text).matches("#[verus_spec(").count();
     u64::try_from(count).unwrap_or(u64::MAX)
+}
+
+/// Gives the text after the attribute at the start of `code`, or `None` without a closing `]`.
+fn after_attribute(code: &str) -> Option<&str> {
+    let mut depth = 0usize;
+    for (i, c) in code.char_indices() {
+        match c {
+            '[' => depth = depth.saturating_add(1),
+            ']' => {
+                depth = depth.checked_sub(1)?;
+                if depth == 0 {
+                    return code.get(i.saturating_add(1)..);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Gives the name of the function that a text before its body declares, or `None`.
+fn fn_name(signature: &str) -> Option<String> {
+    let head = signature.split(['{', ';']).next().unwrap_or_default();
+    let words: Vec<&str> = head
+        .split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+        .filter(|w| !w.is_empty())
+        .collect();
+    let at = words.iter().position(|w| *w == "fn")?;
+    words.get(at.saturating_add(1)).map(|w| (*w).to_owned())
+}
+
+/// Gives the function name of each `#[verus_spec(..)]` item in a source text, in source order.
+///
+/// Comments and strings do not count. A spec item without a function gives no name.
+#[must_use]
+pub fn spec_functions(text: &str) -> Vec<String> {
+    let code = rustsrc::strip(text);
+    code.match_indices("#[verus_spec(")
+        .filter_map(|(at, _)| {
+            let attribute = code.get(at.saturating_add(1)..)?;
+            fn_name(after_attribute(attribute)?)
+        })
+        .collect()
+}
+
+/// Gives the names of the `func-details` object of the JSON output of `verus --output-json`.
+///
+/// Verus lists each function that it verifies. It does not list an `external` function.
+/// A name with a failed proof note does not count. Output without the object gives `None`.
+#[must_use]
+pub fn parse_functions(stdout: &str) -> Option<Vec<String>> {
+    let value = verus_json(stdout)?;
+    let details = value.get("func-details")?.as_object()?;
+    let failed = |detail: &Value| {
+        detail
+            .get("failed_proof_notes")
+            .and_then(Value::as_array)
+            .is_some_and(|notes| !notes.is_empty())
+    };
+    Some(
+        details
+            .iter()
+            .filter(|(_, detail)| !failed(detail))
+            .map(|(name, _)| name.clone())
+            .collect(),
+    )
+}
+
+/// Gives each spec function of a kernel that has no entry in the Verus output.
+///
+/// An entry `<crate>::<module>::..::<name>` proves one function `name` of the kernel `module`.
+/// Two spec functions with one name need two entries. The result keeps the order of `spec`.
+#[must_use]
+pub fn unproved(module: &str, spec: &[String], proved: &[String]) -> Vec<String> {
+    let mut left: Vec<&str> = proved
+        .iter()
+        .filter(|name| name.split("::").nth(1) == Some(module))
+        .filter_map(|name| name.rsplit("::").next())
+        .collect();
+    let mut missing = Vec::new();
+    for name in spec {
+        match left.iter().position(|have| *have == name) {
+            Some(at) => {
+                left.swap_remove(at);
+            }
+            None => missing.push(name.clone()),
+        }
+    }
+    missing
 }
 
 /// Finds `name` in the directories of a `PATH` value.

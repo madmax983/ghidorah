@@ -5,8 +5,15 @@
 //! | `tree` | the `tree_sha256` member of the record | the tree hash of the proof inputs (Section 13.3) |
 //! | `host-<name>` | the `sha256` member of the object at the pointer | the SHA-256 of the host file at its `path` member |
 //!
-//! A record gives `recorded` when the hashes are equal. A missing host file gives `skipped`.
-//! Each other case gives `fail`.
+//! A record gives `recorded` when the hashes are equal and the record holds the claim of its AC.
+//! A missing host file gives `skipped`. Each other case gives `fail`.
+//!
+//! | Input | Claim |
+//! |---|---|
+//! | `tree` | Each kernel row at the pointer has `status: verified`, `errors: 0` and `verified >= spec_items`. Each kernel has a negative row, and each of its negative rows has `ok: true`. |
+//! | `host-<name>` | The object at the pointer has `mismatches: 0` and `agree == insns`. |
+//!
+//! So a record of a failed run never gives `recorded`.
 
 use std::path::Path;
 
@@ -34,13 +41,84 @@ pub fn expected<'a>(record: &'a Value, pointer: &str, input: &str) -> Option<&'a
     }
 }
 
+/// Tells if one kernel row holds the claims of a proof, with the negative rows of the record.
+fn kernel_claims(name: &str, row: &Value, negatives: &[Value]) -> bool {
+    let number = |key: &str| row.get(key).and_then(Value::as_u64);
+    let own: Vec<&Value> = negatives
+        .iter()
+        .filter(|n| n.get("kernel").and_then(Value::as_str) == Some(name))
+        .collect();
+    row.get("status").and_then(Value::as_str) == Some("verified")
+        && number("errors") == Some(0)
+        && number("verified")
+            .zip(number("spec_items"))
+            .is_some_and(|(verified, items)| verified >= items)
+        && !own.is_empty()
+        && own
+            .iter()
+            .all(|n| n.get("ok").and_then(Value::as_bool) == Some(true))
+}
+
+/// Tells if the kernel rows at `pointer` hold the claims of a proof.
+///
+/// The pointer names one kernel row, for example `/kernels/K1`, or the object of all rows.
+fn tree_claims(record: &Value, pointer: &str) -> bool {
+    let Some(at) = record.pointer(pointer) else {
+        return false;
+    };
+    let rows: Vec<(&str, &Value)> = if at.get("status").is_some() {
+        let name = at
+            .get("name")
+            .and_then(Value::as_str)
+            .or_else(|| pointer.rsplit('/').next())
+            .unwrap_or_default();
+        vec![(name, at)]
+    } else {
+        at.as_object()
+            .map(|rows| rows.iter().map(|(k, v)| (k.as_str(), v)).collect())
+            .unwrap_or_default()
+    };
+    let negatives = record
+        .get("negatives")
+        .and_then(Value::as_array)
+        .unwrap_or_default();
+    !rows.is_empty()
+        && rows
+            .iter()
+            .all(|(name, row)| kernel_claims(name, row, negatives))
+}
+
+/// Tells if the host record at `pointer` holds a full agreement.
+fn host_claims(record: &Value, pointer: &str) -> bool {
+    let Some(at) = record.pointer(pointer) else {
+        return false;
+    };
+    let number = |key: &str| at.get(key).and_then(Value::as_u64);
+    number("mismatches") == Some(0) && number("insns").is_some_and(|n| number("agree") == Some(n))
+}
+
+/// Tells if the record holds the claim of the record item (see the module table).
+#[must_use]
+pub fn claims(record: &Value, pointer: &str, input: &str) -> bool {
+    if input == TREE {
+        tree_claims(record, pointer)
+    } else {
+        input.starts_with(HOST_PREFIX) && host_claims(record, pointer)
+    }
+}
+
 /// Gives the status of a record item from the record and the current hash of its input.
 /// `current` is `None` when the input does not exist on this host.
+///
+/// A record that does not hold its [`claims`] gives `fail`, also on a host without the input.
 #[must_use]
 pub fn record_match(record: &Value, pointer: &str, input: &str, current: Option<&str>) -> Status {
     let Some(want) = expected(record, pointer, input) else {
         return Status::Fail;
     };
+    if !claims(record, pointer, input) {
+        return Status::Fail;
+    }
     match current {
         Some(have) if have == want => Status::Recorded,
         None if input.starts_with(HOST_PREFIX) => Status::Skipped,
