@@ -54,7 +54,24 @@ fn detail<'a>(error: &'a ToolError, key: &str) -> Option<&'a Value> {
 
 #[test]
 #[cfg(unix)]
+fn regress_socket_under_root_refused() {
+    // A socket is a special file, like a FIFO, and std makes one with no host tool.
+    let dir = TempDir::new("socket");
+    let _listener =
+        std::os::unix::net::UnixListener::bind(dir.0.join("sock")).expect("the socket binds");
+    let roots = Roots::new(&dir.0, &[PathBuf::from(".")]).expect("the temp root");
+    let result = roots.read("sock", 1 << 20).map_err(|e| e.code);
+    assert_eq!(
+        result.map(|f| f.bytes.len()),
+        Err(ErrorCode::FileUnreadable)
+    );
+}
+
+#[test]
+#[cfg(unix)]
+#[ignore = "tier2"]
 fn regress_fifo_under_root_refused() {
+    // This test runs the host tool mkfifo, so it is a tier-2 test.
     let dir = TempDir::new("fifo");
     let status = std::process::Command::new("mkfifo")
         .arg(dir.0.join("fifo"))
