@@ -1,5 +1,6 @@
 //! `binary_load`, the path roots and the binding rules (AC-147, AC-213).
 
+use std::cell::Cell;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -287,6 +288,60 @@ fn regress_binary_load_sends_progress() {
             assert_eq!(values.len(), 1, "one slice: {values:?}");
         }
     }
+}
+
+/// A clock whose monotonic time moves 1,000 ms at each read.
+#[derive(Debug, Default)]
+struct StepClock {
+    now: Cell<u64>,
+}
+
+impl Clock for StepClock {
+    fn unix_ms(&self) -> u64 {
+        0
+    }
+
+    fn monotonic_ms(&self) -> u64 {
+        let now = self.now.get();
+        self.now.set(now.saturating_add(1_000));
+        now
+    }
+}
+
+#[test]
+fn regress_max_ms_time_stop() {
+    let args = format!(r#"{{"path":"{LARGE}","max_ms":1,"max_steps":20000}}"#);
+    let warned = |envelope: &Value| {
+        envelope
+            .get("warnings")
+            .and_then(Value::as_array)
+            .is_some_and(|w| w.iter().any(|w| text_at(w, "/code") == "W_TIME_STOP"))
+    };
+    // The guard fires at the first fuel checkpoint.
+    let mut s = engine_session(false, Box::<StepClock>::default());
+    let stopped = call(&mut s, "binary_load", &args);
+    assert_eq!(
+        text_at(data(&stopped), "/analysis/state"),
+        "budget_stopped",
+        "{stopped}"
+    );
+    assert!(warned(&stopped), "a time stop gives W_TIME_STOP: {stopped}");
+    assert!(steps_of(&stopped) < 2 * SLICE_STEPS, "one slice: {stopped}");
+    // Eval mode turns the guard off: the run uses its fuel.
+    let mut s = engine_session(true, Box::<StepClock>::default());
+    let full = call(&mut s, "binary_load", &args);
+    assert!(!warned(&full), "{full}");
+    assert!(steps_of(&full) >= 20_000, "{full}");
+    // The guard of analysis_run is the same.
+    let mut s = engine_session(false, Box::<StepClock>::default());
+    let id = load(&mut s, LARGE);
+    let run = call(
+        &mut s,
+        "analysis_run",
+        &format!(r#"{{"binary_id":"{id}","max_ms":1}}"#),
+    );
+    assert!(warned(&run), "{run}");
+    assert_eq!(text_at(data(&run), "/state"), "budget_stopped", "{run}");
 }
 
 #[test]

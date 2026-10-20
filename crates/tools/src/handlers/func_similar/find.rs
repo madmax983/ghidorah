@@ -8,12 +8,13 @@
 //! with more than 200 characters stays out, so each entry is valid for `symbol_rename`.
 
 use ghidorah_analysis::similar::{Index, Match, Named, Scope, Scored, propose};
-use ghidorah_base::{Address, BinaryId, ErrorCode, Fuel, FuncId, OutOfFuel};
+use ghidorah_base::{Address, BinaryId, ErrorCode, FuncId, OutOfFuel};
 use ghidorah_db::{Program, Source};
 use ghidorah_json::Value;
 
 use super::super::func_sections as fs;
 use crate::args::Args;
+use crate::dispatch::Ctx;
 use crate::errors::ToolError;
 use crate::handlers::symbol_rename::{MAX_EVIDENCE, MAX_EVIDENCE_CHARS};
 use crate::session::Session;
@@ -106,18 +107,51 @@ fn resolve(program: &Program, input: &Value, path: &str) -> Result<FuncId, ToolE
     Ok(func)
 }
 
-/// Gives the result of each target of the call in input order.
+/// Why the query step stopped before its end.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Halt {
+    /// The ranking ran out of fuel.
+    Fuel,
+    /// The client cancelled the request.
+    Cancel,
+    /// The `max_ms` guard of the call fired.
+    Time,
+}
+
+impl Halt {
+    /// Gives the `details.stopped_by` value of the stop: `fuel`, `cancel` or `time`.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Fuel => "fuel",
+            Self::Cancel => "cancel",
+            Self::Time => "time",
+        }
+    }
+}
+
+impl From<OutOfFuel> for Halt {
+    fn from(_: OutOfFuel) -> Self {
+        Self::Fuel
+    }
+}
+
+/// Gives the result of each target of the call in input order. Before each target the loop
+/// checks the cancel flag and the `max_ms` guard of `ctx`: the call started at the
+/// monotonic time `began`.
 ///
 /// # Errors
 ///
-/// Returns [`OutOfFuel`] when the ranking runs out of fuel.
+/// Returns [`Halt::Fuel`] when the ranking runs out of the fuel of `ctx`, [`Halt::Cancel`]
+/// after a cancel, and [`Halt::Time`] when the guard fires.
 pub fn find(
     session: &Session,
     index: &Index,
     bound: BinaryId,
     args: &Args,
-    fuel: &mut Fuel,
-) -> Result<Vec<Item>, OutOfFuel> {
+    ctx: &mut Ctx,
+    began: u64,
+) -> Result<Vec<Item>, Halt> {
     let opts = Opts::of(args);
     let Some(program) = program_of(session, bound) else {
         return Ok(Vec::new());
@@ -131,6 +165,12 @@ pub fn find(
     };
     let mut out = Vec::with_capacity(inputs.len());
     for (i, input) in inputs.into_iter().enumerate() {
+        if ctx.cancelled() {
+            return Err(Halt::Cancel);
+        }
+        if session.past_max_ms(began, ctx.max_ms) {
+            return Err(Halt::Time);
+        }
         let path = if name == "targets" {
             fs::item_path(name, i)
         } else {
@@ -151,7 +191,7 @@ pub fn find(
             out.push(Item::Bad { input, error });
             continue;
         };
-        let ranked = index.ranked(doc, opts.scope, fuel)?;
+        let ranked = index.ranked(doc, opts.scope, &mut ctx.fuel)?;
         let matches: Vec<Match> = ranked
             .iter()
             .filter(|s| s.score >= opts.min_score)

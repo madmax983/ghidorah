@@ -23,7 +23,10 @@
 //! holds IDs and references only (ADR-0022). The other call is `func_get` on the best match.
 //!
 //! A fuel stop gives `BUDGET_EXCEEDED`, and `next[0]` sends the same call again. The vectors
-//! of the worker thread stay in its cache, so the second call continues.
+//! of the worker thread stay in its cache, so the second call continues. Before each target
+//! the call checks the cancel flag and the `max_ms` guard. A stop by either also gives
+//! `BUDGET_EXCEEDED` with the same `next[0]`. `details.stopped_by` is `fuel`, `cancel` or
+//! `time`. Eval mode turns the time guard off.
 
 mod find;
 mod render;
@@ -32,6 +35,7 @@ mod state;
 use ghidorah_analysis::similar::Scope;
 use ghidorah_base::ErrorCode;
 use ghidorah_db::Program;
+use ghidorah_json::Value;
 
 use super::func_sections::{self as fs, Namer};
 use crate::args::Args;
@@ -216,20 +220,23 @@ pub const SPEC: ToolSpec<Session> = ToolSpec {
 };
 
 fn run(session: &mut Session, args: &Args, ctx: &mut Ctx) -> Result<Payload, ToolError> {
+    let began = session.clock().monotonic_ms();
     let bound = session.bound(&ctx.frame)?.id;
     if let Some(binary) = session.binary(bound) {
         fs::x86_only(&binary.program)?;
     }
     let programs: Vec<&Program> = session.binaries().map(|b| &b.program).collect();
-    let retry = || {
-        ToolError::new(ErrorCode::BudgetExceeded).next(Call::new(
-            "func_similar",
-            args.canonical().clone(),
-            WHY_RETRY,
-        ))
+    let retry = |halt: find::Halt| {
+        ToolError::new(ErrorCode::BudgetExceeded)
+            .detail("stopped_by", Value::from(halt.name()))
+            .next(Call::new(
+                "func_similar",
+                args.canonical().clone(),
+                WHY_RETRY,
+            ))
     };
-    let index = state::index(&programs, &mut ctx.fuel).map_err(|_| retry())?;
-    let items = find::find(session, &index, bound, args, &mut ctx.fuel).map_err(|_| retry())?;
+    let index = state::index(&programs, &mut ctx.fuel).map_err(|_| retry(find::Halt::Fuel))?;
+    let items = find::find(session, &index, bound, args, ctx, began).map_err(retry)?;
     if !args.given("targets")
         && let Some(find::Item::Bad { error, .. }) = items.first()
     {

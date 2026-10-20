@@ -9,7 +9,7 @@
 //! | [`Session::close`] | a snapshot, and the lock goes |
 //!
 //! [`Session::analyze_sliced`] and [`Session::reanalyze_sliced`] run the engine in fuel
-//! slices with a progress report and a cancel check per slice.
+//! slices with a progress report, a cancel check and a `max_ms` check per slice.
 //!
 //! An analysis run that commits gives one marker line per new revision. A complete run also
 //! writes a snapshot, so a reopen needs no new run. A reopen compares the analysis inputs hash
@@ -336,8 +336,9 @@ impl Session {
     ///
     /// A slice has [`SLICE_STEPS`] work units or a quarter of the units so far, whichever is
     /// more. Each slice with work sends one progress report. After each slice the run stops
-    /// when the analysis is complete, the slice did no work, the fuel is empty, or the client
-    /// cancelled the request.
+    /// when the analysis is complete, the slice did no work, the fuel is empty, the client
+    /// cancelled the request, or the `max_ms` guard fired. A time stop adds `W_TIME_STOP`.
+    /// Eval mode turns the time guard off.
     ///
     /// # Errors
     ///
@@ -388,6 +389,14 @@ impl Session {
         Ok(self.reanalyze_sliced(id, band, ctx)?.map(|s| s.report()))
     }
 
+    /// Tells if the `max_ms` guard of a call fires: the work started at the monotonic time
+    /// `began` of the session clock. Eval mode turns the guard off (design Section 10.11).
+    #[must_use]
+    pub fn past_max_ms(&self, began: u64, max_ms: Option<u64>) -> bool {
+        !self.config.run.eval_mode
+            && max_ms.is_some_and(|ms| self.clock.monotonic_ms().saturating_sub(began) > ms)
+    }
+
     /// Runs the slices of [`Session::analyze_sliced`]. A start band makes the first slice a
     /// re-analysis. The next slices resume the run of the engine.
     fn sliced(
@@ -397,6 +406,7 @@ impl Session {
         until: Until,
         ctx: &mut Ctx,
     ) -> Result<Option<Sliced>, ToolError> {
+        let began = self.clock.monotonic_ms();
         let mut out: Option<Sliced> = None;
         loop {
             let used = out.map_or(0, |s| s.steps_used);
@@ -426,6 +436,9 @@ impl Session {
             let done = run.state == AnalysisState::Complete || run.idle;
             if !done && ctx.cancelled() {
                 run.stop = Some(SliceStop::Cancel);
+            } else if !done && self.past_max_ms(began, ctx.max_ms) {
+                run.stop = Some(SliceStop::Time);
+                ctx.warn(Warning::new(WarningCode::TimeStop));
             }
             out = Some(run);
             if done || run.stop.is_some() || ctx.fuel.remaining() == 0 {

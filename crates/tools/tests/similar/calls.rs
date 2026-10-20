@@ -287,3 +287,75 @@ fn fuel_stop_resumes() {
         "{envelope}"
     );
 }
+
+/// A clock whose monotonic time moves 1,000 ms at each read.
+#[derive(Debug, Default)]
+struct StepClock {
+    now: std::cell::Cell<u64>,
+}
+
+impl ghidorah_base::Clock for StepClock {
+    fn unix_ms(&self) -> u64 {
+        0
+    }
+
+    fn monotonic_ms(&self) -> u64 {
+        let now = self.now.get();
+        self.now.set(now.saturating_add(1_000));
+        now
+    }
+}
+
+/// Makes a session with the stepping clock and the analyzed demo binary.
+fn slow_session(eval_mode: bool) -> ghidorah_tools::Session {
+    let mut config = crate::support::config(Profile::Full);
+    config.run.eval_mode = eval_mode;
+    let mut s = ghidorah_tools::Session::with_registry(
+        crate::support::registry(),
+        config,
+        Box::<StepClock>::default(),
+    );
+    let found = crate::support::analyzed(FULL);
+    let label = s.new_label();
+    s.open(ghidorah_tools::OpenBinary {
+        id: found.id,
+        program: found.program.clone(),
+        file_name: found.file_name.clone(),
+        read_only: false,
+        label,
+        analysis: found.analysis,
+    });
+    s
+}
+
+#[test]
+fn regress_func_similar_honors_max_ms() {
+    let args = r#"{"targets":["main","fn:0x11e0"],"min_score":0,"max_ms":1}"#;
+    let mut s = slow_session(false);
+    let envelope = call(&mut s, "func_similar", args);
+    assert_eq!(code(&envelope), "BUDGET_EXCEEDED", "{envelope}");
+    assert_eq!(
+        text_at(&envelope, "/error/details/stopped_by"),
+        "time",
+        "{envelope}"
+    );
+    let calls = next_calls(&envelope);
+    assert_eq!(calls.first().map(|c| c.0.as_str()), Some("func_similar"));
+    // Eval mode turns the guard off.
+    let mut s = slow_session(true);
+    let envelope = call(&mut s, "func_similar", args);
+    assert_eq!(list_at(data(&envelope), "/items").len(), 2, "{envelope}");
+    // A cancel stops the candidate loop too.
+    let mut s = slow_session(true);
+    let registry = s.active_registry();
+    let mut request = ghidorah_tools::Request::new("func_similar", json(args));
+    request.cancel = Some(std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
+        true,
+    )));
+    let envelope = ghidorah_tools::dispatch_with(&registry, &mut s, &request).to_json();
+    assert_eq!(
+        text_at(&envelope, "/error/details/stopped_by"),
+        "cancel",
+        "{envelope}"
+    );
+}
