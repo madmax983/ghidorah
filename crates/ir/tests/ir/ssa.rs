@@ -190,6 +190,7 @@ fn build_gives_the_l1_shape() {
         ret_uses: [Loc::RAX, Loc::RDX].into_iter().collect(),
         call_uses: [Loc::RAX, Loc::RDI].into_iter().collect(),
         call_defs: std::iter::once(Loc::RAX).collect(),
+        call_pop: None,
     };
     let ssa = build(&arena, body(&arena, &[0x2000]), &options);
     assert_clean(&ssa, "shape");
@@ -334,6 +335,7 @@ fn effects_read_and_write_their_locations() {
         uses: std::iter::once(Loc::RAX).collect(),
         defs: [Loc::RAX, Loc::Flags].into_iter().collect(),
         mem: MemEffect::None,
+        operands: Default::default(),
     };
     let arena = program(|b| {
         b.begin(0x5000, 2)?;
@@ -508,4 +510,76 @@ fn ssa_texts_and_options() {
     assert_eq!(full.ret_uses, full.call_uses);
     assert_eq!(full.call_defs, LocSet::EMPTY);
     assert_eq!(node(2), Node(2));
+}
+
+/// Gives the value of the entry `Get` of `loc` at the anchor `Start`.
+fn entry_value(ssa: &ssa::Ssa, loc: Loc) -> Arg {
+    ssa.anchored(Anchor::Start)
+        .iter()
+        .filter_map(|&i| ssa.arena().op(i))
+        .find(|op| op.opc == Opc::Get && op.a[0] == Arg::L(loc))
+        .and_then(|op| op.out)
+        .map_or(NIL, Arg::V)
+}
+
+/// Two calls as the lifter gives them: `rsp = rsp - 8`, the store of the return address, the
+/// `Put` of `rsp` and the `Call`. Then `rax = rsp` and a return.
+fn two_calls() -> ghidorah_ir::Arena {
+    program(|b| {
+        for (at, next) in [(0x3000u64, 0x3005u64), (0x3005, 0x300a)] {
+            b.begin(at, 5)?;
+            let sp = b.get(Loc::RSP)?;
+            let n = b.binary(Opc::Sub, 64, sp.into(), Arg::k(8))?;
+            b.store(64, n.into(), Arg::k(next))?;
+            b.put(Loc::RSP, n.into())?;
+            b.flow(Opc::Call, Arg::k(0x9000), NIL)?;
+        }
+        b.begin(0x300a, 3)?;
+        let r = b.get(Loc::RSP)?;
+        b.put(Loc::RAX, r.into())?;
+        b.begin(0x300d, 1)?;
+        b.flow(Opc::Ret, NIL, NIL)
+    })
+}
+
+/// The `ret` of a callee pops the return address that the `call` pushes. So the stack
+/// pointer after a call is the stack pointer before it. L1 kept `rsp - 8` after each call
+/// and took 8 more at each later call (decomp-04).
+#[test]
+fn regress_call_pops_return_address() {
+    let arena = two_calls();
+    let options = Opts {
+        ret_uses: std::iter::once(Loc::RAX).collect(),
+        call_pop: Some((Loc::RSP, 8)),
+        ..Opts::default()
+    };
+    let mut ssa = build(&arena, body(&arena, &[0x3000]), &options);
+    assert_clean(&ssa, "call pop");
+    passes::run(&mut ssa, &Switches::all(), &mut Fuel::unlimited()).expect("the passes run");
+    assert_clean(&ssa, "call pop after the passes");
+    let ret = u32::try_from(arena.ops().len() - 1).expect("small");
+    let rax = ssa
+        .uses_at(ret)
+        .iter()
+        .find(|(l, _)| *l == Loc::RAX)
+        .map(|&(_, a)| ssa.root(a))
+        .expect("rax at the return");
+    assert_eq!(rax, entry_value(&ssa, Loc::RSP), "{:?}", ssa.uses_at(ret));
+    // Without the option, the stack pointer stays 16 bytes low: the old model.
+    let mut plain = build(
+        &arena,
+        body(&arena, &[0x3000]),
+        &Opts {
+            call_pop: None,
+            ..options
+        },
+    );
+    passes::run(&mut plain, &Switches::all(), &mut Fuel::unlimited()).expect("the passes run");
+    let low = plain
+        .uses_at(ret)
+        .iter()
+        .find(|(l, _)| *l == Loc::RAX)
+        .map(|&(_, a)| plain.root(a))
+        .expect("rax at the return");
+    assert_ne!(low, entry_value(&plain, Loc::RSP));
 }

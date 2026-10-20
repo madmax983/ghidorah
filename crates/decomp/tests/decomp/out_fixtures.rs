@@ -579,6 +579,9 @@ impl Env for Typed<'_> {
     fn is_string(&self, addr: u64) -> bool {
         self.inner.is_string(addr)
     }
+    fn param_count(&self, addr: u64) -> Option<u8> {
+        self.inner.param_count(addr)
+    }
 }
 
 impl PrintEnv for Typed<'_> {
@@ -593,9 +596,6 @@ impl PrintEnv for Typed<'_> {
     }
     fn signature(&self, addr: u64) -> Option<Signature> {
         self.inner.signature(addr)
-    }
-    fn param_count(&self, addr: u64) -> Option<u8> {
-        self.inner.param_count(addr)
     }
     fn string_bytes(&self, addr: u64) -> Option<Vec<u8>> {
         self.inner.string_bytes(addr)

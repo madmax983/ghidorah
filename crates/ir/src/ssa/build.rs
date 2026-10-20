@@ -101,6 +101,7 @@ const fn loc_width(w: u8) -> bool {
 struct Local<'a> {
     ssa: &'a mut Ssa,
     opts: &'a Opts,
+    calls: &'a BTreeMap<u32, Vec<Loc>>,
     reads: &'a mut Vec<Read>,
     block: Node,
     defs: BTreeMap<Loc, Arg>,
@@ -127,9 +128,18 @@ impl Local<'_> {
 
     /// Records the location uses and adds the location defs of a flow op.
     fn flow(&mut self, index: u32, op: &Op) -> Result<(), SsaError> {
-        let (uses, defs) = flow_sets(&self.ssa.arena, op, self.opts)?;
+        let (set, defs) = flow_sets(&self.ssa.arena, op, self.opts)?;
+        let uses: Vec<Loc> = match self.calls.get(&index) {
+            Some(own) if matches!(op.opc, Opc::Call | Opc::CallInd) => {
+                let mut own = own.clone();
+                own.sort_unstable();
+                own.dedup();
+                own
+            }
+            _ => set.iter().collect(),
+        };
         let mut list = Vec::new();
-        for loc in uses.iter() {
+        for loc in uses {
             let value = self.defs.get(&loc).copied().unwrap_or_else(|| {
                 self.reads.push(Read::Use {
                     op: index,
@@ -157,7 +167,34 @@ impl Local<'_> {
         if !made.is_empty() {
             self.ssa.defs.insert(index, made);
         }
+        if matches!(op.opc, Opc::Call | Opc::CallInd)
+            && let Some((loc, count)) = self.opts.call_pop
+            && !defs.contains(loc)
+            && let Some(&before) = self.defs.get(&loc)
+        {
+            let after = self.popped(index, before, loc, count)?;
+            self.defs.insert(loc, after);
+        }
         Ok(())
+    }
+
+    /// Gives the value of `loc` after the callee of the call op `index` pops `count` bytes.
+    /// The value before the call is `before`. When `before` is `x - count`, the push of the
+    /// call, the value is `x`. Else a new `Add` after the call gives `before + count`.
+    fn popped(&mut self, index: u32, before: Arg, loc: Loc, count: u64) -> Result<Arg, SsaError> {
+        let w = loc.width();
+        if let Arg::V(v) = before
+            && let Some(push) = self.ssa.arena.def_of(v).and_then(|d| self.ssa.arena.op(d))
+            && push.opc == Opc::Sub
+            && push.w == w
+            && push.a[1].as_k() == Some(count)
+            && matches!(push.a[0], Arg::V(_))
+        {
+            return Ok(push.a[0]);
+        }
+        let a = [before, Arg::k(count), Arg::Nil];
+        let (_, out) = self.ssa.push_at(Anchor::After(index), Opc::Add, w, 0, a)?;
+        Ok(Arg::V(out.ok_or(SsaError::Full)?))
     }
 
     /// Runs the local step over the ops of the block.
@@ -206,6 +243,7 @@ pub(super) fn build(
     arena: Arena,
     body: Body,
     opts: &Opts,
+    calls: &BTreeMap<u32, Vec<Loc>>,
     fuel: &mut Fuel,
 ) -> Result<Ssa, SsaError> {
     let (insn_block, op_block) = layout(&arena, &body)?;
@@ -222,6 +260,8 @@ pub(super) fn build(
         uses: BTreeMap::new(),
         defs: BTreeMap::new(),
         seqs: BTreeMap::new(),
+        phi_locs: BTreeMap::new(),
+        fused: BTreeMap::new(),
     };
     let count = ssa.blocks.len();
     let mut reader = Reader::new(count);
@@ -230,6 +270,7 @@ pub(super) fn build(
         let mut local = Local {
             ssa: &mut ssa,
             opts,
+            calls,
             reads: &mut reads,
             block,
             defs: BTreeMap::new(),

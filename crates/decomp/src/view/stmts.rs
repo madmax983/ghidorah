@@ -14,6 +14,10 @@
 //! | `JumpInd(Load(slot))` of a thunk in one instruction, through an import slot | a tail call of the import |
 //! | `Ret` | a stop |
 //!
+//! The store of the return address of a `call` gets no statement: the call line shows it. An
+//! example is the push of a call after `and rsp, -16` in `_start`, where the stack offset is
+//! unknown, so the store stays in memory.
+//!
 //! An indirect jump without a case gets `W_JUMPTABLE_UNRESOLVED` only when the facts of the
 //! environment hold an unresolved table at it ([`Env::jumptable_unresolved`]). So a thunk
 //! or a jump through an import slot gets no such warning.
@@ -23,8 +27,11 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use ghidorah_analysis::jumptable::GuardInfo;
 use ghidorah_base::WarningCode;
-use ghidorah_ir::{Arg, IntrinsicId, Node, Op, OpId, Opc, Val};
+use ghidorah_ir::{
+    Arena, Arg, EffectOperand, InsnSpan, IntrinsicId, Loc, LocSet, Node, Op, OpId, Opc, Val,
+};
 
 use crate::Warning;
 use crate::expr::{Call, Callee, Expr, Stmt, VarIdx};
@@ -40,9 +47,27 @@ pub(crate) enum Term {
     /// A branch: true goes to the block at `taken`.
     Branch { cond: Expr, taken: u64 },
     /// A branch whose false side runs `tail` (a return) in the same instruction.
-    BranchStop { cond: Expr, taken: u64, tail: Stmt },
-    /// An indirect jump with cases in the CFG.
-    Switch { target: Expr },
+    BranchStop {
+        cond: Expr,
+        taken: u64,
+        tail: Box<Stmt>,
+    },
+    /// An indirect jump with cases in the CFG, with the selector of its jump table.
+    Switch {
+        target: Expr,
+        selector: Option<Selector>,
+    },
+}
+
+/// The selector of a jump table: the value that the guard bounds, before its bias.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Selector {
+    /// The selector value.
+    pub(crate) expr: Expr,
+    /// The selector value of the first table entry.
+    pub(crate) bias: u64,
+    /// The guard of the table.
+    pub(crate) guard: GuardInfo,
 }
 
 /// The view of one block before the variables exist.
@@ -67,9 +92,13 @@ pub(crate) struct Raw {
 /// The expression builder of one view.
 pub(crate) struct Ex<'a> {
     pub(crate) f: &'a Facts<'a>,
+    /// The L0 arena: the `Put` ops that L1 turns into `Nop`.
+    pub(crate) l0: &'a Arena,
     pub(crate) plan: &'a Plan,
     pub(crate) env: &'a dyn Env,
     pub(crate) tails: &'a BTreeSet<u64>,
+    /// The guard of each indirect jump with a jump table.
+    pub(crate) guards: &'a BTreeMap<u64, GuardInfo>,
     /// The function is a thunk, so it passes its arguments on to the target of its jump.
     pub(crate) thunk: bool,
 }
@@ -219,13 +248,22 @@ impl Ex<'_> {
             ),
             _ => Callee::Unimpl,
         };
-        let args = self
-            .f
-            .ssa
-            .uses_at(i)
+        let uses = self.f.ssa.uses_at(i);
+        let set = if matches!(op.opc, Opc::Call | Opc::CallInd | Opc::Syscall) {
+            self.set_args(i, &op, uses)
+        } else {
+            LocSet::EMPTY
+        };
+        let mut args: Vec<(Loc, Expr)> = uses
             .iter()
             .map(|&(loc, a)| (loc, self.arg(a, loc.width())))
             .collect();
+        let imm = match self.f.ssa.arena().effect(&op) {
+            Some(effect) if op.opc == Opc::Intrinsic => {
+                in_operand_order(&mut args, &effect.operands)
+            }
+            _ => Vec::new(),
+        };
         let mem = (op.opc == Opc::Intrinsic && op.a[1] != Arg::Nil).then(|| self.arg(op.a[1], 64));
         let rets = self
             .f
@@ -236,9 +274,15 @@ impl Ex<'_> {
             .map(|&(loc, v)| (loc, VarIdx(v.0)))
             .collect();
         let tail = op.opc == Opc::Call && self.tails.contains(&op.id.addr);
+        let push = matches!(op.opc, Opc::Call | Opc::CallInd)
+            .then(|| self.push_of(op.id.addr))
+            .flatten();
         Call {
             callee,
             args,
+            set,
+            push,
+            imm,
             mem,
             rets,
             ret: None,
@@ -289,6 +333,7 @@ impl Ex<'_> {
     fn stmt(&self, i: u32, op: &Op) -> Option<Stmt> {
         match op.opc {
             Opc::Phi | Opc::Nop | Opc::Get | Opc::Jump | Opc::CJump | Opc::JumpInd => None,
+            Opc::Store if self.return_push(op) => None,
             Opc::Store => Some(Stmt::Store {
                 w: op.w,
                 addr: self.arg(op.a[0], 64),
@@ -308,6 +353,32 @@ impl Ex<'_> {
                 })
             }
         }
+    }
+
+    /// Gives the store of the return address of the call at `addr`. It is a `Store` of the
+    /// address after the instruction, and the instruction has a `Call` or `CallInd` op.
+    fn push_of(&self, addr: u64) -> Option<OpId> {
+        let arena = self.f.ssa.arena();
+        let next = arena
+            .insn_index(addr)
+            .and_then(|k| arena.insns().get(k))
+            .and_then(InsnSpan::next_addr)?;
+        let ops = arena.insn_ops(addr);
+        if !ops
+            .iter()
+            .any(|o| matches!(o.opc, Opc::Call | Opc::CallInd))
+        {
+            return None;
+        }
+        ops.iter()
+            .find(|o| o.opc == Opc::Store && o.a[1].as_k() == Some(next))
+            .map(|o| o.id)
+    }
+
+    /// Tells if a store is the push of the return address of a call. The call line shows
+    /// the push, so the store has no statement of its own.
+    fn return_push(&self, op: &Op) -> bool {
+        self.push_of(op.id.addr) == Some(op.id)
     }
 
     /// Gives the return statement of the op `i`.
@@ -332,6 +403,9 @@ const fn forward(callee: u64, at: OpId) -> Call {
     Call {
         callee: Callee::Direct(callee),
         args: Vec::new(),
+        set: LocSet::EMPTY,
+        push: None,
+        imm: Vec::new(),
         mem: None,
         rets: Vec::new(),
         ret: None,
@@ -339,6 +413,28 @@ const fn forward(callee: u64, at: OpId) -> Call {
         tail: true,
         at,
     }
+}
+
+/// Puts the register uses of an opaque instruction in the operand order of `operands`, the
+/// destination first. The other uses follow in location order. Gives the immediates in
+/// operand order.
+fn in_operand_order(args: &mut Vec<(Loc, Expr)>, operands: &[EffectOperand]) -> Vec<u64> {
+    let mut ordered: Vec<(Loc, Expr)> = Vec::with_capacity(args.len());
+    let mut imm = Vec::new();
+    for operand in operands {
+        match *operand {
+            EffectOperand::Loc(l) => {
+                if let Some(k) = args.iter().position(|(x, _)| *x == l) {
+                    ordered.push(args.remove(k));
+                }
+            }
+            EffectOperand::Imm(v) => imm.push(v),
+            EffectOperand::Mem | EffectOperand::None => {}
+        }
+    }
+    ordered.append(args);
+    *args = ordered;
+    imm
 }
 
 /// Tells if the instruction with these ops jumps to its own address: a `rep` loop.
@@ -407,7 +503,7 @@ pub(crate) fn block(ex: &Ex<'_>, b: Node) -> Raw {
                     Some(&(r, ret)) if ret.opc == Opc::Ret => Term::BranchStop {
                         cond,
                         taken,
-                        tail: ex.ret(tagged.get(r).map_or(0, |t| t.0), &ret),
+                        tail: Box::new(ex.ret(tagged.get(r).map_or(0, |t| t.0), &ret)),
                     },
                     _ => Term::Branch { cond, taken },
                 };
@@ -418,6 +514,7 @@ pub(crate) fn block(ex: &Ex<'_>, b: Node) -> Raw {
             Opc::JumpInd => {
                 term = Term::Switch {
                     target: ex.arg(f0.a[0], 64),
+                    selector: ex.guards.get(&f0.id.addr).and_then(|g| ex.selector(g)),
                 };
             }
             Opc::Ret => {

@@ -335,48 +335,88 @@ fn canary(view: &mut View, env: &dyn Env, found: &mut Found) {
         .extend(addrs.into_iter().filter_map(|a| insn_range(view, a)));
 }
 
+/// Gives the nodes that the shape reaches from its entry.
+fn reachable(view: &View) -> BTreeSet<Node> {
+    let mut seen = BTreeSet::new();
+    let mut stack = vec![view.shape.entry];
+    while let Some(n) = stack.pop() {
+        if view.shape.node(n).is_some() && seen.insert(n) {
+            stack.extend(view.shape.exit(n).succs());
+        }
+    }
+    seen
+}
+
+/// Gives the variables that the statements, conditions and targets of `nodes` read.
+fn reads(view: &View, nodes: &BTreeSet<Node>) -> BTreeSet<VarIdx> {
+    nodes
+        .iter()
+        .filter_map(|n| view.node(*n))
+        .flat_map(|n| {
+            n.stmts
+                .iter()
+                .flat_map(Stmt::exprs)
+                .chain(n.cond.iter())
+                .chain(n.target.iter())
+                .flat_map(Expr::vars)
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
 /// Removes the canary assignments and stores that nothing reads after the checks go. Gives
 /// the ops of the removed statements.
+///
+/// The statements get their class once, with each canary store in place. So a reload of a
+/// canary slot stays a canary value after its store goes. Only the nodes that the shape still
+/// reaches read a variable, so the cut failure branch keeps no canary value alive.
 fn remove_defs(view: &mut View) -> Vec<OpId> {
-    let mut removed = Vec::new();
-    for _ in 0..4 {
-        let used: BTreeSet<VarIdx> = view
-            .nodes
-            .iter()
-            .flat_map(|n| {
-                n.stmts
-                    .iter()
-                    .flat_map(Stmt::exprs)
-                    .chain(n.cond.iter())
-                    .chain(n.target.iter())
-                    .flat_map(Expr::vars)
-                    .collect::<Vec<_>>()
-            })
-            .collect();
+    let (assigns, stores) = {
         let facts = Canary::new(view);
-        let mut gone: BTreeSet<OpId> = BTreeSet::new();
+        let mut assigns: BTreeMap<OpId, VarIdx> = BTreeMap::new();
+        let mut stores: BTreeSet<OpId> = BTreeSet::new();
         for s in view.nodes.iter().flat_map(|n| &n.stmts) {
             match s {
-                Stmt::Assign { var, value, at } if !used.contains(var) && facts.is(value, 0) => {
-                    gone.insert(*at);
+                Stmt::Assign { var, value, at } if facts.is(value, 0) => {
+                    assigns.insert(*at, *var);
                 }
                 Stmt::Store {
                     w: 64, value, at, ..
                 } if facts.is(value, 0) => {
-                    gone.insert(*at);
+                    stores.insert(*at);
                 }
                 _ => {}
             }
         }
-        if gone.is_empty() {
-            break;
-        }
+        (assigns, stores)
+    };
+    let live = reachable(view);
+    let mut removed: Vec<OpId> = Vec::new();
+    let mut gone: BTreeSet<OpId> = stores;
+    for _ in 0..=assigns.len() {
         for n in &mut view.nodes {
             n.stmts.retain(|s| {
                 !gone.contains(&s.at()) || !matches!(s, Stmt::Assign { .. } | Stmt::Store { .. })
             });
         }
-        removed.extend(gone);
+        removed.extend(gone.iter().copied());
+        let used = reads(view, &live);
+        let present: BTreeSet<OpId> = view
+            .nodes
+            .iter()
+            .flat_map(|n| &n.stmts)
+            .map(Stmt::at)
+            .collect();
+        gone = assigns
+            .iter()
+            .filter(|(at, var)| present.contains(at) && !used.contains(var))
+            .map(|(at, _)| *at)
+            .collect();
+        if gone.is_empty() {
+            break;
+        }
     }
+    removed.sort_unstable();
+    removed.dedup();
     removed
 }

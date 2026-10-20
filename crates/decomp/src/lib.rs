@@ -55,7 +55,7 @@ pub mod window;
 
 use std::fmt;
 
-use ghidorah_analysis::cc::conv_of;
+use ghidorah_analysis::cc::{conv_of, params};
 use ghidorah_analysis::fir::Opts as FirOpts;
 use ghidorah_analysis::fir::l1::{self, L1Error, L1Ir};
 use ghidorah_base::{Address, Fuel, FuncId, JumpTableId, WarningCode};
@@ -76,6 +76,9 @@ pub use window::Window;
 
 /// The default largest count of blocks that the structurer takes.
 pub const DEFAULT_MAX_NODES: usize = 500;
+
+/// The fuel of the parameter recovery of one function.
+const PARAM_FUEL: u64 = 1_000_000;
 
 /// The switches of the decompiler passes (`passes` in `decomp_opts`).
 #[expect(
@@ -275,6 +278,20 @@ impl Env for ProgramEnv<'_> {
         Some(row.stub.unwrap_or(at).off)
     }
 
+    fn param_count(&self, addr: u64) -> Option<u8> {
+        let (p, _) = params(
+            self.0,
+            FuncId(Address::ram(addr)),
+            &mut Fuel::new(PARAM_FUEL),
+        )
+        .ok()?;
+        if p.stack == 0 {
+            return Some(p.int);
+        }
+        let regs = u8::try_from(conv_of(self.0).int_args.len()).unwrap_or(u8::MAX);
+        Some(regs.saturating_add(p.stack))
+    }
+
     fn jumptable_unresolved(&self, site: u64) -> bool {
         let at = Address::ram(site);
         let Some(owner) = self.0.owner_of(at).and_then(|f| self.0.func(f)) else {
@@ -338,6 +355,7 @@ pub fn from_l1(
         l0: &ir.l0.arena,
         tail_calls: &ir.tail_calls,
         conv,
+        guards: &ir.guards,
     };
     from_input(&input, env, opts, fuel)
 }

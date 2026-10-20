@@ -184,6 +184,7 @@ pub fn decomp(specs: Vec<Spec>, vars: Vec<Var>, tree: Tree) -> Decomp {
             term: s.term,
             ops: Vec::new(),
             span: Some((at_of(i), at_of(i) + 0x10)),
+            ..NodeView::default()
         });
     }
     Decomp {
@@ -197,6 +198,7 @@ pub fn decomp(specs: Vec<Spec>, vars: Vec<Var>, tree: Tree) -> Decomp {
             vars,
             insns: addrs.into_iter().map(|a| (a, 4)).collect(),
             effects: std::collections::BTreeSet::new(),
+            sources: std::collections::BTreeMap::new(),
         },
         tree,
         mode: Mode::Structured,
@@ -497,6 +499,9 @@ fn calls_strings_and_line_ops() {
     let call = Call {
         callee: Callee::Direct(0x2000),
         args: vec![(Loc::RDI, Expr::Str { addr: 0x3000 })],
+        set: std::iter::once(Loc::RDI).collect(),
+        push: None,
+        imm: Vec::new(),
         mem: None,
         rets: vec![(Loc::RAX, VarIdx(0))],
         ret: None,
@@ -507,6 +512,9 @@ fn calls_strings_and_line_ops() {
     let tail = Call {
         callee: Callee::Direct(0x2100),
         args: vec![(Loc::RDI, v(0, 64))],
+        set: std::iter::once(Loc::RDI).collect(),
+        push: None,
+        imm: Vec::new(),
         mem: None,
         rets: Vec::new(),
         ret: None,

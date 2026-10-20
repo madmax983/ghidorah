@@ -500,6 +500,23 @@ pub enum MemEffect {
     },
 }
 
+/// The largest count of explicit operands of an opaque instruction.
+pub const MAX_OPERANDS: usize = 4;
+
+/// One explicit operand of an opaque instruction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub enum EffectOperand {
+    /// No operand.
+    #[default]
+    None,
+    /// A register, as its full-width location.
+    Loc(Loc),
+    /// The memory operand. Its address is argument 1 of the op.
+    Mem,
+    /// An immediate.
+    Imm(u64),
+}
+
 /// The effect of a `Syscall` or `Intrinsic` op: its name, defs, uses and memory effect.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Effect {
@@ -511,6 +528,9 @@ pub struct Effect {
     pub uses: LocSet,
     /// The memory effect.
     pub mem: MemEffect,
+    /// The explicit operands in the operand order of the instruction, the destination first.
+    /// The uses keep no order, so a printer reads the order and the immediates here.
+    pub operands: [EffectOperand; MAX_OPERANDS],
 }
 
 /// One L0 or L1 op. It has at most 64 bytes (AC-067).

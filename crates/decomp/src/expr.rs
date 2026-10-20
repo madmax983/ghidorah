@@ -20,7 +20,7 @@
 //! | `Return` | A return with the values of the return registers |
 //! | `Goto` | An unresolved indirect jump: `goto *(target);` |
 
-use ghidorah_ir::{IntrinsicId, Loc, OpId, Opc};
+use ghidorah_ir::{IntrinsicId, Loc, LocSet, OpId, Opc};
 
 /// The index of a variable in [`crate::View::vars`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -169,6 +169,72 @@ impl Expr {
         out
     }
 
+    /// Tells if two expressions have the same value: the same tree with each op ID ignored.
+    /// Two reads of memory or two calls can give different values, so a tree with a load or a
+    /// call gives `false`.
+    #[must_use]
+    pub fn same_value(&self, other: &Self) -> bool {
+        let mut stack = vec![(self, other)];
+        while let Some((a, b)) = stack.pop() {
+            let same = match (a, b) {
+                (Self::Var { var: x, w: wx }, Self::Var { var: y, w: wy }) => x == y && wx == wy,
+                (Self::Const { value: x, w: wx }, Self::Const { value: y, w: wy }) => {
+                    x == y && wx == wy
+                }
+                (Self::Str { addr: x }, Self::Str { addr: y }) => x == y,
+                (
+                    Self::Un {
+                        op: ox,
+                        w: wx,
+                        sub: sx,
+                        ..
+                    },
+                    Self::Un {
+                        op: oy,
+                        w: wy,
+                        sub: sy,
+                        ..
+                    },
+                )
+                | (
+                    Self::Bin {
+                        op: ox,
+                        w: wx,
+                        sub: sx,
+                        ..
+                    },
+                    Self::Bin {
+                        op: oy,
+                        w: wy,
+                        sub: sy,
+                        ..
+                    },
+                )
+                | (
+                    Self::Ite {
+                        op: ox,
+                        w: wx,
+                        sub: sx,
+                        ..
+                    },
+                    Self::Ite {
+                        op: oy,
+                        w: wy,
+                        sub: sy,
+                        ..
+                    },
+                ) => ox == oy && wx == wy && sx == sy,
+                _ => false,
+            };
+            let (xs, ys) = (a.inputs(), b.inputs());
+            if !same || xs.len() != ys.len() {
+                return false;
+            }
+            stack.extend(xs.into_iter().zip(ys));
+        }
+        true
+    }
+
     /// Gives the variables that the expression reads, in preorder.
     #[must_use]
     pub fn vars(&self) -> Vec<VarIdx> {
@@ -213,8 +279,16 @@ pub enum Callee {
 pub struct Call {
     /// The target.
     pub callee: Callee,
-    /// The values of the locations that the op reads, in location order.
+    /// The values of the locations that the op reads, in location order. The stack
+    /// arguments of a call are the `Stack` locations at the end.
     pub args: Vec<(Loc, Expr)>,
+    /// The argument registers that the caller sets for the call: a new value, or a write in
+    /// the block of the call. The register of an indirect target is not in the set.
+    pub set: LocSet,
+    /// The store of the return address that the call pushes. The call line shows it.
+    pub push: Option<OpId>,
+    /// The immediates of an opaque instruction in operand order.
+    pub imm: Vec<u64>,
     /// The memory address of an `Intrinsic` with a memory effect.
     pub mem: Option<Expr>,
     /// The locations that the op writes and that a later statement reads.

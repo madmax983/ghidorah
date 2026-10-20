@@ -5,22 +5,18 @@
 //! | `var_name`, `var_type` | the variable facts of the `var:` ID |
 //! | `comments` | the PLATE, PRE, POST and EOL comments at the instructions of the body |
 //! | `signature` | the signature fact of the function, then the Tier-0 prototype of its name |
-//! | `param_count` | the parameter recovery of the calling convention analyzer |
 //! | `string_bytes` | the bytes of the string fact |
 //! | `call_targets` | the targets of the call references from the site |
 //! | `syscall_name` | the x86-64 syscall table |
 
-use ghidorah_analysis::cc::{conv_of, params};
-use ghidorah_base::{Address, Fuel, FuncId, VarId};
+use ghidorah_analysis::cc::conv_of;
+use ghidorah_base::{Address, FuncId, VarId};
 use ghidorah_db::{CommentKind, Types};
 use ghidorah_types::{CallConv, DataModel, Prim, Sig, Type, TypeId, TypeStore};
 
 use super::{PrintEnv, Signature, body_units};
 use crate::lattice::{Store, Ty};
 use crate::{Env, ProgramEnv};
-
-/// The fuel of the parameter recovery of one callee.
-const PARAM_FUEL: u64 = 1_000_000;
 
 /// The comment kinds that the text shows, in kind order.
 const KINDS: [CommentKind; 4] = [
@@ -84,16 +80,6 @@ impl PrintEnv for ProgramEnv<'_> {
         let proto = Types::prototype(&name)?;
         let tier0 = ghidorah_types::proto::builtin().ok()?;
         Some(signature(&proto.sig, tier0.store(), Store::Tier0))
-    }
-
-    fn param_count(&self, addr: u64) -> Option<u8> {
-        params(
-            self.0,
-            FuncId(Address::ram(addr)),
-            &mut Fuel::new(PARAM_FUEL),
-        )
-        .ok()
-        .map(|(p, _)| p.int)
     }
 
     fn string_bytes(&self, addr: u64) -> Option<Vec<u8>> {

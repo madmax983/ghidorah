@@ -52,6 +52,7 @@ pub fn pool_opts() -> SsaOpts {
         ret_uses: pool,
         call_uses: pool,
         call_defs: [Loc::RAX, Loc::RDX].into_iter().collect(),
+        call_pop: None,
     }
 }
 
@@ -384,6 +385,7 @@ impl Gen<'_> {
                     uses: [Loc::RAX, Loc::RDX].into_iter().collect(),
                     defs: [Loc::RAX, Loc::RCX].into_iter().collect(),
                     mem: MemEffect::None,
+                    operands: Default::default(),
                 };
                 b.effect_op(Opc::Syscall, effect, NIL)?;
             }
@@ -393,6 +395,7 @@ impl Gen<'_> {
                     uses: std::iter::once(Loc::Reg(32)).collect(),
                     defs: [Loc::Reg(32), Loc::Flags].into_iter().collect(),
                     mem: MemEffect::Read { size: 16 },
+                    operands: Default::default(),
                 };
                 let addr = self.addr(b)?;
                 b.effect_op(Opc::Intrinsic, effect, addr)?;
@@ -511,6 +514,7 @@ pub fn decompile(p: &Program, ssa: &Ssa, opts: &Opts) -> Decomp {
         l0: &p.arena,
         tail_calls: &tails,
         conv: None,
+        guards: &std::collections::BTreeMap::new(),
     };
     ghidorah_decomp::from_input(&input, &NoEnv, opts, &mut Fuel::unlimited())
         .expect("the decompile")

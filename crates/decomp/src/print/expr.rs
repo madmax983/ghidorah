@@ -8,7 +8,6 @@ use std::fmt::Write as _;
 use ghidorah_base::{BinText, Caps};
 use ghidorah_ir::{Cc, FlagOp, Loc, OpId, Opc};
 
-use super::calls::call_ret;
 use super::{Buf, Printer, width_type};
 use crate::expr::{Callee, Expr, Stmt, VarIdx};
 use crate::lattice;
@@ -51,7 +50,7 @@ pub(super) fn konst(value: u64, w: u8) -> String {
 }
 
 /// Gives the text of a constant as a signed value of `w` bits.
-fn signed_konst(value: u64, w: u8) -> String {
+pub(super) fn signed_konst(value: u64, w: u8) -> String {
     let v = value & mask(w);
     let top = w.clamp(1, 64) - 1;
     if v >> top & 1 == 1 {
@@ -156,7 +155,7 @@ impl Printer<'_> {
                     }
                     return format!("return {text};");
                 }
-                match call_ret(c) {
+                match self.result_var(c) {
                     Some(v) => format!("{} = {text};", self.var(v)),
                     None => format!("{text};"),
                 }
@@ -244,7 +243,8 @@ impl Printer<'_> {
                 }
                 if matches!(op, Opc::TestZ | Opc::TestNZ) {
                     buf.op(*at);
-                    return self.test(*op == Opc::TestZ, x, y, buf);
+                    // The negation of `TestZ` is `TestNZ`, so a negated `TestNZ` prints `== 0`.
+                    return self.test(*op == Opc::TestNZ, x, y, buf);
                 }
             }
             Expr::Un {
@@ -296,7 +296,7 @@ impl Printer<'_> {
     /// else `(x & y) == 0`.
     fn test(&mut self, zero: bool, x: &Expr, y: &Expr, buf: &mut Buf) -> (String, u8) {
         let op = if zero { "==" } else { "!=" };
-        if x == y {
+        if x == y || x.same_value(y) {
             let (tx, px) = self.expr(x, buf);
             return (format!("{} {op} 0", wrap(&tx, px, EQ, false)), EQ);
         }
@@ -444,7 +444,7 @@ impl Printer<'_> {
 
     /// Gives the text of a data op with two inputs.
     fn binary(&mut self, op: Opc, w: u8, x: &Expr, y: &Expr, buf: &mut Buf) -> (String, u8) {
-        if matches!(op, Opc::Xor | Opc::Sub) && x == y {
+        if matches!(op, Opc::Xor | Opc::Sub) && (x == y || x.same_value(y)) {
             for node in x.preorder() {
                 if let Some(at) = node.at() {
                     buf.op(at);

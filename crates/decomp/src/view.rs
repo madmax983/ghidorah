@@ -17,9 +17,10 @@
 //! a register name with the address of its first def. So an agent name survives a new
 //! decompile (AC-105a).
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
+use ghidorah_analysis::jumptable::GuardInfo;
 use ghidorah_base::{Fuel, VarId};
 use ghidorah_ir::ssa::Ssa;
 use ghidorah_ir::{Arena, Loc, Node, OpId};
@@ -29,9 +30,11 @@ use crate::expr::{Expr, Stmt};
 use crate::shape::Shape;
 use crate::{ElideReason, Elided, Warning, fold, vars};
 
+mod args;
 mod assemble;
 pub(crate) mod facts;
 pub(crate) mod stmts;
+mod switch;
 
 use facts::Facts;
 use stmts::{Ex, Raw};
@@ -57,6 +60,14 @@ pub trait Env {
     /// `None`. The default knows no import.
     fn import_at_slot(&self, slot: u64) -> Option<u64> {
         let _ = slot;
+        None
+    }
+
+    /// Gives the count of the parameter slots of the function at `addr`: from its signature,
+    /// its Tier-0 prototype or the parameter recovery. The stack parameters come after all
+    /// integer argument registers. The default knows no count.
+    fn param_count(&self, addr: u64) -> Option<u8> {
+        let _ = addr;
         None
     }
 
@@ -98,6 +109,8 @@ pub struct Input<'a> {
     pub tail_calls: &'a BTreeSet<u64>,
     /// The calling convention, for the parameter numbers.
     pub conv: Option<&'a CallConv>,
+    /// The guard of each indirect jump with a jump table, by the address of the jump.
+    pub guards: &'a BTreeMap<u64, GuardInfo>,
 }
 
 /// The kind of a variable.
@@ -137,6 +150,16 @@ pub struct NodeView {
     pub target: Option<Expr>,
     /// The block address of each case of a `Switch` exit.
     pub cases: Vec<u64>,
+    /// The selector of a `Switch` exit: the value whose table index chooses the case. With no
+    /// selector, the switch is over the computed target, and the labels are the positions.
+    pub index: Option<Expr>,
+    /// The selector value of the first table entry. The label of case `i` is `bias + i`.
+    pub bias: u64,
+    /// The last case of the `Switch` exit is the default: the target of the guard for an
+    /// index above the table.
+    pub default: bool,
+    /// The ops of the guard compare and branch that the line of the switch shows.
+    pub guard: Vec<OpId>,
     /// The flow op that ends a block node: a jump, a branch or an indirect jump.
     pub term: Option<OpId>,
     /// The L1 ops of a block node in run order. An added node has none.
@@ -163,6 +186,9 @@ pub struct View {
     /// store, a call, a return, a branch or an opaque memory op. The def of a value that a
     /// return reads is an effect too.
     pub effects: BTreeSet<u64>,
+    /// The flag thunk op of each fused compare op. A line that shows the compare shows the
+    /// instruction of the thunk too, for example the `cmp` of a `jne`.
+    pub sources: BTreeMap<OpId, OpId>,
 }
 
 impl View {
@@ -246,9 +272,11 @@ pub fn build(
     let plan = fold::plan(&f, fold);
     let ex = Ex {
         f: &f,
+        l0: input.l0,
         plan: &plan,
         env,
         tails: input.tail_calls,
+        guards: input.guards,
         thunk: env.is_thunk(entry),
     };
     let mut raws: Vec<Raw> = f.reach.iter().map(|&b| stmts::block(&ex, b)).collect();
@@ -258,6 +286,7 @@ pub fn build(
         l0: input.l0,
         conv: input.conv,
         entry,
+        params: env.param_count(entry),
     };
     let assigned = vars::assign(&cx);
     let mut warnings = Vec::new();

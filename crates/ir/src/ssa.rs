@@ -8,7 +8,7 @@
 //! |---|---|
 //! | `Get(loc)` | `Copy` of the value of `loc` at that point |
 //! | `Put(loc, x)` | `Nop`. The value `x` becomes the value of `loc`. |
-//! | `Ret`, `Call`, `CallInd` | The same op. [`Opts`] gives its location uses and defs. |
+//! | `Ret`, `Call`, `CallInd` | The same op. [`Opts`] gives its location uses and defs, and the pop of the return address after a call. |
 //! | `Syscall`, `Intrinsic` | The same op. Its [`Effect`](crate::Effect) gives its uses and defs. |
 //!
 //! The location uses of an op go to a side table ([`Ssa::uses_at`]). Each location def of an
@@ -77,6 +77,10 @@ pub struct Opts {
     pub call_uses: LocSet,
     /// The locations that a `Call` or `CallInd` writes.
     pub call_defs: LocSet,
+    /// The location that a `Call` or `CallInd` adds to on return, and the count: the callee
+    /// pops the return address that the call pushes. For x86-64 it is `rsp` and 8. A call
+    /// without a write of the location in its block keeps the location.
+    pub call_pop: Option<(Loc, u64)>,
 }
 
 impl Opts {
@@ -89,6 +93,7 @@ impl Opts {
             ret_uses: all,
             call_uses: all,
             call_defs: LocSet::EMPTY,
+            call_pop: None,
         }
     }
 }
@@ -214,6 +219,10 @@ pub struct Ssa {
     pub(crate) defs: BTreeMap<u32, Vec<(Loc, Val)>>,
     /// The next sequence numbers of each address: `[pass ops, phis]`.
     pub(crate) seqs: BTreeMap<u64, [u16; 2]>,
+    /// The location of each phi of the build.
+    pub(crate) phi_locs: BTreeMap<u32, Loc>,
+    /// The flag thunk op that `fuse` read for each fused compare op.
+    pub(crate) fused: BTreeMap<u32, OpId>,
 }
 
 impl Ssa {
@@ -333,6 +342,25 @@ impl Ssa {
     #[must_use]
     pub fn phis(&self, block: Node) -> &[u32] {
         self.anchored(Anchor::Head(block))
+    }
+
+    /// Gives the location of a phi of the SSA build, or `None` for another op.
+    #[must_use]
+    pub fn phi_loc(&self, index: u32) -> Option<Loc> {
+        self.phi_locs.get(&index).copied()
+    }
+
+    /// Gives the flag thunk op that a fusion read for the compare op `index`. The compare
+    /// runs at the place of its flag read, so a printer can show the thunk with it.
+    #[must_use]
+    pub fn fused_from(&self, index: u32) -> Option<OpId> {
+        self.fused.get(&index).copied()
+    }
+
+    /// Records that the compare op `index` comes from a fusion of the flag thunk op `from`.
+    /// An example is the L0 fusion of the function IR builder before the SSA build.
+    pub fn note_fused(&mut self, index: u32, from: OpId) {
+        self.fused.insert(index, from);
     }
 
     /// Gives the location uses of a flow op: each location and its value at the op.
@@ -518,5 +546,23 @@ pub(crate) const fn low_mask(w: u8) -> u64 {
 /// [`SsaError::SeqFull`] and [`SsaError::Full`] when the arena cannot take an op. Returns
 /// [`SsaError::OutOfFuel`] when the fuel runs out.
 pub fn build(arena: Arena, body: Body, opts: &Opts, fuel: &mut Fuel) -> Result<Ssa, SsaError> {
-    build::build(arena, body, opts, fuel)
+    build::build(arena, body, opts, &BTreeMap::new(), fuel)
+}
+
+/// Makes the L1 form of `arena` over `body` like [`build`], with a use list for each call.
+///
+/// Each call op of `calls` reads its own list of locations in place of [`Opts::call_uses`]. A
+/// list can hold stack slots, for example the stack arguments of the call.
+///
+/// # Errors
+///
+/// Returns the errors of [`build`].
+pub fn build_with(
+    arena: Arena,
+    body: Body,
+    opts: &Opts,
+    calls: &BTreeMap<u32, Vec<Loc>>,
+    fuel: &mut Fuel,
+) -> Result<Ssa, SsaError> {
+    build::build(arena, body, opts, calls, fuel)
 }

@@ -1,7 +1,7 @@
 //! The value mode of the AST interpreter (AC-101).
 //!
 //! The walk follows the lowered code. A node step runs its statements. A test evaluates the
-//! branch condition of its node, and a dispatch evaluates the switch target. Values have 128
+//! branch condition of its node, and a dispatch evaluates the switch index or target. Values have 128
 //! bits, and memory is the image plus a sparse map of written bytes, as in the L0 interpreter.
 
 use std::collections::BTreeMap;
@@ -9,8 +9,8 @@ use std::collections::BTreeMap;
 use ghidorah_ir::{Config, EvalError, Image, Loc, Node, OpId, StopReason, eval};
 
 use super::{Outcome, Step, lower};
-use crate::Decomp;
 use crate::expr::{Call, Callee, Expr, Stmt};
+use crate::{Decomp, NodeView};
 
 /// The end of a run, before the outcome takes the written bytes.
 struct Stop {
@@ -305,11 +305,16 @@ impl Machine<'_> {
         Ok(self.eval(c)? != 0)
     }
 
-    /// Gives the case index of the switch target of a node.
+    /// Gives the case index of the switch node `n`. A selector gives the case `index - bias`
+    /// when it is in the table, else the default case. A switch over the target gives the case
+    /// of the target address.
     fn case(&mut self, n: Node) -> Res<usize> {
         let d = self.d;
         let at = self.term(n);
         let view = d.view.node(n).ok_or_else(|| stop(StopReason::BadIr, at))?;
+        if let Some(index) = &view.index {
+            return self.index_case(view, index, at);
+        }
         let target = view
             .target
             .as_ref()
@@ -319,6 +324,20 @@ impl Machine<'_> {
             .iter()
             .position(|&a| a == t)
             .ok_or_else(|| stop(StopReason::NoCode(t), at))
+    }
+
+    /// Gives the case of the selector `index` of a switch view: `index - bias` in the table, else
+    /// the default case.
+    fn index_case(&mut self, view: &NodeView, index: &Expr, at: OpId) -> Res<usize> {
+        let width = index.width();
+        let value = low64(self.eval(index)? & mask(width));
+        let pos = value.wrapping_sub(view.bias) & low64(mask(width));
+        let table = view.cases.len().saturating_sub(usize::from(view.default));
+        match usize::try_from(pos) {
+            Ok(case) if case < table => Ok(case),
+            _ if view.default => Ok(table),
+            _ => Err(stop(StopReason::NoCode(value), at)),
+        }
     }
 
     /// Gives the stop of a node that ends with no stop statement.

@@ -45,6 +45,9 @@ pub(crate) struct Ctx<'a> {
     pub(crate) l0: &'a Arena,
     pub(crate) conv: Option<&'a CallConv>,
     pub(crate) entry: u64,
+    /// The count of the parameter slots of the function, when the facts know it. An entry
+    /// value of a later slot is not a parameter.
+    pub(crate) params: Option<u8>,
 }
 
 /// Gives the values that a statement reads.
@@ -88,14 +91,27 @@ fn events(raw: &Raw) -> Vec<Ev> {
             .map(|v| Val(v.0))
             .chain(stmt_uses(tail))
             .collect(),
-        Term::Switch { target } => target.vars().into_iter().map(|v| Val(v.0)).collect(),
+        Term::Switch { target, selector } => target
+            .vars()
+            .into_iter()
+            .chain(selector.iter().flat_map(|s| s.expr.vars()))
+            .map(|v| Val(v.0))
+            .collect(),
     };
     out.extend(tail.into_iter().map(Ev::Use));
     out
 }
 
-/// The phis of a block: each phi value with its arguments.
+/// The phis of a block: each phi value with its op and its arguments.
 fn phis_of(f: &Facts<'_>, b: Node) -> Vec<(Val, OpId, Vec<Arg>)> {
+    phi_ops(f, b)
+        .into_iter()
+        .map(|(_, v, at, args)| (v, at, args))
+        .collect()
+}
+
+/// The phis of a block: each phi with its op index, its value, its op and its arguments.
+fn phi_ops(f: &Facts<'_>, b: Node) -> Vec<(u32, Val, OpId, Vec<Arg>)> {
     f.ssa
         .phis(b)
         .iter()
@@ -103,9 +119,23 @@ fn phis_of(f: &Facts<'_>, b: Node) -> Vec<(Val, OpId, Vec<Arg>)> {
             let op = f.op(i)?;
             let v = op.out?;
             let args = f.ssa.arena().phi_args(op).unwrap_or_default().to_vec();
-            Some((v, op.id, args))
+            Some((i, v, op.id, args))
         })
         .collect()
+}
+
+/// Gives the op of the last L0 `Put` of `loc` in the block `b`. It is the move that gives a
+/// phi of `loc` its argument on an edge from `b`.
+fn last_put(cx: &Ctx<'_>, b: Node, loc: Loc) -> Option<OpId> {
+    let f = cx.f;
+    f.ops
+        .get(&b)?
+        .iter()
+        .rev()
+        .filter(|&&i| f.ssa.is_insn_op(i))
+        .filter_map(|&i| cx.l0.op(i))
+        .find(|op| op.opc == Opc::Put && op.a[0].as_loc() == Some(loc))
+        .map(|op| op.id)
 }
 
 /// The interference graph of the values.
@@ -411,7 +441,7 @@ fn edge_copies(
     let reach: BTreeSet<Node> = f.reach.iter().copied().collect();
     let mut out = BTreeMap::new();
     for &to in &f.reach {
-        let phis = phis_of(f, to);
+        let phis = phi_ops(f, to);
         if phis.is_empty() {
             continue;
         }
@@ -434,7 +464,12 @@ fn edge_copies(
                 continue;
             };
             let mut list: Vec<(VarIdx, Expr, OpId)> = Vec::new();
-            for (p, at, args) in &phis {
+            for (i, p, phi_at, args) in &phis {
+                // The copy shows the move that sets the argument on this edge, else the phi.
+                let at = from
+                    .zip(f.ssa.phi_loc(*i))
+                    .and_then(|(b, loc)| last_put(cx, b, loc))
+                    .unwrap_or(*phi_at);
                 let Some(&dst) = of.get(p) else {
                     continue;
                 };
@@ -451,7 +486,7 @@ fn edge_copies(
                     Some(Arg::K(k)) => Expr::Const { value: k.get(), w },
                     _ => continue,
                 };
-                list.push((dst, src, *at));
+                list.push((dst, src, at));
             }
             if !list.is_empty() {
                 let addr = f.ssa.block_addr(to).unwrap_or(cx.entry);

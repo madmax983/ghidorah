@@ -548,3 +548,57 @@ fn passes_keep_random_results() {
 fn rng_seed() -> u64 {
     Xoshiro256ss::seed_from_u64(0x256).next_u64()
 }
+
+/// `xor eax, eax; sub ecx, ecx` with each read through its own `Trunc` of the register,
+/// as the lifter gives them. Then return.
+fn zero_idioms() -> Arena {
+    program(|b| {
+        b.begin(0x6000, 2)?;
+        let x1 = b.get(Loc::RAX)?;
+        let t1 = b.unary(Opc::Trunc, 32, x1.into())?;
+        let x2 = b.get(Loc::RAX)?;
+        let t2 = b.unary(Opc::Trunc, 32, x2.into())?;
+        let r = b.binary(Opc::Xor, 32, t2.into(), t1.into())?;
+        let z = b.extend(false, 64, 32, r.into())?;
+        b.put(Loc::RAX, z.into())?;
+        b.begin(0x6002, 2)?;
+        let y1 = b.get(Loc::RCX)?;
+        let u1 = b.unary(Opc::Trunc, 32, y1.into())?;
+        let y2 = b.get(Loc::RCX)?;
+        let u2 = b.unary(Opc::Trunc, 32, y2.into())?;
+        let s = b.binary(Opc::Sub, 32, u2.into(), u1.into())?;
+        let e = b.extend(false, 64, 32, s.into())?;
+        b.put(Loc::RCX, e.into())?;
+        b.begin(0x6004, 1)?;
+        b.flow(Opc::Ret, NIL, NIL)
+    })
+}
+
+/// `xor r, r` and `sub r, r` give 0 for every input. The two reads of the register are two
+/// `Trunc` ops, so `fold` saw no constant input and kept the `Xor` (decomp-07).
+#[test]
+fn regress_fold_zero_idiom() {
+    let arena = zero_idioms();
+    let ret = ret_opts(&[Loc::RAX, Loc::RCX]);
+    let mut ssa = build(&arena, body(&arena, &[0x6000]), &ret);
+    run_all(&mut ssa, Switches::all());
+    assert_clean(&ssa, "zero idioms");
+    let ret_op = u32::try_from(arena.ops().len() - 1).expect("small");
+    let uses: Vec<(Loc, Arg)> = ssa
+        .uses_at(ret_op)
+        .iter()
+        .map(|&(l, a)| (l, ssa.root(a)))
+        .collect();
+    assert_eq!(
+        uses,
+        [(Loc::RAX, Arg::k(0)), (Loc::RCX, Arg::k(0))],
+        "{:?}",
+        ssa.uses_at(ret_op)
+    );
+    let image = ram_image(17);
+    for v in [0u128, 1, 0xffff_ffff, 0x1234_5678_9abc_def0] {
+        let setup = [(Loc::RAX, v), (Loc::RCX, v ^ 0x55)];
+        let want = run_l0(&arena, &image, &ret, &setup, 0x6000, 100);
+        assert_eq!(run_l1(&ssa, &image, &setup, 100), want, "input {v:#x}");
+    }
+}

@@ -135,6 +135,7 @@ fn side_tables() {
         defs: [Loc::RAX, Loc::RCX, Loc::R11].into_iter().collect(),
         uses: [Loc::RAX, Loc::RDI].into_iter().collect(),
         mem: MemEffect::Read { size: 16 },
+        operands: Default::default(),
     };
     let mut b = Builder::new();
     b.begin(0x1000, 2).expect("instruction");

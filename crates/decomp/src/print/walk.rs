@@ -8,7 +8,7 @@ use ghidorah_ir::Node;
 use super::{Buf, LineKind, Printer, expr};
 use crate::expr::Stmt;
 use crate::tree::{Arm, Cond, LoopKind, Tree};
-use crate::view::View;
+use crate::view::{NodeView, View};
 
 /// One task of the tree walk.
 #[derive(Clone, Copy)]
@@ -23,8 +23,8 @@ enum Task<'t> {
     Close(u16),
     /// Print `} while (c);` at a depth.
     DoEnd(&'t Cond, u16),
-    /// Print the case labels and the body of one switch arm.
-    Arm(&'t Arm, u16),
+    /// Print the case labels and the body of one arm of the switch node.
+    Arm(Node, &'t Arm, u16),
     /// Print `break;` at a depth.
     Break(u16),
     /// Print a `while` loop as `for (init; c; step) {` at a depth.
@@ -156,6 +156,65 @@ impl<'a> Printer<'a> {
         })
     }
 
+    /// Gives the text of the selector of a switch node and adds its parts to `buf`. The line
+    /// shows the jump, the target computation and the folded guard. With no selector, the
+    /// switch is over the target.
+    fn selector(&mut self, nv: &NodeView, buf: &mut Buf) -> String {
+        if let Some(t) = nv.term {
+            buf.op(t);
+        }
+        for at in &nv.guard {
+            buf.op(*at);
+        }
+        match (&nv.index, &nv.target) {
+            (Some(index), target) => {
+                if let Some(e) = target {
+                    for at in e.preorder().iter().filter_map(|x| x.at()) {
+                        buf.op(at);
+                    }
+                }
+                self.expr(index, buf).0
+            }
+            (None, Some(t)) => self.expr(t, buf).0,
+            (None, None) => "0".to_owned(),
+        }
+    }
+
+    /// Gives the label lines of an arm of the switch node `on`. An arm with the default case
+    /// gets only `default:`, because its other table entries go to the default block too.
+    fn arm_labels(&self, on: Node, cases: &[usize]) -> Vec<String> {
+        let default = self
+            .view()
+            .node(on)
+            .filter(|nv| nv.default)
+            .map(|nv| nv.cases.len().saturating_sub(1));
+        if default.is_some_and(|last| cases.contains(&last)) {
+            return vec!["default:".to_owned()];
+        }
+        cases
+            .iter()
+            .map(|case| self.case_label(on, *case))
+            .collect()
+    }
+
+    /// Gives the label line of the case at position `case` of the switch node `on`. A case gives
+    /// `case <bias + case>:`, or its position for a switch over the target.
+    fn case_label(&self, on: Node, case: usize) -> String {
+        let Some(nv) = self.view().node(on) else {
+            return format!("case {case}:");
+        };
+        match &nv.index {
+            Some(index) => {
+                let w = index.width();
+                let value = nv
+                    .bias
+                    .wrapping_add(u64::try_from(case).unwrap_or(u64::MAX));
+                format!("case {}:", expr::signed_konst(value, w))
+            }
+            None => format!("case {case}:"),
+        }
+    }
+
     /// Gives the text of a condition and adds its parts to `buf`.
     fn cond(&mut self, c: &Cond, buf: &mut Buf) -> (String, u8) {
         use crate::precedence::{LOG_AND, LOG_OR};
@@ -276,20 +335,12 @@ impl<'a> Printer<'a> {
             Tree::Switch { on, arms, .. } => {
                 let mut buf = Buf::default();
                 let target = match self.view().node(*on) {
-                    Some(nv) => {
-                        if let Some(t) = nv.term {
-                            buf.op(t);
-                        }
-                        match &nv.target {
-                            Some(e) => self.expr(e, &mut buf).0,
-                            None => "0".to_owned(),
-                        }
-                    }
+                    Some(nv) => self.selector(nv, &mut buf),
                     None => "0".to_owned(),
                 };
                 self.push(&format!("switch ({target}) {{"), LineKind::Open, depth, buf);
                 work.push(Task::Close(depth));
-                work.extend(arms.iter().rev().map(|a| Task::Arm(a, depth)));
+                work.extend(arms.iter().rev().map(|a| Task::Arm(*on, a, depth)));
             }
             Tree::Goto(n) => {
                 let text = format!("goto {};", label(self.view(), *n));
@@ -328,14 +379,9 @@ impl<'a> Printer<'a> {
                 let (text, _) = self.cond(c, &mut buf);
                 self.push(&format!("}} while ({text});"), LineKind::Close, depth, buf);
             }
-            Task::Arm(arm, depth) => {
-                for case in &arm.cases {
-                    self.push(
-                        &format!("case {case}:"),
-                        LineKind::Open,
-                        depth,
-                        Buf::default(),
-                    );
+            Task::Arm(on, arm, depth) => {
+                for text in self.arm_labels(on, &arm.cases) {
+                    self.push(&text, LineKind::Open, depth, Buf::default());
                 }
                 let inner = depth.saturating_add(1);
                 if !ends(self.view(), &arm.body) {

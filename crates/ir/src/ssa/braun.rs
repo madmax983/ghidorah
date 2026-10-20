@@ -118,6 +118,7 @@ impl Reader {
             };
             if x == entry || count > 1 || cycle {
                 let (phi, val) = ssa.push_phi(x, loc.width(), Vec::new())?;
+                ssa.phi_locs.insert(phi, loc);
                 self.memo.insert((x.0, loc), Arg::V(val));
                 self.open.push((x, loc, phi));
                 self.phis.push(phi);

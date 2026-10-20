@@ -39,6 +39,7 @@ fn sample() -> Arena {
         defs: [Loc::RAX, Loc::RBX].into_iter().collect::<LocSet>(),
         uses: [Loc::RAX, Loc::Flags].into_iter().collect::<LocSet>(),
         mem: MemEffect::Read { size: 8 },
+        operands: Default::default(),
     };
     b.effect_op(Opc::Intrinsic, effect, Arg::V(v0))
         .expect("intrinsic");
@@ -121,6 +122,7 @@ fn empty_and_effect_forms() {
         defs: LocSet::EMPTY,
         uses: LocSet::EMPTY,
         mem: MemEffect::None,
+        operands: Default::default(),
     };
     b.effect_op(Opc::Syscall, none, Arg::Nil).expect("syscall");
     for mem in [

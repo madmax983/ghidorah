@@ -9,7 +9,7 @@
 //! | `Block(n)` | one line for each statement of `n` |
 //! | `If` | `if (c) {`, the branch, `} else {`, the other branch, `}` |
 //! | `Loop` | `while (c) {`, `for (init; c; step) {`, `do {` .. `} while (c);` or `while (true) {` |
-//! | `Switch` | `switch (x) {`, `case i:` lines, each arm with `break;` |
+//! | `Switch` | `switch (x) {` over the table index, `case <bias + i>:` and `default:` lines, each arm with `break;` |
 //! | `Goto(n)`, `Label(n)` | `goto L_<addr>;` and `L_<addr>:` |
 //! | `Break`, `Continue` | `break;` and `continue;` |
 //!
@@ -34,7 +34,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use ghidorah_base::{FuncId, VarId};
 use ghidorah_db::{CodeUnit, CommentKind, Program};
-use ghidorah_ir::{IntrinsicNames, Node, OpId};
+use ghidorah_ir::{IntrinsicNames, Loc, Node, OpId};
 use ghidorah_types::cc::SYSV_X86_64;
 use ghidorah_types::{CallConv, DataModel, TypeId, TypeStore};
 
@@ -88,12 +88,6 @@ pub trait PrintEnv: Env {
     /// Gives the signature of the function at `addr`: an agent signature first, then the
     /// Tier-0 prototype of its name.
     fn signature(&self, addr: u64) -> Option<Signature> {
-        let _ = addr;
-        None
-    }
-
-    /// Gives the recovered count of integer parameters of the function at `addr`.
-    fn param_count(&self, addr: u64) -> Option<u8> {
         let _ = addr;
         None
     }
@@ -280,8 +274,8 @@ impl<'a> Printer<'a> {
         let types = lattice::infer(&d.view, env, &stores);
         let vnames = names::var_names(&d.view, env);
         let clobbers = names::clobbers(&d.view);
-        let void_ret = env.signature(d.view.entry).is_some_and(|s| s.ret.is_none());
-        Self {
+        let sig_void = env.signature(d.view.entry).map(|s| s.ret.is_none());
+        let mut p = Self {
             d,
             env,
             names,
@@ -294,11 +288,31 @@ impl<'a> Printer<'a> {
             skip: BTreeSet::new(),
             clobbers,
             arity: BTreeMap::new(),
-            void_ret,
+            void_ret: sig_void.unwrap_or(false),
             rets: Vec::new(),
             lines: Vec::new(),
             warnings: Vec::new(),
+        };
+        if sig_void.is_none() {
+            p.void_ret = p.returns_entry_rax();
         }
+        p
+    }
+
+    /// Tells if a return of the tree gives the entry value of `rax`. No convention passes a
+    /// value in `rax`, so the function returns no value on that path. A C function returns a
+    /// value on every path or on none, so each return of such a function is `return;`.
+    fn returns_entry_rax(&self) -> bool {
+        self.d.tree.nodes().into_iter().any(|n| {
+            self.view().node(n).is_some_and(|nv| {
+                nv.stmts.iter().any(|s| match s {
+                    Stmt::Return { uses, .. } => uses
+                        .iter()
+                        .any(|(l, e)| *l == Loc::RAX && self.untouched(e, Loc::RAX)),
+                    _ => false,
+                })
+            })
+        })
     }
 
     /// Gives the view.
@@ -313,7 +327,13 @@ impl<'a> Printer<'a> {
         } else {
             depth
         };
-        let ops: Vec<OpId> = buf.ops.into_iter().collect();
+        let mut set = buf.ops;
+        let sources: Vec<OpId> = set
+            .iter()
+            .filter_map(|o| self.view().sources.get(o).copied())
+            .collect();
+        set.extend(sources);
+        let ops: Vec<OpId> = set.into_iter().collect();
         let span = self.span(&ops);
         self.lines.push(Line {
             text: format!("{}{text}", indent(pad)),
@@ -356,7 +376,7 @@ impl<'a> Printer<'a> {
             let mut buf = Buf::default();
             let text = self.stmt(s, &mut buf);
             let def = match s {
-                Stmt::Call(c) if !c.tail => calls::call_ret(c),
+                Stmt::Call(c) if !c.tail => self.result_var(c),
                 Stmt::Assign {
                     var,
                     value: crate::expr::Expr::Call(_),

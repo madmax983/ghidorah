@@ -35,6 +35,7 @@ use ghidorah_ir::ssa::{Block, Body};
 use ghidorah_ir::{Arena, Builder, Cfg, GraphError, InsnSpan, Memory, Node, OpId, Opc};
 use ghidorah_loader::Perms;
 
+pub mod callsite;
 mod fusion;
 pub mod l1;
 
@@ -111,6 +112,8 @@ pub struct FuncIr {
     pub fusion: Fusion,
     /// The stack frame, or `None` when the build does not track the stack.
     pub frame: Option<Frame>,
+    /// The flag thunk op of each `Cond` op that fusion turns into a compare op.
+    pub fused_from: BTreeMap<u32, OpId>,
 }
 
 /// The error of [`build`].
@@ -396,13 +399,14 @@ pub fn build_units(
     } = blocks(&units, &leaders)?;
     let cfg = edges(entry, &units, &flows, &cases, (&starts, &lasts), noreturn)?;
     let body = Body { blocks, cfg };
-    let fusion = if opts.fuse {
+    let (fusion, fused_from) = if opts.fuse {
         fuse_flags(&mut arena, &body)
     } else {
-        Fusion {
+        let none = Fusion {
             reads: count_reads(&arena),
             fused: 0,
-        }
+        };
+        (none, BTreeMap::new())
     };
     let frame = if opts.stack {
         let frame = stack::track(&arena, &body, fuel)?;
@@ -420,6 +424,7 @@ pub fn build_units(
         units,
         fusion,
         frame,
+        fused_from,
     })
 }
 

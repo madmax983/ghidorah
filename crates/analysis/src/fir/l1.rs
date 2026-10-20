@@ -12,12 +12,13 @@
 //! | Op | Locations |
 //! |---|---|
 //! | `Ret` reads | the first integer return register |
-//! | A call reads | the integer and floating argument registers, and the varargs register |
+//! | A call reads | the integer and floating argument registers, the varargs register when the callee can take a variable argument list, and its stack arguments ([`callsite`]) |
 //! | A call writes | each general register that the callee does not keep, each XMM register and the flags |
+//! | A call pops | 8 bytes from `rsp` on return: the return address that the call pushes |
 //!
 //! The result is derived data: the journal never holds it.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use ghidorah_base::{Fuel, FuncId};
@@ -27,8 +28,9 @@ use ghidorah_ir::ssa::{self, Ssa, SsaError};
 use ghidorah_ir::{Arg, Loc, LocSet, Node, Opc};
 use ghidorah_types::CallConv;
 
-use super::{FirError, FuncIr, Opts};
+use super::{FirError, FuncIr, Opts, callsite};
 use crate::cc::{conv_of, loc_of};
+use crate::jumptable::{self, GuardInfo};
 
 /// The L1 form of one function, with its L0 IR.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -41,6 +43,8 @@ pub struct L1Ir {
     pub report: Report,
     /// The addresses of the tail jumps that became calls.
     pub tail_calls: BTreeSet<u64>,
+    /// The guard of each indirect jump with a jump table, by the address of the jump.
+    pub guards: BTreeMap<u64, GuardInfo>,
 }
 
 /// The error of [`lift`] and [`build`].
@@ -98,6 +102,7 @@ pub fn ssa_opts(conv: &CallConv) -> ssa::Opts {
         ret_uses,
         call_uses,
         call_defs,
+        call_pop: Some((Loc::RSP, 8)),
     }
 }
 
@@ -160,14 +165,41 @@ pub fn lift(
     switches: &Switches,
     fuel: &mut Fuel,
 ) -> Result<L1Ir, L1Error> {
+    lift_with(l0, conv, &|_| None, switches, fuel)
+}
+
+/// Makes the L1 form like [`lift`], with the arity facts of the callees.
+///
+/// `callee` gives the arity of the direct callee at an address. A call of a callee with an
+/// arity reads only its argument registers ([`callsite::uses`]).
+///
+/// # Errors
+///
+/// Returns the errors of [`lift`].
+pub fn lift_with(
+    l0: FuncIr,
+    conv: &CallConv,
+    callee: &dyn Fn(u64) -> Option<callsite::Arity>,
+    switches: &Switches,
+    fuel: &mut Fuel,
+) -> Result<L1Ir, L1Error> {
     let (arena, tail_calls) = rewrite_tail_jumps(&l0);
-    let mut ssa = ssa::build(arena, l0.body.clone(), &ssa_opts(conv), fuel)?;
+    let calls = callsite::uses(&l0, &arena, conv, callee);
+    let mut ssa = ssa::build_with(arena, l0.body.clone(), &ssa_opts(conv), &calls, fuel)?;
+    for (&index, &from) in &l0.fused_from {
+        ssa.note_fused(index, from);
+    }
     let report = passes::run(&mut ssa, switches, fuel)?;
+    let guards = jumptable::sites(&l0)
+        .into_iter()
+        .filter_map(|site| Some((site, jumptable::guard_info(&l0, site)?)))
+        .collect();
     Ok(L1Ir {
         l0,
         ssa,
         report,
         tail_calls,
+        guards,
     })
 }
 
@@ -184,5 +216,20 @@ pub fn build(
     fuel: &mut Fuel,
 ) -> Result<L1Ir, L1Error> {
     let l0 = super::build(program, id, opts, fuel)?;
-    lift(l0, conv_of(program), switches, fuel)
+    let targets: BTreeSet<u64> = l0
+        .arena
+        .ops()
+        .iter()
+        .filter_map(|op| match (op.opc, op.a[0].as_k()) {
+            (Opc::Call, Some(t)) => Some(t),
+            (Opc::Jump, Some(t)) if l0.arena.insn_index(t).is_none() => Some(t),
+            _ => None,
+        })
+        .collect();
+    let conv = conv_of(program);
+    let arity: BTreeMap<u64, callsite::Arity> = targets
+        .into_iter()
+        .filter_map(|t| Some((t, callsite::callee_arity(program, t, conv)?)))
+        .collect();
+    lift_with(l0, conv, &|t| arity.get(&t).copied(), switches, fuel)
 }
