@@ -2,7 +2,7 @@
 
 This file gives the working rules for agents in the ghidorah repository.
 Read `docs/design.md` Sections 1, 2 and 14 before you change code.
-Revision 3 decisions of the owner apply over the design text. SSA and the decompiler are part of the MVP. The owner removed the line-count ledger: there is no `xtask loc`, no `docs/budget.json` and no AC-015.
+Revision 3 decisions of the owner apply over the design text. SSA and the decompiler are part of the MVP. The owner removed the line-count ledger: there is no `xtask loc`, no `docs/budget.json` and no AC-015. Revisions 4 and 5 add the code-pointer and gap-component seeds (WP-19b, WP-19c) and the code producers of WP-25b.
 
 ## Commands
 
@@ -16,13 +16,15 @@ Revision 3 decisions of the owner apply over the design text. SSA and the decomp
 | Docs | `RUSTDOCFLAGS=-Dwarnings cargo doc --workspace --no-deps` |
 | Static gates | `cargo xtask gates [AC-nnn ..]` |
 | Crate graph | `cargo xtask deps` |
+| Crate graph check | `cargo xtask deps --check` |
 | Coverage gate | `cargo xtask cov` |
-| CI steps and test times | `cargo xtask ci [--tier2] [--steps fmt,clippy,doc,offline_build,tier1,tier2,test_times]` |
+| CI steps and test times | `cargo xtask ci [--tier2] [--steps fmt,clippy,doc,offline_build,tier1,tier2,test_times,test_hermetic,fix_commits]` |
 | STE check of docs and comments | `cargo xtask ste` |
 | AC table check | `cargo xtask ac` |
 | AC evidence run | `cargo xtask ac --run [--tier2] [AC-nnn ..]` |
 | Kernel proofs | `VERUS=<verus> VERUS_Z3_PATH=<z3> cargo xtask verify` |
 | Fixture build | `cargo xtask fixtures build [--check]` |
+| PE fixture build | `cargo xtask fixtures build-pe [--check]` |
 | Fixture checks | `cargo xtask fixtures check` |
 | T2 source | `cargo xtask fixtures gen-large` |
 | Golden bless | `cargo xtask golden bless [cargo test args]` |
@@ -30,11 +32,13 @@ Revision 3 decisions of the owner apply over the design text. SSA and the decomp
 | x86 goldens and their tier-2 oracles | `cargo xtask golden x86` |
 | Native semantic vectors (host CPU) | `cargo xtask oracle semantics [--check]` |
 | Host bash and libc boundary record (AC-066) | `cargo xtask oracle bash` |
+| Eval harness | `cargo xtask eval [--json \| --explain \| --bless --reason TEXT \| replay FILE]` |
+| Long fuzz runs | `cargo xtask fuzz [<target>..] [--iters N] [--seed S] [--timeout SECS]` |
+| Benchmarks | `cargo xtask bench [<key>..]` |
 
 - Each xtask command prints one JSON object on stdout. The exit code is 0 for `ok: true`, 1 for `ok: false` and 2 for an error.
 - Set `GHIDORAH_VERUS_OPTIONAL=1` to get `status: skipped` from `xtask verify` when Verus is missing.
 - Set `CARGO_BUILD_JOBS=2` when other agents share the CPUs.
-- Cargo prints `profile package spec .. did not match any packages` until `ghidorah-analysis` and `ghidorah-decomp` exist. This warning does no harm. Keep the profile entries.
 
 ## Gates
 
