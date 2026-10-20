@@ -282,14 +282,74 @@ fn gate_row(id: &str, evidence: Vec<Evidence>) -> AcRow {
     }
 }
 
+/// A proof record with the kernels K1 and K6, and a host record of bash. Every claim holds.
+const CLAIMS: &str = r#"{"tree_sha256":"aa",
+    "kernels":{
+        "K1":{"name":"K1","status":"verified","errors":0,"verified":3,"spec_items":2},
+        "K6":{"name":"K6","status":"verified","errors":0,"verified":2,"spec_items":2}},
+    "negatives":[{"kernel":"K1","ok":true},{"kernel":"K6","ok":true},{"kernel":"K6","ok":true}],
+    "bash":{"path":"/usr/bin/bash","sha256":"bb","insns":10,"agree":10,"mismatches":0}}"#;
+
+#[test]
+fn regress_record_checks_claims() {
+    let check = |text: &str, pointer: &str, input: &str, current: Option<&str>| {
+        let record = json::parse(text).expect("record parses");
+        record::record_match(&record, pointer, input, current)
+    };
+    let tree = |text: &str, pointer: &str| check(text, pointer, "tree", Some("aa"));
+    assert_eq!(tree(CLAIMS, "/kernels/K6"), Status::Recorded);
+    assert_eq!(tree(CLAIMS, "/kernels"), Status::Recorded);
+
+    // A failed kernel row does not match, also when the hash matches.
+    let failed = CLAIMS.replace(
+        r#""name":"K6","status":"verified""#,
+        r#""name":"K6","status":"failed""#,
+    );
+    assert_eq!(tree(&failed, "/kernels/K6"), Status::Fail);
+    assert_eq!(tree(&failed, "/kernels"), Status::Fail);
+    assert_eq!(tree(&failed, "/kernels/K1"), Status::Recorded);
+    let errors = CLAIMS.replace(
+        r#""K6","status":"verified","errors":0"#,
+        r#""K6","status":"verified","errors":1"#,
+    );
+    assert_eq!(tree(&errors, "/kernels/K6"), Status::Fail);
+    let few = CLAIMS.replace(
+        r#""verified":2,"spec_items":2"#,
+        r#""verified":1,"spec_items":2"#,
+    );
+    assert_eq!(tree(&few, "/kernels/K6"), Status::Fail);
+
+    // Each negative row of the kernel must hold, and the kernel needs one.
+    let negative = CLAIMS.replacen(
+        r#"{"kernel":"K6","ok":true}"#,
+        r#"{"kernel":"K6","ok":false}"#,
+        1,
+    );
+    assert_eq!(tree(&negative, "/kernels/K6"), Status::Fail);
+    assert_eq!(tree(&negative, "/kernels/K1"), Status::Recorded);
+    let none = CLAIMS.replace(r#"{"kernel":"K1","ok":true},"#, "");
+    assert_eq!(tree(&none, "/kernels/K1"), Status::Fail);
+
+    // A host record needs full agreement.
+    let host = |text: &str, current: Option<&str>| check(text, "/bash", "host-bash", current);
+    assert_eq!(host(CLAIMS, Some("bb")), Status::Recorded);
+    assert_eq!(host(CLAIMS, None), Status::Skipped);
+    let mismatches = CLAIMS.replace(
+        r#""agree":10,"mismatches":0"#,
+        r#""agree":10,"mismatches":3"#,
+    );
+    assert_eq!(host(&mismatches, Some("bb")), Status::Fail);
+    assert_eq!(host(&mismatches, None), Status::Fail);
+    let disagree = CLAIMS.replace(r#""agree":10"#, r#""agree":4"#);
+    assert_eq!(host(&disagree, Some("bb")), Status::Fail);
+    let silent = CLAIMS.replace(r#","insns":10,"agree":10,"mismatches":0"#, "");
+    assert_eq!(host(&silent, Some("bb")), Status::Fail);
+}
+
 #[test]
 fn ac_018b_evidence_passes() {
     // The record check of each named input.
-    let record = json::parse(
-        r#"{"tree_sha256":"aa","kernels":{"K1":{"status":"verified"}},
-            "bash":{"path":"/usr/bin/bash","sha256":"bb"}}"#,
-    )
-    .expect("record parses");
+    let record = json::parse(CLAIMS).expect("record parses");
     assert_eq!(record::expected(&record, "/kernels/K1", "tree"), Some("aa"));
     assert_eq!(record::expected(&record, "/bash", "host-bash"), Some("bb"));
     let check = |pointer: &str, input: &str, current: Option<&str>| {
