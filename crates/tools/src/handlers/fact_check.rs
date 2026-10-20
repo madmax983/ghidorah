@@ -19,6 +19,7 @@ mod render;
 
 use std::collections::BTreeMap;
 
+use ghidorah_analysis::facts::explain::{DEFAULT_DEPTH, DEFAULT_NODES};
 use ghidorah_analysis::facts::{
     Checker, ExplainError, Gap, NAMES, Outcome, Verdict, explain, key_of,
 };
@@ -118,15 +119,64 @@ const ARGS: &[ArgSpec] = &[
         ArgKind::Int { min: 1, max: 10 },
         "The depth of each why tree in premise levels.",
     )
-    .default_json("3"),
+    .default_json(text_of(&DEPTH_DIGITS)),
     ArgSpec::new(
         "max_nodes",
         Role::Param,
         ArgKind::Int { min: 1, max: 1_000 },
         "The largest number of nodes in all why trees.",
     )
-    .default_json("200"),
+    .default_json(text_of(&NODES_DIGITS)),
 ];
+
+/// The digits of [`DEFAULT_DEPTH`]: the JSON default of `depth`.
+const DEPTH_DIGITS: [u8; digit_count(DEFAULT_DEPTH as u64)] = digits(DEFAULT_DEPTH as u64);
+
+/// The digits of [`DEFAULT_NODES`]: the JSON default of `max_nodes`.
+const NODES_DIGITS: [u8; digit_count(DEFAULT_NODES as u64)] = digits(DEFAULT_NODES as u64);
+
+/// Gives the number of decimal digits of `value`.
+const fn digit_count(value: u64) -> usize {
+    let mut count = 1;
+    let mut rest = value / 10;
+    while rest > 0 {
+        count += 1;
+        rest /= 10;
+    }
+    count
+}
+
+/// Gives the decimal digits of `value` in `N` bytes. `N` is the [`digit_count`] of `value`.
+const fn digits<const N: usize>(value: u64) -> [u8; N] {
+    let mut out = [b'0'; N];
+    let mut rest = value;
+    let mut at = N;
+    while at > 0 {
+        at -= 1;
+        out[at] = match rest % 10 {
+            0 => b'0',
+            1 => b'1',
+            2 => b'2',
+            3 => b'3',
+            4 => b'4',
+            5 => b'5',
+            6 => b'6',
+            7 => b'7',
+            8 => b'8',
+            _ => b'9',
+        };
+        rest /= 10;
+    }
+    out
+}
+
+/// Gives `bytes` as text. Bytes that are not UTF-8 give empty text.
+const fn text_of(bytes: &'static [u8]) -> &'static str {
+    match std::str::from_utf8(bytes) {
+        Ok(text) => text,
+        Err(_) => "",
+    }
+}
 
 const BASIS: &[Field] = &[
     Field::req("complete", OutputShape::Bool),
@@ -294,8 +344,14 @@ fn run(session: &mut Session, args: &Args, ctx: &mut Ctx) -> Result<Payload, Too
         }
         verdicts.push(entry);
     }
-    let depth = u32::try_from(args.int("depth").unwrap_or(3)).unwrap_or(3);
-    let max_nodes = usize::try_from(args.int("max_nodes").unwrap_or(200)).unwrap_or(200);
+    let depth = args
+        .int("depth")
+        .and_then(|d| u32::try_from(d).ok())
+        .unwrap_or(DEFAULT_DEPTH);
+    let max_nodes = args
+        .int("max_nodes")
+        .and_then(|n| usize::try_from(n).ok())
+        .unwrap_or(DEFAULT_NODES);
     let (explanations, rules) = trees(
         p,
         args.list("explain").unwrap_or_default(),
