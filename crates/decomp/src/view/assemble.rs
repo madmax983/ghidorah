@@ -377,5 +377,11 @@ pub(crate) fn shape(f: &Facts<'_>, raws: &mut [Raw], assigned: &Assigned, entry:
         vars: assigned.vars.clone(),
         insns: insns_of(f),
         effects: f.effects(),
+        sources: f
+            .ops
+            .values()
+            .flatten()
+            .filter_map(|&i| Some((f.op(i)?.id, f.ssa.fused_from(i)?)))
+            .collect(),
     }
 }

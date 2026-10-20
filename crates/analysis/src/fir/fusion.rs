@@ -8,7 +8,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use ghidorah_ir::local;
 use ghidorah_ir::ssa::Body;
-use ghidorah_ir::{Arena, Arg, Cc, FlagOp, InsnSpan, Loc, Node, Opc, Val, fuse, rpo};
+use ghidorah_ir::{Arena, Arg, Cc, FlagOp, InsnSpan, Loc, Node, OpId, Opc, Val, fuse, rpo};
 
 use super::Fusion;
 
@@ -21,9 +21,11 @@ pub(super) fn count_reads(arena: &Arena) -> u64 {
 /// The flags thunk that a block leaves in the flags word, or `None` for an unknown thunk.
 type Thunk = Option<u32>;
 
-/// Runs flag fusion over the blocks in reverse postorder. Gives the counts.
-pub(super) fn fuse_flags(arena: &mut Arena, body: &Body) -> Fusion {
+/// Runs flag fusion over the blocks in reverse postorder. Gives the counts and the thunk op of
+/// each fused `Cond` op.
+pub(super) fn fuse_flags(arena: &mut Arena, body: &Body) -> (Fusion, BTreeMap<u32, OpId>) {
     let mut out = Fusion::default();
+    let mut from: BTreeMap<u32, OpId> = BTreeMap::new();
     let preds = body.cfg.preds();
     let mut leave: BTreeMap<Node, Thunk> = BTreeMap::new();
     let insns: Vec<InsnSpan> = arena.insns().to_vec();
@@ -52,25 +54,25 @@ pub(super) fn fuse_flags(arena: &mut Arena, body: &Body) -> Fusion {
                 let Some(index) = span.first.checked_add(k) else {
                     continue;
                 };
-                fuse_op(arena, index, &mut thunk, &mut flag_vals, &mut out);
+                if let Some(t) = fuse_op(arena, index, &mut thunk, &mut flag_vals, &mut out) {
+                    from.insert(index, t);
+                }
             }
         }
         leave.insert(node, thunk);
     }
-    out
+    (out, from)
 }
 
-/// Runs one op of the fusion walk.
+/// Runs one op of the fusion walk. Gives the op of the thunk of a fused `Cond` op.
 fn fuse_op(
     arena: &mut Arena,
     index: u32,
     thunk: &mut Thunk,
     flag_vals: &mut BTreeSet<Val>,
     out: &mut Fusion,
-) {
-    let Some(op) = arena.op(index).copied() else {
-        return;
-    };
+) -> Option<OpId> {
+    let op = arena.op(index).copied()?;
     match op.opc {
         Opc::Put if op.a[0].as_loc() == Some(Loc::Flags) => {
             flag_vals.clear();
@@ -90,6 +92,7 @@ fn fuse_op(
             let fused = thunk
                 .filter(|_| from_flags)
                 .and_then(|t| fused_compare(arena, t, op.sub));
+            let source = thunk.and_then(|t| arena.op(t)).map(|t| t.id);
             if let Some((opc, w, x, y)) = fused
                 && let Some(slot) = usize::try_from(index)
                     .ok()
@@ -100,6 +103,7 @@ fn fuse_op(
                 slot.sub = 0;
                 slot.a = [x, y, Arg::Nil];
                 out.fused = out.fused.saturating_add(1);
+                return source;
             }
         }
         Opc::Call | Opc::CallInd => *thunk = None,
@@ -112,6 +116,7 @@ fn fuse_op(
         }
         _ => {}
     }
+    None
 }
 
 /// The x86 condition codes of the sign reductions: `s`, `ns`, `l`, `ge`, `le` and `g`.

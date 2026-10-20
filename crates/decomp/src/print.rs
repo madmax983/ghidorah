@@ -327,7 +327,13 @@ impl<'a> Printer<'a> {
         } else {
             depth
         };
-        let ops: Vec<OpId> = buf.ops.into_iter().collect();
+        let mut set = buf.ops;
+        let sources: Vec<OpId> = set
+            .iter()
+            .filter_map(|o| self.view().sources.get(o).copied())
+            .collect();
+        set.extend(sources);
+        let ops: Vec<OpId> = set.into_iter().collect();
         let span = self.span(&ops);
         self.lines.push(Line {
             text: format!("{}{text}", indent(pad)),

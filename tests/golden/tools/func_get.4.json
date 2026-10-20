@@ -27,7 +27,7 @@
     "flags": [],
     "caveats": [],
     "decomp": {
-      "text": "uint64_t main(uint64_t param_1, uint64_t param_2)\n{\n    if ((int32_t)param_1 <= 1) {\n        puts(\"usage: crackme <password>\");\n        v27 = 2;\n    } else {\n        v13 = check_password(*(uint64_t *)(param_2 + 8));\n        if ((uint32_t)v13 != 0) {\n            puts(\"Access granted\");\n            v27 = 0;\n        } else {\n            puts(\"Access denied\");\n            v27 = 1;\n        }\n    }\n    return v27;\n}\n",
+      "text": "uint64_t main(uint64_t param_1, uint64_t param_2)\n{\n    if ((int32_t)param_1 <= 1) {\n        puts(\"usage: crackme <password>\");\n        v18 = 2;\n    } else {\n        v9 = check_password(*(uint64_t *)(param_2 + 8));\n        if ((uint32_t)v9 != 0) {\n            puts(\"Access granted\");\n            v18 = 0;\n        } else {\n            puts(\"Access denied\");\n            v18 = 1;\n        }\n    }\n    return v18;\n}\n",
       "line_start": 1,
       "line_count": 17,
       "total_lines": 17,
@@ -38,6 +38,7 @@
           "size": 5,
           "ops": [
             "op:0x1088:1",
+            "op:0x1088:3",
             "op:0x108b:1",
             "op:0x108b:2"
           ]
@@ -52,10 +53,10 @@
         },
         {
           "line": 5,
-          "start": "0x10ab",
-          "size": 4,
+          "start": "0x10cc",
+          "size": 5,
           "ops": [
-            "op:0x10ab:61441"
+            "op:0x10cc:1"
           ]
         },
         {
@@ -74,6 +75,7 @@
           "size": 4,
           "ops": [
             "op:0x1096:3",
+            "op:0x1096:5",
             "op:0x1098:1",
             "op:0x1098:2"
           ]
@@ -88,10 +90,10 @@
         },
         {
           "line": 10,
-          "start": "0x10ab",
-          "size": 4,
+          "start": "0x10bc",
+          "size": 2,
           "ops": [
-            "op:0x10ab:61441"
+            "op:0x10bc:8"
           ]
         },
         {
@@ -104,10 +106,10 @@
         },
         {
           "line": 13,
-          "start": "0x10ab",
-          "size": 4,
+          "start": "0x10a6",
+          "size": 5,
           "ops": [
-            "op:0x10ab:61441"
+            "op:0x10a6:1"
           ]
         },
         {
@@ -131,18 +133,13 @@
           "reason": "no effect"
         },
         {
-          "start": "0x10a6",
-          "size": 5,
+          "start": "0x10ab",
+          "size": 4,
           "reason": "no effect"
         },
         {
           "start": "0x10b0",
           "size": 7,
-          "reason": "no effect"
-        },
-        {
-          "start": "0x10bc",
-          "size": 2,
           "reason": "no effect"
         },
         {
@@ -153,11 +150,6 @@
         {
           "start": "0x10c0",
           "size": 7,
-          "reason": "no effect"
-        },
-        {
-          "start": "0x10cc",
-          "size": 5,
           "reason": "no effect"
         },
         {
@@ -183,14 +175,14 @@
         },
         {
           "id": "var:0x1080/reg:tmp@0x1091",
-          "name": "v13",
+          "name": "v9",
           "type": "uint64_t",
           "storage": "reg:tmp@0x1091",
           "source": "default"
         },
         {
           "id": "var:0x1080/reg:tmp@0x10ab",
-          "name": "v27",
+          "name": "v18",
           "type": "uint64_t",
           "storage": "reg:tmp@0x10ab",
           "source": "default"

@@ -4,14 +4,19 @@
 //!
 //! | Uses | Rule |
 //! |---|---|
-//! | the argument registers | every call |
+//! | the integer argument registers | the count of the callee, or all of them for an unknown or variadic callee |
+//! | the floating argument registers | every call |
 //! | the varargs register (`al`) | only a call whose callee can take a variable argument list |
 //! | the stack arguments | the slots `Stack(k + 8j)` above the stack pointer at the call that the block writes before the call, while no slot is missing |
 //!
+//! So a register that the callee does not read keeps no value alive. A loop with a call then
+//! has no phi of an argument register that it never sets.
+//!
 //! `k` is the stack offset before the call plus the first stack argument offset of the
 //! convention, less the 8 bytes of the return address. The block writes the slots of one call
-//! after the call before it. So a slot of an earlier call is not an argument again. A push of a callee-saved register in the entry block is not an argument.
-//! A slot that escapes stays in memory, so it has no `Stack` location.
+//! after the call before it. So a slot of an earlier call is not an argument again. A push of
+//! a callee-saved register in the entry block is not an argument. A slot that escapes stays
+//! in memory, so it has no `Stack` location.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -30,16 +35,27 @@ pub const MAX_STACK_ARGS: i64 = 16;
 /// The fuel of the parameter recovery of one callee.
 const CALLEE_FUEL: u64 = 1_000_000;
 
-/// Gives the use list of each call op of `l0` (see the module doc). `variadic` tells if the
-/// direct callee at an address can take a variable argument list. An indirect call can.
+/// The arguments of a direct callee that the facts know.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Arity {
+    /// The count of the integer argument registers that the callee reads.
+    pub int: u8,
+    /// The callee can take a variable argument list.
+    pub varargs: bool,
+}
+
+/// Gives the use list of each call op of `l0` (see the module doc). `callee` gives the arity
+/// of the direct callee at an address, or `None` for a callee with no facts. An indirect call
+/// has no facts.
 #[must_use]
 pub fn uses(
     l0: &FuncIr,
     conv: &CallConv,
-    variadic: &dyn Fn(u64) -> bool,
+    callee: &dyn Fn(u64) -> Option<Arity>,
 ) -> BTreeMap<u32, Vec<Loc>> {
     let base: Vec<Loc> = ssa_opts(conv).call_uses.iter().collect();
     let al: BTreeSet<Loc> = conv.varargs_reg.iter().filter_map(|r| loc_of(r)).collect();
+    let ints: Vec<Loc> = conv.int_args.iter().filter_map(|r| loc_of(r)).collect();
     let first = i64::from(conv.stack_arg_offset).saturating_sub(8);
     let saved: BTreeSet<i64> = l0
         .frame
@@ -73,8 +89,10 @@ pub fn uses(
                             _ => None,
                         };
                         let mut list = base.clone();
-                        if direct.is_some_and(|t| !variadic(t)) {
-                            list.retain(|l| !al.contains(l));
+                        if let Some(a) = direct.and_then(callee).filter(|a| !a.varargs) {
+                            let unread: BTreeSet<Loc> =
+                                ints.iter().skip(usize::from(a.int)).copied().collect();
+                            list.retain(|l| !al.contains(l) && !unread.contains(l));
                         }
                         let sp = l0.frame.as_ref().and_then(|f| f.sp_at(span.addr));
                         if let Some(sp) = sp {
@@ -101,23 +119,36 @@ pub fn uses(
     out
 }
 
-/// Tells if the function or import at `addr` can take a variable argument list.
+/// Gives the arity of the function or import at `addr`.
 ///
 /// An import uses its Tier-0 prototype. A function uses its parameters: its signature, its
-/// prototype or the recovery. An address with no facts can take a variable argument list.
+/// prototype or the recovery. A function with stack parameters reads every integer argument
+/// register. An address with no facts gives `None`.
 #[must_use]
-pub fn callee_varargs(program: &Program, addr: u64) -> bool {
+pub fn callee_arity(program: &Program, addr: u64, conv: &CallConv) -> Option<Arity> {
     let at = Address::ram(addr);
     if let Some(row) = program
         .imports()
         .values()
         .find(|r| r.stub == Some(at) || (r.stub.is_none() && r.slot == Some(at)))
     {
-        return row
-            .id
-            .name()
-            .and_then(Types::prototype)
-            .is_none_or(|p| p.sig.variadic);
+        let proto = row.id.name().and_then(Types::prototype)?;
+        return Some(Arity {
+            int: u8::try_from(proto.sig.params.len()).unwrap_or(u8::MAX),
+            varargs: proto.sig.variadic,
+        });
     }
-    params(program, FuncId(at), &mut Fuel::new(CALLEE_FUEL)).map_or(true, |(p, _)| p.varargs)
+    let (p, _) = params(program, FuncId(at), &mut Fuel::new(CALLEE_FUEL)).ok()?;
+    let regs = u8::try_from(conv.int_args.len()).unwrap_or(u8::MAX);
+    let int = if p.stack > 0 {
+        regs
+    } else if conv.positional {
+        p.int.saturating_add(p.float)
+    } else {
+        p.int
+    };
+    Some(Arity {
+        int,
+        varargs: p.varargs,
+    })
 }

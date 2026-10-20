@@ -260,6 +260,8 @@ pub(super) fn build(
         uses: BTreeMap::new(),
         defs: BTreeMap::new(),
         seqs: BTreeMap::new(),
+        phi_locs: BTreeMap::new(),
+        fused: BTreeMap::new(),
     };
     let count = ssa.blocks.len();
     let mut reader = Reader::new(count);

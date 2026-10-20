@@ -18,7 +18,7 @@
 //!
 //! The result is derived data: the journal never holds it.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use ghidorah_base::{Fuel, FuncId};
@@ -162,13 +162,13 @@ pub fn lift(
     switches: &Switches,
     fuel: &mut Fuel,
 ) -> Result<L1Ir, L1Error> {
-    lift_with(l0, conv, &|_| true, switches, fuel)
+    lift_with(l0, conv, &|_| None, switches, fuel)
 }
 
-/// Makes the L1 form like [`lift`], with the varargs facts of the callees.
+/// Makes the L1 form like [`lift`], with the arity facts of the callees.
 ///
-/// `variadic` tells if the direct callee at an address can take a variable argument list. A
-/// call of another callee does not read the varargs register ([`callsite::uses`]).
+/// `callee` gives the arity of the direct callee at an address. A call of a callee with an
+/// arity reads only its argument registers ([`callsite::uses`]).
 ///
 /// # Errors
 ///
@@ -176,13 +176,16 @@ pub fn lift(
 pub fn lift_with(
     l0: FuncIr,
     conv: &CallConv,
-    variadic: &dyn Fn(u64) -> bool,
+    callee: &dyn Fn(u64) -> Option<callsite::Arity>,
     switches: &Switches,
     fuel: &mut Fuel,
 ) -> Result<L1Ir, L1Error> {
     let (arena, tail_calls) = rewrite_tail_jumps(&l0);
-    let calls = callsite::uses(&l0, conv, variadic);
+    let calls = callsite::uses(&l0, conv, callee);
     let mut ssa = ssa::build_with(arena, l0.body.clone(), &ssa_opts(conv), &calls, fuel)?;
+    for (&index, &from) in &l0.fused_from {
+        ssa.note_fused(index, from);
+    }
     let report = passes::run(&mut ssa, switches, fuel)?;
     Ok(L1Ir {
         l0,
@@ -212,15 +215,10 @@ pub fn build(
         .filter(|op| op.opc == Opc::Call)
         .filter_map(|op| op.a[0].as_k())
         .collect();
-    let varargs: BTreeSet<u64> = targets
+    let conv = conv_of(program);
+    let arity: BTreeMap<u64, callsite::Arity> = targets
         .into_iter()
-        .filter(|&t| callsite::callee_varargs(program, t))
+        .filter_map(|t| Some((t, callsite::callee_arity(program, t, conv)?)))
         .collect();
-    lift_with(
-        l0,
-        conv_of(program),
-        &|t| varargs.contains(&t),
-        switches,
-        fuel,
-    )
+    lift_with(l0, conv, &|t| arity.get(&t).copied(), switches, fuel)
 }

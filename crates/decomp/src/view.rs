@@ -17,7 +17,7 @@
 //! a register name with the address of its first def. So an agent name survives a new
 //! decompile (AC-105a).
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use ghidorah_base::{Fuel, VarId};
@@ -172,6 +172,9 @@ pub struct View {
     /// store, a call, a return, a branch or an opaque memory op. The def of a value that a
     /// return reads is an effect too.
     pub effects: BTreeSet<u64>,
+    /// The flag thunk op of each fused compare op. A line that shows the compare shows the
+    /// instruction of the thunk too, for example the `cmp` of a `jne`.
+    pub sources: BTreeMap<OpId, OpId>,
 }
 
 impl View {

@@ -313,11 +313,12 @@ fn fuse_conds(ssa: &mut Ssa, fuel: &mut Fuel) -> Result<u64, SsaError> {
         };
         let (a, b) = (ssa.root(thunk.a[0]), ssa.root(thunk.a[1]));
         if let Some((opc, x, y)) = fuse(flag_op, cc, thunk.w, a, b) {
-            plan.push((index, opc, thunk.w, [x, y, Arg::Nil]));
+            plan.push((index, opc, thunk.w, [x, y, Arg::Nil], thunk.id));
         }
     }
-    for &(index, opc, w, a) in &plan {
+    for &(index, opc, w, a, from) in &plan {
         ssa.set_op(index, opc, w, 0, a);
+        ssa.fused.insert(index, from);
     }
     Ok(u64::try_from(plan.len()).unwrap_or(u64::MAX))
 }

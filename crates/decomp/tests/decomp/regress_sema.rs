@@ -443,6 +443,45 @@ fn regress_intrinsic_operand_order() {
     );
 }
 
+/// Fusion moves the compare of `test rdx,rdx` (0x12d2) and `cmp r12,rbx` (0x12f7) to the
+/// branch. So the condition lines held only the branch, and the compares got `no effect`. An out-of-SSA copy took the address of its join block, not the address of its
+/// move: `xor ebx,ebx` (0x12da) for the loop counter (decomp-10).
+#[test]
+fn regress_line_map_of_compares_and_copies() {
+    let p = program("xor_decode.gcc-O2");
+    let out = ghidorah_decomp::render(
+        p,
+        fid(entry_of(p, "decode")),
+        &Opts::default(),
+        &NoNames,
+        &mut Fuel::new(50_000_000),
+    )
+    .expect("the render");
+    let line = |pred: &dyn Fn(&str) -> bool| {
+        out.lines
+            .iter()
+            .find(|l| pred(l.text.trim()))
+            .unwrap_or_else(|| panic!("no line: {}", out.text()))
+    };
+    let span = |l: &ghidorah_decomp::Line| l.span.expect("a line range");
+    let guard = line(&|t| t == "if (param_3 != 0) {");
+    assert_eq!(span(guard).0, 0x12d2, "{guard:?}");
+    let back = line(&|t| t.starts_with("} while (param_3 != "));
+    let (start, size) = span(back);
+    assert!(start <= 0x12f7 && 0x12f7 < start + size, "{back:?}");
+    let init = line(&|t| t.ends_with(" = 0;") && !t.starts_with('*'));
+    assert_eq!(span(init).0, 0x12da, "{init:?}");
+    for addr in [0x12d2u64, 0x12f7] {
+        assert!(
+            !out.elided
+                .iter()
+                .any(|e| e.start <= addr && addr < e.start + e.size),
+            "{addr:#x} is elided: {:?}",
+            out.elided
+        );
+    }
+}
+
 /// `test rdx,rdx; je 12fc` at 0x12d2 of `decode` skips the loop when `n == 0`. So the loop
 /// runs under `param_3 != 0`. `test rdx,rdx; jne 1260` at 0x126b of `gcd` loops while the
 /// remainder is not 0, so the loop breaks on `== 0` (decomp-01).

@@ -219,6 +219,10 @@ pub struct Ssa {
     pub(crate) defs: BTreeMap<u32, Vec<(Loc, Val)>>,
     /// The next sequence numbers of each address: `[pass ops, phis]`.
     pub(crate) seqs: BTreeMap<u64, [u16; 2]>,
+    /// The location of each phi of the build.
+    pub(crate) phi_locs: BTreeMap<u32, Loc>,
+    /// The flag thunk op that `fuse` read for each fused compare op.
+    pub(crate) fused: BTreeMap<u32, OpId>,
 }
 
 impl Ssa {
@@ -338,6 +342,25 @@ impl Ssa {
     #[must_use]
     pub fn phis(&self, block: Node) -> &[u32] {
         self.anchored(Anchor::Head(block))
+    }
+
+    /// Gives the location of a phi of the SSA build, or `None` for another op.
+    #[must_use]
+    pub fn phi_loc(&self, index: u32) -> Option<Loc> {
+        self.phi_locs.get(&index).copied()
+    }
+
+    /// Gives the flag thunk op that a fusion read for the compare op `index`. The compare
+    /// runs at the place of its flag read, so a printer can show the thunk with it.
+    #[must_use]
+    pub fn fused_from(&self, index: u32) -> Option<OpId> {
+        self.fused.get(&index).copied()
+    }
+
+    /// Records that the compare op `index` comes from a fusion of the flag thunk op `from`.
+    /// An example is the L0 fusion of the function IR builder before the SSA build.
+    pub fn note_fused(&mut self, index: u32, from: OpId) {
+        self.fused.insert(index, from);
     }
 
     /// Gives the location uses of a flow op: each location and its value at the op.
