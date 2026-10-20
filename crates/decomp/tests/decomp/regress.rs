@@ -216,3 +216,288 @@ fn regress_linemap_does_not_hide_dropped_store() {
         printed.warnings
     );
 }
+
+/// Gives each variable token `v<N>` of `text` with a flag: `true` when the token is the left
+/// side of an assignment. A store through a pointer reads its variable.
+fn var_tokens(text: &str) -> Vec<(String, bool)> {
+    let mut out = Vec::new();
+    for line in text.lines() {
+        let mut start = None;
+        let ends = line
+            .char_indices()
+            .chain(std::iter::once((line.len(), ' ')));
+        for (k, ch) in ends {
+            let ident = ch.is_ascii_alphanumeric() || ch == '_';
+            match (ident, start) {
+                (true, None) => start = Some(k),
+                (false, Some(s)) => {
+                    start = None;
+                    let word = &line[s..k];
+                    let digits = word.strip_prefix('v').unwrap_or_default();
+                    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
+                        continue;
+                    }
+                    let before = line[..s].trim_start();
+                    let lead =
+                        before.is_empty() || before.ends_with("for (") || before.ends_with("; ");
+                    let def = lead && line[k..].starts_with(" = ");
+                    out.push((word.to_owned(), def));
+                }
+                _ => {}
+            }
+        }
+    }
+    out
+}
+
+/// Gives the variables `v<N>` that `text` reads but never assigns.
+pub fn undefined_reads(text: &str) -> BTreeSet<String> {
+    let tokens = var_tokens(text);
+    let defs: BTreeSet<&String> = tokens.iter().filter(|t| t.1).map(|t| &t.0).collect();
+    tokens
+        .iter()
+        .filter(|t| !t.1 && !defs.contains(&t.0))
+        .map(|t| t.0.clone())
+        .collect()
+}
+
+/// Gives the variables `v<N>` that `text` assigns but never reads.
+fn dead_assigns(text: &str) -> BTreeSet<String> {
+    let tokens = var_tokens(text);
+    let reads: BTreeSet<&String> = tokens.iter().filter(|t| !t.1).map(|t| &t.0).collect();
+    tokens
+        .iter()
+        .filter(|t| t.1 && !reads.contains(&t.0))
+        .map(|t| t.0.clone())
+        .collect()
+}
+
+/// Gives the decompiled text of the function at `entry` of the fixture `fixture`.
+pub fn text_at(fixture: &str, entry: u64) -> String {
+    let p = crate::fixtures::program(fixture);
+    ghidorah_decomp::render(
+        p,
+        crate::fixtures::fid(entry),
+        &Opts::default(),
+        &ghidorah_ir::NoNames,
+        &mut ghidorah_base::Fuel::new(50_000_000),
+    )
+    .unwrap_or_else(|e| panic!("{fixture} {entry:#x}: {e}"))
+    .text()
+}
+
+/// A function that passes an entry value on to a call or a tail call has that parameter.
+/// `cc::recover` counted a call as a read of its target only. So the namer limit made the
+/// entry value a register value with no def, and the head lost the parameter. A caller of
+/// such a function lost the argument (r2-engine-01).
+#[test]
+fn regress_forwarded_params_stay_params() {
+    let main = crate::regress_sema::text("hello.gcc-O2", "main");
+    assert!(
+        main.starts_with("uint64_t main(uint64_t param_1)\n"),
+        "{main}"
+    );
+    assert!(main.contains("return run(param_1);"), "{main}");
+    let left = crate::regress_sema::text("two_helpers.gcc-O2", "left_value");
+    assert!(left.contains("helper(param_1)"), "{left}");
+    assert!(undefined_reads(&left).is_empty(), "{left}");
+    let wrapper = text_at("pe/pe_main.exe", 0x1_4000_1236);
+    let head = wrapper.lines().next().unwrap_or_default();
+    assert_eq!(head.matches("param_").count(), 4, "{wrapper}");
+    assert!(
+        wrapper.contains("FUN_140001242(param_1, param_2, param_3, param_4)"),
+        "{wrapper}"
+    );
+    let caller = crate::regress_sema::text("two_helpers.gcc-O2", "main");
+    assert!(
+        caller.contains("left_value(") && !caller.contains("left_value()"),
+        "{caller}"
+    );
+    assert!(caller.contains("right_value(param_1)"), "{caller}");
+    assert!(dead_assigns(&caller).is_empty(), "{caller}");
+}
+
+/// The fixtures whose text must read no entry value of an argument register as a register
+/// value.
+const PARAM_FIXTURES: [&str; 14] = [
+    "hello.clang-O2",
+    "hello.clang-O2.stripped",
+    "hello.gcc-O2",
+    "hello.gcc-O2-nocet-nopie",
+    "hello.gcc-O2-noplt",
+    "hello.gcc-O2.noeh",
+    "hello.gcc-O2.noshdr",
+    "hello.gcc-O2.stripped",
+    "two_helpers.gcc-O2",
+    "two_helpers.clang-O2",
+    "strings.gcc-O2",
+    "varargs.gcc-O2",
+    "pe/pe_main.exe",
+    "pe/pe_flags.exe",
+];
+
+/// Gives the undefined reads of the text of each function of `fixture` whose variable holds
+/// the entry value of an integer argument register. The entry stack pointer, a floating
+/// register and the other registers have no parameter number of their own, so the check
+/// leaves them out.
+fn undefined_params(fixture: &str) -> Vec<String> {
+    let p = crate::fixtures::program(fixture);
+    let args: BTreeSet<Loc> = ghidorah_analysis::cc::conv_of(p)
+        .int_args
+        .iter()
+        .filter_map(|n| ghidorah_analysis::cc::loc_of(n))
+        .collect();
+    let mut bad = Vec::new();
+    for f in p.funcs().iter().filter(|f| !f.func.flags.thunk) {
+        let id = f.id();
+        let d = ghidorah_decomp::decompile(
+            p,
+            id,
+            &Opts::default(),
+            &mut ghidorah_base::Fuel::new(50_000_000),
+        )
+        .unwrap_or_else(|e| panic!("{fixture} {:#x}: {e}", id.0.off));
+        let vars = d.view.vars.clone();
+        let env = ghidorah_decomp::ProgramEnv(p);
+        let body = ghidorah_decomp::print::body_units(p, id);
+        let out = ghidorah_decomp::finish(d, &env, &ghidorah_ir::NoNames, "f", &body);
+        let text = out.text();
+        for name in undefined_reads(&text) {
+            let input = out
+                .vars
+                .iter()
+                .find(|r| r.name == name)
+                .and_then(|r| vars.iter().find(|v| v.id == r.id))
+                .and_then(|v| v.input);
+            if input.is_some_and(|l| args.contains(&l)) {
+                bad.push(format!("{fixture} {:#x} reads {name}:\n{text}", id.0.off));
+            }
+        }
+    }
+    bad
+}
+
+/// No function text of the fixtures reads a variable with no def that holds the entry value
+/// of an argument register. Such a variable is a lost parameter (r2-engine-01).
+#[test]
+fn regress_no_undefined_register_values() {
+    let bad: Vec<String> = PARAM_FIXTURES
+        .iter()
+        .flat_map(|f| undefined_params(f))
+        .collect();
+    assert!(bad.is_empty(), "{} reads:\n{}", bad.len(), bad.join("\n"));
+}
+
+/// Gives the count of the top-level arguments of the first call of `name` in `text`.
+fn arg_count(text: &str, name: &str) -> usize {
+    let start = text
+        .find(&format!("{name}("))
+        .unwrap_or_else(|| panic!("no call of {name}: {text}"));
+    let body = &text[start + name.len() + 1..];
+    let (mut depth, mut commas) = (0usize, 0usize);
+    for ch in body.chars() {
+        match ch {
+            '(' => depth += 1,
+            ')' if depth == 0 => return if body.starts_with(')') { 0 } else { commas + 1 },
+            ')' => depth -= 1,
+            ',' if depth == 0 => commas += 1,
+            _ => {}
+        }
+    }
+    commas + 1
+}
+
+/// A slot of the MS x64 convention is its position: `rcx` or `xmm0` is slot 0, up to `r9` or
+/// `xmm3`. `Env::param_count` gave the count of the integer slots only, and the namer named
+/// no floating slot. So `c` of `m3(int a, double b, int c)` read as a register value, and a
+/// caller passed 2 of the 3 arguments (r2-engine-02).
+#[test]
+fn regress_positional_param_slots() {
+    let fixture = "pe/pe_cc.exe";
+    let body = |text: &str| text.lines().skip(1).collect::<Vec<_>>().join("\n");
+    let m3 = text_at(fixture, 0x1_4000_1130);
+    let head = m3.lines().next().unwrap_or_default();
+    assert_eq!(head.matches("param_").count(), 3, "{m3}");
+    assert!(body(&m3).contains("param_3"), "r8 is param_3: {m3}");
+    let m4 = text_at(fixture, 0x1_4000_1150);
+    assert!(body(&m4).contains("param_4"), "r9 is param_4: {m4}");
+    let g2 = text_at(fixture, 0x1_4000_11c0);
+    assert!(body(&g2).contains("param_2"), "rdx is param_2: {g2}");
+    for text in [&m3, &m4, &g2] {
+        assert!(undefined_reads(text).is_empty(), "{text}");
+    }
+    let start = text_at(fixture, 0x1_4000_11e0);
+    assert_eq!(arg_count(&start, "FUN_140001130"), 3, "{start}");
+    assert_eq!(arg_count(&start, "FUN_140001150"), 4, "{start}");
+    assert_eq!(arg_count(&start, "FUN_1400011c0"), 2, "{start}");
+}
+
+/// Gives the output of the function `name` of the fixture `fixture`.
+fn output_of(fixture: &str, name: &str) -> ghidorah_decomp::Output {
+    let p = crate::fixtures::program(fixture);
+    let entry = crate::fixtures::entry_of(p, name);
+    ghidorah_decomp::render(
+        p,
+        crate::fixtures::fid(entry),
+        &Opts::default(),
+        &ghidorah_ir::NoNames,
+        &mut ghidorah_base::Fuel::new(50_000_000),
+    )
+    .unwrap_or_else(|e| panic!("{fixture} {name}: {e}"))
+}
+
+/// Gives the names of the call rows of an output.
+fn call_names(out: &ghidorah_decomp::Output) -> Vec<String> {
+    out.lines
+        .iter()
+        .flat_map(|l| &l.calls)
+        .map(|c| c.name.clone())
+        .collect()
+}
+
+/// `finish` of the `-fno-plt` build calls `puts` through its GOT slot: `call [rip+x]`. The
+/// call named its target `DAT_00000003`, the EXTERNAL address of the import (known-04).
+/// The finding names `main`, but `main` of hello only tail calls `run`.
+#[test]
+fn regress_noplt_got_call_names_import() {
+    let fixture = "hello.gcc-O2-noplt";
+    let finish = output_of(fixture, "finish");
+    let text = finish.text();
+    assert!(text.contains("puts(\"Goodbye.\");"), "{text}");
+    assert!(!text.contains("DAT_"), "{text}");
+    assert_eq!(call_names(&finish), ["puts"], "{text}");
+    let main = output_of(fixture, "main");
+    assert!(
+        call_names(&main).iter().all(|n| !n.starts_with("DAT_")),
+        "{}",
+        main.text()
+    );
+}
+
+/// `greet` of the `-fno-plt` build ends with `jmp [rip+x]` through the GOT slot of
+/// `__printf_chk` at stack height 0. It is no thunk, so the jump stayed a `goto` that read no
+/// argument register (known-05). The finding names `puts`, but the slot is the one of
+/// `__printf_chk`: `greet` calls `printf`, which the build fortifies.
+#[test]
+fn regress_noplt_got_jump_is_tail_call() {
+    let greet = output_of("hello.gcc-O2-noplt", "greet");
+    let text = greet.text();
+    assert!(
+        text.contains("return __printf_chk(2, \"Hello, %s!\\n\", param_1);"),
+        "{text}"
+    );
+    assert!(!text.contains("goto"), "{text}");
+    assert_eq!(call_names(&greet), ["__printf_chk"], "{text}");
+}
+
+/// `_start` calls `__libc_start_main` through its GOT slot after `and rsp, -16`. The push of
+/// the return address can alias the slot, so the load did not fold into the call. The call
+/// names the import, so the load stayed as an assignment that no line reads (known-04).
+#[test]
+fn regress_import_call_slot_load_has_no_statement() {
+    for fixture in ["hello.gcc-O2", "hello.gcc-O2-noplt"] {
+        let text = output_of(fixture, "_start").text();
+        assert!(text.contains("__libc_start_main("), "{text}");
+        assert!(dead_assigns(&text).is_empty(), "{text}");
+    }
+}

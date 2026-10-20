@@ -14,6 +14,9 @@
 //! | `JumpInd(Load(slot))` of a thunk in one instruction, through an import slot | a tail call of the import |
 //! | `Ret` | a stop |
 //!
+//! A call through an import slot, `Call(Load(slot))` in one instruction, calls the import.
+//! The load of the slot gets no statement: the call line shows it.
+//!
 //! The store of the return address of a `call` gets no statement: the call line shows it. An
 //! example is the push of a call after `and rsp, -16` in `_start`, where the stack offset is
 //! unknown, so the store stays in memory.
@@ -27,6 +30,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use ghidorah_analysis::cc::is_scalar_into;
 use ghidorah_analysis::jumptable::GuardInfo;
 use ghidorah_base::WarningCode;
 use ghidorah_ir::{
@@ -37,7 +41,7 @@ use crate::Warning;
 use crate::expr::{Call, Callee, Expr, Stmt, VarIdx};
 use crate::fold::Plan;
 use crate::view::Env;
-use crate::view::facts::{Facts, Kind};
+use crate::view::facts::{Facts, Kind, Site};
 
 /// The terminator of a block.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -222,7 +226,14 @@ impl Ex<'_> {
         }
     }
 
-    /// Gives the call of the flow op `i`, with its used defs as results.
+    /// Tells if `a` is the entry value of a location.
+    fn is_entry(&self, a: Arg) -> bool {
+        matches!(self.f.ssa.root(a), Arg::V(v) if matches!(self.f.kind_of(v), Kind::Input(_)))
+    }
+
+    /// Gives the call of the flow op `i`, with its used defs as results. A scalar conversion
+    /// into an XMM register writes the scalar lane of its destination. No caller leaves a
+    /// value in the other lanes. So the entry value of the destination is no input.
     pub(crate) fn call(&self, i: u32) -> Call {
         let op = self.f.op(i).copied().unwrap_or(Op {
             id: OpId { addr: 0, seq: 0 },
@@ -232,14 +243,13 @@ impl Ex<'_> {
             out: None,
             a: [Arg::Nil; 3],
         });
-        let callee = match op.opc {
-            Opc::Call => match op.a[0] {
-                Arg::K(t) => Callee::Direct(t.get()),
-                other => Callee::Indirect(self.arg(other, 64)),
-            },
-            Opc::CallInd => Callee::Indirect(self.arg(op.a[0], 64)),
-            Opc::Syscall => Callee::Syscall,
-            Opc::Intrinsic => Callee::Intrinsic(
+        let callee = match (op.opc, op.a[0]) {
+            (Opc::Call, Arg::K(t)) => Callee::Direct(t.get()),
+            (Opc::Call | Opc::CallInd, target) => self
+                .slot_target(target, op.id.addr)
+                .map_or_else(|| Callee::Indirect(self.arg(target, 64)), Callee::Direct),
+            (Opc::Syscall, _) => Callee::Syscall,
+            (Opc::Intrinsic, _) => Callee::Intrinsic(
                 self.f
                     .ssa
                     .arena()
@@ -254,8 +264,16 @@ impl Ex<'_> {
         } else {
             LocSet::EMPTY
         };
+        let scalar = op.opc == Opc::Intrinsic
+            && self
+                .f
+                .ssa
+                .arena()
+                .effect(&op)
+                .is_some_and(|e| is_scalar_into(e.name));
         let mut args: Vec<(Loc, Expr)> = uses
             .iter()
+            .filter(|&&(loc, a)| !(scalar && loc.is_xmm() && self.is_entry(a)))
             .map(|&(loc, a)| (loc, self.arg(a, loc.width())))
             .collect();
         let imm = match self.f.ssa.arena().effect(&op) {
@@ -292,22 +310,37 @@ impl Ex<'_> {
         }
     }
 
-    /// Gives the call target of the indirect jump of a thunk through an import slot. The jump
-    /// target must be a load of a constant slot address in the same instruction. Another
-    /// function sets its argument registers before the jump. The jump reads no register in
-    /// L1, so the jump of such a function keeps its `goto`.
-    fn import_jump(&self, target: Arg, addr: u64) -> Option<u64> {
+    /// Gives the call target of the import whose slot `target` loads. The target must be a
+    /// load of a constant slot address in the instruction at `addr`. An example is the
+    /// `call [rip+x]` of a `-fno-plt` build: it calls the import, not a data address.
+    fn slot_target(&self, target: Arg, addr: u64) -> Option<u64> {
         let Arg::V(v) = target else {
             return None;
         };
-        if !self.thunk {
-            return None;
-        }
         let op = self.f.def.get(&v).and_then(|&i| self.f.op(i))?;
         if op.opc != Opc::Load || op.id.addr != addr {
             return None;
         }
         self.env.import_at_slot(op.a[0].as_k()?)
+    }
+
+    /// Tells if the value of the load `op` is only the target of a call through an import
+    /// slot. The call line shows the load, so the load has no statement of its own.
+    fn loads_slot_target(&self, op: &Op) -> bool {
+        let Some(Site::Op(i)) = op.out.and_then(|v| self.f.site.get(&v)) else {
+            return false;
+        };
+        self.f.op(*i).is_some_and(|call| {
+            matches!(call.opc, Opc::Call | Opc::CallInd)
+                && call.a[0] == op.out.map_or(Arg::Nil, Arg::V)
+                && self.slot_target(call.a[0], call.id.addr).is_some()
+        })
+    }
+
+    /// Gives the call target of the indirect jump of a thunk through an import slot. Another
+    /// function with such a jump at stack height 0 has a call in L1 in its place.
+    fn import_jump(&self, target: Arg, addr: u64) -> Option<u64> {
+        self.slot_target(target, addr).filter(|_| self.thunk)
     }
 
     /// Gives the statement of an indirect jump with no case: the tail call of the import of
@@ -334,6 +367,7 @@ impl Ex<'_> {
         match op.opc {
             Opc::Phi | Opc::Nop | Opc::Get | Opc::Jump | Opc::CJump | Opc::JumpInd => None,
             Opc::Store if self.return_push(op) => None,
+            Opc::Load if self.loads_slot_target(op) => None,
             Opc::Store => Some(Stmt::Store {
                 w: op.w,
                 addr: self.arg(op.a[0], 64),

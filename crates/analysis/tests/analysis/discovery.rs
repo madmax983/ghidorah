@@ -179,3 +179,69 @@ fn regress_no_code_in_zero_fill() {
         }
     }
 }
+
+/// Two binaries that differ only in the order of the function symbols at one address give one
+/// state hash and one function name. The `Symbols` analyzer took the premise of the last
+/// alias and pushed the extents in table order (known-06). The state hash holds the hash of
+/// the file bytes. So each program takes the memory and the file hash of the first file, and
+/// the binary model of its own file.
+#[test]
+fn regress_symbol_alias_order_is_stable() {
+    use ghidorah_base::Limits;
+    use ghidorah_loader::{LoadOpts, load};
+    use ghidorah_testkit::elf::{ElfBuilder, Loc, Section, Symbol};
+
+    // The entry: ret, then nop padding. The aliases: xor eax, eax; ret; then nop padding.
+    let code = [
+        0xc3, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x31, 0xc0, 0xc3, 0x90, 0x90, 0x90, 0x90,
+        0x90,
+    ];
+    let at = Loc::section(".text", 8);
+    let aliases = [
+        Symbol::func("zeta", at.clone(), 8),
+        Symbol::func("alpha", at.clone(), 3),
+        Symbol::func("mid", at.clone(), 5).weak(),
+        Symbol::func("local_one", at, 6).local(),
+    ];
+    let file = |order: &[usize]| {
+        let mut b = ElfBuilder::exec()
+            .section(Section::code(".text", &code))
+            .entry(Loc::section(".text", 0));
+        for &k in order {
+            b = b.symbol(aliases[k].clone());
+        }
+        load(&b.build(), &LoadOpts::AUTO, &Limits::DEFAULT).expect("the bytes load")
+    };
+    let (base, mem) = file(&[0, 1, 2, 3]);
+    let build = |order: &[usize]| {
+        let (mut binary, _) = file(order);
+        binary.identity.sha256 = base.identity.sha256;
+        let mut p = Program::from_binary(binary, mem.clone(), &Limits::DEFAULT).expect("load");
+        crate::support::analyze(&mut p);
+        p
+    };
+    let first = build(&[0, 1, 2, 3]);
+    let entry = first
+        .binary()
+        .symbols
+        .iter()
+        .find(|s| s.name.as_str() == Some("alpha"))
+        .expect("the alias")
+        .addr;
+    let name = |p: &Program| p.name(Address::ram(entry)).map(|n| n.text);
+    assert_eq!(
+        name(&first).as_deref(),
+        Some("alpha"),
+        "global, then name order"
+    );
+    let hash = first.state_hash().expect("the hash");
+    for order in [[1, 0, 2, 3], [2, 1, 0, 3], [1, 2, 3, 0]] {
+        let other = build(&order);
+        assert_eq!(name(&other), name(&first), "{order:?}");
+        assert_eq!(
+            other.state_hash().expect("the hash"),
+            hash,
+            "the order {order:?} changes the state"
+        );
+    }
+}

@@ -107,13 +107,14 @@ impl Printer<'_> {
             .map(|(n, _)| usize::from(*n).saturating_add(1))
             .max()
             .unwrap_or(0);
-        // The signature, the prototype or the parameter recovery gives the count. The
-        // variables of the text give it only when the facts know no count.
-        let count = match (&sig, self.env.param_count(view.entry)) {
+        // The signature, the prototype or the parameter recovery gives the count. A parameter
+        // that the text reads adds its slot when the count of the facts is short.
+        let facts = match (&sig, self.env.param_count(view.entry)) {
             (Some(s), _) => s.params.len(),
             (None, Some(n)) => usize::from(n),
-            (None, None) => used_max,
+            (None, None) => 0,
         };
+        let count = facts.max(used_max);
         let mut texts = Vec::new();
         for n in 0..count {
             let sig_ty = sig.as_ref().and_then(|s| s.params.get(n)).copied();

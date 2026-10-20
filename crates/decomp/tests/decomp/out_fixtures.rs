@@ -145,12 +145,20 @@ pub fn elided_at(out: &Output, addr: u64) -> Option<ElideReason> {
         .map(|e| e.reason)
 }
 
-/// Gives the targets of the references of `kind` from `site`.
+/// Gives the targets of the references of `kind` from `site`. A reference to the EXTERNAL
+/// address of an import gives the call target of the import: its stub, else its slot.
 fn refs_of(p: &Program, site: u64, kind: impl Fn(RefType) -> bool) -> Vec<u64> {
     p.refs_from(Address::ram(site))
         .iter()
         .filter(|r| kind(r.value.key.kind))
-        .map(|r| r.value.key.to.off)
+        .map(|r| {
+            let to = r.value.key.to;
+            p.imports()
+                .values()
+                .find(|row| row.ext == to)
+                .and_then(|row| row.stub.or(row.slot))
+                .map_or(to.off, |a| a.off)
+        })
         .collect()
 }
 

@@ -65,7 +65,8 @@ pub trait Env {
 
     /// Gives the count of the parameter slots of the function at `addr`: from its signature,
     /// its Tier-0 prototype or the parameter recovery. The stack parameters come after all
-    /// integer argument registers. The default knows no count.
+    /// integer argument registers. A positional convention counts its floating slots too.
+    /// The default knows no count.
     fn param_count(&self, addr: u64) -> Option<u8> {
         let _ = addr;
         None
@@ -280,13 +281,14 @@ pub fn build(
         thunk: env.is_thunk(entry),
     };
     let mut raws: Vec<Raw> = f.reach.iter().map(|&b| stmts::block(&ex, b)).collect();
+    let read = crate::vars_names::read_slots(&f, input.conv);
     let cx = vars::Ctx {
         f: &f,
         raws: &raws,
         l0: input.l0,
         conv: input.conv,
         entry,
-        params: env.param_count(entry),
+        params: env.param_count(entry).map(|n| u16::from(n).max(read)),
     };
     let assigned = vars::assign(&cx);
     let mut warnings = Vec::new();
