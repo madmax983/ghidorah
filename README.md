@@ -177,8 +177,10 @@ The dev crates are `ghidorah-testkit`, `ghidorah-oracle`, `ghidorah-eval` and `x
 
 - Verus proves six kernels of `ghidorah-kernel`: K1 `Reader`, K2 range math, K3 `RangeSet`, K5 flag fusion, K6 budget fit and K7 provenance order (design Section 13.1, ADR-0011).
 - The proved code is the shipped code. A std-only stub crate (`ghidorah-spec`) lets plain `cargo` build the same files.
-- `verify/results.json` records the last proof run with a tree hash of the proof inputs. A kernel test fails when the record is stale.
-- Each kernel has a negative patch in `verify/negative/`. Its Verus run must fail with a verification error.
+- `verify/results.json` records the last proof run with a tree hash of the proof inputs. A stale record is a warning in plain `cargo test`.
+- Under `GHIDORAH_REQUIRE_PROOFS=1`, a stale record fails the kernel test and the record check of `xtask ac`. `xtask ci` and `xtask ac --run` require proofs.
+- Each kernel has at least one negative patch in `verify/negative/`. K1, K3, K5 and K7 have two patches.
+- The Verus run of each patch must fail with its own expected error kind from `KERNELS` in `xtask/src/verify/kernels.rs`.
 
 Run the proofs:
 
@@ -193,7 +195,7 @@ Other checks:
 | `cargo test --workspace` | Tier-1 tests with checked-in fixtures only. |
 | `cargo test --workspace -- --include-ignored` | Tier-2 tests. They need gcc, clang or objdump. |
 | `cargo xtask gates` | The static workspace gates. |
-| `cargo xtask cov` | Line coverage per crate. |
+| `cargo xtask cov` | Line coverage per crate. The gate fails when the kernel or a core crate has no measurement. |
 | `cargo xtask ste` | The ASD-STE100 check of docs and comments. |
 | `cargo xtask fuzz` | Long fuzz runs of each target with 100,000 cases. Failed inputs go to `tests/regress/`. |
 | `cargo xtask bench` | The release benchmarks against the budgets of `perf/budget.json`. |

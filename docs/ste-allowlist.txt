@@ -57,7 +57,6 @@ docs/design.md STE-3 `binary_survey { include?: [identity, protections, segments
 docs/design.md STE-3 `search { kind | ids, query?, match?: substr|glob|exact
 docs/design.md STE-4 A string of digits only is never guessed.
 docs/design.md STE-2 the call and jump sites of the stub
-docs/design.md STE-2 It escapes C0 and C1 controls, DEL, U+2028,
 docs/design.md STE-4 the noreturn flag is set
 docs/design.md STE-4 `xtask verify` (WP-03) runs Verus when `VERUS` and
 docs/design.md STE-2 Parser targets, each owned by its parser WP:

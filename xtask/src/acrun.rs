@@ -27,7 +27,8 @@ pub enum Status {
     Fail,
     /// The record matches the hash of its named input.
     Recorded,
-    /// The item did not run in this tier, or the host has no input file of the record.
+    /// The item did not run in this tier, or the record check gives no verdict on this host
+    /// ([`record`]).
     Skipped,
 }
 
@@ -313,7 +314,10 @@ pub fn run_rows(root: &Path, rows: &[AcRow], tier2: bool) -> Result<Vec<Outcome>
                     file,
                     pointer,
                     input,
-                } => record::status(root, file, pointer, input),
+                } => {
+                    // An evidence run requires proofs, as its test items do.
+                    record::status(root, file, pointer, input, true)
+                }
             };
             outcomes.push(Outcome {
                 ac: row.id.clone(),

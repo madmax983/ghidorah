@@ -1,6 +1,6 @@
 //! The `xtask cov` command: line coverage with rustup `llvm-tools` (ADR-0027).
 //!
-//! Output: `{ ok, workspace: {..}, crates: { <dir>: {..} }, objects, tests_ok }`.
+//! Output: `{ ok, workspace: {..}, crates: { <dir>: {..} }, missing, objects, tests_ok }`.
 //! Percent values are integers in hundredths (`percent_x100`), so the output has no floats.
 //!
 //! Method: build and run the tier-1 tests with `-C instrument-coverage` in `target/cov`,
@@ -238,9 +238,20 @@ fn report(counts: Counts, min: Option<u64>) -> (bool, Value) {
     (ok, value)
 }
 
+/// Gives the gated crates without a measurement: the kernel and each core crate with no row or
+/// zero instrumented lines.
+#[must_use]
+pub fn unmeasured(coverage: &Coverage) -> Vec<&'static str> {
+    std::iter::once("kernel")
+        .chain(CORE.iter().copied())
+        .filter(|dir| coverage.crates.get(*dir).is_none_or(|c| c.lines == 0))
+        .collect()
+}
+
 /// Applies the thresholds and gives the JSON report with its `ok` member.
 ///
-/// A crate with zero instrumented lines has no gate yet.
+/// The report lists the gated crates without a measurement in `missing` (see [`unmeasured`]).
+/// An empty measurement or a `missing` crate fails the gate.
 #[must_use]
 pub fn gate(coverage: &Coverage) -> Value {
     let mut all = Counts::default();
@@ -248,16 +259,21 @@ pub fn gate(coverage: &Coverage) -> Value {
     let mut crates = BTreeMap::new();
     for (dir, counts) in &coverage.crates {
         all.add(*counts);
-        let min = min_percent(dir).filter(|_| counts.lines > 0);
-        let (crate_ok, value) = report(*counts, min);
+        let (crate_ok, value) = report(*counts, min_percent(dir));
         ok &= crate_ok;
         crates.insert(dir.clone(), value);
     }
-    let (workspace_ok, workspace) = report(all, (all.lines > 0).then_some(WORKSPACE_MIN));
+    let (workspace_ok, workspace) = report(all, Some(WORKSPACE_MIN));
+    let missing = unmeasured(coverage);
+    let measured = all.lines > 0 && missing.is_empty();
     Value::object([
-        ("ok", Value::from(ok && workspace_ok)),
+        ("ok", Value::from(ok && workspace_ok && measured)),
         ("workspace", workspace),
         ("crates", Value::Object(crates)),
+        (
+            "missing",
+            Value::from(missing.into_iter().map(Value::from).collect::<Vec<_>>()),
+        ),
     ])
 }
 
@@ -309,9 +325,13 @@ fn llvm_tools() -> Result<Tools, Error> {
     }
 }
 
-fn instrumented(root: &Path, target: &Path, profiles: &Path, args: &[&str]) -> Command {
+/// Gives a cargo command of the coverage build in `target`, with the profiles in `profiles`.
+#[must_use]
+pub fn instrumented(root: &Path, target: &Path, profiles: &Path, args: &[&str]) -> Command {
     let mut cmd = proc::cargo_cmd(args);
+    // A `CARGO_ENCODED_RUSTFLAGS` value makes cargo ignore `RUSTFLAGS`.
     cmd.current_dir(root)
+        .env_remove("CARGO_ENCODED_RUSTFLAGS")
         .env("RUSTFLAGS", "-C instrument-coverage")
         .env("CARGO_TARGET_DIR", target)
         .env("LLVM_PROFILE_FILE", profiles.join("%p-%m.profraw"));

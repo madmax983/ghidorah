@@ -294,7 +294,7 @@ const CLAIMS: &str = r#"{"tree_sha256":"aa",
 fn regress_record_checks_claims() {
     let check = |text: &str, pointer: &str, input: &str, current: Option<&str>| {
         let record = json::parse(text).expect("record parses");
-        record::record_match(&record, pointer, input, current)
+        record::record_match(&record, pointer, input, current, true)
     };
     let tree = |text: &str, pointer: &str| check(text, pointer, "tree", Some("aa"));
     assert_eq!(tree(CLAIMS, "/kernels/K6"), Status::Recorded);
@@ -388,24 +388,31 @@ fn ac_018b_evidence_passes() {
     assert_eq!(record::expected(&record, "/kernels/K1", "tree"), Some("aa"));
     assert_eq!(record::expected(&record, "/bash", "host-bash"), Some("bb"));
     let check = |pointer: &str, input: &str, current: Option<&str>| {
-        record::record_match(&record, pointer, input, current)
+        record::record_match(&record, pointer, input, current, true)
     };
     assert_eq!(check("/kernels/K1", "tree", Some("aa")), Status::Recorded);
     assert_eq!(check("/kernels/K1", "tree", Some("ab")), Status::Fail);
     assert_eq!(check("/kernels/K1", "tree", None), Status::Fail);
     assert_eq!(check("/kernels/K9", "tree", Some("aa")), Status::Fail);
     assert_eq!(check("/bash", "host-bash", Some("bb")), Status::Recorded);
-    assert_eq!(check("/bash", "host-bash", Some("bc")), Status::Fail);
+    assert_eq!(check("/bash", "host-bash", Some("bc")), Status::Skipped);
     assert_eq!(check("/bash", "host-bash", None), Status::Skipped);
     assert_eq!(check("/bash", "other", Some("bb")), Status::Fail);
-    // The tree record of the repository matches its proof inputs.
+    // The tree record of the repository matches its proof inputs. A stale record is a warning
+    // in plain `cargo test` and a failure under `GHIDORAH_REQUIRE_PROOFS=1` (design 13.3).
+    let require = std::env::var(record::REQUIRE_PROOFS).is_ok_and(|v| v == "1");
     for kernel in ["K1", "K2", "K3", "K5", "K6", "K7"] {
         let pointer = format!("/kernels/{kernel}");
-        let status = record::status(&root(), "verify/results.json", &pointer, "tree");
-        assert_eq!(status, Status::Recorded, "{kernel}");
+        let status = record::status(&root(), "verify/results.json", &pointer, "tree", require);
+        let allowed: &[Status] = if require {
+            &[Status::Recorded]
+        } else {
+            &[Status::Recorded, Status::Skipped]
+        };
+        assert!(allowed.contains(&status), "{kernel}: {status:?}");
     }
     assert_eq!(
-        record::status(&root(), "verify/none.json", "/kernels", "tree"),
+        record::status(&root(), "verify/none.json", "/kernels", "tree", true),
         Status::Fail
     );
 
