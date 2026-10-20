@@ -11,6 +11,7 @@ use ghidorah_json::{Object, Value};
 use ghidorah_loader::{EntryKind, Kind, Protections, Relro, SegmentKind};
 
 use super::{DIAG_PLACES, STRING_FUNCS, TOP_FUNCTIONS, WHY_REST, WORK_ITEMS};
+use crate::handlers::addr_info;
 use crate::handlers::func_sections::{self as fs, Namer};
 
 /// One section: its members, its list and the call that lists the items it leaves out.
@@ -252,7 +253,7 @@ fn sections(p: &Program) -> Part {
         .map(|s| {
             let name = fs::safe(&s.name.render(Caps::DETAILED).text);
             let mut out = Object::new();
-            out.push("id", Value::from(format!("sec:{}:{name}", s.index)));
+            out.push("id", Value::from(addr_info::section_id(s)));
             out.push("name", Value::from(name));
             if let Some(r) = s.va {
                 out.push("start", fs::hex(r.first));

@@ -6,6 +6,7 @@ use ghidorah_json::Value;
 use ghidorah_loader::{SymBind, SymKind, SymTable};
 
 use super::filter::{Items, Matcher, New};
+use crate::handlers::addr_info;
 use crate::handlers::func_sections::{self as fs, Namer};
 
 /// Gives the text of binary text in the escapes of `BinText`, with no cap.
@@ -78,7 +79,7 @@ pub fn sections(items: &mut Items<'_>, m: &Matcher) {
             if !m.matches(&name) {
                 return None;
             }
-            let mut new = New::item("section", format!("sec:{}:{name}", s.index));
+            let mut new = New::item("section", addr_info::section_id(s));
             new.addr = s.va.map(|r| Address::ram(r.first));
             new.text = Some(Value::from(name));
             new.seq = u64::from(s.index);
@@ -178,8 +179,8 @@ fn sym_names(
 
 /// Adds the named symbols of the symbol tables of the loader model whose name matches.
 pub fn symbols(items: &mut Items<'_>, m: &Matcher, namer: &Namer) {
-    let list: Vec<New> = items
-        .program
+    let program = items.program;
+    let list: Vec<New> = program
         .binary()
         .symbols
         .iter()
@@ -191,7 +192,8 @@ pub fn symbols(items: &mut Items<'_>, m: &Matcher, namer: &Namer) {
                 return None;
             }
             let name = namer.text(&raw);
-            let mut new = New::item("symbol", format!("sym:{name}"));
+            let id = addr_info::symbol_id(program, &raw, Address::ram(s.addr));
+            let mut new = New::item("symbol", id);
             new.addr = (s.addr != 0).then(|| Address::ram(s.addr));
             new.text = Some(Value::from(name));
             new.seq = seq;
