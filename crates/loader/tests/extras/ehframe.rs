@@ -551,8 +551,8 @@ fn zero_range_fde_gives_no_record() {
 #[test]
 fn eight_byte_length_records() {
     let mut eh = Eh::default();
-    // A CIE with the 8-byte length form and an 8-byte CIE ID.
-    let mut cie = vec![0u8; 8];
+    // A CIE with the 8-byte length form. The CIE ID keeps 4 bytes in `.eh_frame`.
+    let mut cie = vec![0u8; 4];
     cie.extend_from_slice(&[1, b'z', b'R', 0, 1, 0x78, 16, 1, 0x1b, 0x0c, 0x07, 0x08]);
     eh.buf.extend_from_slice(&0xffff_ffffu32.to_le_bytes());
     eh.buf
@@ -560,8 +560,11 @@ fn eight_byte_length_records() {
     eh.buf.extend_from_slice(&cie);
     let at = eh.buf.len() as u64;
     let id_field = at + 12;
-    let rel = 0x400 - i64::try_from(id_field + 8 + VA).expect("va");
-    let mut fde = (id_field).to_le_bytes().to_vec();
+    let rel = 0x400 - i64::try_from(id_field + 4 + VA).expect("va");
+    let mut fde = u32::try_from(id_field)
+        .expect("an offset")
+        .to_le_bytes()
+        .to_vec();
     fde.extend_from_slice(&i32::try_from(rel).expect("rel").to_le_bytes());
     fde.extend_from_slice(&0x10u32.to_le_bytes());
     fde.push(0);
