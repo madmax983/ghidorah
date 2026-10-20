@@ -4,7 +4,7 @@
 //! |---|---|
 //! | headers | RVAs below `SizeOfHeaders` map to the same file offsets, region `headers` with `READ` |
 //! | `vsize` | `VirtualSize`; 0 means `SizeOfRawData`; 0 for both maps nothing |
-//! | `file_off` | `PointerToRawData` rounded down to a multiple of 0x200 |
+//! | `file_off` | `PointerToRawData`, rounded down to a multiple of 0x200 when `FileAlignment` is at least 0x200 (the `pefile` rule) |
 //! | `file_size` | `min(SizeOfRawData, vsize)`, 0 for `CNT_UNINITIALIZED_DATA`, cut at the end of the file |
 //! | overlap | a later section replaces the overlapped part of an earlier region, with `E_OVERLAP` |
 //!
@@ -36,6 +36,16 @@ pub(crate) const SCN_WRITE: u64 = 0x8000_0000;
 
 /// The file alignment that the Windows loader uses for `PointerToRawData`.
 const RAW_ALIGN: u64 = 0x200;
+
+/// Gives the file offset of the raw data of a section. With a `FileAlignment` of 0x200 or
+/// more, the offset rounds down to a multiple of 0x200. A low-alignment image maps flat.
+const fn raw_offset(raw_ptr: u64, file_align: u64) -> u64 {
+    if file_align >= RAW_ALIGN {
+        raw_ptr & !RAW_ALIGN.saturating_sub(1)
+    } else {
+        raw_ptr
+    }
+}
 
 /// Gives the access bits of section `Characteristics`.
 fn perms(flags: u64) -> Perms {
@@ -133,10 +143,10 @@ fn one(raw: &[u8], i: usize, base: u64, diags: &mut Diags) -> Section {
 }
 
 /// Gives the region of a section, and adds `E_OOB` when its file part leaves the file.
-fn region(s: &Section, len: u64, diags: &mut Diags) -> Option<Region> {
+fn region(s: &Section, h: &Headers, len: u64, diags: &mut Diags) -> Option<Region> {
     let va = s.va?;
     let mem = u64::try_from(va.len()).unwrap_or(u64::MAX);
-    let file_off = s.file_off & !(RAW_ALIGN.saturating_sub(1));
+    let file_off = raw_offset(s.file_off, u64::from(h.file_alignment));
     let file_size = if s.flags & SCN_UNINITIALIZED != 0 {
         0
     } else {
@@ -215,7 +225,7 @@ pub(crate) fn map(
         );
     }
     for s in sections {
-        let Some(r) = region(s, len, diags) else {
+        let Some(r) = region(s, h, len, diags) else {
             continue;
         };
         let index = u32::try_from(segments.len()).unwrap_or(u32::MAX);

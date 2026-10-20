@@ -173,7 +173,31 @@ fn mapping_variants() -> Vec<(&'static str, PeBuilder)> {
         ),
         ("pe32plus_arm64", base().machine(0xaa64)),
         ("mz_no_pe", base().no_pe_signature()),
+        ("low_alignment", low_alignment()),
     ]
+}
+
+/// The file offset of `SectionAlignment` in the optional header of the builder.
+const SECTION_ALIGNMENT_AT: usize = 0x78;
+
+/// The file offset of `FileAlignment` in the optional header of the builder.
+const FILE_ALIGNMENT_AT: usize = 0x7c;
+
+/// A low-alignment image: `SectionAlignment` and `FileAlignment` are 0x80, and `.text` is at
+/// RVA and file offset 0x280 with `xor eax, eax; ret; nop`. Such an image maps flat.
+fn low_alignment() -> PeBuilder {
+    let mut text = vec![0x31, 0xc0, 0xc3, 0x90];
+    text.resize(0x80, 0xcc);
+    PeBuilder::exe()
+        .entry(0x280)
+        .section(
+            Section::code(".text", 0x280, &[])
+                .vsize(0x80)
+                .at_raw(0x280, 0x80),
+        )
+        .patch(0x280, &text)
+        .patch(SECTION_ALIGNMENT_AT, &0x80u32.to_le_bytes())
+        .patch(FILE_ALIGNMENT_AT, &0x80u32.to_le_bytes())
 }
 
 fn import_variants() -> Vec<(&'static str, PeBuilder)> {

@@ -108,6 +108,21 @@ fn ac_245_rva_mapping_variants() {
 }
 
 #[test]
+fn regress_pe_low_alignment_maps_flat() {
+    let (b, map) = load_variant("low_alignment");
+    assert_eq!(
+        read(&map, EXE_BASE + 0x280, 4),
+        [0x31, 0xc0, 0xc3, 0x90],
+        "the entry reads the bytes at file offset 0x280"
+    );
+    assert_eq!(
+        map.region_at(EXE_BASE + 0x280).map(|r| r.file_off),
+        Some(0x280)
+    );
+    assert!(b.diagnostics.is_empty(), "{:?}", b.diagnostics);
+}
+
+#[test]
 fn fixture_reads_follow_the_sections() {
     let (b, map) = load_fixture("pe_main.exe");
     for s in &b.sections {
