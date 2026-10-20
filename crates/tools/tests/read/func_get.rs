@@ -2,6 +2,7 @@
 //! section shapes (AC-154a to AC-154c).
 
 use ghidorah_json::Value;
+use ghidorah_tools::{Call, Host, hints};
 
 use crate::support::{call, call_value, code, data, demo, fixture, items, json, str_of, text_at};
 
@@ -252,4 +253,41 @@ fn func_get_sections_render() {
     assert!(summary.get("blocks").and_then(Value::as_u64).unwrap_or(0) >= 4);
     let missing = get(&mut session, "0x2004", &["summary"], "{}");
     assert_eq!(code(&missing), "NOT_IN_FUNCTION", "{missing}");
+}
+
+/// A caveat remedy is a call object `{ tool, args, why }` that `hints::check` accepts. It is
+/// never a raw string, and it has no `count` argument (agent-protocol-10).
+#[test]
+fn regress_caveat_remedy_is_a_call() {
+    let (mut session, _) = fixture("func_ptrs.gcc-O2");
+    let out = get(&mut session, "fn:0x1350", &["cfg"], "{}");
+    let caveats = data(&out)
+        .get("caveats")
+        .and_then(Value::as_array)
+        .map(<[Value]>::to_vec)
+        .expect("caveats");
+    let caveat = caveats
+        .iter()
+        .find(|c| str_of(c, "code") == "W_JUMPTABLE_UNRESOLVED")
+        .unwrap_or_else(|| panic!("no W_JUMPTABLE_UNRESOLVED: {out}"));
+    assert_eq!(str_of(caveat, "at"), "0x1366", "{caveat}");
+    let remedy = caveat.get("remedy").expect("the caveat has a remedy");
+    assert!(remedy.as_object().is_some(), "a call object: {remedy}");
+    assert_eq!(text_at(remedy, "/tool"), "func_edit", "{remedy}");
+    assert_eq!(text_at(remedy, "/args/at"), "0x1366", "{remedy}");
+    assert!(!text_at(remedy, "/args/action").is_empty(), "{remedy}");
+    assert!(remedy.pointer("/args/count").is_none(), "{remedy}");
+    let why = text_at(remedy, "/why");
+    assert!(!why.is_empty(), "{remedy}");
+    let args = remedy.get("args").cloned().expect("args");
+    let found = Call::new(&text_at(remedy, "/tool"), args, &why);
+    let registry = session.active_registry();
+    hints::check(&registry, &|name| session.in_profile(name), &found)
+        .unwrap_or_else(|e| panic!("{remedy}: {e}"));
+    for c in &caveats {
+        if let Some(r) = c.get("remedy") {
+            assert!(r.as_object().is_some(), "{c}");
+            assert!(r.pointer("/args/count").is_none(), "{c}");
+        }
+    }
 }

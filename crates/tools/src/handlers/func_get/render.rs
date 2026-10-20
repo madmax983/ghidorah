@@ -13,6 +13,7 @@ use crate::dispatch::{KeyPart, SortKey};
 use crate::envelope::Frame;
 use crate::errors::ToolError;
 use crate::handlers::func_sections::{self as fs, CursorScope, Render};
+use crate::hints::Call;
 use crate::session::Session;
 
 /// The characters of the `omitted` entry of one section.
@@ -251,8 +252,13 @@ fn row_section(
 }
 
 /// Gives the header of `func`: its ID, name, entry, size, parts, signature, start reason,
-/// confidence, flags and caveats.
-fn header(r: &Render<'_>, func: FuncId) -> Result<Object, ToolError> {
+/// confidence, flags and caveats. The remedy of a caveat is a call that `check` keeps (see
+/// [`remedy::caveat`]).
+fn header(
+    r: &Render<'_>,
+    func: FuncId,
+    check: &dyn Fn(Call) -> Option<Call>,
+) -> Result<Object, ToolError> {
     let p = r.program;
     let view = p.func(func).ok_or_else(|| {
         ToolError::new(ErrorCode::NotFound)
@@ -300,8 +306,8 @@ fn header(r: &Render<'_>, func: FuncId) -> Result<Object, ToolError> {
             if let Some(at) = c.at {
                 out.push("at", fs::addr(at));
             }
-            if let Some(remedy) = &c.remedy {
-                out.push("remedy", Value::from(remedy.as_str()));
+            if let Some(call) = remedy::caveat(p, func, c).and_then(check) {
+                out.push("remedy", call.to_json());
             }
             Value::Object(out)
         })
@@ -420,7 +426,8 @@ pub fn one(
     fuel: &mut Fuel,
     marks: &mut Marks,
 ) -> Result<Value, ToolError> {
-    let mut out = header(&job.render, func)?;
+    let check = |c| remedy::checked(job.session, c);
+    let mut out = header(&job.render, func, &check)?;
     let count = u64::try_from(job.include.len()).unwrap_or(u64::MAX);
     let mut entry_cost = OMITTED_ENTRY;
     if job.detailed {

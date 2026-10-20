@@ -1,4 +1,4 @@
-//! The remedy calls of the warnings of `func_get` (design Sections 8.5 and 10.8).
+//! The remedy calls of the warnings and caveats of `func_get` (design Sections 8.5 and 10.8).
 //!
 //! Each remedy is a complete call `{ tool, args, why }`. A remedy that `hints::check` does
 //! not accept goes, so a result never holds a call that the agent cannot send.
@@ -8,6 +8,8 @@
 //! | `W_JUMPTABLE_UNRESOLVED`, a table of function entries or an import slot | `func_edit { action: "set_call_targets", at, targets }` |
 //! | `W_JUMPTABLE_UNRESOLVED`, a table of instructions of the function | `func_edit { action: "set_jumptable", at, targets }` |
 //! | `W_INDIRECT_CALL_UNRESOLVED`, a table of function entries or an import slot | `func_edit { action: "set_call_targets", at, targets }` |
+//! | `W_NORETURN_SUSPECT` | `func_edit { action: "set_noreturn", target: <callee>, noreturn: true }` |
+//! | `W_AGENT_OVERRIDE_CONFLICT` of the agent noreturn flag | `func_edit { action: "set_noreturn", target, noreturn }` with the value of the analysis |
 //! | other codes | none |
 //!
 //! The table of a site is the jump-table record base. Else it is the target of the nearest
@@ -15,8 +17,8 @@
 //! function. The targets are the 8-byte entries of the table from its start, at most
 //! [`MAX_ENTRIES`]. The list stops at the first entry of another kind.
 
-use ghidorah_base::{Address, FuncId, JumpTableId, Limits};
-use ghidorah_db::{Program, RefType};
+use ghidorah_base::{Address, FuncId, JumpTableId, Limits, WarningCode};
+use ghidorah_db::{Caveat, Program, RefType};
 use ghidorah_json::Value;
 
 use crate::api::Host;
@@ -38,8 +40,12 @@ pub const WHY_CALL_TARGETS: &str =
 pub const WHY_JUMPTABLE: &str =
     "Set the cases of the jump table. Make sure that each case is correct.";
 
+/// The `why` of a `set_noreturn` remedy.
+pub const WHY_NORETURN: &str =
+    "Set the noreturn flag of the function. Make sure that the flag is correct.";
+
 /// Every fixed text of the remedies that an agent reads.
-pub const TEXTS: &[&str] = &[WHY_CALL_TARGETS, WHY_JUMPTABLE];
+pub const TEXTS: &[&str] = &[WHY_CALL_TARGETS, WHY_JUMPTABLE, WHY_NORETURN];
 
 /// Keeps `call` when `hints::check` accepts it in the active registry and profile of
 /// `session`.
@@ -153,4 +159,40 @@ pub fn site(p: &Program, func: FuncId, at: u64, jump: bool) -> Option<Call> {
         })
         .collect();
     (!cases.is_empty()).then(|| site_call("set_jumptable", at, cases, WHY_JUMPTABLE))
+}
+
+/// Gives the `set_noreturn` call of `target` with `value`.
+fn noreturn(target: FuncId, value: bool) -> Call {
+    Call::new(
+        "func_edit",
+        Value::object([
+            ("action", Value::from("set_noreturn")),
+            ("target", Value::from(target.to_string())),
+            ("noreturn", Value::Bool(value)),
+        ]),
+        WHY_NORETURN,
+    )
+}
+
+/// Gives the remedy call of a caveat of `func`, or `None` (see the module table).
+#[must_use]
+pub fn caveat(p: &Program, func: FuncId, c: &Caveat) -> Option<Call> {
+    let at = c.at.unwrap_or(func.0);
+    match c.code {
+        WarningCode::JumptableUnresolved => site(p, func, at.off, true),
+        WarningCode::IndirectCallUnresolved => site(p, func, at.off, false),
+        WarningCode::NoreturnSuspect => p
+            .refs_from(at)
+            .into_iter()
+            .map(|r| r.value.key)
+            .find(|k| k.kind.is_call() && k.to.is_ram())
+            .map(|k| noreturn(FuncId(k.to), true)),
+        WarningCode::AgentOverrideConflict if at == func.0 => p
+            .base()
+            .funcs()
+            .get(func)
+            .and_then(|f| f.flags.noreturn.as_ref())
+            .map(|f| noreturn(func, !f.value)),
+        _ => None,
+    }
 }

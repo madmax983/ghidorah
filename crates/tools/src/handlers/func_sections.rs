@@ -51,6 +51,7 @@ pub const TEXTS: &[&str] = &[
     WHY_INSN,
     remedy::WHY_CALL_TARGETS,
     remedy::WHY_JUMPTABLE,
+    remedy::WHY_NORETURN,
 ];
 
 /// The parts of one function render that every section shares.
