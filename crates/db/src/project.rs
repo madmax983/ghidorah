@@ -363,13 +363,14 @@ impl Project {
     /// empty journal and the project file last. A directory without a project file is an
     /// incomplete project, so the steps replace its files. The create breaks a stale lock
     /// only with `--break-lock`. When a project file exists after the lock, the create
-    /// releases the lock and writes nothing.
+    /// releases the lock and writes nothing. A symbolic link in place of a project directory or
+    /// a project file stops the create.
     ///
     /// # Errors
     ///
     /// Returns [`ProjectError::Locked`] when another process holds the lock, and
     /// [`ProjectError::Fs`] for a failed file operation. A project file that exists gives
-    /// [`FsError::Exists`].
+    /// [`FsError::Exists`], and a symbolic link gives [`FsError::WrongKind`].
     pub fn create(
         fs: Box<dyn Fs>,
         root: &Path,
@@ -387,7 +388,7 @@ impl Project {
         if Self::exists(fs.as_mut(), &dir) {
             return Err(made(&dir));
         }
-        fs.create_dir_all(&dir.join(BIN_DIR))?;
+        disk::make_dirs(fs.as_mut(), &dir)?;
         let break_lock = matches!(opts.access, Access::Write { break_lock: true });
         lock::acquire(fs.as_mut(), &dir, &opts.me, break_lock).map_err(disk::lock_error)?;
         if Self::exists(fs.as_mut(), &dir) {

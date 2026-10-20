@@ -20,7 +20,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use ghidorah_db::fs::{Fs, FsError};
+use ghidorah_db::fs::{EntryKind, Fs, FsError};
 
 /// One file.
 #[derive(Debug, Clone, Default)]
@@ -342,6 +342,17 @@ impl Fs for SimFs {
     fn exists(&mut self, path: &Path) -> bool {
         let s = self.state();
         s.names.contains_key(path) || s.dirs.contains(path)
+    }
+
+    fn kind(&mut self, path: &Path) -> Option<EntryKind> {
+        let s = self.state();
+        if s.names.contains_key(path) {
+            Some(EntryKind::File)
+        } else if s.dirs.contains(path) {
+            Some(EntryKind::Dir)
+        } else {
+            None
+        }
     }
 
     fn boxed(&self) -> Box<dyn Fs> {

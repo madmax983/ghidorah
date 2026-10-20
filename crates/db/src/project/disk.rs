@@ -10,7 +10,7 @@ use super::{
     PROJECT_FILE, PROJECT_TMP, Project, ProjectError, ProjectMeta, ProjectSummary,
 };
 use crate::codec::{CodecError, Obj};
-use crate::fs::{Fs, FsError, replace_file};
+use crate::fs::{EntryKind, Fs, FsError, replace_file};
 use crate::history::History;
 use crate::journal::{self, JOURNAL_FILE, JournalError, Line};
 use crate::lock::LockError;
@@ -132,18 +132,51 @@ pub(super) fn bin_path(dir: &Path, meta: &ProjectMeta) -> PathBuf {
     dir.join(BIN_DIR).join(hex::encode(&meta.sha256))
 }
 
+/// Makes the project directory `dir` and its `bin` directory. The step refuses an entry at
+/// one of these paths that is not a directory of its own, for example a symbolic link.
+pub(super) fn make_dirs(fs: &mut dyn Fs, dir: &Path) -> Result<(), FsError> {
+    let paths = [dir.to_path_buf(), dir.join(BIN_DIR)];
+    for path in &paths {
+        if fs.kind(path).is_some_and(|k| k != EntryKind::Dir) {
+            return Err(FsError::WrongKind(path.clone()));
+        }
+    }
+    fs.create_dir_all(&dir.join(BIN_DIR))?;
+    for path in paths {
+        if fs.kind(&path) != Some(EntryKind::Dir) {
+            return Err(FsError::WrongKind(path));
+        }
+    }
+    Ok(())
+}
+
+/// Refuses an entry at `path` that is not a regular file, for example a symbolic link. A path
+/// with no entry is good.
+fn file_or_none(fs: &mut dyn Fs, path: &Path) -> Result<(), FsError> {
+    match fs.kind(path) {
+        None | Some(EntryKind::File) => Ok(()),
+        Some(_) => Err(FsError::WrongKind(path.to_path_buf())),
+    }
+}
+
 /// Writes the files of a new project: `.gitignore`, the input copy, the journal and the
 /// project file last. The caller holds the lock. Gives the length of the journal.
+///
+/// An entry of an incomplete project that is not a regular file stops the steps.
 pub(super) fn write_new(project: &mut Project, bytes: &[u8]) -> Result<u64, ProjectError> {
     let dir = project.dir.clone();
     let fs = project.fs.as_mut();
     let ignore = dir.join(GITIGNORE_FILE);
-    replace_file(fs, &ignore, &tmp_of(&ignore), GITIGNORE_TEXT.as_bytes())?;
     let bin = bin_path(&dir, &project.meta);
+    let journal = dir.join(JOURNAL_FILE);
+    let file = dir.join(PROJECT_FILE);
+    for path in [&ignore, &bin, &journal, &file] {
+        file_or_none(fs, path)?;
+    }
+    replace_file(fs, &ignore, &tmp_of(&ignore), GITIGNORE_TEXT.as_bytes())?;
     replace_file(fs, &bin, &tmp_of(&bin), bytes)?;
     fs.set_read_only(&bin)?;
     fs.sync_dir(&dir.join(BIN_DIR))?;
-    let journal = dir.join(JOURNAL_FILE);
     let journal_len = if fs.exists(&journal) {
         len_of(&fs.read(&journal)?)
     } else {
@@ -153,12 +186,7 @@ pub(super) fn write_new(project: &mut Project, bytes: &[u8]) -> Result<u64, Proj
     };
     let mut text = ghidorah_json::write_pretty(&project.meta.to_json());
     text.push('\n');
-    replace_file(
-        fs,
-        &dir.join(PROJECT_FILE),
-        &dir.join(PROJECT_TMP),
-        text.as_bytes(),
-    )?;
+    replace_file(fs, &file, &dir.join(PROJECT_TMP), text.as_bytes())?;
     fs.sync_dir(&dir)?;
     if let Some(root) = dir.parent() {
         fs.sync_dir(root)?;

@@ -2,8 +2,41 @@
 
 use std::path::Path;
 
-use super::{Fs, FsError, RealFs, replace_file};
+use super::{EntryKind, Fs, FsError, RealFs, replace_file};
 use crate::project::tests::fs_sim::SimFs;
+
+#[cfg(unix)]
+#[test]
+fn real_fs_refuses_symbolic_links() {
+    let dir = std::env::temp_dir().join(format!("ghidorah-fs-links-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let mut fs = RealFs;
+    fs.create_dir_all(&dir).unwrap();
+    let victim = dir.join("victim.txt");
+    std::fs::write(&victim, b"victim").unwrap();
+    let link = dir.join("link");
+    std::os::unix::fs::symlink(&victim, &link).unwrap();
+    let dangling = dir.join("dangling");
+    std::os::unix::fs::symlink(dir.join("none"), &dangling).unwrap();
+    let refused = FsError::WrongKind(link.clone());
+    assert_eq!(fs.append(&link, b"x"), Err(refused.clone()));
+    assert_eq!(fs.write_all(&link, b"x"), Err(refused.clone()));
+    assert_eq!(fs.truncate(&link, 0), Err(refused.clone()));
+    assert_eq!(fs.create_new(&link), Err(refused));
+    assert_eq!(
+        fs.create_new(&dangling),
+        Err(FsError::WrongKind(dangling.clone()))
+    );
+    assert_eq!(fs.append(&dir, b"x"), Err(FsError::WrongKind(dir.clone())));
+    assert_eq!(std::fs::read(&victim).unwrap(), b"victim");
+    assert_eq!(fs.kind(&victim), Some(EntryKind::File));
+    assert_eq!(fs.kind(&dir), Some(EntryKind::Dir));
+    assert_eq!(fs.kind(&link), Some(EntryKind::Other));
+    assert_eq!(fs.kind(&dir.join("none")), None);
+    let text = FsError::WrongKind(link).to_string();
+    assert!(text.contains("symbolic link"), "{text}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
 
 #[test]
 fn regress_replace_file_keeps_other_tmp() {

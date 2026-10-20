@@ -23,6 +23,9 @@
 //! A temporary file has a name of this process: `<base>.<pid>.<n>`. `n` counts up in the
 //! process. So two processes never use the same temporary file, and no process removes the
 //! temporary file of another process.
+//!
+//! [`RealFs`] never writes through a symbolic link. `create_new`, `append`, `write_all` and
+//! `truncate` give [`FsError::WrongKind`] for a path that is not a regular file.
 
 #[cfg(test)]
 mod tests;
@@ -53,8 +56,22 @@ pub enum FsError {
         /// The text of the operating system error.
         message: String,
     },
+    /// The entry at the path is a symbolic link, or it is not of the kind that the operation
+    /// needs. The operation refuses it.
+    WrongKind(PathBuf),
     /// A simulated crash stopped the file system. Each later operation fails.
     Stopped,
+}
+
+/// The kind of an entry at a path. The test does not follow a symbolic link.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EntryKind {
+    /// A regular file.
+    File,
+    /// A directory.
+    Dir,
+    /// A symbolic link or another kind of entry.
+    Other,
 }
 
 impl FsError {
@@ -90,6 +107,11 @@ impl fmt::Display for FsError {
                     path.display()
                 )
             }
+            Self::WrongKind(p) => write!(
+                f,
+                "The path {} is a symbolic link or an entry of the wrong kind.",
+                p.display()
+            ),
             Self::Stopped => f.write_str("A simulated crash stopped the file system."),
         }
     }
@@ -198,6 +220,10 @@ pub trait Fs: Send {
     /// Tells if a file or a directory exists at the path.
     fn exists(&mut self, path: &Path) -> bool;
 
+    /// Gives the kind of the entry at the path, or `None` when no entry is there. The test does
+    /// not follow a symbolic link.
+    fn kind(&mut self, path: &Path) -> Option<EntryKind>;
+
     /// Gives a second handle on the same file system.
     fn boxed(&self) -> Box<dyn Fs>;
 }
@@ -265,40 +291,35 @@ impl Fs for RealFs {
     }
 
     fn create_new(&mut self, path: &Path) -> Result<(), FsError> {
-        std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(path)
-            .map(drop)
-            .map_err(|e| FsError::io("create_new", path, &e))
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        open_regular("create_new", path, &options).map(drop)
     }
 
     fn append(&mut self, path: &Path, bytes: &[u8]) -> Result<(), FsError> {
         use std::io::Write;
-        let mut file = std::fs::OpenOptions::new()
-            .append(true)
-            .open(path)
-            .map_err(|e| FsError::io("append", path, &e))?;
+        let mut options = std::fs::OpenOptions::new();
+        options.append(true);
+        let mut file = open_regular("append", path, &options)?;
         file.write_all(bytes)
             .map_err(|e| FsError::io("append", path, &e))
     }
 
     fn write_all(&mut self, path: &Path, bytes: &[u8]) -> Result<(), FsError> {
         use std::io::Write;
-        let mut file = std::fs::OpenOptions::new()
-            .write(true)
-            .truncate(true)
-            .open(path)
-            .map_err(|e| FsError::io("write_all", path, &e))?;
-        file.write_all(bytes)
+        // The open does not cut the file. The cut comes after the check of the open file.
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true);
+        let mut file = open_regular("write_all", path, &options)?;
+        file.set_len(0)
+            .and_then(|()| file.write_all(bytes))
             .map_err(|e| FsError::io("write_all", path, &e))
     }
 
     fn truncate(&mut self, path: &Path, len: u64) -> Result<(), FsError> {
-        let file = std::fs::OpenOptions::new()
-            .write(true)
-            .open(path)
-            .map_err(|e| FsError::io("truncate", path, &e))?;
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true);
+        let file = open_regular("truncate", path, &options)?;
         file.set_len(len)
             .and_then(|()| file.sync_all())
             .map_err(|e| FsError::io("truncate", path, &e))
@@ -361,9 +382,58 @@ impl Fs for RealFs {
         std::fs::symlink_metadata(path).is_ok()
     }
 
+    fn kind(&mut self, path: &Path) -> Option<EntryKind> {
+        let kind = std::fs::symlink_metadata(path).ok()?.file_type();
+        Some(if kind.is_file() {
+            EntryKind::File
+        } else if kind.is_dir() {
+            EntryKind::Dir
+        } else {
+            EntryKind::Other
+        })
+    }
+
     fn boxed(&self) -> Box<dyn Fs> {
         Box::new(*self)
     }
+}
+
+/// Opens a regular file for a write with `options`.
+///
+/// The open refuses a path that is a symbolic link or not a regular file. After the open, the
+/// name must still give the open file: the same device and inode. So a link that goes in
+/// place of the file during the open gives no write to another file.
+fn open_regular(
+    op: &'static str,
+    path: &Path,
+    options: &std::fs::OpenOptions,
+) -> Result<std::fs::File, FsError> {
+    let refuse = || FsError::WrongKind(path.to_path_buf());
+    if let Ok(entry) = std::fs::symlink_metadata(path)
+        && !entry.file_type().is_file()
+    {
+        return Err(refuse());
+    }
+    let file = options.open(path).map_err(|e| FsError::io(op, path, &e))?;
+    let opened = file.metadata().map_err(|e| FsError::io(op, path, &e))?;
+    let named = std::fs::symlink_metadata(path).map_err(|e| FsError::io(op, path, &e))?;
+    if !named.file_type().is_file() || !same_file(&opened, &named) {
+        return Err(refuse());
+    }
+    Ok(file)
+}
+
+/// Tells if two metadata records are of one file: the same device and inode.
+#[cfg(unix)]
+fn same_file(a: &std::fs::Metadata, b: &std::fs::Metadata) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    a.dev() == b.dev() && a.ino() == b.ino()
+}
+
+/// Tells if the open file is a regular file. Other systems give no inode numbers.
+#[cfg(not(unix))]
+fn same_file(a: &std::fs::Metadata, _: &std::fs::Metadata) -> bool {
+    a.is_file()
 }
 
 /// Sets the permission bits to 0444.
