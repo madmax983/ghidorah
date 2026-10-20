@@ -19,10 +19,12 @@
 //!
 //! [`params`] gives the parameters of a function: an agent signature first, then the Tier-0
 //! prototype of its name, then the recovery with the callee reads of the last rule
-//! ([`crate::fir::callsite::solve`]). [`recover`] alone reads no callee. ELF binaries use [`SYSV_X86_64`]. PE binaries use
-//! [`MS_X64`], whose slots are positional: argument n uses slot n of the integer list or of the
-//! floating list. So the slot count is the highest used slot of both lists, and a stack
-//! parameter means that all four register slots are parameters.
+//! ([`crate::fir::callsite::solve`]). [`recover`] alone reads no callee.
+//!
+//! ELF binaries use [`SYSV_X86_64`]. PE binaries use [`MS_X64`], whose slots are positional:
+//! argument n uses slot n of the integer list or of the floating list. So the slot count is
+//! the highest used slot of both lists, and a stack parameter means that all four register
+//! slots are parameters.
 
 use std::collections::{BTreeMap, BTreeSet};
 

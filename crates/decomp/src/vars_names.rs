@@ -20,7 +20,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use ghidorah_analysis::cc::loc_of;
 use ghidorah_base::{Storage, VarId};
 use ghidorah_ir::{Loc, Val};
-
 use ghidorah_types::CallConv;
 
 use crate::expr::VarIdx;
