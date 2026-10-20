@@ -1,7 +1,8 @@
 //! The `fix_commits` step of `xtask ci` (AC-234).
 //!
-//! Each commit whose subject starts with `fix:` must change at least one test file. The step
-//! reads `git log --name-only` with the format [`LOG_FORMAT`].
+//! Each commit whose subject starts with `fix:` must change at least one Rust test file. A
+//! golden or a data file under `tests` is not a test file. The step reads
+//! `git log --name-only` with the format [`LOG_FORMAT`].
 
 use std::path::Path;
 use std::process::Command;
@@ -15,14 +16,19 @@ pub const LOG_FORMAT: &str = "@@%h %s";
 /// The marker at the start of the header line of one commit.
 const MARKER: &str = "@@";
 
-/// Tells if `path` is a test file: a file under a `tests` directory, or a `tests.rs` file.
+/// Tells if `path` is a test file: a `tests.rs` file, or a `.rs` file under a `tests`
+/// directory.
+///
+/// A golden file or a data file under `tests` is not a test file. A fix needs a test that
+/// fails before the fix (CLAUDE.md, TDD process).
 #[must_use]
 pub fn is_test_file(path: &str) -> bool {
     let parts: Vec<&str> = path.split('/').collect();
     let Some((file, dirs)) = parts.split_last() else {
         return false;
     };
-    *file == "tests.rs" || dirs.contains(&"tests")
+    *file == "tests.rs"
+        || (dirs.contains(&"tests") && Path::new(file).extension().is_some_and(|ext| ext == "rs"))
 }
 
 /// One commit of the log: its header `<hash> <subject>` and its changed files.

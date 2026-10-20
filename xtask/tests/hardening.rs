@@ -131,8 +131,9 @@ fn ac_234_fix_commits_change_tests() {
         ("crates/db/src/edit/tests.rs", true),
         ("crates/db/src/edit/tests/funcs.rs", true),
         ("xtask/tests/gates.rs", true),
-        ("tests/golden/tools.json", true),
-        ("tests/regress/calc/0a1b2c3d.bin", true),
+        ("tests/golden/tools.json", false),
+        ("tests/regress/calc/0a1b2c3d.bin", false),
+        ("crates/cli/tests/data/x.json", false),
         ("crates/json/src/parse.rs", false),
         ("docs/design.md", false),
         ("crates/testkit/src/tests_helper.rs", false),
@@ -164,6 +165,28 @@ crates/json/src/write.rs
         ]
     );
     assert_eq!(ci::LOG_FORMAT, "@@%h %s");
+}
+
+/// A golden or a data file under `tests` is not a test: a fix needs a `.rs` test change.
+#[test]
+fn regress_fix_commit_needs_rs_test() {
+    let log = "\
+@@ffff666 fix: the loader reads the flags
+crates/loader/src/elf.rs
+tests/golden/loader/x.readelf.txt
+
+@@abab777 fix: the loader reads the notes
+crates/loader/src/elf.rs
+crates/loader/tests/elf.rs
+tests/golden/loader/x.readelf.txt
+";
+    assert_eq!(
+        ci::fix_commits_without_tests(log),
+        vec!["ffff666 fix: the loader reads the flags".to_owned()]
+    );
+    assert!(!ci::is_test_file("tests/golden/loader/x.readelf.txt"));
+    assert!(!ci::is_test_file("crates/x/tests.rs.orig"));
+    assert!(ci::is_test_file("crates/x/src/tests.rs"));
 }
 
 /// The fuzz targets of design Section 13.5 in the order of the text.
