@@ -237,42 +237,88 @@ fn regress_cheat_scan_catches_external() {
     }
 }
 
+/// The allowed starts of a cfg gate in the kernel. Each one names `verus_only` alone.
+const VERUS_ONLY_GATES: &[&str] = &[
+    "cfg(verus_only)",
+    "cfg(not(verus_only))",
+    "cfg_attr(verus_only, ",
+];
+
+/// Gives one message for each cfg gate of a source text that is not an allowed `verus_only` gate.
+///
+/// A gate is `cfg(..)`, `cfg_attr(..)` or `cfg!(..)`. Exec code is never cfg-gated (design
+/// Section 13.2). So Verus proves the code that a release build ships.
+fn gate_findings(path: &str, code: &str) -> Vec<String> {
+    let mut found = Vec::new();
+    for (i, _) in code.match_indices("cfg") {
+        let before = code.get(..i).and_then(|h| h.chars().next_back());
+        if before.is_some_and(|c| c.is_ascii_alphanumeric() || c == '_') {
+            continue;
+        }
+        let rest = code.get(i..).unwrap_or_default();
+        let word_end = rest
+            .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+            .unwrap_or(rest.len());
+        let word = rest.get(..word_end).unwrap_or_default();
+        let after = rest.get(word_end..).unwrap_or_default();
+        let after = after.strip_prefix('!').unwrap_or(after).trim_start();
+        let is_gate = (word == "cfg" || word == "cfg_attr") && after.starts_with('(');
+        if is_gate && !VERUS_ONLY_GATES.iter().any(|g| rest.starts_with(g)) {
+            let line = code.get(..i).unwrap_or_default().lines().count().max(1);
+            let head = rest.lines().next().unwrap_or_default();
+            found.push(format!(
+                "{path}:{line}: a cfg gate without `verus_only`: `{head}`"
+            ));
+        }
+    }
+    found
+}
+
+/// Gives one message for each bad cfg gate and each misplaced `verus_only` gate of a source text.
+fn cfg_findings(path: &str, text: &str) -> Vec<String> {
+    let code = strip(text);
+    let mut found = gate_findings(path, &code);
+    for (i, _) in code.match_indices("verus_only") {
+        let start = code.get(..i).and_then(|h| h.rfind('#')).unwrap_or(0);
+        let attr = code.get(start..i).unwrap_or_default();
+        let next = after_attribute(&code, start)
+            .unwrap_or_default()
+            .trim_start();
+        let ok = match attr {
+            "#[cfg(" => next.starts_with("use vstd::") || next.starts_with("verus! {"),
+            "#[cfg(not(" => next.starts_with("use ghidorah_spec::"),
+            "#[cfg_attr(" => {
+                code.get(i..)
+                    .is_some_and(|t| t.starts_with("verus_only, verus_spec("))
+                    && ["while ", "loop ", "for "]
+                        .iter()
+                        .any(|k| next.starts_with(k))
+            }
+            "#![cfg_attr(" => {
+                path.ends_with("/lib.rs")
+                    && code
+                        .get(i..)
+                        .is_some_and(|t| t.starts_with("verus_only, feature(proc_macro_hygiene))]"))
+            }
+            _ => false,
+        };
+        if !ok {
+            found.push(format!(
+                "{path}: `verus_only` in `{attr}` before `{}`",
+                next.lines().next().unwrap_or("")
+            ));
+        }
+    }
+    found
+}
+
 #[test]
 fn ac_035b_cfg_placement() {
     let sources = kernel_sources();
     assert!(!sources.is_empty(), "the kernel has source files");
     for (path, text) in &sources {
-        let code = strip(text);
-        for (i, _) in code.match_indices("verus_only") {
-            let start = code.get(..i).and_then(|h| h.rfind('#')).unwrap_or(0);
-            let attr = code.get(start..i).unwrap_or_default();
-            let next = after_attribute(&code, start)
-                .unwrap_or_default()
-                .trim_start();
-            let ok = match attr {
-                "#[cfg(" => next.starts_with("use vstd::") || next.starts_with("verus! {"),
-                "#[cfg(not(" => next.starts_with("use ghidorah_spec::"),
-                "#[cfg_attr(" => {
-                    code.get(i..)
-                        .is_some_and(|t| t.starts_with("verus_only, verus_spec("))
-                        && ["while ", "loop ", "for "]
-                            .iter()
-                            .any(|k| next.starts_with(k))
-                }
-                "#![cfg_attr(" => {
-                    path.ends_with("/lib.rs")
-                        && code.get(i..).is_some_and(|t| {
-                            t.starts_with("verus_only, feature(proc_macro_hygiene))]")
-                        })
-                }
-                _ => false,
-            };
-            assert!(
-                ok,
-                "{path}: `verus_only` in `{attr}` before `{}`",
-                next.lines().next().unwrap_or("")
-            );
-        }
+        let found = cfg_findings(path, text);
+        assert!(found.is_empty(), "{}", found.join("\n"));
     }
     let lib = sources
         .iter()
@@ -283,6 +329,31 @@ fn ac_035b_cfg_placement() {
             .starts_with("#![cfg_attr(verus_only, feature(proc_macro_hygiene))]"),
         "lib.rs starts with the proc_macro_hygiene line"
     );
+}
+
+#[test]
+fn regress_cfg_gate_outside_verus_only() {
+    let path = "crates/kernel/src/demo.rs";
+    // Verus proves the debug twin. A release build ships the other twin.
+    let twins = "#[cfg(debug_assertions)]\n#[verus_spec(r => ensures r == 1)]\npub fn f() -> u8 {\n    1\n}\n\n#[cfg(not(debug_assertions))]\n#[verus_spec(r => ensures r == 1)]\npub fn f() -> u8 {\n    2\n}\n";
+    assert_eq!(cfg_findings(path, twins).len(), 2, "{twins}");
+    for text in [
+        "#[cfg_attr(test, derive(Debug))]\npub struct S;\n",
+        "pub fn f() -> bool {\n    cfg!(debug_assertions)\n}\n",
+        "#[cfg(target_pointer_width = \"64\")]\nconst W: u32 = 64;\n",
+        "#[cfg(all(verus_only, test))]\nuse vstd::prelude::*;\n",
+        "#[cfg (test)]\nmod tests;\n",
+    ] {
+        assert!(!cfg_findings(path, text).is_empty(), "{text}");
+    }
+    for text in [
+        "#[cfg(verus_only)]\nuse vstd::prelude::*;\n",
+        "#[cfg(not(verus_only))]\nuse ghidorah_spec::{proof, verus_spec};\n",
+        "fn f() {\n    #[cfg_attr(verus_only, verus_spec(invariant true))]\n    loop {}\n}\n",
+        "// #[cfg(debug_assertions)] in a comment\nconst S: &str = \"cfg!(test)\";\n",
+    ] {
+        assert_eq!(cfg_findings(path, text), Vec::<String>::new(), "{text}");
+    }
 }
 
 #[test]
