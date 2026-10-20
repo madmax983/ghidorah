@@ -4,21 +4,27 @@
 //! has a range: a line with ops, or a comment line.
 //!
 //! [`cover`] makes sure that every instruction of the function is in a line range or in an
-//! elided range with a reason. An instruction outside both gets one of these reasons:
+//! elided range with a reason. An instruction outside both gets one of these results:
 //!
-//! | Instruction | Reason |
+//! | Instruction | Result |
 //! |---|---|
 //! | the jump at the end of a block, which the structure shows | `control flow` |
-//! | another instruction of a reachable block, whose effect no line shows | `no effect` |
+//! | an instruction of a reachable block with an effect: a store, a call, a return, a branch, an opaque memory op or a value that a return reads | no elided range, and `W_STRUCTURE_SELFCHECK` at the instruction |
+//! | another instruction of a reachable block, for example a push of a callee-saved register, the frame setup, `nop` or `endbr64` | `no effect` |
 //! | an instruction of the body outside every block | `padding` |
+//!
+//! The effects come from the live ops of the L1 form ([`crate::View::effects`]). So a
+//! printer that drops a statement gives a self-check warning. It does not hide the statement
+//! as `no effect`.
 
 use std::collections::BTreeSet;
 
+use ghidorah_base::WarningCode;
 use ghidorah_db::CommentKind;
 use ghidorah_ir::OpId;
 
 use crate::print::Line;
-use crate::{ElideReason, Elided};
+use crate::{ElideReason, Elided, Warning};
 
 /// One row of the line map.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -124,26 +130,40 @@ pub fn merge(mut elided: Vec<Elided>) -> Vec<Elided> {
     out
 }
 
-/// Adds an elided range for each instruction that no line and no elided range holds.
+/// Adds an elided range for each instruction that no line and no elided range holds, when
+/// the instruction has no effect that a line must show.
 ///
 /// `insns` holds the instructions of the reachable blocks. `flow` holds the addresses of the
-/// jumps at the block ends. `body` holds the instructions of the function body. Each list
-/// holds the address and the length.
+/// jumps at the block ends. `effects` holds the addresses of the instructions with an effect
+/// (see [`crate::View::effects`]). `body` holds the instructions of the function body. Each
+/// instruction list holds the address and the length.
+///
+/// An instruction with an effect that no line holds is a failure of the printer, not an
+/// elision. It gets no elided range. Gives a `W_STRUCTURE_SELFCHECK` warning at each one,
+/// in address order.
 pub fn cover(
     lines: &[Line],
     insns: &[(u64, u8)],
     flow: &BTreeSet<u64>,
+    effects: &BTreeSet<u64>,
     body: &[(u64, u8)],
     elided: &mut Vec<Elided>,
-) {
+) -> Vec<Warning> {
     let ranges = Ranges::new(lines, elided);
     let mut added = Vec::new();
+    let mut dropped = Vec::new();
     for &(start, len) in insns {
         if ranges.holds(start) {
             continue;
         }
         let reason = if flow.contains(&start) {
             ElideReason::Flow
+        } else if effects.contains(&start) {
+            dropped.push(Warning {
+                code: WarningCode::StructureSelfcheck,
+                at: start,
+            });
+            continue;
         } else {
             ElideReason::NoEffect
         };
@@ -165,4 +185,5 @@ pub fn cover(
         });
     }
     elided.extend(added);
+    dropped
 }

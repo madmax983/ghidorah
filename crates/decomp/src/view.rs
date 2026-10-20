@@ -136,6 +136,10 @@ pub struct View {
     /// The address and the length of each instruction of the reachable blocks, in address
     /// order.
     pub insns: Vec<(u64, u8)>,
+    /// The addresses of the instructions with an effect that a line must show (see
+    /// [`crate::linemap`]): a store, a call, a return, a branch, an opaque memory op, or a
+    /// value that a return reads.
+    pub effects: BTreeSet<u64>,
 }
 
 impl View {

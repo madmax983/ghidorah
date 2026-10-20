@@ -1,7 +1,7 @@
 //! The facts of an L1 form that the view reads. The facts are the reachable blocks, the ops of
 //! each block, the kind of each value and its uses.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use ghidorah_ir::ssa::{Anchor, Ssa};
 use ghidorah_ir::{Arg, Loc, Node, Op, Opc, Val, rpo};
@@ -139,6 +139,54 @@ impl<'a> Facts<'a> {
     /// Gives the op with this index.
     pub(crate) fn op(&self, i: u32) -> Option<&'a Op> {
         self.ssa.arena().op(i)
+    }
+
+    /// Gives the addresses of the instructions of the reachable blocks with an effect that a
+    /// line must show. An instruction has an effect when one of its live ops is a store, a
+    /// call, a return, a branch or an opaque op with a memory address. A def of a value that
+    /// a return reads is an effect too.
+    ///
+    /// A push or a pop of a callee-saved register, the frame setup and teardown, `nop` and
+    /// `endbr64` have no live op of this kind, so they stay `no effect`.
+    pub(crate) fn effects(&self) -> BTreeSet<u64> {
+        let mut out = BTreeSet::new();
+        for &i in self.ops.values().flatten() {
+            let Some(op) = self.op(i).filter(|_| self.ssa.is_insn_op(i)) else {
+                continue;
+            };
+            let shows = match op.opc {
+                Opc::Store
+                | Opc::Call
+                | Opc::CallInd
+                | Opc::Syscall
+                | Opc::Unimpl
+                | Opc::Ret
+                | Opc::CJump
+                | Opc::JumpInd => true,
+                Opc::Intrinsic => op.a[1] != Arg::Nil,
+                _ => false,
+            };
+            if shows {
+                out.insert(op.id.addr);
+            }
+            if op.opc != Opc::Ret {
+                continue;
+            }
+            for &(_, a) in self.ssa.uses_at(i) {
+                let Arg::V(v) = a else {
+                    continue;
+                };
+                if let Some(def) = self
+                    .def
+                    .get(&v)
+                    .filter(|d| self.ssa.is_insn_op(**d))
+                    .and_then(|d| self.op(*d))
+                {
+                    out.insert(def.id.addr);
+                }
+            }
+        }
+        out
     }
 }
 

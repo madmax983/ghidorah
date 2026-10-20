@@ -1,6 +1,6 @@
-//! The output ACs over the fixture functions (WP-23): the line map coverage, the snippets
-//! and goto budgets, determinism, the cache, the self-check, the FLAT rate, the calls and the
-//! field access of a typed pointer.
+//! The output ACs over the fixture functions (WP-23): the snippets and goto budgets,
+//! determinism, the cache, the self-check, the FLAT rate, the calls and the field access of a
+//! typed pointer. `out_linemap` holds the line map coverage.
 
 use std::collections::BTreeSet;
 use std::sync::OnceLock;
@@ -12,7 +12,7 @@ use ghidorah_base::{Address, Fuel, Limits, VarId};
 use ghidorah_db::{CommentKind, Edit, Program, RefType, SessionLabel, Source, SymKind, VarField};
 use ghidorah_decomp::print::{self, CallTarget, PrintEnv, Signature};
 use ghidorah_decomp::selfcheck::Validation;
-use ghidorah_decomp::{Cache, Env, Mode, Opts, Output, ProgramEnv, linemap};
+use ghidorah_decomp::{Cache, Env, Mode, Opts, Output, ProgramEnv};
 use ghidorah_ir::{NoNames, Switches};
 use ghidorah_json::Value;
 use ghidorah_loader::{LoadOpts, load};
@@ -95,31 +95,6 @@ pub fn corpus() -> &'static [Item] {
         all.sort_by(|a, b| (&a.fixture, a.entry).cmp(&(&b.fixture, b.entry)));
         all
     })
-}
-
-#[test]
-fn ac_099_line_map_coverage() {
-    let mut bad = Vec::new();
-    let items = corpus();
-    assert!(items.len() > 2_000, "only {} functions", items.len());
-    let mut checked = 0usize;
-    for item in items {
-        let p = program(&item.fixture);
-        for (addr, _) in print::body_units(p, fid(item.entry)) {
-            checked += 1;
-            if !linemap::covered(&item.out.lines, &item.out.elided, addr) {
-                bad.push(format!("{} {:#x}: {addr:#x}", item.fixture, item.entry));
-                break;
-            }
-        }
-    }
-    assert!(checked > 50_000, "only {checked} instructions");
-    assert!(
-        bad.is_empty(),
-        "{} functions: {:?}",
-        bad.len(),
-        &bad[..bad.len().min(10)]
-    );
 }
 
 #[test]

@@ -145,8 +145,8 @@ pub enum ElideReason {
     Unreachable,
     /// A jump at the end of a block. The structure of the text shows it.
     Flow,
-    /// An instruction of a reachable block whose effect no line shows, for example a push of
-    /// a callee-saved register.
+    /// An instruction of a reachable block with no effect that a line must show, for example
+    /// a push of a callee-saved register. See [`linemap`] for the effects.
     NoEffect,
     /// An instruction of the body outside every block, for example alignment bytes.
     Padding,
@@ -423,10 +423,18 @@ pub fn finish(
     let printed = print::print(&decomp, env, names, name);
     let mut elided = decomp.elided.clone();
     let flow = print::flow_addrs(&decomp.view);
-    linemap::cover(&printed.lines, &decomp.view.insns, &flow, body, &mut elided);
+    let dropped = linemap::cover(
+        &printed.lines,
+        &decomp.view.insns,
+        &flow,
+        &decomp.view.effects,
+        body,
+        &mut elided,
+    );
     let elided = linemap::merge(elided);
     let mut all = decomp.warnings.clone();
     all.extend(printed.warnings);
+    all.extend(dropped);
     Output {
         entry: decomp.view.entry,
         name: name.to_owned(),

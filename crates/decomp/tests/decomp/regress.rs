@@ -1,8 +1,10 @@
 //! Regression tests of the decompiler core.
 
+use std::collections::BTreeSet;
 use std::sync::mpsc;
 use std::time::Duration;
 
+use ghidorah_base::WarningCode;
 use ghidorah_decomp::{ElideReason, Elided, Line, LineKind, LoopKind, Opts, Tree};
 use ghidorah_decomp::{interp_ast, linemap};
 use ghidorah_ir::{Arg, Builder, Config, Loc, NoImage, Opc, StopReason};
@@ -136,4 +138,81 @@ fn regress_linemap_covers_top_byte() {
     assert!(linemap::covered(&[], &[past], u64::MAX));
     let merged = linemap::merge(vec![two, top]);
     assert_eq!(merged, vec![two, top], "{merged:?}");
+}
+
+/// A printer that drops a store or a call must not hide it as `no effect`. With no printed
+/// line, `cover` gives no elided row for the store, the call and the return. It gives
+/// `W_STRUCTURE_SELFCHECK` at each of them. A dead add stays `no effect` (tests-tdd-01).
+#[test]
+fn regress_linemap_does_not_hide_dropped_store() {
+    let mut b = Builder::new();
+    b.begin(0x2000, 4).expect("in order");
+    let addr = b.get(Loc::RDI).expect("get");
+    b.store(64, addr.into(), Arg::k(1)).expect("store");
+    b.begin(0x2004, 5).expect("in order");
+    b.flow(Opc::Call, Arg::k(0x9000), Arg::Nil).expect("call");
+    b.begin(0x2009, 1).expect("in order");
+    let dead = b.get(Loc::RDI).expect("get");
+    let _ = b
+        .binary(Opc::Add, 64, dead.into(), Arg::k(1))
+        .expect("a dead add");
+    b.begin(0x200a, 1).expect("in order");
+    b.flow(Opc::Ret, Arg::Nil, Arg::Nil).expect("ret");
+    let arena = b.finish();
+    let body = body_with(&arena, &[0x2000], &[]);
+    let p = Program {
+        arena,
+        body,
+        entry: 0x2000,
+        setup: Vec::new(),
+    };
+    let ssa = l1_of(&p);
+    let d = decompile(&p, &ssa, &Opts::default());
+    assert_eq!(
+        d.view.effects,
+        BTreeSet::from([0x2000, 0x2004, 0x200a]),
+        "{:?}",
+        d.view.insns
+    );
+    let units = d.view.insns.clone();
+    let mut elided = Vec::new();
+    let warnings = linemap::cover(
+        &[],
+        &d.view.insns,
+        &BTreeSet::new(),
+        &d.view.effects,
+        &units,
+        &mut elided,
+    );
+    assert_eq!(
+        elided,
+        vec![Elided {
+            start: 0x2009,
+            size: 1,
+            reason: ElideReason::NoEffect,
+        }]
+    );
+    let at: Vec<u64> = warnings.iter().map(|w| w.at).collect();
+    assert_eq!(at, [0x2000, 0x2004, 0x200a], "{warnings:?}");
+    assert!(
+        warnings
+            .iter()
+            .all(|w| w.code == WarningCode::StructureSelfcheck),
+        "{warnings:?}"
+    );
+    let printed = ghidorah_decomp::finish(
+        d,
+        &ghidorah_decomp::NoEnv,
+        &ghidorah_ir::NoNames,
+        "f",
+        &units,
+    );
+    assert!(
+        printed
+            .warnings
+            .iter()
+            .all(|w| w.code != WarningCode::StructureSelfcheck),
+        "the printer shows each effect: {:?}",
+        printed.warnings
+    );
 }

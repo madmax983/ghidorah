@@ -376,5 +376,6 @@ pub(crate) fn shape(f: &Facts<'_>, raws: &mut [Raw], assigned: &Assigned, entry:
         nodes: b.views,
         vars: assigned.vars.clone(),
         insns: insns_of(f),
+        effects: f.effects(),
     }
 }

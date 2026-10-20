@@ -192,7 +192,8 @@ fn line_rows_and_cover_reasons() {
         size: 4,
         reason: ElideReason::Canary,
     }];
-    linemap::cover(&lines, &insns, &flow, &body, &mut elided);
+    let dropped = linemap::cover(&lines, &insns, &flow, &BTreeSet::new(), &body, &mut elided);
+    assert!(dropped.is_empty(), "{dropped:?}");
     elided.sort();
     let reasons: Vec<(u64, ElideReason)> = elided.iter().map(|e| (e.start, e.reason)).collect();
     assert_eq!(
