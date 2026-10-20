@@ -17,6 +17,7 @@ mod analysis_run;
 mod calc;
 mod coerce;
 mod cursor;
+mod envelope;
 mod examples;
 mod load;
 mod profiles;

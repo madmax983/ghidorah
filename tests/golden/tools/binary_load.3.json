@@ -4,7 +4,10 @@
   "binary_id": "98b111e4fc0ef006",
   "rev": 0,
   "session": "cli",
-  "partial": false,
+  "analysis": {
+    "state": "none"
+  },
+  "partial": true,
   "data": {
     "binary_id": "98b111e4fc0ef006",
     "sha256": "98b111e4fc0ef0060be449c91ee31e249d889734f3603827363c9e07ea42d9a1",
@@ -32,6 +35,11 @@
         "binary_id": "98b111e4fc0ef006"
       },
       "why": "Survey the binary that the call loaded."
+    },
+    {
+      "tool": "analysis_run",
+      "args": {},
+      "why": "Finish the analysis of the binary."
     }
   ],
   "noop": false

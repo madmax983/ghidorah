@@ -4,7 +4,10 @@
   "binary_id": "467a43b75d95c826",
   "rev": 2,
   "session": "mcp-1",
-  "partial": false,
+  "analysis": {
+    "state": "none"
+  },
+  "partial": true,
   "data": {
     "undone": [
       {
@@ -16,6 +19,13 @@
     "new_tx": "tx:2",
     "rev": 2
   },
+  "next": [
+    {
+      "tool": "analysis_run",
+      "args": {},
+      "why": "Finish the analysis of the binary."
+    }
+  ],
   "tx": "tx:2",
   "noop": false
 }

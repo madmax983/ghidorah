@@ -4,7 +4,10 @@
   "binary_id": "467a43b75d95c826",
   "rev": 0,
   "session": "cli",
-  "partial": false,
+  "analysis": {
+    "state": "none"
+  },
+  "partial": true,
   "data": {
     "value": "0x11a",
     "unsigned": "282",
@@ -33,6 +36,11 @@
         "target": "0x11a"
       },
       "why": "Tell what is at the address."
+    },
+    {
+      "tool": "analysis_run",
+      "args": {},
+      "why": "Finish the analysis of the binary."
     }
   ]
 }
