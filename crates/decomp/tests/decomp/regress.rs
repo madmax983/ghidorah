@@ -216,3 +216,174 @@ fn regress_linemap_does_not_hide_dropped_store() {
         printed.warnings
     );
 }
+
+/// Gives each variable token `v<N>` of `text` with a flag: `true` when the token is the left
+/// side of an assignment. A store through a pointer reads its variable.
+fn var_tokens(text: &str) -> Vec<(String, bool)> {
+    let mut out = Vec::new();
+    for line in text.lines() {
+        let mut start = None;
+        let ends = line
+            .char_indices()
+            .chain(std::iter::once((line.len(), ' ')));
+        for (k, ch) in ends {
+            let ident = ch.is_ascii_alphanumeric() || ch == '_';
+            match (ident, start) {
+                (true, None) => start = Some(k),
+                (false, Some(s)) => {
+                    start = None;
+                    let word = &line[s..k];
+                    let digits = word.strip_prefix('v').unwrap_or_default();
+                    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
+                        continue;
+                    }
+                    let before = line[..s].trim_start();
+                    let lead =
+                        before.is_empty() || before.ends_with("for (") || before.ends_with("; ");
+                    let def = lead && line[k..].starts_with(" = ");
+                    out.push((word.to_owned(), def));
+                }
+                _ => {}
+            }
+        }
+    }
+    out
+}
+
+/// Gives the variables `v<N>` that `text` reads but never assigns.
+pub fn undefined_reads(text: &str) -> BTreeSet<String> {
+    let tokens = var_tokens(text);
+    let defs: BTreeSet<&String> = tokens.iter().filter(|t| t.1).map(|t| &t.0).collect();
+    tokens
+        .iter()
+        .filter(|t| !t.1 && !defs.contains(&t.0))
+        .map(|t| t.0.clone())
+        .collect()
+}
+
+/// Gives the variables `v<N>` that `text` assigns but never reads.
+fn dead_assigns(text: &str) -> BTreeSet<String> {
+    let tokens = var_tokens(text);
+    let reads: BTreeSet<&String> = tokens.iter().filter(|t| !t.1).map(|t| &t.0).collect();
+    tokens
+        .iter()
+        .filter(|t| t.1 && !reads.contains(&t.0))
+        .map(|t| t.0.clone())
+        .collect()
+}
+
+/// Gives the decompiled text of the function at `entry` of the fixture `fixture`.
+pub fn text_at(fixture: &str, entry: u64) -> String {
+    let p = crate::fixtures::program(fixture);
+    ghidorah_decomp::render(
+        p,
+        crate::fixtures::fid(entry),
+        &Opts::default(),
+        &ghidorah_ir::NoNames,
+        &mut ghidorah_base::Fuel::new(50_000_000),
+    )
+    .unwrap_or_else(|e| panic!("{fixture} {entry:#x}: {e}"))
+    .text()
+}
+
+/// A function that passes an entry value on to a call or a tail call has that parameter.
+/// `cc::recover` counted a call as a read of its target only. So the namer limit made the
+/// entry value a register value with no def, and the head lost the parameter. A caller of
+/// such a function lost the argument (r2-engine-01).
+#[test]
+fn regress_forwarded_params_stay_params() {
+    let main = crate::regress_sema::text("hello.gcc-O2", "main");
+    assert!(
+        main.starts_with("uint64_t main(uint64_t param_1)\n"),
+        "{main}"
+    );
+    assert!(main.contains("return run(param_1);"), "{main}");
+    let left = crate::regress_sema::text("two_helpers.gcc-O2", "left_value");
+    assert!(left.contains("helper(param_1)"), "{left}");
+    assert!(undefined_reads(&left).is_empty(), "{left}");
+    let wrapper = text_at("pe/pe_main.exe", 0x1_4000_1236);
+    let head = wrapper.lines().next().unwrap_or_default();
+    assert_eq!(head.matches("param_").count(), 4, "{wrapper}");
+    assert!(
+        wrapper.contains("FUN_140001242(param_1, param_2, param_3, param_4)"),
+        "{wrapper}"
+    );
+    let caller = crate::regress_sema::text("two_helpers.gcc-O2", "main");
+    assert!(
+        caller.contains("left_value(") && !caller.contains("left_value()"),
+        "{caller}"
+    );
+    assert!(caller.contains("right_value(param_1)"), "{caller}");
+    assert!(dead_assigns(&caller).is_empty(), "{caller}");
+}
+
+/// The fixtures whose text must read no entry value of an argument register as a register
+/// value.
+const PARAM_FIXTURES: [&str; 14] = [
+    "hello.clang-O2",
+    "hello.clang-O2.stripped",
+    "hello.gcc-O2",
+    "hello.gcc-O2-nocet-nopie",
+    "hello.gcc-O2-noplt",
+    "hello.gcc-O2.noeh",
+    "hello.gcc-O2.noshdr",
+    "hello.gcc-O2.stripped",
+    "two_helpers.gcc-O2",
+    "two_helpers.clang-O2",
+    "strings.gcc-O2",
+    "varargs.gcc-O2",
+    "pe/pe_main.exe",
+    "pe/pe_flags.exe",
+];
+
+/// Gives the undefined reads of the text of each function of `fixture` whose variable holds
+/// the entry value of an integer argument register. The entry stack pointer, a floating
+/// register and the other registers have no parameter number of their own, so the check
+/// leaves them out.
+fn undefined_params(fixture: &str) -> Vec<String> {
+    let p = crate::fixtures::program(fixture);
+    let args: BTreeSet<Loc> = ghidorah_analysis::cc::conv_of(p)
+        .int_args
+        .iter()
+        .filter_map(|n| ghidorah_analysis::cc::loc_of(n))
+        .collect();
+    let mut bad = Vec::new();
+    for f in p.funcs().iter().filter(|f| !f.func.flags.thunk) {
+        let id = f.id();
+        let d = ghidorah_decomp::decompile(
+            p,
+            id,
+            &Opts::default(),
+            &mut ghidorah_base::Fuel::new(50_000_000),
+        )
+        .unwrap_or_else(|e| panic!("{fixture} {:#x}: {e}", id.0.off));
+        let vars = d.view.vars.clone();
+        let env = ghidorah_decomp::ProgramEnv(p);
+        let body = ghidorah_decomp::print::body_units(p, id);
+        let out = ghidorah_decomp::finish(d, &env, &ghidorah_ir::NoNames, "f", &body);
+        let text = out.text();
+        for name in undefined_reads(&text) {
+            let input = out
+                .vars
+                .iter()
+                .find(|r| r.name == name)
+                .and_then(|r| vars.iter().find(|v| v.id == r.id))
+                .and_then(|v| v.input);
+            if input.is_some_and(|l| args.contains(&l)) {
+                bad.push(format!("{fixture} {:#x} reads {name}:\n{text}", id.0.off));
+            }
+        }
+    }
+    bad
+}
+
+/// No function text of the fixtures reads a variable with no def that holds the entry value
+/// of an argument register. Such a variable is a lost parameter (r2-engine-01).
+#[test]
+fn regress_no_undefined_register_values() {
+    let bad: Vec<String> = PARAM_FIXTURES
+        .iter()
+        .flat_map(|f| undefined_params(f))
+        .collect();
+    assert!(bad.is_empty(), "{} reads:\n{}", bad.len(), bad.join("\n"));
+}

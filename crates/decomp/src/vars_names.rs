@@ -7,8 +7,9 @@
 //! | a value of the stack slot `k` | `stack:<k>` |
 //! | other values | `reg:<name>@<first def address>` |
 //!
-//! A parameter number must be below the parameter count of the facts ([`crate::Env::param_count`]).
-//! An entry value of a later slot is a register value.
+//! A parameter number must be below the parameter count of the view. The count is the count of
+//! the facts ([`crate::Env::param_count`]), or the count of the slots that the L1 body reads
+//! when that is more. A call use is a read. An entry value of a later slot is a register value.
 //!
 //! Two variables never share an identity. A taken identity gets a register storage, and a
 //! taken register name gets a number suffix.
@@ -19,10 +20,49 @@ use ghidorah_analysis::cc::loc_of;
 use ghidorah_base::{Storage, VarId};
 use ghidorah_ir::{Loc, Val};
 
+use ghidorah_types::CallConv;
+
 use crate::expr::VarIdx;
 use crate::vars::{Ctx, kind_of, reg_storage, var_id};
 use crate::view::Var;
-use crate::view::facts::Kind;
+use crate::view::facts::{Facts, Kind};
+
+/// Gives the parameter slot of an entry location in the convention `conv`. The slot is the
+/// position of an integer argument register, or the number of a stack parameter after them.
+fn slot_of(conv: &CallConv, loc: Loc) -> Option<u16> {
+    if let Some(n) = conv.int_args.iter().position(|r| loc_of(r) == Some(loc)) {
+        return u16::try_from(n).ok();
+    }
+    let Loc::Stack(k) = loc else {
+        return None;
+    };
+    let off = i64::from(conv.stack_arg_offset);
+    let k = i64::from(k);
+    if k < off || (k - off) % 8 != 0 {
+        return None;
+    }
+    let n = i64::try_from(conv.int_args.len()).ok()? + (k - off) / 8;
+    u16::try_from(n).ok()
+}
+
+/// Gives the count of the parameter slots that the L1 body reads: one more than the highest
+/// slot of an entry value with a use. A call use counts.
+pub(crate) fn read_slots(f: &Facts<'_>, conv: Option<&CallConv>) -> u16 {
+    let Some(conv) = conv else {
+        return 0;
+    };
+    f.start
+        .iter()
+        .filter_map(|&i| f.op(i).and_then(|o| o.out))
+        .filter(|v| f.use_count(*v) > 0)
+        .filter_map(|v| match f.kind_of(v) {
+            Kind::Input(loc) => slot_of(conv, loc),
+            _ => None,
+        })
+        .map(|n| n.saturating_add(1))
+        .max()
+        .unwrap_or(0)
+}
 
 /// The namer of the variables of one view.
 pub(crate) struct Namer<'a> {
@@ -61,30 +101,17 @@ impl<'a> Namer<'a> {
     }
 
     /// Gives the parameter number of an entry location. A number at or above the parameter
-    /// count of the facts gives `None`, so an entry value of such a register is a register
+    /// count of the view gives `None`, so an entry value of such a register is a register
     /// value.
     fn param(&self, loc: Loc) -> Option<u16> {
         let n = self.slot(loc)?;
-        let count = self.cx.params.map_or(u16::MAX, u16::from);
+        let count = self.cx.params.unwrap_or(u16::MAX);
         (n < count).then_some(n)
     }
 
     /// Gives the parameter slot of an entry location in the calling convention.
     fn slot(&self, loc: Loc) -> Option<u16> {
-        let conv = self.cx.conv?;
-        if let Some(n) = conv.int_args.iter().position(|r| loc_of(r) == Some(loc)) {
-            return u16::try_from(n).ok();
-        }
-        let Loc::Stack(k) = loc else {
-            return None;
-        };
-        let off = i64::from(conv.stack_arg_offset);
-        let k = i64::from(k);
-        if k < off || (k - off) % 8 != 0 {
-            return None;
-        }
-        let n = i64::try_from(conv.int_args.len()).ok()? + (k - off) / 8;
-        u16::try_from(n).ok()
+        slot_of(self.cx.conv?, loc)
     }
 
     /// Gives a free register storage with the base name `name`.

@@ -14,9 +14,12 @@
 //! - Varargs: a `test al, al` prologue, or the integer save area: 64-bit stores of the last
 //!   argument registers, `r9` included, to slots that go up by 8 in register order. The
 //!   registers of the save area are not named parameters.
+//! - A call or a tail jump reads each argument register of its callee that holds its entry
+//!   value at the call. So a function that passes a parameter on to a callee keeps it.
 //!
 //! [`params`] gives the parameters of a function: an agent signature first, then the Tier-0
-//! prototype of its name, then [`recover`]. ELF binaries use [`SYSV_X86_64`]. PE binaries use
+//! prototype of its name, then the recovery with the callee reads of the last rule
+//! ([`crate::fir::callsite::solve`]). [`recover`] alone reads no callee. ELF binaries use [`SYSV_X86_64`]. PE binaries use
 //! [`MS_X64`], whose slots are positional: argument n uses slot n of the integer list or of the
 //! floating list. So the slot count is the highest used slot of both lists, and a stack
 //! parameter means that all four register slots are parameters.
@@ -25,15 +28,15 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use ghidorah_base::{Address, Fuel, FuncId};
 use ghidorah_db::{Program, Types};
-use ghidorah_ir::{Arena, Arg, Loc, Node, Op, Opc, Val, local, rpo};
+use ghidorah_ir::{Arena, Arg, Loc, Node, Op, OpId, Opc, Val, local, rpo};
 use ghidorah_kernel::RangeSet;
 use ghidorah_loader::Format;
+use ghidorah_types::CallConv;
 use ghidorah_types::cc::{MS_X64, SYSV_X86_64};
-use ghidorah_types::{CallConv, Sig};
 use ghidorah_x86::Mnem;
 
 use crate::ctx::AnalysisCtx;
-use crate::fir::{self, FirError, FuncIr, Opts};
+use crate::fir::{FirError, FuncIr};
 use crate::irfacts::work_ir;
 use crate::registry::AnalyzerId;
 use crate::spec::{AnalyzerSpec, Grain, Step, Trigger};
@@ -126,17 +129,20 @@ fn call_defs() -> BTreeSet<Loc> {
 /// register or from memory. Their only XMM use is the destination.
 const SCALAR_INTO: [Mnem; 2] = [Mnem::Cvtsi2ss, Mnem::Cvtsi2sd];
 
-/// The live-in reads and the writes of one block.
-#[derive(Debug, Default)]
-struct BlockUse {
-    uses: BTreeSet<Loc>,
+/// The live-in reads and the writes of one block. `free` holds each call and jump op with
+/// the argument registers that the block does not write before it.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct BlockUse {
+    pub(crate) uses: BTreeSet<Loc>,
     defs: BTreeSet<Loc>,
+    pub(crate) free: Vec<(OpId, BTreeSet<Loc>)>,
 }
 
 /// The use step over the ops of one block.
 struct Uses<'a> {
     arena: &'a Arena,
     saved: BTreeSet<Loc>,
+    args: &'a BTreeSet<Loc>,
     src: BTreeMap<Val, BTreeSet<Loc>>,
     out: BlockUse,
 }
@@ -167,6 +173,10 @@ impl Uses<'_> {
 
     /// Runs one op.
     fn op(&mut self, op: &Op, call_defs: &BTreeSet<Loc>) {
+        if matches!(op.opc, Opc::Call | Opc::CallInd | Opc::Jump | Opc::JumpInd) {
+            let free = self.args.difference(&self.out.defs).copied().collect();
+            self.out.free.push((op.id, free));
+        }
         let pass = |s: &mut Self, from: Arg| {
             if let Some(out) = op.out {
                 let regs = s.src_of(from);
@@ -236,20 +246,23 @@ impl Uses<'_> {
     }
 }
 
-/// Gives the live-in registers of the entry block of `fir`. With `any_push`, the push of any
-/// one register is not a read. Else only the push of a callee-saved register is not a read.
-fn live_in(fir: &FuncIr, conv: &CallConv, any_push: bool) -> BTreeSet<Loc> {
+/// Gives the use summary of each block of `fir`. With `any_push`, the push of any one
+/// register is not a read. Else only the push of a callee-saved register is not a read.
+pub(crate) fn summaries(fir: &FuncIr, conv: &CallConv, any_push: bool) -> Vec<BlockUse> {
     let saved: BTreeSet<Loc> = if any_push {
         (0..16u8).filter_map(Loc::gpr).collect()
     } else {
         conv.callee_saved.iter().filter_map(|n| loc_of(n)).collect()
     };
+    let names = conv.int_args.iter().chain(conv.float_args.iter());
+    let args: BTreeSet<Loc> = names.filter_map(|n| loc_of(n)).collect();
     let defs = call_defs();
     let mut blocks: Vec<BlockUse> = Vec::new();
     for b in &fir.body.blocks {
         let mut step = Uses {
             arena: &fir.arena,
             saved: saved.clone(),
+            args: &args,
             src: BTreeMap::new(),
             out: BlockUse::default(),
         };
@@ -262,6 +275,11 @@ fn live_in(fir: &FuncIr, conv: &CallConv, any_push: bool) -> BTreeSet<Loc> {
         }
         blocks.push(step.out);
     }
+    blocks
+}
+
+/// Gives the live-in registers of the entry block over the block summaries `blocks`.
+pub(crate) fn flow(fir: &FuncIr, blocks: &[BlockUse]) -> BTreeSet<Loc> {
     let order: Vec<Node> = rpo(&fir.body.cfg).into_iter().rev().collect();
     let mut live: BTreeMap<Node, BTreeSet<Loc>> = BTreeMap::new();
     let rounds = order.len().saturating_mul(4).saturating_add(8);
@@ -302,7 +320,8 @@ pub fn obeys(fir: &FuncIr, conv: &CallConv) -> bool {
         .filter_map(|n| loc_of(n))
         .collect();
     allowed.extend(loc_of("rsp"));
-    live_in(fir, conv, true).iter().all(|l| allowed.contains(l))
+    let live = flow(fir, &summaries(fir, conv, true));
+    live.iter().all(|l| allowed.contains(l))
 }
 
 /// Gives the count of the registers of `names` up to the highest one in `live`.
@@ -402,10 +421,15 @@ fn stack_slots(frame: &crate::stack::Frame, first: i64) -> BTreeSet<i64> {
     out
 }
 
-/// Recovers the parameters of `fir` by the rules of the module doc.
+/// Recovers the parameters of `fir` by the rules of the module doc. A call reads no
+/// argument register here: [`params`] adds the reads of the callees.
 #[must_use]
 pub fn recover(fir: &FuncIr, conv: &CallConv) -> Params {
-    let live = live_in(fir, conv, false);
+    from_live(fir, conv, &flow(fir, &summaries(fir, conv, false)))
+}
+
+/// Gives the parameters of `fir` with the live-in registers `live`.
+pub(crate) fn from_live(fir: &FuncIr, conv: &CallConv, live: &BTreeSet<Loc>) -> Params {
     let first = i64::from(conv.stack_arg_offset);
     let stack = fir
         .frame
@@ -416,16 +440,16 @@ pub fn recover(fir: &FuncIr, conv: &CallConv) -> Params {
             u8::try_from(n).unwrap_or(u8::MAX)
         });
     if conv.positional {
-        return positional(conv, &live, stack);
+        return positional(conv, live, stack);
     }
     let area = save_area(fir, conv);
     let al = tests_al(fir);
     let varargs = area.is_some() || al;
-    let int = area.unwrap_or_else(|| filled(conv.int_args, &live));
+    let int = area.unwrap_or_else(|| filled(conv.int_args, live));
     let float = if varargs {
         0
     } else {
-        filled(conv.float_args, &live)
+        filled(conv.float_args, live)
     };
     Params {
         int,
@@ -462,17 +486,11 @@ fn positional(conv: &CallConv, live: &BTreeSet<Loc>, stack: u8) -> Params {
     out
 }
 
-/// Gives the parameters of a signature.
-fn from_sig(sig: &Sig) -> Params {
-    Params {
-        int: u8::try_from(sig.params.len()).unwrap_or(u8::MAX),
-        float: 0,
-        stack: 0,
-        varargs: sig.variadic,
-    }
-}
-
 /// Gives the parameters of the published function `id` and their source.
+///
+/// The recovery adds the reads of each call and tail call: the argument registers of the
+/// callee that still hold their entry values. The callees come first over the call graph
+/// ([`crate::fir::callsite::solve`]).
 ///
 /// # Errors
 ///
@@ -483,19 +501,14 @@ pub fn params(
     id: FuncId,
     fuel: &mut Fuel,
 ) -> Result<(Params, ParamSource), FirError> {
-    let view = program.func(id).ok_or(FirError::NoFunc(id))?;
-    if let Some(sig) = view.sig.and_then(|s| program.types().sig(s.value)) {
-        return Ok((from_sig(sig), ParamSource::Signature));
+    if program.func(id).is_none() {
+        return Err(FirError::NoFunc(id));
     }
-    if let Some(proto) = program
-        .name(id.0)
-        .filter(|n| !n.is_default())
-        .and_then(|n| Types::prototype(&n.text))
-    {
-        return Ok((from_sig(&proto.sig), ParamSource::Prototype));
+    if let Some(found) = crate::fir::callsite::fixed(program, id) {
+        return Ok(found);
     }
-    let ir = fir::build(program, id, &Opts::DEFAULT, fuel)?;
-    Ok((recover(&ir, conv_of(program)), ParamSource::Recovered))
+    let p = crate::fir::callsite::solve(program, id, conv_of(program), fuel)?;
+    Ok((p, ParamSource::Recovered))
 }
 
 /// Gives the varargs flag that a base fact sets for the function `entry`: its agent

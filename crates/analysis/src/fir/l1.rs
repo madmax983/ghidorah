@@ -216,16 +216,7 @@ pub fn build(
     fuel: &mut Fuel,
 ) -> Result<L1Ir, L1Error> {
     let l0 = super::build(program, id, opts, fuel)?;
-    let targets: BTreeSet<u64> = l0
-        .arena
-        .ops()
-        .iter()
-        .filter_map(|op| match (op.opc, op.a[0].as_k()) {
-            (Opc::Call, Some(t)) => Some(t),
-            (Opc::Jump, Some(t)) if l0.arena.insn_index(t).is_none() => Some(t),
-            _ => None,
-        })
-        .collect();
+    let targets: BTreeSet<u64> = callsite::call_targets(&l0).into_values().collect();
     let conv = conv_of(program);
     let arity: BTreeMap<u64, callsite::Arity> = targets
         .into_iter()

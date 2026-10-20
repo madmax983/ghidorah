@@ -123,3 +123,31 @@ fn params_from_prototypes() {
     let t = truth("fixtures/truth/hello.gcc-O2.json");
     assert!(list(&t, "functions").len() > 5);
 }
+
+/// Gives the recovered parameter count of the function at `entry` of the fixture `path`.
+fn recovered(path: &str, entry: u64) -> u32 {
+    let p = cached(path);
+    let (params, source) = cc::params(p, fid(entry), &mut Fuel::new(10_000_000))
+        .unwrap_or_else(|e| panic!("{path} {entry:#x}: {e}"));
+    assert_eq!(source, ParamSource::Recovered, "{path} {entry:#x}");
+    params.count()
+}
+
+/// A function that passes its entry values on to a call or a tail call has those
+/// parameters. The recovery counted a call as a read of its target only (r2-engine-01).
+#[test]
+fn regress_forwarded_param_counts() {
+    let hello = cached("fixtures/bin/hello.gcc-O2");
+    let main = named(hello, "main");
+    assert_eq!(recovered("fixtures/bin/hello.gcc-O2", main), 1);
+    let two = cached("fixtures/bin/two_helpers.gcc-O2");
+    let left = named(two, "left_value");
+    assert_eq!(recovered("fixtures/bin/two_helpers.gcc-O2", left), 1);
+    assert_eq!(recovered("fixtures/bin/pe/pe_main.exe", 0x1_4000_1236), 4);
+    let ir = fir_of(hello, main);
+    assert_eq!(
+        cc::recover(&ir, &SYSV_X86_64).count(),
+        0,
+        "recover reads no callee"
+    );
+}
