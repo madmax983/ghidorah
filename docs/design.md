@@ -958,7 +958,7 @@ Opcodes (about 55): `Get Put Copy Load Store Add Sub Mul UMulHi SMulHi UDiv SDiv
 - One semantic module is the source of truth: `x86_flags(op, w, a, b, c) -> u16` (CF bit 0, PF 2, AF 4, ZF 6, SF 7, OF 11), `x86_cond(cc, flags) -> bool` and `undefined_mask(op) -> u16`. The interpreter, materialization and fusion use only this module.
 - The kernel owns the fusion table (K5). `kernel::flags::fused_pred(op, cc) -> Option<Pred>` gives the predicate for `op` in {Sub, Add, Logic}. `Pred` is one of `Eq Ne ULt ULe UGt UGe SLt SLe SGt SGe TestZ TestNZ`. `kernel::flags::eval_pred(p, a, b, w) -> bool` evaluates it.
 - Verus proves `x86_cond(cc, flags(op, a, b, w)) == eval_pred(fused_pred(op, cc), a, b, w)` for every fusable `cc`. There is one lemma per `(op, width)` with `by(bit_vector)` at a fixed width: 12 lemmas in total (AC-031).
-- `ir::fuse(op, cc, a, b) -> Option<(Opc, Arg, Arg)>` calls `fused_pred` and maps each `Pred` to an `Opc` with one total `match`. A test checks the interpreter result of that `Opc` against `eval_pred` at widths 8, 16, 32 and 64 (AC-068b). So the proved table is the shipped table.
+- `ir::fuse(op, cc, w, a, b) -> Option<(Opc, Arg, Arg)>` calls `fused_pred` and maps each `Pred` to an `Opc` with one total `match`. A test checks the interpreter result of that `Opc` against `eval_pred` at widths 8, 16, 32 and 64 (AC-068b). So the proved table is the shipped table.
 - Undefined flags never feed fusion. Tests mask them.
 
 ### 6.3 Lifter

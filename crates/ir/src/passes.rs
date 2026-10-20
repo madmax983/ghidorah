@@ -278,7 +278,7 @@ fn fuse_conds(ssa: &mut Ssa, fuel: &mut Fuel) -> Result<u64, SsaError> {
             continue;
         };
         let (a, b) = (ssa.root(thunk.a[0]), ssa.root(thunk.a[1]));
-        if let Some((opc, x, y)) = fuse(flag_op, cc, a, b) {
+        if let Some((opc, x, y)) = fuse(flag_op, cc, thunk.w, a, b) {
             plan.push((index, opc, thunk.w, [x, y, Arg::Nil]));
         }
     }

@@ -493,6 +493,13 @@ pub fn run(ctx: &mut AnalysisCtx<'_>, ranges: &RangeSet) -> Step {
             .or_default()
             .push(FactKey::Ref(key));
     }
+    for (at, entry) in &data.entries {
+        let key = entry.key(*at);
+        premises
+            .entry(key.to.off)
+            .or_default()
+            .push(FactKey::Ref(key));
+    }
     for r in program.base().refs().iter() {
         let key = r.value.key;
         if !key.kind.is_flow() && key.to.is_ram() {

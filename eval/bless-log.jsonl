@@ -206,3 +206,4 @@
 {"commit":"8193524","metric":"cost:verify-05:chars","old":null,"new":987,"reason":"First-run values of WP-26."}
 {"commit":"8193524","metric":"cost:verify-05:est_tokens","old":null,"new":329,"reason":"First-run values of WP-26."}
 {"commit":"8193524","metric":"cost:verify-05:peak","old":null,"new":650,"reason":"First-run values of WP-26."}
+{"commit":"2531904","metric":"survey_fact_recall","old":0.996,"new":1.000,"reason":"clang relative string tables now give refs"}

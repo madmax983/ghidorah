@@ -12,8 +12,8 @@
 //! | `X86Dec` | the `Sub` row on `(a, 1)`, for a condition that does not read CF |
 //! | `X86Inc` | the `Add` row on `(a, 1)`, for a condition that does not read CF |
 //!
-//! The `Add` row compares `a` with `-b`, so it needs a constant `b`.
-//! Each other flag operation gives `None`. An undefined flag never feeds fusion.
+//! The `Add` row compares `a` with `-b` at the width of the `Flags` op, so it needs a
+//! constant `b`. Each other flag operation gives `None`. An undefined flag never feeds fusion.
 
 pub use ghidorah_kernel::flags::Pred;
 use ghidorah_kernel::flags::{FuseOp, fused_pred, fused_rhs};
@@ -46,12 +46,14 @@ const fn reads_cf(code: u8) -> bool {
     matches!(code, 2 | 3 | 6 | 7)
 }
 
-/// Gives the compare that `Cond(cc, Flags(op, a, b, _))` fuses into, or `None`.
+/// Gives the compare that `Cond(cc, Flags(op, a, b, _))` fuses into, or `None`. `w` is the
+/// width of the `Flags` op.
 ///
-/// The compare op takes the width of the `Flags` op. It reads the low bits of a constant
-/// at that width, so a negated constant of 64 bits is correct at each width.
+/// The compare op takes the width `w`. The `Add` row gives the constant `-b` at the width
+/// `w`, the right operand of the K5 proof. A width that is not 8, 16 or 32 bits gives the
+/// constant at 64 bits.
 #[must_use]
-pub fn fuse(op: FlagOp, cc: Cc, a: Arg, b: Arg) -> Option<(Opc, Arg, Arg)> {
+pub fn fuse(op: FlagOp, cc: Cc, w: u8, a: Arg, b: Arg) -> Option<(Opc, Arg, Arg)> {
     let code = cc.code();
     let (row, lhs, rhs) = match op {
         FlagOp::X86Sub => (FuseOp::Sub, a, b),
@@ -64,7 +66,7 @@ pub fn fuse(op: FlagOp, cc: Cc, a: Arg, b: Arg) -> Option<(Opc, Arg, Arg)> {
     };
     let pred = fused_pred(row, code)?;
     let rhs = match row {
-        FuseOp::Add => Arg::k(fused_rhs(FuseOp::Add, rhs.as_k()?, 64)),
+        FuseOp::Add => Arg::k(fused_rhs(FuseOp::Add, rhs.as_k()?, u32::from(w))),
         FuseOp::Sub | FuseOp::Logic => rhs,
     };
     Some(pred_opc(pred, lhs, rhs))

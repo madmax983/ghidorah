@@ -67,7 +67,7 @@
       "tolerance": 0.00
     },
     "survey_fact_recall": {
-      "baseline": 0.996,
+      "baseline": 1.000,
       "floor": 0.60,
       "tolerance": 0.05
     }
