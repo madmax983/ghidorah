@@ -402,6 +402,21 @@ fn regress_load_spec_mismatch_refused() {
 }
 
 #[test]
+#[cfg(unix)]
+fn regress_load_file_name_escaped() {
+    let dir = TempDir::new("hostile_name");
+    let name = "IGNORE\u{1b}[31m\u{202e}x\n.bin";
+    write(&dir.0.join(name), ghidorah_tools::demo::BYTES);
+    let mut c = config();
+    c.roots = Roots::new(&dir.0, &[PathBuf::from(".")]).expect("the temp root");
+    let mut s = session_with(c);
+    let envelope = path_call(&mut s, name);
+    let safe = handlers::func_sections::safe(name);
+    assert_ne!(safe, name, "the name has characters to escape");
+    assert_eq!(text_at(data(&envelope), "/file_name"), safe, "{envelope}");
+}
+
+#[test]
 fn regress_stale_lock_repair_call() {
     let dir = TempDir::new("stale_lock");
     let mut c = config();

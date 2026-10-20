@@ -388,7 +388,8 @@ fn make_program(session: &Session, args: &Args, bytes: &[u8]) -> Result<Program,
 }
 
 /// Gives the result object of a binary. `refusal` is the reason why the binary has no
-/// project on disk: then the object holds `persisted: false` and `persist_reason`.
+/// project on disk: then the object holds `persisted: false` and `persist_reason`. The file
+/// name comes from the file system, so it has the escapes of [`safe`], as in other outputs.
 fn report(binary: &OpenBinary, already: bool, steps_used: u64, refusal: Option<&str>) -> Object {
     let program = &binary.program;
     let meta = program.meta();
@@ -419,7 +420,7 @@ fn report(binary: &OpenBinary, already: bool, steps_used: u64, refusal: Option<&
     let mut out = Object::new();
     out.push("binary_id", Value::from(binary.id.to_string()));
     out.push("sha256", Value::from(hex::encode(&meta.sha256)));
-    out.push("file_name", Value::from(binary.file_name.as_str()));
+    out.push("file_name", Value::from(safe(&binary.file_name)));
     out.push("format", Value::from(meta.format.name()));
     out.push("arch", Value::from(meta.arch.to_string()));
     out.push("kind", Value::from(kind));
