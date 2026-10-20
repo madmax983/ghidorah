@@ -5,7 +5,8 @@
 //! 1. A relative path starts at the first root.
 //! 2. The lexical form of the path, with `.` and `..` resolved, must stay under a root.
 //! 3. `canonicalize` resolves the symlinks. The canonical path must also stay under a root.
-//! 4. The path must name a regular file of at most the size limit.
+//! 4. The path must name a regular file of at most the size limit. The type check runs before
+//!    the open and again on the open file. The open never waits for the writer of a FIFO.
 //!
 //! A path that leaves the roots gives `PATH_OUTSIDE_ROOT` with `details.roots`. The error
 //! never shows an absolute path: each root shows its relative name. A file that does not exist
@@ -184,7 +185,12 @@ impl Roots {
     pub fn read(&self, path: &str, max_bytes: u64) -> Result<ReadFile, ToolError> {
         let canonical = self.check(path)?;
         let unreadable = |_| ToolError::new(ErrorCode::FileUnreadable);
-        let file = std::fs::File::open(&canonical).map_err(unreadable)?;
+        // The open of a FIFO blocks until a writer comes. So the type check comes first.
+        if !std::fs::metadata(&canonical).map_err(unreadable)?.is_file() {
+            return Err(ToolError::new(ErrorCode::FileUnreadable));
+        }
+        let file = open_no_block(&canonical).map_err(unreadable)?;
+        // The second check closes the race: the path can change after the first check.
         let meta = file.metadata().map_err(unreadable)?;
         if !meta.is_file() {
             return Err(ToolError::new(ErrorCode::FileUnreadable));
@@ -213,6 +219,71 @@ impl Roots {
     }
 }
 
+/// The `O_NONBLOCK` flag of `open` on Linux and Android, for most CPU types.
+#[cfg(all(
+    any(target_os = "linux", target_os = "android"),
+    not(any(
+        target_arch = "mips",
+        target_arch = "mips64",
+        target_arch = "sparc",
+        target_arch = "sparc64"
+    ))
+))]
+const O_NONBLOCK: i32 = 0o4000;
+
+/// The `O_NONBLOCK` flag of `open` on Linux for MIPS.
+#[cfg(all(
+    any(target_os = "linux", target_os = "android"),
+    any(target_arch = "mips", target_arch = "mips64")
+))]
+const O_NONBLOCK: i32 = 0x80;
+
+/// The `O_NONBLOCK` flag of `open` on Linux for SPARC.
+#[cfg(all(
+    any(target_os = "linux", target_os = "android"),
+    any(target_arch = "sparc", target_arch = "sparc64")
+))]
+const O_NONBLOCK: i32 = 0x4000;
+
+/// The `O_NONBLOCK` flag of `open` on macOS and the BSD systems.
+#[cfg(any(
+    target_os = "macos",
+    target_os = "ios",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd",
+    target_os = "dragonfly"
+))]
+const O_NONBLOCK: i32 = 0x4;
+
+/// No flag on other Unix systems. The type check before the open stays.
+#[cfg(all(
+    unix,
+    not(any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "freebsd",
+        target_os = "netbsd",
+        target_os = "openbsd",
+        target_os = "dragonfly"
+    ))
+))]
+const O_NONBLOCK: i32 = 0;
+
+/// Opens `path` to read. On Unix the open uses `O_NONBLOCK`, so a special file never blocks it.
+fn open_no_block(path: &Path) -> std::io::Result<std::fs::File> {
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(O_NONBLOCK);
+    }
+    options.open(path)
+}
+
 /// Gives the lexical form of `path`: `.` parts go, and each `..` drops the part before it.
 ///
 /// A `..` at the top stays at the top, as the file system does.
@@ -231,3 +302,6 @@ fn lexical(path: &Path) -> PathBuf {
     }
     out
 }
+
+#[cfg(test)]
+mod tests;
