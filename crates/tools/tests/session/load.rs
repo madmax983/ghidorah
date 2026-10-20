@@ -345,6 +345,63 @@ fn regress_max_ms_time_stop() {
 }
 
 #[test]
+fn regress_load_spec_mismatch_refused() {
+    let raw = |base: &str| {
+        format!(
+            r#"{{"path":"fixtures/bin/hello.gcc-O2","file_format":"raw","base":"{base}","analysis":"none"}}"#
+        )
+    };
+    let refused = |envelope: &Value, id: &str| {
+        assert_eq!(code(envelope), "INVALID_ARGUMENT", "{envelope}");
+        assert_eq!(
+            text_at(envelope, "/error/details/reason"),
+            "load_spec_differs",
+            "{envelope}"
+        );
+        assert_eq!(text_at(envelope, "/error/details/stored/format"), "raw");
+        assert_eq!(
+            text_at(envelope, "/error/details/stored/base"),
+            "0x400000",
+            "{envelope}"
+        );
+        assert_eq!(
+            text_at(envelope, "/next/0/tool"),
+            "binary_load",
+            "{envelope}"
+        );
+        assert_eq!(
+            envelope.pointer("/next/0/args"),
+            Some(&json(&format!(r#"{{"binary_id":"{id}"}}"#))),
+            "{envelope}"
+        );
+    };
+    // An open binary keeps the load settings of its first load.
+    let mut s = session();
+    let first = call(&mut s, "binary_load", &raw("0x400000"));
+    let id = text_at(data(&first), "/binary_id");
+    refused(&call(&mut s, "binary_load", &raw("0x10000000")), &id);
+    let again = call(&mut s, "binary_load", &raw("0x400000"));
+    assert_eq!(data(&again).get("already_loaded"), Some(&Value::Bool(true)));
+    // A project keeps the load settings of its first load too.
+    let dir = TempDir::new("load_spec");
+    let mut c = config();
+    c.projects = Some(ProjectsConfig {
+        root: dir.0.clone(),
+        named: true,
+        break_lock: false,
+    });
+    {
+        let mut a = session_with(c.clone());
+        data(&call(&mut a, "binary_load", &raw("0x400000")));
+    }
+    let mut b = session_with(c);
+    refused(&call(&mut b, "binary_load", &raw("0x10000000")), &id);
+    assert_eq!(b.binaries().count(), 0, "a refused load opens nothing");
+    let reopened = call(&mut b, "binary_load", &format!(r#"{{"binary_id":"{id}"}}"#));
+    assert_eq!(text_at(data(&reopened), "/format"), "raw");
+}
+
+#[test]
 fn regress_stale_lock_repair_call() {
     let dir = TempDir::new("stale_lock");
     let mut c = config();

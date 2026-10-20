@@ -16,21 +16,22 @@
 //! of the last run with the hash of the program. A difference makes the state `stale`, and a
 //! re-analysis from the start band 100 is due.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use ghidorah_base::{BinaryId, ErrorCode, Fuel, Rev, TxId, WarningCode};
-use ghidorah_db::project::{Access, LoadSpec, OpenOptions, ProjectMeta, check_root};
+use ghidorah_db::project::{Access, LoadSpec, OpenOptions, PROJECT_FILE, ProjectMeta, check_root};
 use ghidorah_db::snapshot::{inputs_hash, result_hash};
 use ghidorah_db::{Line, Project, ProjectError, ProjectSummary, RunLine, RunState};
-use ghidorah_json::{Object, Value};
+use ghidorah_json::{Limits as JsonLimits, Object, Value};
 
 use super::store::project_error;
 use super::{OpenBinary, RunReport, Session, Store, Until};
 use crate::api::Progress;
-use crate::dispatch::{Crash, Ctx};
+use crate::dispatch::Ctx;
 use crate::envelope::{AnalysisInfo, AnalysisState, Warning};
 use crate::errors::ToolError;
 use crate::handlers::analysis_run::{SLICE_STEPS, SliceStop, Sliced};
+use crate::handlers::load::spec_differs;
 
 /// The start band of a full re-analysis (design Section 3.9).
 pub const FULL_BAND: u16 = 100;
@@ -145,7 +146,9 @@ impl Session {
     ///
     /// # Errors
     ///
-    /// Returns `PROJECT_LOCKED`, `JOURNAL_CORRUPT` or another project error.
+    /// Returns `PROJECT_LOCKED`, `JOURNAL_CORRUPT` or another project error. A project with
+    /// other load settings than `load` gives `INVALID_ARGUMENT` with
+    /// `details.reason: "load_spec_differs"`, and nothing opens.
     pub(crate) fn admit(
         &mut self,
         binary: OpenBinary,
@@ -155,29 +158,17 @@ impl Session {
     ) -> Result<(Admitted, Vec<Warning>), ToolError> {
         let root = match self.root_check() {
             Ok(Some(root)) => root,
-            Ok(None) => {
-                self.open(binary);
-                return Ok((Admitted::Fresh, Vec::new()));
-            }
-            Err(refusal) => {
-                // The binary stays in memory, and the store keeps the reason for the agent.
-                let id = binary.id;
-                self.open(binary);
-                if let Some(store) = self.stores.get_mut(&id) {
-                    store.refusal = Some(refusal.to_string());
-                }
-                return Ok((Admitted::Fresh, Vec::new()));
-            }
+            Ok(None) => return Ok(self.keep(binary, load, None)),
+            // The binary stays in memory, and the store keeps the reason for the agent.
+            Err(refusal) => return Ok(self.keep(binary, load, Some(refusal.to_string()))),
         };
-        if Project::exists(self.fs.as_mut(), &Project::dir_of(&root, binary.id)) {
-            return self
-                .reopen_with(binary.id, break_lock)?
-                .ok_or_else(|| ToolError::new(ErrorCode::UnknownBinary));
+        let dir = Project::dir_of(&root, binary.id);
+        if Project::exists(self.fs.as_mut(), &dir) {
+            return self.admit_project(&dir, binary.id, load, break_lock);
         }
         if binary.read_only {
             // A read-only session makes no new project.
-            self.open(binary);
-            return Ok((Admitted::Fresh, Vec::new()));
+            return Ok(self.keep(binary, load, None));
         }
         let meta = ProjectMeta::new(&binary.program, &binary.file_name, load);
         let opts = self.open_options(false, break_lock);
@@ -186,10 +177,8 @@ impl Session {
             Ok(project) => project,
             // Another process can make the project after the check above. Then the project
             // opens like a project that was there first.
-            Err(_) if Project::exists(self.fs.as_mut(), &Project::dir_of(&root, binary.id)) => {
-                return self
-                    .reopen_with(binary.id, break_lock)?
-                    .ok_or_else(|| ToolError::new(ErrorCode::UnknownBinary));
+            Err(_) if Project::exists(self.fs.as_mut(), &dir) => {
+                return self.admit_project(&dir, binary.id, load, break_lock);
             }
             Err(error) => return Err(project_error(&error)),
         };
@@ -199,6 +188,46 @@ impl Session {
         );
         self.open(binary);
         Ok((Admitted::Fresh, Vec::new()))
+    }
+
+    /// Opens `binary` in memory with its load settings. `refusal` is the reason of a refused
+    /// projects root.
+    fn keep(
+        &mut self,
+        binary: OpenBinary,
+        load: LoadSpec,
+        refusal: Option<String>,
+    ) -> (Admitted, Vec<Warning>) {
+        let id = binary.id;
+        self.open(binary);
+        if let Some(store) = self.stores.get_mut(&id) {
+            store.load = Some(load);
+            store.refusal = refusal;
+        }
+        (Admitted::Fresh, Vec::new())
+    }
+
+    /// Opens the project of `id` in `dir` for a load with the settings `load`. The project
+    /// keeps the settings of its first load, so other settings open nothing.
+    fn admit_project(
+        &mut self,
+        dir: &Path,
+        id: BinaryId,
+        load: LoadSpec,
+        break_lock: bool,
+    ) -> Result<(Admitted, Vec<Warning>), ToolError> {
+        let stored = self
+            .fs
+            .read(&dir.join(PROJECT_FILE))
+            .ok()
+            .and_then(|bytes| ghidorah_json::parse_bytes(&bytes, &JsonLimits::DEFAULT).ok())
+            .and_then(|value| ProjectMeta::from_json(&value).ok())
+            .map(|meta| meta.load);
+        if let Some(stored) = stored.filter(|s| *s != load) {
+            return Err(spec_differs(id, stored, load));
+        }
+        self.reopen_with(id, break_lock)?
+            .ok_or_else(|| ToolError::new(ErrorCode::UnknownBinary))
     }
 
     /// Opens the project of `id` from the projects root. Gives `None` when no project exists.
@@ -511,46 +540,6 @@ impl Session {
         Ok(())
     }
 
-    /// Drops the program of the open binary `id` and loads it again. A project gives the
-    /// snapshot and the journal. A binary in memory gives its checkpoint and its history.
-    ///
-    /// # Errors
-    ///
-    /// Returns the project error of a failed load, or `INTERNAL_ERROR` when the history does not
-    /// replay over the checkpoint.
-    pub fn reload(&mut self, id: BinaryId) -> Result<(), ToolError> {
-        let limits = self.config.limits;
-        let (Some(binary), Some(store)) = (self.binaries.get_mut(&id), self.stores.get_mut(&id))
-        else {
-            return Ok(());
-        };
-        if let Some(project) = store.project.as_mut() {
-            let loaded = project.load(&limits).map_err(|e| project_error(&e))?;
-            binary.program = loaded.program;
-            store.history = loaded.history;
-            return Ok(());
-        }
-        let Some(checkpoint) = &store.checkpoint else {
-            return Ok(());
-        };
-        let mut program = (**checkpoint).clone();
-        let tail = store
-            .history
-            .lines()
-            .get(store.checkpoint_lines..)
-            .unwrap_or_default();
-        for line in tail {
-            match line {
-                Line::Tx(t) => ghidorah_db::replay::apply_tx(&mut program, t)
-                    .map_err(|_| ToolError::new(ErrorCode::InternalError))?,
-                Line::Meta(m) => ghidorah_db::meta::apply(&mut program, m),
-                Line::Run(_) => {}
-            }
-        }
-        binary.program = program;
-        Ok(())
-    }
-
     /// Writes the snapshot of the open binary `id` and releases its lock.
     pub fn close(&mut self, id: BinaryId) {
         let (Some(binary), Some(store)) = (self.binaries.get(&id), self.stores.get_mut(&id)) else {
@@ -561,29 +550,6 @@ impl Session {
                 let _ = project.snapshot(&binary.program);
             }
             project.release();
-        }
-    }
-
-    /// Writes the crash record of a handler panic for the bound binary: the tool, the
-    /// arguments, the rev and the panic text.
-    pub(crate) fn write_crash(&mut self, crash: &Crash) {
-        let Some(id) = self.current else {
-            return;
-        };
-        let rev = self.binaries.get(&id).map_or(0, |b| b.program.rev().0);
-        let record = Value::object([
-            ("tool", Value::from(crash.tool.as_str())),
-            ("args", Value::from(crash.args.as_str())),
-            ("rev", Value::from(rev)),
-            ("panic", Value::from(crash.panic.as_str())),
-        ]);
-        let project = self
-            .stores
-            .get_mut(&id)
-            .and_then(|s| s.project.as_mut())
-            .filter(|p| !p.is_read_only());
-        if let Some(project) = project {
-            let _ = project.write_crash(&crash.id, &record);
         }
     }
 }

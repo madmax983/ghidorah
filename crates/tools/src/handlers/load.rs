@@ -9,7 +9,9 @@
 //! | `binary_id` | a binary that is open in the session, or a project in the projects root |
 //!
 //! The load probes the format, maps the file and makes the program. A binary that is open
-//! already gives `already_loaded: true` and no second copy. A session with a projects root
+//! already gives `already_loaded: true` and no second copy. The binary ID is the hash of the
+//! bytes, so a binary keeps the load settings (`file_format`, `base`, `entry`) of its first
+//! load. Other settings give `INVALID_ARGUMENT` with `details.reason: "load_spec_differs"`. A session with a projects root
 //! opens the project of the binary, or makes a new one (design Section 3.10). A reopen by
 //! `binary_id` reads only the input copy of the project, with no root check.
 //!
@@ -65,8 +67,19 @@ pub const WHY_SURVEY: &str = "Survey the binary that the call loaded.";
 /// The `why` of the repair call of a stale project lock.
 pub const WHY_BREAK_LOCK: &str = "The owner of the project lock is not alive. Send the call again with break_lock true to replace the lock.";
 
+/// The `why` of the repair call of a load with other load settings than the first load.
+pub const WHY_STORED_SPEC: &str = "Open the binary with the load settings of its first load.";
+
+/// The `details.expected` of a load with other load settings than the first load.
+pub const EXPECTED_STORED_SPEC: &str = "the load settings of details.stored";
+
 /// Every fixed text of the handler that an agent reads.
-pub const TEXTS: &[&str] = &[WHY_SURVEY, WHY_BREAK_LOCK];
+pub const TEXTS: &[&str] = &[
+    WHY_SURVEY,
+    WHY_BREAK_LOCK,
+    WHY_STORED_SPEC,
+    EXPECTED_STORED_SPEC,
+];
 
 const ARGS: &[ArgSpec] = &[
     ArgSpec::new(
@@ -304,6 +317,42 @@ fn load_spec(args: &Args) -> Result<LoadSpec, ToolError> {
     })
 }
 
+/// Gives the JSON form of load settings: `{ format: "auto" }` or
+/// `{ format: "raw", base, entry }`.
+fn spec_json(spec: LoadSpec) -> Value {
+    match spec {
+        LoadSpec::Auto => Value::object([("format", Value::from("auto"))]),
+        LoadSpec::Raw { base, entry } => Value::object([
+            ("format", Value::from("raw")),
+            ("base", Value::from(hex::u64_text(base))),
+            ("entry", entry.map(hex::u64_text).into()),
+        ]),
+    }
+}
+
+/// Gives the error of a load of the binary `id` with the settings `asked` when its first load
+/// used `stored`: `INVALID_ARGUMENT` with `details.reason: "load_spec_differs"`,
+/// `details.stored` and `next[0]` `binary_load { binary_id }`. The binary ID is the hash of
+/// the bytes only, so one binary has one set of load settings.
+pub(crate) fn spec_differs(id: BinaryId, stored: LoadSpec, asked: LoadSpec) -> ToolError {
+    let field = match (stored, asked) {
+        (LoadSpec::Raw { base: a, .. }, LoadSpec::Raw { base: b, .. }) if a != b => "base",
+        (LoadSpec::Raw { .. }, LoadSpec::Raw { .. }) => "entry",
+        _ => "file_format",
+    };
+    ToolError::new(ErrorCode::InvalidArgument)
+        .var("field", field)
+        .path(&format!("/{field}"))
+        .detail("reason", Value::from("load_spec_differs"))
+        .detail("stored", spec_json(stored))
+        .detail("expected", Value::from(EXPECTED_STORED_SPEC))
+        .next(Call::new(
+            "binary_load",
+            Value::object([("binary_id", Value::from(id.to_string()))]),
+            WHY_STORED_SPEC,
+        ))
+}
+
 /// Gives the name and the bytes of the file of the call.
 fn read_input(session: &Session, args: &Args) -> Result<(String, Vec<u8>), ToolError> {
     if let Some(name) = args.str("builtin") {
@@ -512,6 +561,14 @@ fn run(session: &mut Session, args: &Args, ctx: &mut Ctx) -> Result<Payload, Too
     let program = make_program(session, args, &bytes)?;
     let id = program.meta().binary_id;
     if session.binary(id).is_some() {
+        let asked = load_spec(args)?;
+        if let Some(stored) = session
+            .store(id)
+            .and_then(Store::load_spec)
+            .filter(|s| *s != asked)
+        {
+            return Err(spec_differs(id, stored, asked));
+        }
         return finish(session, id, true, 0, ctx);
     }
     let binary = OpenBinary {

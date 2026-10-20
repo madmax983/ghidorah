@@ -15,7 +15,7 @@
 use std::path::PathBuf;
 
 use ghidorah_base::{BinaryId, ErrorCode};
-use ghidorah_db::project::check_root;
+use ghidorah_db::project::{LoadSpec, check_root};
 use ghidorah_db::{
     Commit, History, Line, MetaLine, Program, Project, ProjectError, RealFs, SessionLabel, Tx,
     TxLine, UndoError, UndoOutcome, UndoRequest,
@@ -24,6 +24,7 @@ use ghidorah_json::Value;
 
 use super::Session;
 use super::batch::BatchTx;
+use crate::dispatch::Crash;
 use crate::errors::{Candidate, ToolError};
 
 /// The projects settings of a session.
@@ -60,6 +61,8 @@ pub struct Store {
     pub(super) batch: Option<Box<BatchTx>>,
     /// The reason why the binary has no project: the refusal of the projects root.
     pub(super) refusal: Option<String>,
+    /// The load settings of the first load of a binary in memory.
+    pub(super) load: Option<LoadSpec>,
 }
 
 impl Store {
@@ -74,6 +77,7 @@ impl Store {
             checkpoint_lines: 0,
             batch: None,
             refusal: None,
+            load: None,
         }
     }
 
@@ -87,6 +91,7 @@ impl Store {
             checkpoint_lines: 0,
             batch: None,
             refusal: None,
+            load: None,
         }
     }
 
@@ -107,6 +112,13 @@ impl Store {
     #[must_use]
     pub fn persist_reason(&self) -> Option<&str> {
         self.refusal.as_deref()
+    }
+
+    /// Gives how the loader read the binary: the load settings of the project, else those of
+    /// the first load of a binary in memory. Gives `None` when the session does not know them.
+    #[must_use]
+    pub fn load_spec(&self) -> Option<LoadSpec> {
+        self.project.as_ref().map(|p| p.meta().load).or(self.load)
     }
 
     /// Puts a copy of `program` in place of the checkpoint of a store in memory.
@@ -277,6 +289,69 @@ impl Session {
         }
         store.history.record(line);
         Ok(())
+    }
+
+    /// Drops the program of the open binary `id` and loads it again. A project gives the
+    /// snapshot and the journal. A binary in memory gives its checkpoint and its history.
+    ///
+    /// # Errors
+    ///
+    /// Returns the project error of a failed load, or `INTERNAL_ERROR` when the history does not
+    /// replay over the checkpoint.
+    pub fn reload(&mut self, id: BinaryId) -> Result<(), ToolError> {
+        let limits = self.config.limits;
+        let (Some(binary), Some(store)) = (self.binaries.get_mut(&id), self.stores.get_mut(&id))
+        else {
+            return Ok(());
+        };
+        if let Some(project) = store.project.as_mut() {
+            let loaded = project.load(&limits).map_err(|e| project_error(&e))?;
+            binary.program = loaded.program;
+            store.history = loaded.history;
+            return Ok(());
+        }
+        let Some(checkpoint) = &store.checkpoint else {
+            return Ok(());
+        };
+        let mut program = (**checkpoint).clone();
+        let tail = store
+            .history
+            .lines()
+            .get(store.checkpoint_lines..)
+            .unwrap_or_default();
+        for line in tail {
+            match line {
+                Line::Tx(t) => ghidorah_db::replay::apply_tx(&mut program, t)
+                    .map_err(|_| ToolError::new(ErrorCode::InternalError))?,
+                Line::Meta(m) => ghidorah_db::meta::apply(&mut program, m),
+                Line::Run(_) => {}
+            }
+        }
+        binary.program = program;
+        Ok(())
+    }
+
+    /// Writes the crash record of a handler panic for the bound binary: the tool, the
+    /// arguments, the rev and the panic text.
+    pub(crate) fn write_crash(&mut self, crash: &Crash) {
+        let Some(id) = self.current else {
+            return;
+        };
+        let rev = self.binaries.get(&id).map_or(0, |b| b.program.rev().0);
+        let record = Value::object([
+            ("tool", Value::from(crash.tool.as_str())),
+            ("args", Value::from(crash.args.as_str())),
+            ("rev", Value::from(rev)),
+            ("panic", Value::from(crash.panic.as_str())),
+        ]);
+        let project = self
+            .stores
+            .get_mut(&id)
+            .and_then(|s| s.project.as_mut())
+            .filter(|p| !p.is_read_only());
+        if let Some(project) = project {
+            let _ = project.write_crash(&crash.id, &record);
+        }
     }
 }
 
