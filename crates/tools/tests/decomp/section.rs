@@ -401,4 +401,15 @@ fn regress_func_get_decomp_cache_hits() {
         (3, 4),
         "a binary that opens again has a new cache"
     );
+    s.batch_begin(id, "mcp-1").expect("a batch opens");
+    let (in_batch, hits, misses) = look(&mut s);
+    assert_eq!(
+        (hits, misses),
+        (3, 4),
+        "a decompile in a batch reads no cache"
+    );
+    assert!(in_batch.contains("finish_renamed"), "{in_batch}");
+    s.batch_rollback(id);
+    let (_, hits, _) = look(&mut s);
+    assert_eq!(hits, 4, "the cache serves again after the batch");
 }
