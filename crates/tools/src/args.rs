@@ -5,11 +5,13 @@
 //!
 //! | Input | Result |
 //! |---|---|
-//! | A key outside the schema | `UNKNOWN_ARGUMENT`. `next[0]` renames or removes the key. |
+//! | A key outside the schema | `UNKNOWN_ARGUMENT`. `next[0]` renames or removes the key. A rename to a list argument puts a single value in an array. |
 //! | An alias of an argument | The canonical name and `W_COERCED` |
 //! | A value of the wrong type or range | `INVALID_ARGUMENT` with `details.expected` |
 //! | A value above its cap | `LIMIT_EXCEEDED`. `next[0]` clamps the value. |
 //! | Address text that does not parse | `ADDRESS_INVALID` |
+//! | An ID prefix with a body that does not parse | `INVALID_ARGUMENT` that names the ID kind |
+//! | An address in a list item | A type check only. The handler gives an error for that item. |
 //! | A required argument that is absent | `MISSING_ARGUMENT` with `details.example` |
 //! | A broken group rule | `MISSING_ARGUMENT` or `INVALID_ARGUMENT` |
 //! | An action rule of a selector tool | `MISSING_ARGUMENT` or `INVALID_ARGUMENT` with `details.action` |
@@ -205,15 +207,19 @@ pub const GLOBALS: [ArgSpec; 15] = [
 
 /// Gives the global arguments that apply to `tool`, in schema order.
 ///
-/// `max_steps` carries the fuel cap of the tool as its maximum.
+/// `max_steps` carries the fuel cap of the tool as its maximum. A tool with no binary has no
+/// `binary_id` and no `in`, because a set belongs to a binary. [`global_default`] gives the
+/// defaults of the tool.
 #[must_use]
 pub fn globals_of<S: 'static>(tool: &ToolSpec<S>) -> Vec<ArgSpec> {
     let list = tool.list.is_some();
+    let bound = tool.binary != BinaryArg::None;
     GLOBALS
         .iter()
         .filter(|g| match g.name {
-            "binary_id" => tool.binary != BinaryArg::None,
-            "limit" | "cursor" | "count_only" | "shape" | "in" => list,
+            "binary_id" => bound,
+            "in" => list && bound,
+            "limit" | "cursor" | "count_only" | "shape" => list,
             "expected_rev" | "dry_run" => tool.mutating,
             "force" => tool.force,
             "max_steps" | "max_ms" => tool.fuel.is_some(),
@@ -230,6 +236,18 @@ pub fn globals_of<S: 'static>(tool: &ToolSpec<S>) -> Vec<ArgSpec> {
             _ => *g,
         })
         .collect()
+}
+
+/// Gives the default of the global argument `name` for `tool`, when the tool sets one. The
+/// defaults are the budget of `max_chars`, the page size of `limit` and the fuel of `max_steps`.
+#[must_use]
+pub fn global_default<S: 'static>(tool: &ToolSpec<S>, name: &str) -> Option<u64> {
+    match name {
+        "max_chars" => Some(u64::from(tool.max_chars)),
+        "limit" => tool.list.map(|l| u64::from(l.default_limit)),
+        "max_steps" => tool.fuel.map(|f| f.default),
+        _ => None,
+    }
 }
 
 /// The parsed arguments of one call.

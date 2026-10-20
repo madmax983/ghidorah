@@ -7,7 +7,7 @@ use ghidorah_tools::instructions::{self, LINES, MAX_CHARS};
 use ghidorah_tools::profiles::{MAX_FULL, MAX_FULL_CHARS, MAX_MINI, MAX_MINI_CHARS, parse_profile};
 use ghidorah_tools::{Host, Profile, ProfileSet, Registry, Session};
 
-use crate::support::{call, code, config, registry, root, session_with};
+use crate::support::{call, code, config, demo, json, registry, root, session_with};
 
 /// The 23 tools of the catalog in `tools/list` order (design Section 10.3).
 pub const CATALOG: [&str; 23] = [
@@ -282,4 +282,226 @@ fn profile_parse_and_allowlist() {
     let envelope = call(&mut s, "calc", r#"{"expr":"0x1"}"#);
     assert_eq!(code(&envelope), "", "{envelope}");
     assert_eq!(s.active_tools().len(), 1);
+}
+
+/// Gives the tool names of `line` that the catalog holds.
+fn tools_of(line: &str) -> Vec<&str> {
+    line.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+        .filter(|token| CATALOG.contains(token))
+        .collect()
+}
+
+/// Every shipped profile gets a workflow line with active tools only. The batch line of
+/// `readonly` has no edit sentence, and `mini` keeps the rev and `dry_run` line for its edits.
+#[test]
+fn regress_every_profile_has_workflow() {
+    let reg = registry();
+    for profile in Profile::ALL {
+        let set = ProfileSet::new(profile, None);
+        let text = instructions::generate(&reg, &set);
+        let workflow = text.lines().find(|l| l.starts_with("Workflow:"));
+        let Some(workflow) = workflow else {
+            panic!("{} has no workflow line:\n{text}", profile.as_str());
+        };
+        for tool in tools_of(workflow) {
+            assert!(set.holds(&reg, tool), "{tool}: {workflow}");
+        }
+        for name in ["binary_survey", "func_get"] {
+            assert!(workflow.contains(name), "{workflow}");
+        }
+        let batch = text.lines().find(|l| l.starts_with("batch_run"));
+        let edits = text.lines().find(|l| l.contains("dry_run"));
+        match profile {
+            Profile::Readonly => {
+                let batch = batch.expect("readonly has batch_run");
+                assert!(!batch.contains("edits"), "{batch}");
+                assert!(edits.is_none(), "{text}");
+            }
+            Profile::Mini => {
+                let edits = edits.expect("mini has edit tools");
+                assert!(edits.contains("rev"), "{edits}");
+                assert!(!edits.contains("history_undo"), "{edits}");
+                assert!(text.contains("binary_load {path}"), "{text}");
+            }
+            Profile::Full => {
+                // In full, each built line gives the text of design Section 10.15.
+                let active = |tool: &str| set.holds(&reg, tool);
+                for line in LINES {
+                    assert_eq!(line.render(&active).as_deref(), Some(line.text));
+                }
+            }
+        }
+    }
+}
+
+/// Gives the property names of each tool of the `tools/list` of `profile`.
+fn published(profile: Profile) -> Vec<(String, Vec<String>)> {
+    let list = ProfileSet::new(profile, None).tools_list(&registry());
+    list.as_array()
+        .unwrap_or_default()
+        .iter()
+        .map(|entry| {
+            let name = entry
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let props = entry
+                .pointer("/inputSchema/properties")
+                .and_then(Value::as_object)
+                .map(|o| o.iter().map(|(k, _)| k.to_owned()).collect())
+                .unwrap_or_default();
+            (name.to_owned(), props)
+        })
+        .collect()
+}
+
+/// Gives the global keys that `text` tells the agent to send. A key is a word of the text. It
+/// holds `_`, or a value comes after it, for example `force true` or `session *`.
+fn named_globals(text: &str) -> Vec<&'static str> {
+    let words: Vec<&str> = text
+        .split(|c: char| c.is_ascii_whitespace() || matches!(c, ',' | '.' | ':' | ';'))
+        .filter(|w| !w.is_empty())
+        .collect();
+    let value = |w: Option<&&str>| {
+        w.is_some_and(|w| {
+            matches!(*w, "true" | "false" | "*") || w.starts_with(|c: char| c.is_ascii_digit())
+        })
+    };
+    ghidorah_tools::args::GLOBALS
+        .iter()
+        .map(|g| g.name)
+        .filter(|name| {
+            words
+                .iter()
+                .enumerate()
+                .any(|(i, w)| *w == *name && (name.contains('_') || value(words.get(i + 1))))
+        })
+        .collect()
+}
+
+/// Each argument key that a tool tells the agent to send is a property of its published
+/// schema (agent-protocol-09). The keys come from the examples, the text, the `force` repair
+/// and the repair calls of a session.
+#[test]
+fn regress_repairs_fit_published_schema() {
+    let reg = registry();
+    // (tool, key, source, full only): the mini catalog publishes the summary, not the
+    // description.
+    let mut wanted: Vec<(String, String, &str, bool)> = Vec::new();
+    for tool in reg.tools() {
+        let name = tool.name.to_owned();
+        for example in tool.examples {
+            let args = json(example.args);
+            for (key, _) in args
+                .as_object()
+                .into_iter()
+                .flat_map(ghidorah_json::Object::iter)
+            {
+                wanted.push((name.clone(), key.to_owned(), "example", false));
+            }
+        }
+        for key in named_globals(tool.description) {
+            wanted.push((name.clone(), key.to_owned(), "description", true));
+        }
+        for key in named_globals(tool.summary) {
+            wanted.push((name.clone(), key.to_owned(), "summary", false));
+        }
+        if tool.force {
+            wanted.push((name.clone(), "force".to_owned(), "force repair", false));
+        }
+    }
+    let mut s = demo();
+    assert_eq!(code(&call(&mut s, "analysis_run", "{}")), "");
+    let blocked = call(
+        &mut s,
+        "symbol_rename",
+        r#"{"target":"main","name":"entry"}"#,
+    );
+    assert_eq!(
+        code(&blocked),
+        "BLOCKED_BY_HIGHER_PRIORITY_SOURCE",
+        "{blocked}"
+    );
+    let steps = r#"{"steps":[
+        {"id":"a","tool":"symbol_rename","args":{"target":"0x1090","name":"read_input"}},
+        {"id":"b","tool":"search","args":{"kind":"name","query":"read"}}
+    ],"max_steps":2}"#;
+    let stopped = call(&mut s, "batch_run", steps);
+    assert_eq!(code(&stopped), "BUDGET_EXCEEDED", "{stopped}");
+    for envelope in [&blocked, &stopped] {
+        let repair = envelope.pointer("/next/0").expect("a repair call");
+        let tool = repair
+            .get("tool")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let args = repair.get("args").and_then(Value::as_object).expect("args");
+        for (key, _) in args.iter() {
+            wanted.push((tool.to_owned(), key.to_owned(), "repair call", false));
+        }
+    }
+    let has = |tool: &str, key: &str| wanted.iter().any(|(t, k, ..)| t == tool && k == key);
+    assert!(has("history_undo", "session") && has("func_edit", "max_steps"));
+    assert!(has("symbol_rename", "force") && has("batch_run", "max_steps"));
+    for profile in [Profile::Full, Profile::Mini] {
+        let tools = published(profile);
+        for (tool, key, why, full_only) in &wanted {
+            let Some((_, props)) = tools.iter().find(|(name, _)| name == tool) else {
+                continue;
+            };
+            if *full_only && profile == Profile::Mini {
+                continue;
+            }
+            assert!(
+                props.contains(key),
+                "{}: {tool} names {key} in its {why}, but its schema has {props:?}",
+                profile.as_str()
+            );
+        }
+    }
+}
+
+/// Gives the default of the global `name` in the full schema of `tool`.
+fn full_default(s: &mut Session, tool: &str, name: &str) -> Option<Value> {
+    let args = format!(r#"{{"name":"{tool}","level":"full"}}"#);
+    let envelope = call(s, "tool_search", &args);
+    assert_eq!(code(&envelope), "", "{envelope}");
+    let path = format!("/data/items/0/schema/properties/{name}");
+    assert!(envelope.pointer(&path).is_some(), "{envelope}");
+    envelope.pointer(&format!("{path}/default")).cloned()
+}
+
+/// The full schema gives the defaults of the tool for its global arguments. A tool with no
+/// binary has no `in` (maintainability-docs-06, agent-protocol-13).
+#[test]
+fn regress_full_schema_has_tool_defaults() {
+    let reg = registry();
+    let mut s = session_with(config());
+    let (_, func_list) = reg.get("func_list").expect("func_list");
+    let (_, binary_load) = reg.get("binary_load").expect("binary_load");
+    let page = func_list
+        .list
+        .map(|l| l.default_limit)
+        .expect("a list tool");
+    assert_eq!(page, 100);
+    assert_eq!(
+        full_default(&mut s, "func_list", "limit"),
+        Some(json("100"))
+    );
+    let chars = func_list.max_chars.to_string();
+    assert_eq!(
+        full_default(&mut s, "func_list", "max_chars"),
+        Some(json(&chars))
+    );
+    let fuel = binary_load.fuel.map(|f| f.default.to_string());
+    assert_eq!(
+        full_default(&mut s, "binary_load", "max_steps"),
+        fuel.as_deref().map(json)
+    );
+    let undo = call(&mut s, "tool_search", r#"{"query":"undo","in":"set:foo"}"#);
+    assert_eq!(code(&undo), "UNKNOWN_ARGUMENT", "{undo}");
+    assert_eq!(
+        undo.pointer("/error/field_path").and_then(Value::as_str),
+        Some("/in"),
+        "{undo}"
+    );
 }

@@ -108,7 +108,8 @@ fn table_resolved(program: &Program, site: Address) -> bool {
 
 /// Tells if the instruction at `site` with the flow `flow` is an indirect call or jump with
 /// no target.
-pub(crate) fn is_gap(program: &Program, site: Address, flow: FlowKind) -> bool {
+#[must_use]
+pub fn is_gap(program: &Program, site: Address, flow: FlowKind) -> bool {
     if override_targets(program, site).is_some() {
         return false;
     }

@@ -98,8 +98,33 @@ pub struct CodeInfo {
     pub retry: bool,
     /// The message template in the form "What failed. Why. Action.".
     pub message: &'static str,
-    /// The hint: one short instruction or fact for the repair.
+    /// The hint: one short instruction or fact for the repair. It can hold placeholders.
     pub hint: &'static str,
+    /// The plain hint: the hint for a result with no `next[0]` or no candidates, or with a
+    /// scope that is already wide. It names none of them. A code with a hint that names none
+    /// of them has the same text in both fields.
+    pub plain: &'static str,
+}
+
+impl CodeInfo {
+    /// Gives the row with the plain hint `plain`.
+    #[must_use]
+    pub const fn with_plain(self, plain: &'static str) -> Self {
+        Self { plain, ..self }
+    }
+
+    /// Tells if the hint names `next[0]`. A result with no `next` then takes the plain hint.
+    #[must_use]
+    pub fn hint_names_next(&self) -> bool {
+        self.hint.contains("next[0]")
+    }
+
+    /// Tells if the hint names the candidates. A result with no candidates then takes the
+    /// plain hint.
+    #[must_use]
+    pub fn hint_names_candidates(&self) -> bool {
+        self.hint.contains("candidate")
+    }
 }
 
 /// A reserved number of a catalog. No code uses it.

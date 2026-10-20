@@ -2,17 +2,21 @@
 //!
 //! | Channel | From | To | Items |
 //! |---|---|---|---|
-//! | work | reader | worker | requests and the error replies of the reader, in input order |
+//! | work | reader | worker | requests and the error replies of the reader, in input order, then a stop item at the end of stdin. The queue holds at most [`QUEUE`] items. |
 //! | out | worker | writer | reply and notification lines |
 //!
 //! The worker opens the backend, so the backend needs no `Send`. A broken pipe on stdout
-//! ends the server at once with [`Exit::Ok`]. The other threads then stop with the process.
+//! stops the worker: the running request gets its cancel flag, and the worker takes no next
+//! request. The server waits at most [`STOP_WAIT`] for the worker, so the drop of the backend
+//! writes the snapshots and releases the project locks. Then the server ends with
+//! [`Exit::Ok`]. The reader thread stops with the process.
 
 use std::io::{self, BufRead, Write};
-use std::sync::atomic::AtomicBool;
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, Receiver, Sender, SyncSender};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::thread;
+use std::time::{Duration, Instant};
 
 use ghidorah_json::Value;
 
@@ -27,8 +31,23 @@ use crate::out::{self, Stop};
 use crate::record::Recorder;
 use crate::{Streams, VERSION, WORKER_STACK, catalog};
 
+#[cfg(test)]
+mod tests;
+
 /// The method of a cancel notification.
 const CANCELLED: &str = "notifications/cancelled";
+
+/// The longest wait for the worker after stdout fails.
+pub const STOP_WAIT: Duration = Duration::from_secs(5);
+
+/// The most work items that wait for the worker. A full queue makes the reader wait, so a
+/// flood of large lines cannot grow the memory without a limit.
+pub const QUEUE: usize = 64;
+
+/// Makes the work queue: a channel that holds at most [`QUEUE`] items.
+fn work_queue() -> (SyncSender<Work>, Receiver<Work>) {
+    mpsc::sync_channel(QUEUE)
+}
 
 /// One item of the work queue.
 enum Work {
@@ -36,6 +55,58 @@ enum Work {
     Request(Request, Arc<AtomicBool>),
     /// A ready error reply of the reader.
     Reply(String),
+    /// The end of the work: stdin ended, or stdout failed. The worker stops at this item, so
+    /// a second sender of the queue does not keep the worker alive.
+    Stop,
+}
+
+/// The state that the worker and the stop share.
+#[derive(Default)]
+struct RunState {
+    /// `true` after a stop: the worker takes no next item.
+    stopped: bool,
+    /// The cancel flag of the request that the worker runs.
+    flag: Option<Arc<AtomicBool>>,
+}
+
+/// The request that the worker runs, and the stop mark of a failed stdout.
+#[derive(Clone, Default)]
+struct Running(Arc<Mutex<RunState>>);
+
+impl Running {
+    fn state(&self) -> std::sync::MutexGuard<'_, RunState> {
+        self.0.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Notes the start of a request with the cancel flag `flag`. Gives `false` after a stop.
+    fn start(&self, flag: &Arc<AtomicBool>) -> bool {
+        let mut state = self.state();
+        if state.stopped {
+            return false;
+        }
+        state.flag = Some(Arc::clone(flag));
+        true
+    }
+
+    /// Notes the end of the running request.
+    fn end(&self) {
+        self.state().flag = None;
+    }
+
+    /// Tells if a stop came.
+    fn stopped(&self) -> bool {
+        self.state().stopped
+    }
+
+    /// Stops the worker: the running request gets its cancel flag, and the worker takes no
+    /// next item.
+    fn stop(&self) {
+        let mut state = self.state();
+        state.stopped = true;
+        if let Some(flag) = state.flag.take() {
+            flag.store(true, Ordering::Relaxed);
+        }
+    }
 }
 
 /// The shared log stream.
@@ -58,7 +129,7 @@ enum WriterEnd {
 }
 
 /// Reads stdin lines and sends the work items in input order.
-fn read(stdin: Box<dyn BufRead + Send>, work: &Sender<Work>, cancels: &CancelMap, log: &Log) {
+fn read(stdin: Box<dyn BufRead + Send>, work: &SyncSender<Work>, cancels: &CancelMap, log: &Log) {
     let mut reader = LineReader::new(stdin, MAX_LINE);
     loop {
         let frame = match reader.next_frame() {
@@ -96,28 +167,48 @@ fn read(stdin: Box<dyn BufRead + Send>, work: &Sender<Work>, cancels: &CancelMap
         if let Some(item) = item
             && work.send(item).is_err()
         {
-            break;
+            return;
         }
     }
+    // The worker answers the items before this one, then it stops.
+    let _ = work.send(Work::Stop);
 }
 
-/// Answers the work items in order until the work channel closes.
-fn work<B: Backend>(
-    server: &mut Server<B>,
-    items: &Receiver<Work>,
-    out: &Sender<String>,
-    cancels: &CancelMap,
-    log: &Log,
-) {
+/// The channels and the shared state of the worker.
+struct Lanes<'a> {
+    items: &'a Receiver<Work>,
+    out: &'a Sender<String>,
+    cancels: &'a CancelMap,
+    running: &'a Running,
+    log: &'a Log,
+}
+
+/// Answers the work items in order until the work channel closes or a stop comes.
+fn work<B: Backend>(server: &mut Server<B>, lanes: &Lanes<'_>) {
+    let Lanes {
+        items,
+        out,
+        cancels,
+        running,
+        log,
+    } = *lanes;
     let notes = out.clone();
     let emit = move |message: Value| {
         let _ = notes.send(ghidorah_json::write(&message));
     };
     for item in items {
+        if running.stopped() {
+            return;
+        }
         let line = match item {
+            Work::Stop => return,
             Work::Reply(line) => Some(line),
             Work::Request(request, flag) => {
+                if !running.start(&flag) {
+                    return;
+                }
                 let reply = server.handle(&request, &flag, &emit);
+                running.end();
                 cancels.finish(&request.id);
                 if let Some(error) = server.take_record_error() {
                     log.line(&format!("The call record stops: {error}."));
@@ -154,6 +245,7 @@ fn start_worker<B: Backend>(
         Sender<Result<usize, OpenError>>,
     ),
     cancels: CancelMap,
+    running: Running,
     log: Log,
 ) -> io::Result<thread::JoinHandle<()>> {
     let (items, out, ready) = channels;
@@ -173,8 +265,50 @@ fn start_worker<B: Backend>(
             if let Some(recorder) = recorder {
                 server = server.with_recorder(recorder);
             }
-            work(&mut server, &items, &out, &cancels, &log);
+            let lanes = Lanes {
+                items: &items,
+                out: &out,
+                cancels: &cancels,
+                running: &running,
+                log: &log,
+            };
+            work(&mut server, &lanes);
+            // The drop of the server drops the backend: snapshots, then the lock release.
+            drop(server);
         })
+}
+
+/// Waits at most `wait` for `worker`. Gives `true` when the worker ends in time.
+fn join_bounded(worker: thread::JoinHandle<()>, wait: Duration) -> bool {
+    let Some(end) = Instant::now().checked_add(wait) else {
+        return worker.join().is_ok();
+    };
+    while !worker.is_finished() {
+        if Instant::now() >= end {
+            return false;
+        }
+        thread::sleep(Duration::from_millis(5));
+    }
+    worker.join().is_ok()
+}
+
+/// Stops the worker after stdout fails, and waits for it at most [`STOP_WAIT`].
+///
+/// `stop` is a sender of the work queue. Its stop item wakes a worker that waits for work. A
+/// full queue takes no stop item, but then the worker is busy, and it sees the stop mark
+/// before its next item.
+fn stop_worker(
+    worker: thread::JoinHandle<()>,
+    running: &Running,
+    stop: SyncSender<Work>,
+    log: &Log,
+) {
+    running.stop();
+    let _ = stop.try_send(Work::Stop);
+    drop(stop);
+    if !join_bounded(worker, STOP_WAIT) {
+        log.line("The worker does not stop in 5 s. The server stops without it.");
+    }
 }
 
 /// Serves MCP on `streams` until stdin ends or stdout breaks.
@@ -195,10 +329,12 @@ pub fn serve<B: Backend>(options: Options, serve: &ServeOptions, streams: Stream
             return Exit::Usage;
         }
     };
-    let (work_tx, work_rx) = mpsc::channel();
+    let (work_tx, work_rx) = work_queue();
     let (out_tx, out_rx) = mpsc::channel();
     let (ready_tx, ready_rx) = mpsc::channel();
     let cancels = CancelMap::new();
+    let running = Running::default();
+    let stop_tx = work_tx.clone();
     let channels = (work_rx, out_tx, ready_tx);
     let Ok(worker) = start_worker::<B>(
         options,
@@ -206,6 +342,7 @@ pub fn serve<B: Backend>(options: Options, serve: &ServeOptions, streams: Stream
         recorder,
         channels,
         cancels.clone(),
+        running.clone(),
         log.clone(),
     ) else {
         log.line("The worker thread does not start. The server stops.");
@@ -237,15 +374,22 @@ pub fn serve<B: Backend>(options: Options, serve: &ServeOptions, streams: Stream
         return Exit::Usage;
     };
     match writer.join() {
-        Ok(WriterEnd::Done) => {}
-        Ok(WriterEnd::Stopped(Stop::BrokenPipe)) => return Exit::Ok,
+        Ok(WriterEnd::Done) => drop(stop_tx),
+        Ok(WriterEnd::Stopped(Stop::BrokenPipe)) => {
+            stop_worker(worker, &running, stop_tx, &log);
+            return Exit::Ok;
+        }
         Ok(WriterEnd::Stopped(Stop::Io(error))) => {
             log.line(&format!(
                 "The server cannot write stdout: {error}. The server stops."
             ));
+            stop_worker(worker, &running, stop_tx, &log);
             return Exit::Usage;
         }
-        Err(_) => return Exit::Usage,
+        Err(_) => {
+            stop_worker(worker, &running, stop_tx, &log);
+            return Exit::Usage;
+        }
     }
     if worker.join().is_err() {
         log.line("The worker thread stops after a fault. The server stops.");

@@ -3,6 +3,7 @@
 //! | Input kind | [`Family::Address`] | [`Family::Function`] | [`Family::XrefTo`] | [`Family::XrefFrom`] |
 //! |---|---|---|---|---|
 //! | address, name, `bb:`, `op:` | that address | the owner function, else `NOT_IN_FUNCTION` | refs to the address | refs from the one instruction |
+//! | name of a function entry | that address | that function | refs to the entry | refs from the body of the function |
 //! | `fn:F`, `exp:F` | the entry of F | F | refs to the entry | refs from the body of F |
 //! | `imp:X` | the stub or IAT thunk, else the slot, else the EXTERNAL address | the stub or thunk function, else invalid | the sites of the import | invalid |
 //! | `sys:N` | invalid | invalid | the syscall sites | invalid |
@@ -12,6 +13,9 @@
 //! | `ext:0x..` | that EXTERNAL address | invalid | refs to it | invalid |
 //! | `var:`, `t:`, `note:`, `set:`, `tx:`, `ref:` | invalid | invalid | invalid | invalid |
 //!
+//! A name is a symbol name, a `sym:` ID, a default name or `name@0x..`. Hex text, an integer,
+//! an offset, `bb:` and `op:` always name one instruction.
+//!
 //! "Invalid" gives `INVALID_ARGUMENT` with `details.accepted`. The address family needs a
 //! mapped RAM address or an EXTERNAL address: else `ADDRESS_UNMAPPED` with the nearest mapped
 //! addresses.
@@ -20,7 +24,7 @@ use ghidorah_base::{Address, FuncId, ImportId, JumpTableId, SyscallId};
 use ghidorah_db::{ImportRow, Program};
 use ghidorah_json::Value;
 
-use super::{Named, Resolved, Site, errors};
+use super::{Named, Resolved, Rule, Site, errors};
 use crate::errors::ToolError;
 
 /// A tool family of the target table.
@@ -138,6 +142,9 @@ fn target_at(
             Named::Region(_) | Named::Other(_) => Err(invalid()),
         },
         Family::XrefFrom => match named {
+            Named::Addr(a) if is_name(resolved) && program.func(FuncId(*a)).is_some() => {
+                Ok(Target::RefsFromBody(FuncId(*a)))
+            }
             Named::Addr(a) => Ok(Target::RefsFromInsn(*a)),
             Named::Func(f) => Ok(Target::RefsFromBody(*f)),
             Named::Export(_) => {
@@ -146,6 +153,26 @@ fn target_at(
             Named::JumpTable(j) => Ok(Target::CaseEdges(*j)),
             _ => Err(invalid()),
         },
+    }
+}
+
+/// Tells if `resolved` comes from a name: a symbol name, a `sym:` ID, a default name or
+/// `name@0x..`.
+fn is_name(resolved: &Resolved) -> bool {
+    match resolved.rule {
+        Rule::Symbol | Rule::DefaultName | Rule::NameAt => true,
+        Rule::Id => resolved.matched.starts_with("sym:"),
+        Rule::Integer | Rule::Hex | Rule::Section | Rule::Offset => false,
+    }
+}
+
+/// Gives the scope of a target for `resolved_from.scope`: `function` for the body of a
+/// function, else `insn`.
+#[must_use]
+pub const fn scope(target: &Target) -> &'static str {
+    match target {
+        Target::RefsFromBody(_) => "function",
+        _ => "insn",
     }
 }
 

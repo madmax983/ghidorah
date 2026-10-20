@@ -1,11 +1,18 @@
 //! `analysis_run`: run or resume the analysis with a fuel budget (design Section 10.4, tool 3).
 //!
-//! The handler runs the analysis engine of the session in fuel slices. A slice has
-//! [`SLICE_STEPS`] work units or a quarter of the units so far, whichever is more. So the
-//! publish steps of one call cost at most a log factor over one publish. After each slice the
-//! handler sends one progress report with the work units so far, so the progress value
-//! increases strictly (AC-173). It checks the cancel flag at the end of each slice. So
-//! `notifications/cancelled` stops the run at the next fuel checkpoint (AC-172).
+//! The handler runs the analysis engine of the session in fuel slices through
+//! [`Session::analyze_sliced`]. A slice has [`SLICE_STEPS`] work units or a quarter of the
+//! units so far, whichever is more. So the publish steps of one call cost at most a log factor
+//! over one publish. `binary_load` and the re-analysis of an edit use the same slices.
+//!
+//! After each slice the session sends one progress report with the work units so far, so the
+//! progress value increases strictly (AC-173). It checks the cancel flag at the end of each
+//! slice. So `notifications/cancelled` stops the run at the next fuel checkpoint (AC-172).
+//!
+//! The state is relative to the full analysis. When the last slice of a call with
+//! `until: "triage"` does no work, the triage bands have no more work. Then the call gives
+//! `resume: false` and `next[0]` `analysis_run { until: "full" }`. Another stop before
+//! completion gives `resume: true`, and `next[0]` is the same call with the same `until`.
 //!
 //! [`Engine`] is the analysis engine of the shipped tools: one [`Scheduler`] per open binary.
 //! A session with no engine gets one at the first call. A binary with no scheduler gets one
@@ -21,10 +28,11 @@ use std::collections::BTreeMap;
 use std::collections::btree_map::Entry;
 
 use ghidorah_analysis::{ANALYZERS, AnalyzerRow, Changed, RunState, Scheduler, Until as Band};
-use ghidorah_base::{BinaryId, ErrorCode, Fuel};
+use ghidorah_base::{BinaryId, ErrorCode, Fuel, Limits};
+use ghidorah_db::Program;
 use ghidorah_json::{Object, Value};
+use ghidorah_loader::{Binary, Sym};
 
-use crate::api::Progress;
 use crate::args::Args;
 use crate::dispatch::{Ctx, Payload};
 use crate::envelope::{AnalysisState, Mutation};
@@ -43,11 +51,49 @@ pub const MAX_STEPS: u64 = 1_000_000_000_000;
 /// The smallest fuel of one slice. The handler sends one progress report per slice.
 pub const SLICE_STEPS: u64 = 4_096;
 
+/// Why a run in fuel slices stopped before its end (design Section 2.4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SliceStop {
+    /// The client cancelled the request.
+    Cancel,
+    /// The `max_ms` guard of the call fired.
+    Time,
+}
+
+/// The report of a run in fuel slices: [`Session::analyze_sliced`] gives it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Sliced {
+    /// The state after the last slice.
+    pub state: AnalysisState,
+    /// The work units of all slices.
+    pub steps_used: u64,
+    /// The checkpoint that stopped the run before its end, or `None`.
+    pub stop: Option<SliceStop>,
+    /// `true` when the last slice did no work: no analyzer up to the bound of the run has
+    /// work.
+    pub idle: bool,
+}
+
+impl Sliced {
+    /// Gives the run report: the last state and the work units of all slices.
+    #[must_use]
+    pub const fn report(&self) -> RunReport {
+        RunReport {
+            state: self.state,
+            steps_used: self.steps_used,
+        }
+    }
+}
+
 /// The `why` of the `analysis_run` hint after a stop on the fuel budget.
 pub const WHY_RESUME: &str = "The analysis has more work. Call analysis_run again to resume it.";
 
 /// Every fixed text of the handler that an agent reads.
-pub const TEXTS: &[&str] = &[WHY_RESUME];
+pub const TEXTS: &[&str] = &[WHY_RESUME, WHY_TRIAGE_DONE];
+
+/// The `why` of the `analysis_run` hint when the triage bands have no more work.
+pub const WHY_TRIAGE_DONE: &str =
+    "The triage bands have no more work. Call analysis_run with until full to run the other bands.";
 
 /// The analysis engine of the shipped tools: one scheduler per open binary.
 #[derive(Debug, Default)]
@@ -58,11 +104,14 @@ pub struct Engine {
 }
 
 impl Engine {
-    /// Makes an engine that shuffles the analyzer order of the first analysis of each binary
-    /// with `seed`. This is the seed-order relation of design Section 13.4 (AC-189a).
+    /// Makes an engine for the seed-order relation of design Section 13.4 (AC-189a). It
+    /// shuffles the seed insertion order of the first analysis of each binary with `seed`.
     ///
-    /// The scheduler picks its steps by priority and name, so the state hash stays the same.
-    /// Only the row order of the `analyzers` list changes.
+    /// Before that analysis, the engine makes the program again from a copy of its binary
+    /// model. The copy has the symbols, FDEs, entry points, exports and `.pdata` entries in
+    /// shuffled order. The symbols at one address keep their order. The import order stays,
+    /// because it sets the EXTERNAL addresses. The rebuild uses the default limits. The
+    /// analyzer order of the scheduler also changes.
     #[must_use]
     pub fn with_seed_order(seed: u64) -> Self {
         Self {
@@ -80,11 +129,54 @@ fn first_scheduler(order: Option<u64>) -> Scheduler {
     })
 }
 
+/// Makes `program` again with the seed lists of its binary in the order that `seed` shuffles.
+/// A program with commits stays the same, because the rebuild loses them.
+fn reseed(program: &mut Program, seed: u64) -> Result<(), ToolError> {
+    if program.rev().0 != 0 {
+        return Ok(());
+    }
+    let binary = seeds_shuffled(program.binary(), seed);
+    *program =
+        Program::from_binary(binary, program.mem().clone(), &Limits::DEFAULT).map_err(|e| {
+            ToolError::new(ErrorCode::InternalError).detail("reason", Value::from(e.to_string()))
+        })?;
+    Ok(())
+}
+
+/// Gives a copy of `binary` with its seed lists in the order that `seed` shuffles.
+fn seeds_shuffled(binary: &Binary, seed: u64) -> Binary {
+    let mut out = binary.clone();
+    out.symbols = by_address(&binary.symbols, seed);
+    out.fdes = shuffled(&binary.fdes, seed.rotate_left(8));
+    out.entry_points = shuffled(&binary.entry_points, seed.rotate_left(16));
+    out.exports = shuffled(&binary.exports, seed.rotate_left(24));
+    out.pdata = shuffled(&binary.pdata, seed.rotate_left(32));
+    out
+}
+
+/// Gives `symbols` with their address groups in the order that `seed` shuffles. The symbols
+/// at one address keep their table order. The `Symbols` analyzer takes the premise of the last
+/// function symbol at an address.
+fn by_address(symbols: &[Sym], seed: u64) -> Vec<Sym> {
+    let mut groups: Vec<Vec<Sym>> = Vec::new();
+    let mut slots: BTreeMap<u64, usize> = BTreeMap::new();
+    for sym in symbols {
+        let slot = *slots.entry(sym.addr).or_insert(groups.len());
+        match groups.get_mut(slot) {
+            Some(group) => group.push(sym.clone()),
+            None => groups.push(vec![sym.clone()]),
+        }
+    }
+    shuffled(&groups, seed).into_iter().flatten().collect()
+}
+
 /// Gives `items` in the order of a Fisher-Yates shuffle with a `SplitMix64` stream from `seed`.
-fn shuffled<T: Copy>(items: &[T], seed: u64) -> Vec<T> {
-    let mut out = items.to_vec();
+/// A list of two or more items always moves: a shuffle that keeps the order turns into a
+/// rotation by one.
+fn shuffled<T: Clone>(items: &[T], seed: u64) -> Vec<T> {
+    let mut order: Vec<usize> = (0..items.len()).collect();
     let mut state = seed;
-    for i in (1..out.len()).rev() {
+    for i in (1..order.len()).rev() {
         state = state.wrapping_add(0x9e37_79b9_7f4a_7c15);
         let mut z = state;
         z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
@@ -92,9 +184,15 @@ fn shuffled<T: Copy>(items: &[T], seed: u64) -> Vec<T> {
         z ^= z >> 31;
         let bound = u64::try_from(i).map_or(u64::MAX, |n| n.saturating_add(1));
         let j = usize::try_from(z % bound).unwrap_or(0);
-        out.swap(i, j);
+        order.swap(i, j);
     }
-    out
+    if order.len() >= 2 && order.iter().enumerate().all(|(i, k)| i == *k) {
+        order.rotate_left(1);
+    }
+    order
+        .iter()
+        .filter_map(|i| items.get(*i).cloned())
+        .collect()
 }
 
 /// Gives the envelope state of a run state.
@@ -140,7 +238,12 @@ impl AnalysisEngine for Engine {
             Entry::Occupied(found) => found.into_mut(),
             Entry::Vacant(slot) => match binary.analysis.map(|a| a.state) {
                 // The first analysis after a load publishes after each run.
-                None => slot.insert(first_scheduler(order)),
+                None => {
+                    if let Some(seed) = order {
+                        reseed(&mut binary.program, seed)?;
+                    }
+                    slot.insert(first_scheduler(order))
+                }
                 // A project with a current analysis needs no new run.
                 Some(AnalysisState::Complete) => {
                     return Ok(RunReport {
@@ -269,7 +372,13 @@ fn slice(
 }
 
 /// Gives the result object of a call.
-fn report(report: RunReport, used: u64, rows: &[AnalyzerRow], changed: Changed) -> Object {
+fn report(
+    report: RunReport,
+    used: u64,
+    resume: bool,
+    rows: &[AnalyzerRow],
+    changed: Changed,
+) -> Object {
     let rows = rows
         .iter()
         .map(|r| {
@@ -284,10 +393,7 @@ fn report(report: RunReport, used: u64, rows: &[AnalyzerRow], changed: Changed) 
     let mut out = Object::new();
     out.push("state", Value::from(report.state.as_str()));
     out.push("steps_used", int(used));
-    out.push(
-        "resume",
-        Value::Bool(report.state != AnalysisState::Complete),
-    );
+    out.push("resume", Value::Bool(resume));
     out.push("analyzers", Value::Array(rows));
     out.push(
         "changed",
@@ -313,26 +419,21 @@ fn run(session: &mut Session, args: &Args, ctx: &mut Ctx) -> Result<Payload, Too
     if !session.has_engine() {
         install(session);
     }
-    let mut last = slice(session, id, until, 0)?;
-    let mut used = 0u64;
+    // A slice with no fuel gives the state. A dry run and a complete analysis stop there.
+    let probe = slice(session, id, until, 0)?;
     let dry = args.globals().dry_run;
-    while !dry && last.state != AnalysisState::Complete && !ctx.cancelled() {
-        let steps = SLICE_STEPS.max(used / 4).min(ctx.fuel.remaining());
-        if steps == 0 {
-            break;
-        }
-        last = slice(session, id, until, steps)?;
-        let _ = ctx.fuel.take(last.steps_used.min(ctx.fuel.remaining()));
-        if last.steps_used == 0 {
-            break;
-        }
-        used = used.saturating_add(last.steps_used);
-        ctx.progress(Progress {
-            progress: used,
-            total: None,
-            message: format!("The analysis used {used} work units."),
-        });
-    }
+    let (last, used, idle) = if dry || probe.state == AnalysisState::Complete {
+        (probe, 0, false)
+    } else {
+        let run = session
+            .analyze_sliced(id, until, ctx)?
+            .ok_or_else(|| ToolError::new(ErrorCode::InternalError))?;
+        (run.report(), run.steps_used, run.idle)
+    };
+    // The state is relative to the full analysis. A triage run whose last slice did no work
+    // has no more work, although the bands after triage wait.
+    let triage_done = until == Until::Triage && idle && last.state != AnalysisState::Complete;
+    let resume = last.state != AnalysisState::Complete && !triage_done;
     let binary = session
         .binary(id)
         .ok_or_else(|| ToolError::new(ErrorCode::UnknownBinary))?;
@@ -344,13 +445,22 @@ fn run(session: &mut Session, args: &Args, ctx: &mut Ctx) -> Result<Payload, Too
         noop: binary.program.rev() == rev,
         diff: dry.then(|| Value::Array(Vec::new())),
     });
-    if last.state != AnalysisState::Complete {
+    let mut hint = Object::new();
+    hint.push("binary_id", Value::from(id.to_string()));
+    if triage_done {
+        hint.push("until", Value::from("full"));
         ctx.hint(Call::new(
             "analysis_run",
-            Value::object([("binary_id", Value::from(id.to_string()))]),
-            WHY_RESUME,
+            Value::Object(hint),
+            WHY_TRIAGE_DONE,
         ));
+    } else if resume {
+        // The resume hint keeps the bound of the call.
+        if until == Until::Triage {
+            hint.push("until", Value::from("triage"));
+        }
+        ctx.hint(Call::new("analysis_run", Value::Object(hint), WHY_RESUME));
     }
     let rows = session.analyzer_rows(id);
-    Ok(Payload::Object(report(last, used, &rows, changed)))
+    Ok(Payload::Object(report(last, used, resume, &rows, changed)))
 }

@@ -11,9 +11,12 @@
 //! 3. A method outside `ping`, `tools/list` and `tools/call` gives -32601.
 //! 4. `_meta["io.modelcontextprotocol/protocolVersion"] = "2026-07-28"` gives the modern era.
 //!    A missing modern key then gives -32602 with the missing key names.
-//! 5. Another version in that key gives -32022 with `{ supported, requested }`.
+//! 5. Another version in that key gives -32022 with `{ supported, requested }`. The list
+//!    `supported` holds only the versions that `_meta` takes ([`META_VERSIONS`]). A legacy
+//!    version needs `initialize`, and the message of a legacy version says so.
 //! 6. A request without the version key uses the legacy era after `initialize`.
-//!    Before `initialize` it gives -32602 with the missing key names.
+//!    Before `initialize` it gives -32602 with the missing key names. A `ping` is the
+//!    exception: it gets `{}` in every state and starts no era.
 //! 7. `ping` exists only in the legacy era. A modern `ping` gives -32601.
 //!
 //! A modern result carries `resultType: "complete"`. A legacy result does not.
@@ -33,6 +36,10 @@ pub const LEGACY: [&str; 2] = ["2025-11-25", "2025-06-18"];
 
 /// All supported versions, newest first.
 pub const SUPPORTED: [&str; 3] = [MODERN, "2025-11-25", "2025-06-18"];
+
+/// The versions that the `_meta` key of the protocol version takes. A legacy version needs
+/// `initialize`.
+pub const META_VERSIONS: [&str; 1] = [MODERN];
 
 /// The `_meta` key of the protocol version.
 pub const VERSION_KEY: &str = "io.modelcontextprotocol/protocolVersion";
@@ -120,6 +127,9 @@ const MISSING_KEYS: &str = "The request has no protocol keys in _meta. Send init
 const BAD_VERSION: &str =
     "The protocol version of the request is not supported. Use a version of data.supported.";
 
+/// The message of rule 5 for a legacy version in `_meta`.
+const LEGACY_IN_META: &str = "A legacy protocol version needs initialize. The _meta key takes only the versions of data.supported. Send initialize first, or use a version of data.supported.";
+
 fn method_of(name: &str) -> Option<Method> {
     match name {
         "ping" => Some(Method::Ping),
@@ -185,16 +195,19 @@ pub fn decide(
             Era::Modern
         }
         Some(other) => {
+            let legacy = other.as_str().is_some_and(|v| LEGACY.contains(&v));
+            let message = if legacy { LEGACY_IN_META } else { BAD_VERSION };
             return Err(Rejection {
                 code: rpc::UNSUPPORTED_VERSION,
-                message: BAD_VERSION.to_owned(),
+                message: message.to_owned(),
                 data: Some(Value::object([
-                    ("supported", strings(&SUPPORTED)),
+                    ("supported", strings(&META_VERSIONS)),
                     ("requested", other.clone()),
                 ])),
             });
         }
-        None if state.legacy.is_some() => Era::Legacy,
+        // A ping needs no handshake: the MCP lifecycle allows it before initialize.
+        None if state.legacy.is_some() || call == Method::Ping => Era::Legacy,
         None => return Err(missing(meta)),
     };
     if era == Era::Modern && call == Method::Ping {

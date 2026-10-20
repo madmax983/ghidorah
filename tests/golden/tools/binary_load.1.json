@@ -4,7 +4,10 @@
   "binary_id": "467a43b75d95c826",
   "rev": 0,
   "session": "cli",
-  "partial": false,
+  "analysis": {
+    "state": "none"
+  },
+  "partial": true,
   "data": {
     "binary_id": "467a43b75d95c826",
     "sha256": "467a43b75d95c826daba8cb216d01d7fd386aa96c5ef5a95c2effffe1780de8f",
@@ -37,6 +40,11 @@
         "binary_id": "467a43b75d95c826"
       },
       "why": "Survey the binary that the call loaded."
+    },
+    {
+      "tool": "analysis_run",
+      "args": {},
+      "why": "Finish the analysis of the binary."
     }
   ],
   "noop": true

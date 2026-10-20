@@ -240,10 +240,16 @@ fn ac_168_expected_rev() {
     let conflict = call(&mut session, "symbol_rename", &args);
     assert_eq!(code(&conflict), "CONFLICT", "{conflict}");
     assert_eq!(int_at(&conflict, "/error/details/current_rev"), rev);
-    let (tool, next) = next0(&conflict);
-    assert_eq!(tool, "symbol_rename");
+    // next[0] reads the history. The call with the current rev is a candidate.
+    let (tool, history) = next0(&conflict);
+    assert_eq!(tool, "history_list", "{conflict}");
+    assert_eq!(int_at(&history, "/since_rev"), rev + 5);
+    let next = conflict
+        .pointer("/error/candidates/0/value")
+        .cloned()
+        .expect("the call with the current rev");
     assert_eq!(next.get("expected_rev").and_then(Value::as_u64), Some(rev));
-    let done = call_value(&mut session, &tool, next);
+    let done = call_value(&mut session, "symbol_rename", next);
     assert_eq!(code(&done), "", "{done}");
     assert_eq!(int_at(&done, "/rev"), rev + 1);
     let stale = call(

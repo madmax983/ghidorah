@@ -306,3 +306,30 @@ fn ac_219_destructive_rejected() {
     );
     let _ = data(&direct);
 }
+
+/// A step outside the profile gets a hint that names the profile, the active tools with close
+/// names and a search of the active tools.
+#[test]
+fn regress_batch_step_not_in_profile_repair() {
+    let mut s = demo_in(Profile::Mini);
+    let text = r#"{"steps":[{"id":"c","tool":"comment_set","args":{"target":"0x1090","kind":"eol","text":"x"}}]}"#;
+    let envelope = rejected(&mut s, text);
+    assert_eq!(code(&envelope), "TOOL_NOT_IN_PROFILE", "{envelope}");
+    assert_eq!(
+        text_at(&envelope, "/error/details/reason"),
+        "not_in_profile"
+    );
+    let hint = text_at(&envelope, "/error/hint");
+    assert!(hint.contains("mini"), "{envelope}");
+    assert!(hint.contains("--profile full"), "{envelope}");
+    let (tool, args) = next0(&envelope);
+    assert_eq!(tool, "tool_search", "{envelope}");
+    assert_eq!(text_at(&args, "/query"), "comment_set", "{envelope}");
+    let text =
+        r#"{"steps":[{"id":"c","tool":"func_edit","args":{"action":"create","target":"0x1090"}}]}"#;
+    let envelope = rejected(&mut s, text);
+    assert!(
+        candidates(&envelope).contains(&"func_get".to_owned()),
+        "{envelope}"
+    );
+}

@@ -172,7 +172,7 @@ pub fn run<T>(
     let report = if commit.noop {
         None
     } else {
-        session.after_edit(id, commit.start_band(), &mut ctx.fuel)?
+        session.after_edit_sliced(id, commit.start_band(), ctx)?
     };
     let binary = session
         .binary(id)

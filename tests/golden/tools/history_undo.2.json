@@ -3,8 +3,11 @@
   "ok": true,
   "binary_id": "467a43b75d95c826",
   "rev": 1,
-  "session": "*",
-  "partial": false,
+  "session": "mcp-1",
+  "analysis": {
+    "state": "none"
+  },
+  "partial": true,
   "data": {
     "undone": [
       {
@@ -16,6 +19,13 @@
     "new_tx": null,
     "rev": 1
   },
+  "next": [
+    {
+      "tool": "analysis_run",
+      "args": {},
+      "why": "Finish the analysis of the binary."
+    }
+  ],
   "noop": true,
   "diff": [
     {

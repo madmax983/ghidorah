@@ -3,8 +3,52 @@
 use ghidorah_cli::mcp::rpc;
 use ghidorah_json::Value;
 
-use crate::common::json;
+use crate::common::{json, root, run_binary, tmp};
 use crate::era::{check, replies};
+
+#[test]
+fn regress_call_reopens_binary_id() {
+    let dir = tmp("call_reopen");
+    let projects = dir.join("projects").to_string_lossy().into_owned();
+    let workspace = root().to_string_lossy().into_owned();
+    let run = |tool: &str, args: &str| {
+        run_binary(
+            &[
+                "call",
+                "--project-root",
+                &projects,
+                "--root",
+                &workspace,
+                tool,
+                args,
+            ],
+            "",
+        )
+    };
+    let load = run("binary_load", r#"{"builtin":"demo"}"#);
+    assert_eq!(load.code, 0, "{}{}", load.stdout, load.stderr);
+    // A second process: the call opens the project of its binary_id.
+    let list = run("func_list", r#"{"binary_id":"467a43b75d95c826"}"#);
+    assert_eq!(list.code, 0, "{}{}", list.stdout, list.stderr);
+    let envelope = json(&list.stdout);
+    assert_eq!(envelope.get("ok"), Some(&Value::Bool(true)), "{envelope}");
+    assert!(
+        envelope
+            .pointer("/data/items")
+            .and_then(Value::as_array)
+            .is_some_and(|items| !items.is_empty()),
+        "{envelope}"
+    );
+    // A binary_id with no project still gives UNKNOWN_BINARY.
+    let none = run("func_list", r#"{"binary_id":"0123456789abcdef"}"#);
+    assert_eq!(none.code, 1, "{}{}", none.stdout, none.stderr);
+    assert_eq!(
+        json(&none.stdout)
+            .pointer("/error/code")
+            .and_then(Value::as_str),
+        Some("UNKNOWN_BINARY")
+    );
+}
 
 fn code(reply: &Value) -> Option<i64> {
     reply.pointer("/error/code").and_then(Value::as_i64)

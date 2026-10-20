@@ -190,13 +190,18 @@ fn orphans(b: &OpenBinary) -> Vec<Orphan> {
     out
 }
 
-/// Gives the row of one open binary: `{ binary_id, file_name, rev, read_only, analysis }`.
-pub(super) fn binary_row(b: &OpenBinary) -> Value {
+/// Gives the row of one open binary: `{ binary_id, file_name, rev, read_only, persisted?,
+/// persist_reason?, analysis }`. `refusal` is the reason why the binary has no project.
+pub(super) fn binary_row(b: &OpenBinary, refusal: Option<&str>) -> Value {
     let mut out = Object::new();
     out.push("binary_id", Value::from(b.id.to_string()));
     out.push("file_name", Value::from(safe(&b.file_name)));
     out.push("rev", Value::from(b.program.rev().0));
     out.push("read_only", Value::Bool(b.read_only));
+    if let Some(reason) = refusal {
+        out.push("persisted", Value::Bool(false));
+        out.push("persist_reason", Value::from(safe(reason)));
+    }
     out.push(
         "analysis",
         b.analysis

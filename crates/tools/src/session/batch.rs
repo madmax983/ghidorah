@@ -14,11 +14,12 @@
 //! starts the re-analysis once. [`Session::batch_rollback`] puts back the program before the
 //! batch. Meta lines (marks and progress rows) are not edits: they stay in both cases.
 
-use ghidorah_base::{BinaryId, ErrorCode, Fuel, Rev, TxId};
+use ghidorah_base::{BinaryId, ErrorCode, Rev, TxId};
 use ghidorah_db::{Applied, Commit, MetaLine, Program, Tx, TxLabel, TxLine, TypeInput, TypeMode};
 
 use super::store::session_label;
 use super::{RunReport, Session};
+use crate::dispatch::Ctx;
 use crate::envelope::{AnalysisInfo, AnalysisState};
 use crate::errors::ToolError;
 
@@ -145,17 +146,14 @@ impl Session {
     }
 
     /// Ends the open batch of `id` with one commit: one journal line, then one re-analysis
-    /// within `fuel` when an edit affects the analysis.
+    /// when an edit affects the analysis. The re-analysis runs in the fuel slices of
+    /// [`Session::analyze_sliced`] with the fuel and the cancel checks of `ctx`.
     ///
     /// # Errors
     ///
     /// Returns the error of a failed journal write, after which the program has the durable
     /// state, or the error of the engine.
-    pub fn batch_commit(
-        &mut self,
-        id: BinaryId,
-        fuel: &mut Fuel,
-    ) -> Result<BatchCommit, ToolError> {
+    pub fn batch_commit(&mut self, id: BinaryId, ctx: &mut Ctx) -> Result<BatchCommit, ToolError> {
         let batch = self.stores.get_mut(&id).and_then(|s| s.batch.take());
         let (Some(batch), Some(binary)) = (batch, self.binaries.get_mut(&id)) else {
             return Err(ToolError::new(ErrorCode::UnknownBinary));
@@ -170,7 +168,7 @@ impl Session {
         };
         self.journal(id, &TxLine::of_commit(&merged))?;
         let report = match batch.band {
-            Some(band) => self.reanalyze(id, band, fuel)?,
+            Some(band) => self.reanalyze_sliced(id, band, ctx)?.map(|s| s.report()),
             None => None,
         };
         let rev = self

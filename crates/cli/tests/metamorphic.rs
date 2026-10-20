@@ -31,8 +31,19 @@ use crate::hardening::{
 /// The sections of the `func_get` reads of the rename and rebase relations.
 const SECTIONS: &str = r#"["summary","disasm","decomp","xrefs","callers","callees","strings","cfg","jumptables","vars","why"]"#;
 
-/// Loads `path` in a session with `engine` and gives the state hash and the analyzer rows.
-fn analyzed(path: &str, engine: Engine) -> (String, Vec<&'static str>) {
+/// The run of one fixture: the state hash, the analyzer rows and the seed lists.
+struct Run {
+    /// The state hash.
+    hash: String,
+    /// The analyzer rows in list order.
+    rows: Vec<&'static str>,
+    /// The seed lists of the program in insertion order: symbols, FDEs, entry points,
+    /// exports and `.pdata` entries.
+    seeds: Vec<Vec<String>>,
+}
+
+/// Loads `path` in a session with `engine` and gives its [`Run`].
+fn analyzed(path: &str, engine: Engine) -> Run {
     let roots = Roots::new(&root(), &[PathBuf::from(".")]).expect("the root");
     let mut session = Session::new(SessionConfig::new(roots), Box::new(FixedClock::new(0)));
     session.set_engine(Box::new(engine));
@@ -51,40 +62,75 @@ fn analyzed(path: &str, engine: Engine) -> (String, Vec<&'static str>) {
         .iter()
         .map(|r| r.name)
         .collect();
-    (hash, rows)
+    let b = binary.program.binary();
+    let seeds = vec![
+        b.symbols
+            .iter()
+            .map(|s| format!("{} {} {:?}", s.addr, s.index, s.name))
+            .collect(),
+        b.fdes.iter().map(|f| format!("{:?}", f.range)).collect(),
+        b.entry_points.iter().map(|e| format!("{e:?}")).collect(),
+        b.exports.iter().map(|e| format!("{e:?}")).collect(),
+        b.pdata.iter().map(|r| format!("{r:?}")).collect(),
+    ];
+    Run { hash, rows, seeds }
 }
 
 #[test]
 fn ac_189a_seed_order() {
     let list = fixtures("T1");
-    let shuffled_rows = std::thread::scope(|scope| {
+    let (shuffled_rows, seeded, shuffled_seeds) = std::thread::scope(|scope| {
         // Four threads share the fixtures.
         let mut handles = Vec::new();
         for chunk in list.chunks(list.len().div_ceil(4).max(1)) {
             handles.push(scope.spawn(move || {
-                let mut moved = 0usize;
+                let (mut moved, mut seeded, mut reordered) = (0usize, 0usize, 0usize);
                 for f in chunk {
-                    let (hash, rows) = analyzed(&f.path, Engine::default());
+                    let shipped = analyzed(&f.path, Engine::default());
                     let seed = fnv1a64(f.name.as_bytes());
-                    let (other, other_rows) = analyzed(&f.path, Engine::with_seed_order(seed));
-                    assert_eq!(other, hash, "{}: the seed order changes the state", f.name);
-                    let a: BTreeSet<_> = rows.iter().collect();
-                    let b: BTreeSet<_> = other_rows.iter().collect();
+                    let other = analyzed(&f.path, Engine::with_seed_order(seed));
+                    assert_eq!(
+                        other.hash, shipped.hash,
+                        "{}: the seed order changes the state",
+                        f.name
+                    );
+                    let a: BTreeSet<_> = shipped.rows.iter().collect();
+                    let b: BTreeSet<_> = other.rows.iter().collect();
                     assert_eq!(a, b, "{}: the same analyzers run", f.name);
-                    moved += usize::from(rows != other_rows);
+                    moved += usize::from(shipped.rows != other.rows);
+                    for (x, y) in shipped.seeds.iter().zip(&other.seeds) {
+                        let (mut x, mut y) = (x.clone(), y.clone());
+                        x.sort();
+                        y.sort();
+                        assert_eq!(x, y, "{}: the same seeds", f.name);
+                    }
+                    // The negative control: the shuffled run inserts the seeds in another
+                    // order, so the relation tests the seed insertion order.
+                    if shipped.seeds.iter().any(|list| list.len() >= 2) {
+                        seeded += 1;
+                        reordered += usize::from(shipped.seeds != other.seeds);
+                    }
                 }
-                moved
+                (moved, seeded, reordered)
             }));
         }
         handles
             .into_iter()
             .map(|h| h.join().expect("a seed-order thread"))
-            .sum::<usize>()
+            .fold((0, 0, 0), |(a, b, c), (x, y, z)| (a + x, b + y, c + z))
     });
     assert_eq!(
         shuffled_rows,
         list.len(),
         "each shuffled run seeds the analyzers in another order"
+    );
+    assert!(
+        seeded > 0,
+        "some fixtures have two or more seeds of one kind"
+    );
+    assert_eq!(
+        shuffled_seeds, seeded,
+        "each shuffled run inserts the seeds in another order"
     );
 }
 

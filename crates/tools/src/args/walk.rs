@@ -6,13 +6,15 @@
 
 use std::collections::BTreeSet;
 
-use ghidorah_base::{ErrorCode, Fuel, Id, WarningCode, addr_expr, did_you_mean};
+use ghidorah_base::addr_expr::AddrExprError;
+use ghidorah_base::{ErrorCode, Fuel, Id, IdKind, WarningCode, addr_expr, did_you_mean};
 use ghidorah_json::{Number, Object, Value};
 
 use super::{Coerce, Format};
 use crate::envelope::Warning;
 use crate::errors::{Candidate, ToolError, cut};
 use crate::hints::{Call, WHY_CLAMP, WHY_HEX, WHY_NAMES};
+use crate::resolve::bad_id;
 use crate::spec::{ArgKind, ArgSpec};
 
 /// The fuel of one did-you-mean scan.
@@ -155,10 +157,26 @@ pub(super) fn fix_object(
         };
         if let Some(spec) = spec {
             taken.insert(spec.name);
-            out.push(spec.name, fix_value(spec, value, aliases));
+            let value = if key == spec.name {
+                fix_value(spec, value, aliases)
+            } else {
+                fix_value(spec, &wrap_for(spec, value), aliases)
+            };
+            out.push(spec.name, value);
         }
     }
     out
+}
+
+/// Gives `value` in an array when `spec` is a list and `value` is not an array. A rename from
+/// a singular name to its list name, for example `target` to `targets`, uses it.
+fn wrap_for(spec: &ArgSpec, value: &Value) -> Value {
+    let list = matches!(spec.kind, ArgKind::AddrList(_) | ArgKind::List(..));
+    if list && !matches!(value, Value::Array(_)) {
+        Value::Array(vec![value.clone()])
+    } else {
+        value.clone()
+    }
 }
 
 fn fix_value(spec: &ArgSpec, value: &Value, aliases: bool) -> Value {
@@ -362,6 +380,7 @@ impl Walk<'_> {
     ) -> Result<Value, ToolError> {
         let ok = Ok(value.clone());
         match (spec.kind, value) {
+            (ArgKind::Addr, _) if in_item(path) => addr_type(value, path),
             (ArgKind::Addr, _) => self.addr(value, path),
             (ArgKind::AddrList(max), Value::Array(items)) => {
                 if items.len() > max {
@@ -370,7 +389,7 @@ impl Walk<'_> {
                 }
                 for (i, item) in items.iter().enumerate() {
                     path.push(Part::Index(i));
-                    self.addr(item, path)?;
+                    addr_type(item, path)?;
                     path.pop();
                 }
                 ok
@@ -438,10 +457,33 @@ impl Walk<'_> {
             }
             Value::String(text) => match addr_expr::parse(text) {
                 Ok(_) => Ok(value.clone()),
+                Err(AddrExprError::BadId(e)) => {
+                    let trimmed = text.trim_matches(|c: char| c.is_ascii_whitespace());
+                    match IdKind::of_text(trimmed) {
+                        Some(kind) => Err(bad_id(&field(path), kind, &e).path(&pointer(path))),
+                        None => Err(self.address(path, None)),
+                    }
+                }
                 Err(e) => Err(self.address(path, e.repair_text())),
             },
             _ => Err(Self::invalid(path, expected(&ArgKind::Addr))),
         }
+    }
+}
+
+/// Tells if `path` is inside a list item. The handler resolves each item of a list on its own,
+/// so one bad item never fails the call (AC-144).
+fn in_item(path: &[Part]) -> bool {
+    path.iter().any(|part| matches!(part, Part::Index(_)))
+}
+
+/// Checks only the JSON type of an address in a list item: a string or an integer. The
+/// resolver of the handler reports a syntax error for that item.
+fn addr_type(value: &Value, path: &[Part]) -> Result<Value, ToolError> {
+    match value {
+        Value::String(_) => Ok(value.clone()),
+        Value::Number(n) if n.is_integer() => Ok(value.clone()),
+        _ => Err(Walk::invalid(path, expected(&ArgKind::Addr))),
     }
 }
 

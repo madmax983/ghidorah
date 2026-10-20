@@ -1,7 +1,9 @@
 //! `ghidorah call` and `ghidorah jsonl` (design Section 10.14).
 //!
 //! `call` runs one tool call and prints its envelope on stdout. The exit code is 0 for
-//! `ok: true` and 1 for `ok: false`. Bad arguments of the command line give exit code 2.
+//! `ok: true` and 1 for `ok: false`. Bad arguments of the command line give exit code 2. A
+//! call with the `binary_id` of a project in the projects root opens that project first, so
+//! one `call` can follow another (read-only when another writer holds the lock).
 //!
 //! `jsonl` reads independent requests `{ "id", "tool", "args" }` from stdin, one per line.
 //! It writes one line per request: the envelope with the `id` of the request as its first
@@ -12,13 +14,13 @@
 use std::io::Read;
 use std::path::Path;
 
-use ghidorah_base::ErrorCode;
+use ghidorah_base::{BinaryId, ErrorCode};
 use ghidorah_json::{Limits, Object, Value};
 use ghidorah_tools::{Request, ToolError, dispatch};
 
 use crate::Streams;
 use crate::argv::{ArgsInput, CallArgs, PrintFormat, SessionFlags};
-use crate::backend::{Backend, Options};
+use crate::backend::{Backend, OpenError, Options};
 use crate::config::Env;
 use crate::exit::Exit;
 use crate::mcp::frame::{Frame, LineReader, MAX_LINE};
@@ -124,20 +126,53 @@ fn read_args(input: &ArgsInput, stdin: &mut dyn Read) -> Result<Value, String> {
     }
 }
 
+/// Opens the backend of one `ghidorah call`.
+///
+/// Each call is a new process, so a `binary_id` names no open binary. A call with a valid
+/// `binary_id`, other than `binary_load`, opens the project of that binary from the projects
+/// root first. A project that another writer holds opens read-only. A project that does not
+/// open leaves the call to give its own error, for example `UNKNOWN_BINARY`.
+fn open_for<B: Backend>(options: &Options, tool: &str, tool_args: &Value) -> Result<B, OpenError> {
+    let id = tool_args
+        .get("binary_id")
+        .and_then(Value::as_str)
+        .filter(|text| BinaryId::parse(text).is_ok());
+    if let Some(id) = id.filter(|_| tool != "binary_load") {
+        let mut with = options.clone();
+        with.open.push(id.to_owned());
+        if let Ok(backend) = B::open(&with) {
+            return Ok(backend);
+        }
+        with.read_only = true;
+        if let Ok(backend) = B::open(&with) {
+            return Ok(backend);
+        }
+    }
+    B::open(options)
+}
+
 /// Runs `ghidorah call` with the backend `B`.
 pub fn call<B: Backend>(args: &CallArgs, env: &Env, streams: &mut Streams) -> Exit {
-    let mut backend = match B::open(&Options::with_flags(env, &args.session, SESSION)) {
+    let mut args = args.clone();
+    if let ArgsInput::File(path) = &args.input {
+        args.input = ArgsInput::File(env.cwd.join(Path::new(path)));
+    }
+    let tool_args = match read_args(&args.input, &mut streams.stdin) {
+        Ok(value) => value,
+        Err(message) => {
+            out::log(&mut streams.stderr, &message);
+            return Exit::Usage;
+        }
+    };
+    let options = Options::with_flags(env, &args.session, SESSION);
+    let mut backend = match open_for::<B>(&options, &args.tool, &tool_args) {
         Ok(backend) => backend,
         Err(error) => {
             out::log(&mut streams.stderr, &error.message);
             return Exit::Usage;
         }
     };
-    let mut args = args.clone();
-    if let ArgsInput::File(path) = &args.input {
-        args.input = ArgsInput::File(env.cwd.join(Path::new(path)));
-    }
-    call_on(&mut backend, &args, streams)
+    call_with(&mut backend, &args, tool_args, streams)
 }
 
 /// Runs `ghidorah call` on the open backend `backend`.
@@ -149,6 +184,16 @@ pub fn call_on<B: Backend>(backend: &mut B, args: &CallArgs, streams: &mut Strea
             return Exit::Usage;
         }
     };
+    call_with(backend, args, tool_args, streams)
+}
+
+/// Runs the tool call of `args` with the arguments `tool_args` on `backend`, and prints it.
+fn call_with<B: Backend>(
+    backend: &mut B,
+    args: &CallArgs,
+    tool_args: Value,
+    streams: &mut Streams,
+) -> Exit {
     let mut request = Request::new(&args.tool, tool_args);
     request.session.clone_from(&args.session.session);
     let envelope = dispatch(backend, &request);

@@ -10,11 +10,34 @@
 //! | a function entry | the function |
 //!
 //! A call site outside every body and a target that is none of these give no edge.
+//!
+//! A call to a PLT stub is an edge to the import, not to the stub function. So
+//! [`CallGraph::callers_of_func`] merges the callers of the import into the callers of its
+//! stub or thunk function ([`import_entry`]).
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use ghidorah_base::{Address, FuncId, ImportId};
-use ghidorah_db::Program;
+use ghidorah_db::{ImportRow, Program};
+
+/// Gives the entry of the stub or thunk of an import. A PLT stub of the loader comes first.
+/// Else the entry is the lowest function with the `thunk` flag that jumps through the slot.
+#[must_use]
+pub fn import_entry(program: &Program, row: &ImportRow) -> Option<Address> {
+    if row.stub.is_some() {
+        return row.stub;
+    }
+    program
+        .refs_to(row.ext)
+        .iter()
+        .map(|r| r.value.key.from)
+        .filter(|from| {
+            program
+                .func(FuncId(*from))
+                .is_some_and(|f| f.func.flags.thunk)
+        })
+        .min()
+}
 
 /// The callee of a call edge.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -30,6 +53,7 @@ pub enum Callee {
 pub struct CallGraph {
     calls: BTreeMap<FuncId, BTreeMap<Callee, BTreeSet<Address>>>,
     callers: BTreeMap<Callee, BTreeSet<FuncId>>,
+    entries: BTreeMap<FuncId, BTreeSet<ImportId>>,
 }
 
 impl CallGraph {
@@ -44,6 +68,12 @@ impl CallGraph {
             }
         }
         let mut out = Self::default();
+        for row in program.imports().values() {
+            let entry = import_entry(program, row).map(FuncId);
+            if let Some(func) = entry.filter(|f| program.func(*f).is_some()) {
+                out.entries.entry(func).or_default().insert(row.id.clone());
+            }
+        }
         for layer in [program.base(), program.analysis()] {
             for r in layer.refs().iter() {
                 let key = r.value.key;
@@ -88,6 +118,37 @@ impl CallGraph {
             .get(callee)
             .map(|s| s.iter().copied().collect())
             .unwrap_or_default()
+    }
+
+    /// Gives the nodes that stand for the function `func`: the function, then each import
+    /// whose stub or thunk it is.
+    fn nodes_of(&self, func: FuncId) -> Vec<Callee> {
+        let imports = self.entries.get(&func).into_iter().flatten();
+        std::iter::once(Callee::Func(func))
+            .chain(imports.cloned().map(Callee::Import))
+            .collect()
+    }
+
+    /// Gives the callers of the function `func` in entry order. The callers of a stub or
+    /// thunk include the callers of its import.
+    #[must_use]
+    pub fn callers_of_func(&self, func: FuncId) -> Vec<FuncId> {
+        let mut out = BTreeSet::new();
+        for node in self.nodes_of(func) {
+            out.extend(self.callers.get(&node).into_iter().flatten().copied());
+        }
+        out.into_iter().collect()
+    }
+
+    /// Gives the call sites in `caller` that call the function `func` or the import of a
+    /// stub or thunk `func`, in address order.
+    #[must_use]
+    pub fn sites_of_func(&self, caller: FuncId, func: FuncId) -> Vec<Address> {
+        let mut out = BTreeSet::new();
+        for node in self.nodes_of(func) {
+            out.extend(self.sites(caller, &node));
+        }
+        out.into_iter().collect()
     }
 
     /// Gives the call sites in `func` that call `callee`, in address order.

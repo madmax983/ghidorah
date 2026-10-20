@@ -1,5 +1,7 @@
 //! `func_list`: the frozen priority, sorts, filters and pages (AC-157).
 
+use std::collections::BTreeSet;
+
 use ghidorah_analysis::analyzers::metrics;
 use ghidorah_base::{Address, BinaryId};
 use ghidorah_db::{Edit, SymKind};
@@ -211,4 +213,61 @@ fn func_list_filters_the_code_pointer_reasons() {
         seeded += want;
     }
     assert!(seeded > 0, "the noeh build has code-pointer seeds");
+}
+
+/// Gives the distinct caller functions of the call items of `xref_list` on `target`.
+fn xref_callers(session: &mut ghidorah_tools::Session, target: &str) -> BTreeSet<String> {
+    let args = Value::object([
+        ("targets", Value::Array(vec![Value::from(target)])),
+        ("kinds", json(r#"["call"]"#)),
+    ]);
+    all_items(session, "xref_list", &args, 1000)
+        .iter()
+        .filter_map(|i| i.pointer("/from_func/id").and_then(Value::as_str))
+        .map(str::to_owned)
+        .collect()
+}
+
+#[test]
+fn regress_plt_stub_callers() {
+    let (mut session, _) = fixture("func_ptrs.gcc-O2");
+    let qsort = call(
+        &mut session,
+        "func_get",
+        r#"{"target":"fn:0x1080","include":["summary","callers"]}"#,
+    );
+    let d = data(&qsort);
+    assert_eq!(text_at(d, "/name"), "qsort@plt", "{qsort}");
+    let callers = d.get("callers").and_then(Value::as_array).expect("callers");
+    let main = callers
+        .iter()
+        .find(|c| str_of(c, "name") == "main")
+        .unwrap_or_else(|| panic!("main calls qsort@plt: {qsort}"));
+    assert!(
+        main.get("sites")
+            .and_then(Value::as_array)
+            .is_some_and(|s| s.contains(&Value::from("0x110f"))),
+        "{qsort}"
+    );
+    let count = d.pointer("/summary/callers").and_then(Value::as_u64);
+    assert!(count.is_some_and(|n| n >= 1), "{qsort}");
+    let funcs = all_items(&mut session, "func_list", &json("{}"), 1000);
+    let mut stubs = 0;
+    for f in funcs.iter().filter(|f| str_of(f, "name").ends_with("@plt")) {
+        let want = xref_callers(&mut session, &str_of(f, "id"));
+        let got = f.get("callers").and_then(Value::as_u64);
+        assert_eq!(got, u64::try_from(want.len()).ok(), "{f}");
+        stubs += usize::from(!want.is_empty());
+    }
+    assert!(stubs >= 2, "{stubs} called stubs");
+    let args = json(r#"{"sort":"in_degree"}"#);
+    let sorted = all_items(&mut session, "func_list", &args, 1000);
+    let shown: Vec<u64> = sorted
+        .iter()
+        .map(|f| f.get("callers").and_then(Value::as_u64).unwrap_or(0))
+        .collect();
+    assert!(
+        shown.windows(2).all(|w| w[0] >= w[1]),
+        "in_degree order agrees with callers: {shown:?}"
+    );
 }

@@ -1,18 +1,19 @@
 //! The sites of `xref_list`: target resolution, the reference classes, import sites, call
-//! graph edges and unresolved indirect calls.
+//! graph edges and the gaps: indirect calls and jumps with no target.
 
 use std::collections::BTreeSet;
 
 use ghidorah_analysis::code::slot_of;
+use ghidorah_analysis::facts::scope::is_gap;
 use ghidorah_analysis::{CallGraph, Callee};
 use ghidorah_base::{Address, ErrorCode, FuncId, ImportId, SyscallId};
-use ghidorah_db::{FlowOverride, Program, Ref, RefKey, RefType};
+use ghidorah_db::{CodeUnit, Program, Ref, RefKey, RefType};
 use ghidorah_json::Value;
 use ghidorah_loader::Format;
 
 use crate::errors::ToolError;
 use crate::handlers::func_sections as fs;
-use crate::resolve::{self, Family, Target};
+use crate::resolve::{self, Family, Rule, Target, table};
 
 /// One found reference: the target index, the key, the source and the path to an import.
 pub struct Found {
@@ -162,6 +163,11 @@ pub struct Targets {
     pub starts: Vec<Callee>,
     /// The functions whose bodies a `from` call reads.
     pub bodies: Vec<FuncId>,
+    /// The single instructions that a `from` call reads.
+    pub sites: Vec<Address>,
+    /// How each name or address target of a `from` call resolves: `{ index, input,
+    /// resolved_from }`. An ID target has one fixed scope, so it has no entry.
+    pub resolved: Vec<Value>,
 }
 
 /// Resolves each target of `inputs` for `family`. A bad target goes to `errors`.
@@ -170,12 +176,24 @@ pub fn resolve_all(p: &Program, inputs: &[Value], family: Family) -> Targets {
     let mut out = Targets::default();
     for (i, input) in inputs.iter().enumerate() {
         let path = fs::item_path("targets", i);
-        let target = resolve::resolve(p, input, &fs::site(&path))
-            .and_then(|r| resolve::target(p, &r, family))
-            .and_then(|t| refs_of(p, i, &t).map(|found| (t, found)));
+        let target = resolve::resolve(p, input, &fs::site(&path)).and_then(|r| {
+            let t = resolve::target(p, &r, family)?;
+            refs_of(p, i, &t).map(|found| (r, t, found))
+        });
         match target {
-            Ok((t, found)) => {
+            Ok((r, t, found)) => {
                 out.refs.extend(found);
+                if family == Family::XrefFrom && r.rule != Rule::Id {
+                    let mut from = r.resolved_from();
+                    if let Value::Object(o) = &mut from {
+                        o.push("scope", Value::from(table::scope(&t)));
+                    }
+                    out.resolved.push(Value::object([
+                        ("index", Value::from(i)),
+                        ("input", input.clone()),
+                        ("resolved_from", from),
+                    ]));
+                }
                 match t {
                     Target::SyscallSites(id) => out.syscalls.push((i, id)),
                     Target::ImportSites(id) => out.starts.push(Callee::Import(id)),
@@ -186,6 +204,8 @@ pub fn resolve_all(p: &Program, inputs: &[Value], family: Family) -> Targets {
                         out.starts.push(Callee::Func(f));
                         out.bodies.push(f);
                     }
+                    Target::RefsFromInsn(a) => out.sites.push(a),
+                    Target::CaseEdges(jt) => out.sites.push(jt.0),
                     _ => {}
                 }
             }
@@ -213,8 +233,11 @@ pub fn edges(graph: &CallGraph, start: &[Callee], to: bool, depth: u64, max: usi
         let mut next = Vec::new();
         for node in &level {
             let pairs: Vec<(Callee, Callee)> = if to {
-                graph
-                    .callers(node)
+                let callers = match node {
+                    Callee::Func(f) => graph.callers_of_func(*f),
+                    Callee::Import(_) => graph.callers(node),
+                };
+                callers
                     .into_iter()
                     .map(|c| (Callee::Func(c), node.clone()))
                     .collect()
@@ -255,30 +278,35 @@ pub fn callee_id(c: &Callee) -> String {
     }
 }
 
-/// Gives the indirect calls with no target: no call reference and no target override.
-pub fn unresolved(p: &Program, funcs: Option<&[FuncId]>) -> Vec<Address> {
-    let all: Vec<FuncId> = p.funcs().iter().map(ghidorah_db::FuncView::id).collect();
-    let mut out = Vec::new();
-    for f in funcs.unwrap_or(&all) {
+/// Tells if the instruction at `site` is a gap by the rule of `fact_check`.
+///
+/// A gap is an indirect call or jump with no target. It has no call or jump reference, no
+/// resolved jump table and no `IndirectTargets` override.
+fn gap_at(p: &Program, site: Address) -> bool {
+    site.is_ram()
+        && p.code_unit(site.off)
+            .is_some_and(|CodeUnit::Insn { flow, .. }| is_gap(p, site, *flow))
+}
+
+/// Gives the gaps of the instructions that a call reads, in address order. `Some` reads the
+/// bodies of `bodies` and the single instructions of `sites`. `None` reads every function.
+pub fn gaps(p: &Program, read: Option<(&[FuncId], &[Address])>) -> Vec<Address> {
+    let all: Vec<FuncId>;
+    let (funcs, sites) = if let Some(read) = read {
+        read
+    } else {
+        all = p.funcs().iter().map(ghidorah_db::FuncView::id).collect();
+        (all.as_slice(), &[][..])
+    };
+    let mut out = BTreeSet::new();
+    for f in funcs {
         for (at, _) in fs::body_units(p, *f) {
             let site = Address::ram(at);
-            let indirect = p.code_unit(at).is_some_and(|u| {
-                matches!(
-                    u,
-                    ghidorah_db::CodeUnit::Insn {
-                        flow: ghidorah_db::FlowKind::ICall,
-                        ..
-                    }
-                )
-            });
-            let called = p.refs_from(site).iter().any(|r| r.value.key.kind.is_call());
-            let targets = p
-                .flow_override(site)
-                .is_some_and(|o| matches!(o.value, FlowOverride::IndirectTargets(_)));
-            if indirect && !called && !targets {
-                out.push(site);
+            if gap_at(p, site) {
+                out.insert(site);
             }
         }
     }
-    out
+    out.extend(sites.iter().copied().filter(|s| gap_at(p, *s)));
+    out.into_iter().collect()
 }

@@ -22,6 +22,7 @@ const fn row(
         retry,
         message,
         hint,
+        plain: hint,
     }
 }
 
@@ -43,9 +44,10 @@ pub(crate) const fn info(code: ErrorCode) -> CodeInfo {
             "UNKNOWN_ARGUMENT",
             R,
             false,
-            "The argument {field} is not in the schema of the tool. The tool accepts only the arguments of its schema. Send next[0], which renames or removes the argument.",
-            "The candidates hold the closest argument names.",
-        ),
+            "The argument {field} is not in the schema of the tool. The tool accepts only the arguments of its schema. Rename or remove the argument.",
+            "Send next[0]. It renames or removes the argument, or it gets the schema of the tool.",
+        )
+        .with_plain("The schema of the tool in tools/list holds the argument names."),
         E::MissingArgument => row(
             code,
             "MISSING_ARGUMENT",
@@ -53,7 +55,8 @@ pub(crate) const fn info(code: ErrorCode) -> CodeInfo {
             false,
             "The required argument {field} is missing. The tool cannot run without it. Add the argument to the call.",
             "Call next[0] to get the schema and an example.",
-        ),
+        )
+        .with_plain("The schema of the tool in tools/list holds the required arguments."),
         E::UnknownTool => row(
             code,
             "UNKNOWN_TOOL",
@@ -61,15 +64,17 @@ pub(crate) const fn info(code: ErrorCode) -> CodeInfo {
             false,
             "The tool {tool} does not exist. No tool in the registry has this name. Use a name from the candidates.",
             "Call next[0] to search the tools.",
-        ),
+        )
+        .with_plain("Use a tool name from tools/list."),
         E::ToolNotInProfile => row(
             code,
             "TOOL_NOT_IN_PROFILE",
             H,
             false,
             "The tool {tool} is not available here. The tool is outside the active profile, or the batch step is destructive. Read details.reason.",
-            "For a destructive step, send next[0] as a direct call.",
-        ),
+            "Send next[0]. For not_in_profile, the server runs {profile}. Start it again with --profile full or a wider --tools list.",
+        )
+        .with_plain("The server runs {profile}. Start it again with --profile full or a wider --tools list."),
         E::AddressInvalid => row(
             code,
             "ADDRESS_INVALID",
@@ -77,7 +82,8 @@ pub(crate) const fn info(code: ErrorCode) -> CodeInfo {
             false,
             "The address text does not parse. It does not match the address grammar, or the integer is 2^53 or more. Send the address as a 0x hex string.",
             "Send next[0] when it exists.",
-        ),
+        )
+        .with_plain("An address is a 0x hex string, a symbol or an ID."),
         E::AddressUnmapped => row(
             code,
             "ADDRESS_UNMAPPED",
@@ -85,7 +91,8 @@ pub(crate) const fn info(code: ErrorCode) -> CodeInfo {
             false,
             "The address is not in a memory region of the binary. The binary has no bytes at this address. Use an address from the candidates.",
             "The candidates hold the nearest addresses in a region.",
-        ),
+        )
+        .with_plain("Call binary_survey to see the memory regions of the binary."),
         E::AddressBaseAmbiguous => row(
             code,
             "ADDRESS_BASE_AMBIGUOUS",
@@ -101,7 +108,8 @@ pub(crate) const fn info(code: ErrorCode) -> CodeInfo {
             false,
             "The name matches more than one entity. The server does not pick a match. Use a candidate value.",
             "Each candidate value is a sym: form or a name@0x form.",
-        ),
+        )
+        .with_plain("Send the name as a sym: form or a name@0x form."),
         E::NotFound => row(
             code,
             "NOT_FOUND",
@@ -109,7 +117,8 @@ pub(crate) const fn info(code: ErrorCode) -> CodeInfo {
             false,
             "The {kind} does not exist. No entity of this kind has this ID or name. Use a candidate value or search for the entity.",
             "The candidates hold the closest names.",
-        ),
+        )
+        .with_plain("Call search to find the entity by name or by kind."),
         E::UnknownBinary => row(
             code,
             "UNKNOWN_BINARY",
@@ -117,7 +126,8 @@ pub(crate) const fn info(code: ErrorCode) -> CodeInfo {
             false,
             "The binary_id is not open in this session. The session has no binary with this ID. Use a candidate binary_id.",
             "Send next[0] when it exists. It opens the project of the binary.",
-        ),
+        )
+        .with_plain("Load the binary again with binary_load."),
         E::BinaryRequired => row(
             code,
             "BINARY_REQUIRED",
@@ -125,7 +135,8 @@ pub(crate) const fn info(code: ErrorCode) -> CodeInfo {
             false,
             "The call names no binary, and more than one binary is open. The server cannot select a binary for the call. Add binary_id to the call.",
             "Send next[0]. It uses the most recent binary_id.",
-        ),
+        )
+        .with_plain("Add the binary_id of an open binary to the call."),
         E::PathOutsideRoot => row(
             code,
             "PATH_OUTSIDE_ROOT",
@@ -173,7 +184,8 @@ pub(crate) const fn info(code: ErrorCode) -> CodeInfo {
             false,
             "The cursor is not valid. It does not decode, it fails its check or it belongs to another query. Send next[0] to start at the first page.",
             "Send next[0]. It is the call without the cursor.",
-        ),
+        )
+        .with_plain("Send the call again without the cursor."),
         E::CursorStale => row(
             code,
             "CURSOR_STALE",
@@ -181,15 +193,17 @@ pub(crate) const fn info(code: ErrorCode) -> CodeInfo {
             false,
             "The cursor is stale. The sort key of its boundary item changed. Send next[0] to start at the first page.",
             "Send next[0]. It is the call without the cursor.",
-        ),
+        )
+        .with_plain("Send the call again without the cursor."),
         E::Conflict => row(
             code,
             "CONFLICT",
-            RW,
+            H,
             true,
-            "The call conflicts with the current state. The expected_rev differs from the current rev, or a later transaction changed the same facts. Send next[0] with the current rev.",
-            "For an undo, the candidates list the later transactions.",
-        ),
+            "The call conflicts with the current state. The expected_rev differs from the current rev, or a later transaction changed the same facts. Read the later edits before you send the call again.",
+            "Send next[0] to read the later edits. The candidates hold the call with the current rev or the later transactions.",
+        )
+        .with_plain("Call history_list to read the later edits."),
         E::BlockedByHigherPrioritySource => row(
             code,
             "BLOCKED_BY_HIGHER_PRIORITY_SOURCE",
@@ -205,7 +219,8 @@ pub(crate) const fn info(code: ErrorCode) -> CodeInfo {
             false,
             "The new function body overlaps another function. Two function bodies cannot share an address. Change or delete the other function first.",
             "The candidates name the owner function.",
-        ),
+        )
+        .with_plain("Call addr_info to find the owner function."),
         E::NotInFunction => row(
             code,
             "NOT_IN_FUNCTION",
@@ -227,9 +242,10 @@ pub(crate) const fn info(code: ErrorCode) -> CodeInfo {
             "NOTHING_TO_UNDO",
             N,
             false,
-            "The undo found no transaction. The scope has no transaction in the applied state. Use the session value * for a wider scope.",
-            "Call history_list to see the transactions.",
-        ),
+            "The undo found no transaction. The scope has no transaction in the applied state. Call history_list to see the transactions.",
+            "Use the session value * for a wider scope.",
+        )
+        .with_plain("The scope of every session has no applied transaction."),
         E::LimitExceeded => row(
             code,
             "LIMIT_EXCEEDED",
@@ -307,8 +323,8 @@ pub(crate) const fn info(code: ErrorCode) -> CodeInfo {
             "OUTPUT_BUDGET_EXCEEDED",
             N,
             false,
-            "The result is larger than the output budget. An internal guard stopped the call. Report this error.",
-            "Send the call again with a higher max_chars.",
+            "The result is larger than the output budget. The call changed no fact, and an internal guard stopped it. Read details.chars and details.limit.",
+            "A committed edit never gives this error. Its result drops data members until it fits.",
         ),
         E::InternalError => row(
             code,
@@ -324,8 +340,9 @@ pub(crate) const fn info(code: ErrorCode) -> CodeInfo {
             H,
             false,
             "No binary is open. The call needs an open binary. Load a binary with binary_load.",
-            "Send next[0] to list the projects.",
-        ),
+            "Send next[0]. It lists the projects or opens the newest project.",
+        )
+        .with_plain("Send binary_load with a path under a root of the server."),
         E::NothingToRedo => row(
             code,
             "NOTHING_TO_REDO",

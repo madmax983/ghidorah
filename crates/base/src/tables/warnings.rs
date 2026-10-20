@@ -20,6 +20,7 @@ const fn row(
         retry,
         message,
         hint,
+        plain: hint,
     }
 }
 

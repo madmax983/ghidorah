@@ -3,8 +3,8 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use ghidorah_analysis::CallGraph;
 use ghidorah_analysis::analyzers::{lang, metrics};
-use ghidorah_analysis::{CallGraph, Callee};
 use ghidorah_base::{Address, Caps, Fuel, FuncId};
 use ghidorah_db::Program;
 use ghidorah_json::{Object, Value};
@@ -286,6 +286,9 @@ fn exports(c: &Ctx<'_>) -> Part {
 }
 
 /// The referenced strings, the most referenced first, with up to 3 functions each.
+///
+/// When strings exist but no code refers to one, the section adds `unreferenced` (the count)
+/// and `next`: a `search` call that lists them.
 fn strings(c: &Ctx<'_>) -> Part {
     let p = c.program;
     let mut found: Vec<(usize, u64, BTreeSet<FuncId>)> = Vec::new();
@@ -293,9 +296,11 @@ fn strings(c: &Ctx<'_>) -> Part {
     for layer in [p.base(), p.analysis()] {
         addrs.extend(layer.strings().iter().map(|(at, _)| at));
     }
+    let mut unreferenced = 0usize;
     for at in addrs {
         let refs = p.refs_to(Address::ram(at));
         if refs.is_empty() {
+            unreferenced = unreferenced.saturating_add(1);
             continue;
         }
         let funcs = refs
@@ -305,6 +310,7 @@ fn strings(c: &Ctx<'_>) -> Part {
         found.push((refs.len(), at, funcs));
     }
     found.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
+    let none_referenced = found.is_empty();
     let list = found
         .into_iter()
         .filter_map(|(count, at, funcs)| {
@@ -324,8 +330,26 @@ fn strings(c: &Ctx<'_>) -> Part {
                 ("funcs", Value::Array(names)),
             ]))
         })
-        .collect();
-    Part::listed(Object::new(), "items", list, Some("string"))
+        .collect::<Vec<_>>();
+    let mut head = Object::new();
+    if none_referenced && unreferenced > 0 {
+        head.push("unreferenced", Value::from(unreferenced));
+        head.push(
+            "next",
+            Value::object([
+                ("tool", Value::from("search")),
+                (
+                    "args",
+                    Value::object([
+                        ("kind", Value::from("string")),
+                        ("include_unreferenced", Value::Bool(true)),
+                    ]),
+                ),
+                ("why", Value::from(WHY_REST)),
+            ]),
+        );
+    }
+    Part::listed(head, "items", list, Some("string"))
 }
 
 /// Gives the name of an entry kind.
@@ -386,10 +410,7 @@ fn functions(c: &Ctx<'_>, graph: &CallGraph) -> Part {
                 ("id", Value::from(r.func.to_string())),
                 ("name", Value::from(c.namer.of(p, r.func.0))),
                 ("size", Value::from(size)),
-                (
-                    "callers",
-                    Value::from(graph.callers(&Callee::Func(r.func)).len()),
-                ),
+                ("callers", Value::from(graph.callers_of_func(r.func).len())),
             ])
         })
         .collect();

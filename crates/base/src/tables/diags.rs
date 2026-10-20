@@ -18,6 +18,7 @@ const fn row(
         retry: false,
         message,
         hint,
+        plain: hint,
     }
 }
 

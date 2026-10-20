@@ -49,6 +49,15 @@
             "triage",
             "full"
           ]
+        },
+        "break_lock": {
+          "type": "boolean"
+        },
+        "dry_run": {
+          "type": "boolean"
+        },
+        "max_steps": {
+          "type": "integer"
         }
       },
       "additionalProperties": false
@@ -117,6 +126,9 @@
         },
         "binary_id": {
           "type": "string"
+        },
+        "max_steps": {
+          "type": "integer"
         }
       },
       "additionalProperties": false
@@ -323,6 +335,9 @@
         },
         "binary_id": {
           "type": "string"
+        },
+        "max_chars": {
+          "type": "integer"
         }
       },
       "additionalProperties": false
@@ -942,6 +957,9 @@
         },
         "binary_id": {
           "type": "string"
+        },
+        "force": {
+          "type": "boolean"
         }
       },
       "additionalProperties": false
@@ -1007,6 +1025,9 @@
         },
         "binary_id": {
           "type": "string"
+        },
+        "force": {
+          "type": "boolean"
         }
       },
       "additionalProperties": false
@@ -1239,6 +1260,12 @@
         },
         "binary_id": {
           "type": "string"
+        },
+        "force": {
+          "type": "boolean"
+        },
+        "max_steps": {
+          "type": "integer"
         }
       },
       "required": [
@@ -1274,6 +1301,15 @@
         },
         "binary_id": {
           "type": "string"
+        },
+        "dry_run": {
+          "type": "boolean"
+        },
+        "force": {
+          "type": "boolean"
+        },
+        "max_steps": {
+          "type": "integer"
         }
       },
       "required": [
@@ -1306,6 +1342,18 @@
         },
         "binary_id": {
           "type": "string"
+        },
+        "session": {
+          "type": "string"
+        },
+        "dry_run": {
+          "type": "boolean"
+        },
+        "force": {
+          "type": "boolean"
+        },
+        "max_steps": {
+          "type": "integer"
         }
       },
       "additionalProperties": false
@@ -1427,6 +1475,12 @@
         },
         "binary_id": {
           "type": "string"
+        },
+        "dry_run": {
+          "type": "boolean"
+        },
+        "max_steps": {
+          "type": "integer"
         }
       },
       "required": [
@@ -1481,6 +1535,9 @@
         },
         "binary_id": {
           "type": "string"
+        },
+        "max_steps": {
+          "type": "integer"
         }
       },
       "additionalProperties": false

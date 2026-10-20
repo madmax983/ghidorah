@@ -54,7 +54,9 @@
     "basis": {
       "complete": false,
       "unresolved": [
-        "0x1014"
+        "0x1014",
+        "0x112f",
+        "0x1170"
       ]
     }
   },

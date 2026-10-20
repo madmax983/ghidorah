@@ -1,9 +1,13 @@
 //! Projects in a session: reopen by `binary_id`, the lock, read-only mode, the torn tail
 //! warning, the reopen hint and the root rule of ADR-0022.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use ghidorah_base::BinaryId;
+use ghidorah_db::fs::EntryKind;
+use ghidorah_db::{Fs, FsError, RealFs};
 use ghidorah_json::Value;
 use ghidorah_tools::session::ProjectsConfig;
 
@@ -179,4 +183,168 @@ fn default_root_in_a_git_tree_keeps_no_project() {
     let mut s = session_with(named);
     load_demo(&mut s);
     assert!(root.join(DEMO_ID).join("project.json").is_file());
+}
+
+#[test]
+fn regress_git_tree_root_reports_not_persisted() {
+    use ghidorah_base::FixedClock;
+    use ghidorah_tools::{Host, Session};
+
+    let dir = tmp("git_tree_reason");
+    std::fs::create_dir_all(dir.join(".git")).expect("a git directory");
+    let root: PathBuf = dir.join("projects");
+    let mut cfg = config();
+    cfg.projects = Some(ProjectsConfig {
+        root: root.clone(),
+        named: false,
+        break_lock: false,
+    });
+    let mut s = Session::with_registry(
+        <Session as Host>::registry(),
+        cfg,
+        Box::new(FixedClock::new(0)),
+    );
+    // With no open binary, the brief tells why no project persists.
+    let empty = call(&mut s, "session_brief", "{}");
+    assert_eq!(
+        data(&empty).get("persisted"),
+        Some(&Value::Bool(false)),
+        "{empty}"
+    );
+    let reason = data(&empty)
+        .get("persist_reason")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
+    assert!(reason.contains("git working tree"), "{empty}");
+    let load = call(
+        &mut s,
+        "binary_load",
+        r#"{"builtin":"demo","analysis":"none"}"#,
+    );
+    let got = data(&load);
+    assert_eq!(got.get("persisted"), Some(&Value::Bool(false)), "{load}");
+    assert_eq!(
+        got.get("persist_reason").and_then(Value::as_str),
+        Some(reason.as_str()),
+        "{load}"
+    );
+    assert!(!root.join(DEMO_ID).exists(), "no project inside a git tree");
+    let brief = call(&mut s, "session_brief", "{}");
+    let row = data(&brief)
+        .pointer("/binaries/0")
+        .cloned()
+        .unwrap_or_default();
+    assert_eq!(row.get("persisted"), Some(&Value::Bool(false)), "{brief}");
+    assert_eq!(
+        row.get("persist_reason").and_then(Value::as_str),
+        Some(reason.as_str()),
+        "{brief}"
+    );
+    // A root that keeps projects gives no persisted member.
+    let mut named = session_with(config_in(&root));
+    let load = call(
+        &mut named,
+        "binary_load",
+        r#"{"builtin":"demo","analysis":"none"}"#,
+    );
+    assert!(data(&load).get("persisted").is_none(), "{load}");
+    // A bad project file gives its reason in the error details.
+    drop(named);
+    std::fs::write(root.join(DEMO_ID).join("project.json"), "{}").expect("a bad project file");
+    let mut bad = session_with(config_in(&root));
+    let error = call(&mut bad, "binary_load", &demo_args());
+    assert_eq!(code(&error), "INTERNAL_ERROR", "{error}");
+    assert!(
+        error
+            .pointer("/error/details/reason")
+            .and_then(Value::as_str)
+            .is_some_and(|r| r.starts_with("The project file is bad")),
+        "{error}"
+    );
+}
+
+/// The real file system, but the first check of a project file gives `false`. So the test
+/// sees the race with a second process that makes the project.
+#[derive(Clone)]
+struct LateProject {
+    hidden: Arc<AtomicUsize>,
+}
+
+impl Fs for LateProject {
+    fn create_dir_all(&mut self, path: &Path) -> Result<(), FsError> {
+        RealFs.create_dir_all(path)
+    }
+    fn create_new(&mut self, path: &Path) -> Result<(), FsError> {
+        RealFs.create_new(path)
+    }
+    fn append(&mut self, path: &Path, bytes: &[u8]) -> Result<(), FsError> {
+        RealFs.append(path, bytes)
+    }
+    fn write_all(&mut self, path: &Path, bytes: &[u8]) -> Result<(), FsError> {
+        RealFs.write_all(path, bytes)
+    }
+    fn truncate(&mut self, path: &Path, len: u64) -> Result<(), FsError> {
+        RealFs.truncate(path, len)
+    }
+    fn sync_file(&mut self, path: &Path) -> Result<(), FsError> {
+        RealFs.sync_file(path)
+    }
+    fn rename(&mut self, from: &Path, to: &Path) -> Result<(), FsError> {
+        RealFs.rename(from, to)
+    }
+    fn link_new(&mut self, src: &Path, dst: &Path) -> Result<(), FsError> {
+        RealFs.link_new(src, dst)
+    }
+    fn sync_dir(&mut self, path: &Path) -> Result<(), FsError> {
+        RealFs.sync_dir(path)
+    }
+    fn remove(&mut self, path: &Path) -> Result<(), FsError> {
+        RealFs.remove(path)
+    }
+    fn read(&mut self, path: &Path) -> Result<Vec<u8>, FsError> {
+        RealFs.read(path)
+    }
+    fn set_read_only(&mut self, path: &Path) -> Result<(), FsError> {
+        RealFs.set_read_only(path)
+    }
+    fn list(&mut self, dir: &Path) -> Result<Vec<String>, FsError> {
+        RealFs.list(dir)
+    }
+    fn exists(&mut self, path: &Path) -> bool {
+        let hide = path.ends_with("project.json")
+            && self
+                .hidden
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
+                .is_ok();
+        !hide && RealFs.exists(path)
+    }
+    fn kind(&mut self, path: &Path) -> Option<EntryKind> {
+        RealFs.kind(path)
+    }
+    fn boxed(&self) -> Box<dyn Fs> {
+        Box::new(self.clone())
+    }
+}
+
+#[test]
+fn regress_admit_reopens_a_project_made_meanwhile() {
+    let dir = tmp("late_project");
+    {
+        let mut first = session_with(config_in(&dir));
+        load_demo(&mut first);
+    }
+    let mut s = session_with(config_in(&dir));
+    s.set_fs(Box::new(LateProject {
+        hidden: Arc::new(AtomicUsize::new(1)),
+    }));
+    // The check of admit misses the project, so the create finds the project file.
+    let envelope = call(&mut s, "binary_load", r#"{"builtin":"demo"}"#);
+    let got = data(&envelope);
+    assert_eq!(got.get("already_loaded"), Some(&Value::Bool(false)));
+    let id = BinaryId::parse(DEMO_ID).expect("the ID parses");
+    assert!(
+        s.store(id).and_then(|st| st.project()).is_some(),
+        "the session opens the project on disk"
+    );
 }

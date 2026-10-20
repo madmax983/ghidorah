@@ -33,6 +33,9 @@ impl AnalysisState {
     }
 }
 
+/// The state name of a bound binary with no analysis run.
+pub const NO_ANALYSIS: &str = "none";
+
 /// The analysis member of an envelope: `{ state, rev }`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AnalysisInfo {
@@ -56,28 +59,41 @@ pub struct Frame {
 }
 
 impl Frame {
-    /// Tells if the result is partial: the analysis state is not `complete`.
+    /// Tells if the result is partial: the analysis state is not `complete`. A bound binary
+    /// with no analysis run gives a partial result too.
     #[must_use]
     pub fn partial(&self) -> bool {
-        self.analysis
-            .is_some_and(|a| a.state != AnalysisState::Complete)
+        match self.analysis {
+            Some(a) => a.state != AnalysisState::Complete,
+            None => self.binary_id.is_some(),
+        }
     }
 
     /// Writes the frame members `binary_id?, rev, session, analysis?` into `out`.
+    ///
+    /// A bound binary with no analysis run gets `analysis: { state: "none" }`.
     fn write(&self, out: &mut Object, with_analysis: bool) {
         if let Some(id) = &self.binary_id {
             out.push("binary_id", Value::from(id.as_str()));
         }
         out.push("rev", int(self.rev));
         out.push("session", Value::from(self.session.as_str()));
-        if let (Some(a), true) = (self.analysis, with_analysis) {
-            out.push(
+        if !with_analysis {
+            return;
+        }
+        match (self.analysis, &self.binary_id) {
+            (Some(a), _) => out.push(
                 "analysis",
                 Value::object([
                     ("state", Value::from(a.state.as_str())),
                     ("rev", int(a.rev)),
                 ]),
-            );
+            ),
+            (None, Some(_)) => out.push(
+                "analysis",
+                Value::object([("state", Value::from(NO_ANALYSIS))]),
+            ),
+            (None, None) => {}
         }
     }
 }

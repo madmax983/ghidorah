@@ -4,8 +4,8 @@
 {"c":{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}}}}
 {"s":{"jsonrpc":"2.0","id":2,"error":{"code":-32602,"message":"The request has no protocol keys in _meta. Send initialize first, or add the keys of data.missing to params._meta.","data":{"missing":["io.modelcontextprotocol/clientCapabilities"]}}}}
 {"c":{"jsonrpc":"2.0","id":3,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2025-03-26","io.modelcontextprotocol/clientCapabilities":{}}}}}
-{"s":{"jsonrpc":"2.0","id":3,"error":{"code":-32022,"message":"The protocol version of the request is not supported. Use a version of data.supported.","data":{"supported":["2026-07-28","2025-11-25","2025-06-18"],"requested":"2025-03-26"}}}}
+{"s":{"jsonrpc":"2.0","id":3,"error":{"code":-32022,"message":"The protocol version of the request is not supported. Use a version of data.supported.","data":{"supported":["2026-07-28"],"requested":"2025-03-26"}}}}
 {"c":{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"echo_text","arguments":{"text":"x"}}}}
 {"s":{"jsonrpc":"2.0","id":4,"error":{"code":-32602,"message":"The request has no protocol keys in _meta. Send initialize first, or add the keys of data.missing to params._meta.","data":{"missing":["io.modelcontextprotocol/protocolVersion","io.modelcontextprotocol/clientCapabilities"]}}}}
 {"c":{"jsonrpc":"2.0","id":5,"method":"ping"}}
-{"s":{"jsonrpc":"2.0","id":5,"error":{"code":-32602,"message":"The request has no protocol keys in _meta. Send initialize first, or add the keys of data.missing to params._meta.","data":{"missing":["io.modelcontextprotocol/protocolVersion","io.modelcontextprotocol/clientCapabilities"]}}}}
+{"s":{"jsonrpc":"2.0","id":5,"result":{}}}

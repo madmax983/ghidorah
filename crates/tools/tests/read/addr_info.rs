@@ -2,7 +2,7 @@
 
 use ghidorah_json::Value;
 
-use crate::support::{call, call_value, code, data, demo, items, str_of, text_at};
+use crate::support::{call, call_value, code, data, demo, fixture, items, str_of, text_at};
 
 #[test]
 fn addr_info_fields() {
@@ -103,4 +103,87 @@ fn regress_bare_hex_has_repair_call() {
         let fixed = call_value(&mut session, tool, args);
         assert_eq!(code(&fixed), "", "{fixed}");
     }
+}
+
+/// Gives the `ok` flags of the items of a per-item result.
+fn oks(envelope: &Value) -> Vec<bool> {
+    items(envelope)
+        .iter()
+        .map(|i| i.get("ok") == Some(&Value::Bool(true)))
+        .collect()
+}
+
+/// A list item with bad address syntax fails only that item (AC-144, agent-protocol-05). An
+/// ID prefix with a bad body gives `INVALID_ARGUMENT` that names the ID kind.
+#[test]
+fn regress_list_item_syntax_error_is_per_item() {
+    let (mut session, _) = fixture("func_ptrs.gcc-O2");
+    let got = call(
+        &mut session,
+        "func_get",
+        r#"{"targets":["main","nosuch","fn:zz","0xzz"]}"#,
+    );
+    assert_eq!(code(&got), "", "{got}");
+    assert_eq!(oks(&got), [true, false, false, false], "{got}");
+    let list = items(&got);
+    assert_eq!(text_at(&list[0], "/data/name"), "main", "{got}");
+    assert_eq!(text_at(&list[1], "/error/code"), "NOT_FOUND");
+    assert_eq!(
+        text_at(&list[2], "/error/code"),
+        "INVALID_ARGUMENT",
+        "{got}"
+    );
+    assert_eq!(text_at(&list[2], "/error/field_path"), "/targets/2");
+    let expected = text_at(&list[2], "/error/details/expected");
+    assert!(
+        expected.contains("fn:"),
+        "the error names the ID kind: {got}"
+    );
+    assert!(
+        !text_at(&list[2], "/error/message").contains("0x hex string"),
+        "{got}"
+    );
+    assert_eq!(text_at(&list[3], "/error/code"), "ADDRESS_INVALID", "{got}");
+    assert_eq!(text_at(&list[3], "/error/field_path"), "/targets/3");
+
+    let one = call(&mut session, "func_get", r#"{"target":"fn:zz"}"#);
+    assert_eq!(
+        code(&one),
+        "INVALID_ARGUMENT",
+        "a single target fails the call: {one}"
+    );
+    assert_eq!(text_at(&one, "/error/field_path"), "/target");
+    assert!(
+        text_at(&one, "/error/details/expected").contains("fn:"),
+        "{one}"
+    );
+
+    let renamed = call(
+        &mut session,
+        "symbol_rename",
+        r#"{"items":[{"target":"0x1366","name":"op_jump"},{"target":"fn:qq","name":"bad"}]}"#,
+    );
+    assert_eq!(code(&renamed), "", "{renamed}");
+    assert_eq!(oks(&renamed), [true, false], "{renamed}");
+    let list = items(&renamed);
+    assert_eq!(text_at(&list[1], "/error/code"), "INVALID_ARGUMENT");
+    assert_eq!(text_at(&list[1], "/error/field_path"), "/items/1/target");
+
+    let refs = call(
+        &mut session,
+        "xref_list",
+        r#"{"targets":["fn:0x1350","fn:zz"],"direction":"from"}"#,
+    );
+    assert_eq!(code(&refs), "", "{refs}");
+    assert!(!items(&refs).is_empty(), "{refs}");
+    let errors = data(&refs)
+        .get("errors")
+        .and_then(Value::as_array)
+        .expect("errors");
+    assert_eq!(errors.len(), 1, "{refs}");
+    assert_eq!(errors[0].get("index").and_then(Value::as_u64), Some(1));
+    assert_eq!(
+        errors[0].pointer("/error/code").and_then(Value::as_str),
+        Some("INVALID_ARGUMENT")
+    );
 }

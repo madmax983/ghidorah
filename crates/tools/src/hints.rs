@@ -45,6 +45,15 @@ pub const WHY_BINARY: &str = "Send the call with the most recent binary_id.";
 /// The `why` of a `session_brief` call when no binary is open.
 pub const WHY_BRIEF: &str = "List the projects on disk and the open binaries.";
 
+/// The `why` of a `history_list` call after a commit whose result drops data members.
+pub const WHY_HISTORY: &str = "Read the edits after the rev before the call.";
+
+/// The `why` of a `history_list` call after a `CONFLICT` on `expected_rev`.
+pub const WHY_CONFLICT: &str = "Read the edits after expected_rev before you send the call again.";
+
+/// The `why` of a `tool_search` call for a tool outside the active profile.
+pub const WHY_ALTERNATIVE: &str = "Search the active tools for a tool that does the same task.";
+
 /// The page hint of a list with more items.
 pub const HINT_NEXT_PAGE: &str = "Send page.next_cursor as cursor to get the next page.";
 
@@ -53,7 +62,7 @@ pub const HINT_TOO_BIG: &str =
     "The next item does not fit in max_chars. Raise max_chars, or add fields for smaller items.";
 
 /// Every fixed text that the pipeline sends to an agent. Test `ac_024` checks them.
-pub const TEXTS: [&str; 12] = [
+pub const TEXTS: [&str; 15] = [
     WHY_NAMES,
     WHY_CLAMP,
     WHY_HEX,
@@ -64,6 +73,9 @@ pub const TEXTS: [&str; 12] = [
     WHY_ANALYSIS,
     WHY_BINARY,
     WHY_BRIEF,
+    WHY_HISTORY,
+    WHY_CONFLICT,
+    WHY_ALTERNATIVE,
     HINT_NEXT_PAGE,
     HINT_TOO_BIG,
 ];

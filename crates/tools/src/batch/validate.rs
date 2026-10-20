@@ -21,7 +21,7 @@ use super::{
     DESTRUCTIVE, MAX_STEP_ID, NOT_IN_BATCH, OnError, STEP_GLOBALS, WHY_DIRECT, WHY_LIMIT, WHY_TOP,
 };
 use crate::args::{Args, parse};
-use crate::errors::{Candidate, ToolError};
+use crate::errors::{Candidate, ToolError, not_in_profile, profile_label};
 use crate::handlers::batch_run::SPEC;
 use crate::hints::{Call, WHY_SCHEMA, WHY_SEARCH};
 use crate::profiles::ProfileSet;
@@ -191,7 +191,8 @@ pub(super) fn repair_in_batch(
 }
 
 /// Gives the batch error of a step argument error: the field path below
-/// `/steps/N/args`, and a repair call on the batch.
+/// `/steps/N/args`, and a repair call on the batch. `MISSING_ARGUMENT`, and an
+/// `UNKNOWN_ARGUMENT` whose direct repair fails the strict parser, get `tool_search`.
 fn step_error(
     error: ToolError,
     raw: &Value,
@@ -203,12 +204,12 @@ fn step_error(
     let path = format!("/steps/{step}/args{inner}");
     let mut out = error;
     out.field_path = Some(path);
-    let repair = out
-        .next
-        .first()
-        .and_then(|c| repair_in_batch(raw, step, tool, refs, c));
+    let direct = out.next.first();
+    let parses = direct.is_some_and(|c| crate::args::parse_strict(tool, &c.args).is_ok());
+    let repair = direct.and_then(|c| repair_in_batch(raw, step, tool, refs, c));
     out.next.clear();
-    if out.code == ErrorCode::MissingArgument {
+    let unknown = out.code == ErrorCode::UnknownArgument && !parses;
+    if out.code == ErrorCode::MissingArgument || unknown {
         let args = Value::object([
             ("name", Value::from(tool.name)),
             ("level", Value::from("full")),
@@ -362,11 +363,9 @@ fn check_step(
         ));
     }
     let readonly = profile.profile() == Profile::Readonly && tool.mutating;
+    let active = |name: &str| profile.holds(registry, name);
     if readonly || !profile.holds(registry, tool.name) {
-        return Err(ToolError::new(ErrorCode::ToolNotInProfile)
-            .var("tool", tool.name)
-            .path(&tool_path)
-            .detail("reason", Value::from("not_in_profile")));
+        return Err(not_in_profile(registry, &active, tool.name).path(&tool_path));
     }
     let args = object
         .get("args")
@@ -381,7 +380,8 @@ fn check_step(
     let earlier: Vec<&str> = done.iter().map(|s| s.id.as_str()).collect();
     let found = refs::find(tool, &args, &earlier, step)?;
     if destructive(tool, &args) {
-        return Err(destructive_error(raw, step, tool, &args));
+        let label = profile_label(registry, &active);
+        return Err(destructive_error(raw, step, tool, &args).var("profile", &label));
     }
     let mut test = args.clone();
     for r in &found {

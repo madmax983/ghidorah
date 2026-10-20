@@ -9,14 +9,25 @@
 //! | `binary_id` | a binary that is open in the session, or a project in the projects root |
 //!
 //! The load probes the format, maps the file and makes the program. A binary that is open
-//! already gives `already_loaded: true` and no second copy. A session with a projects root
+//! already gives `already_loaded: true` and no second copy. The binary ID is the hash of the
+//! bytes, so a binary keeps the load settings (`file_format`, `base`, `entry`) of its first
+//! load. Other settings give `INVALID_ARGUMENT` with `details.reason: "load_spec_differs"`. A session with a projects root
 //! opens the project of the binary, or makes a new one (design Section 3.10). A reopen by
 //! `binary_id` reads only the input copy of the project, with no root check.
 //!
 //! With an analysis engine in the session, the load then runs the analysis within
-//! `max_steps`. A project with a current analysis needs no run. A project with changed
-//! analysis inputs starts a re-analysis. Without an engine, the analysis state is `none`. A
-//! dry run loads the file and reports it, but opens nothing.
+//! `max_steps`, in fuel slices with one progress report per slice. A cancel stops the run at
+//! the next slice end, and the load stays. A project with a current analysis needs no run. A
+//! project with changed analysis inputs starts a re-analysis. Without an engine, the analysis
+//! state is `none`. A dry run loads the file and reports it, but opens nothing.
+//!
+//! A default projects root inside a git working tree keeps no project (ADR-0022). Then the
+//! result holds `persisted: false` and `persist_reason`, so the agent knows that its edits
+//! stay in memory only.
+//!
+//! A project lock of a process that is not alive gives `PROJECT_LOCKED` with `stale: true`.
+//! Then `next[0]` is the same call with `break_lock: true`. The flag holds for that call only,
+//! and the lock code replaces only a stale lock.
 
 use std::collections::BTreeMap;
 
@@ -27,6 +38,7 @@ use ghidorah_loader::{
     self as loader, Detected, Diagnostic, EntryKind, Kind, LoadError, LoadOpts, probe,
 };
 
+use super::func_sections::safe;
 use crate::args::Args;
 use crate::demo::builtin;
 use crate::dispatch::{Ctx, Payload};
@@ -34,7 +46,7 @@ use crate::envelope::{Mutation, Warning};
 use crate::errors::ToolError;
 use crate::hints::Call;
 use crate::outshape::{Field, OutputShape};
-use crate::session::{Admitted, OpenBinary, Session, Until};
+use crate::session::{Admitted, OpenBinary, Session, Store, Until};
 use crate::spec::{
     Annotations, ArgKind, ArgSpec, BinaryArg, Example, FuelSpec, Group, GroupRule, Profile, Role,
     ToolSpec,
@@ -52,8 +64,22 @@ pub const MAX_PATH_CHARS: usize = 4_096;
 /// The `why` of the `binary_survey` hint after a load.
 pub const WHY_SURVEY: &str = "Survey the binary that the call loaded.";
 
+/// The `why` of the repair call of a stale project lock.
+pub const WHY_BREAK_LOCK: &str = "The owner of the project lock is not alive. Send the call again with break_lock true to replace the lock.";
+
+/// The `why` of the repair call of a load with other load settings than the first load.
+pub const WHY_STORED_SPEC: &str = "Open the binary with the load settings of its first load.";
+
+/// The `details.expected` of a load with other load settings than the first load.
+pub const EXPECTED_STORED_SPEC: &str = "the load settings of details.stored";
+
 /// Every fixed text of the handler that an agent reads.
-pub const TEXTS: &[&str] = &[WHY_SURVEY];
+pub const TEXTS: &[&str] = &[
+    WHY_SURVEY,
+    WHY_BREAK_LOCK,
+    WHY_STORED_SPEC,
+    EXPECTED_STORED_SPEC,
+];
 
 const ARGS: &[ArgSpec] = &[
     ArgSpec::new(
@@ -107,6 +133,13 @@ const ARGS: &[ArgSpec] = &[
         "How far the analysis runs after the load.",
     )
     .default_json("\"full\""),
+    ArgSpec::new(
+        "break_lock",
+        Role::Param,
+        ArgKind::Bool,
+        "Replace a stale project lock: a lock whose owner process is not alive. A live owner keeps its lock.",
+    )
+    .default_json("false"),
 ];
 
 const ANALYSIS: &[Field] = &[
@@ -133,6 +166,8 @@ const FIELDS: &[Field] = &[
     Field::req("size", OutputShape::Int),
     Field::req("already_loaded", OutputShape::Bool),
     Field::req("read_only", OutputShape::Bool),
+    Field::opt("persisted", OutputShape::Bool),
+    Field::opt("persist_reason", OutputShape::Str),
     Field::req("analysis", OutputShape::Obj(ANALYSIS)),
     Field::req("diagnostics", OutputShape::Obj(DIAGNOSTICS)),
 ];
@@ -282,6 +317,42 @@ fn load_spec(args: &Args) -> Result<LoadSpec, ToolError> {
     })
 }
 
+/// Gives the JSON form of load settings: `{ format: "auto" }` or
+/// `{ format: "raw", base, entry }`.
+fn spec_json(spec: LoadSpec) -> Value {
+    match spec {
+        LoadSpec::Auto => Value::object([("format", Value::from("auto"))]),
+        LoadSpec::Raw { base, entry } => Value::object([
+            ("format", Value::from("raw")),
+            ("base", Value::from(hex::u64_text(base))),
+            ("entry", entry.map(hex::u64_text).into()),
+        ]),
+    }
+}
+
+/// Gives the error of a load of the binary `id` with the settings `asked` when its first load
+/// used `stored`: `INVALID_ARGUMENT` with `details.reason: "load_spec_differs"`,
+/// `details.stored` and `next[0]` `binary_load { binary_id }`. The binary ID is the hash of
+/// the bytes only, so one binary has one set of load settings.
+pub(crate) fn spec_differs(id: BinaryId, stored: LoadSpec, asked: LoadSpec) -> ToolError {
+    let field = match (stored, asked) {
+        (LoadSpec::Raw { base: a, .. }, LoadSpec::Raw { base: b, .. }) if a != b => "base",
+        (LoadSpec::Raw { .. }, LoadSpec::Raw { .. }) => "entry",
+        _ => "file_format",
+    };
+    ToolError::new(ErrorCode::InvalidArgument)
+        .var("field", field)
+        .path(&format!("/{field}"))
+        .detail("reason", Value::from("load_spec_differs"))
+        .detail("stored", spec_json(stored))
+        .detail("expected", Value::from(EXPECTED_STORED_SPEC))
+        .next(Call::new(
+            "binary_load",
+            Value::object([("binary_id", Value::from(id.to_string()))]),
+            WHY_STORED_SPEC,
+        ))
+}
+
 /// Gives the name and the bytes of the file of the call.
 fn read_input(session: &Session, args: &Args) -> Result<(String, Vec<u8>), ToolError> {
     if let Some(name) = args.str("builtin") {
@@ -316,8 +387,10 @@ fn make_program(session: &Session, args: &Args, bytes: &[u8]) -> Result<Program,
     Program::from_binary(binary, mem, &limits).map_err(|_| ToolError::new(ErrorCode::InternalError))
 }
 
-/// Gives the result object of a binary.
-fn report(binary: &OpenBinary, already: bool, steps_used: u64) -> Object {
+/// Gives the result object of a binary. `refusal` is the reason why the binary has no
+/// project on disk: then the object holds `persisted: false` and `persist_reason`. The file
+/// name comes from the file system, so it has the escapes of [`safe`], as in other outputs.
+fn report(binary: &OpenBinary, already: bool, steps_used: u64, refusal: Option<&str>) -> Object {
     let program = &binary.program;
     let meta = program.meta();
     let kind = match meta.kind {
@@ -347,7 +420,7 @@ fn report(binary: &OpenBinary, already: bool, steps_used: u64) -> Object {
     let mut out = Object::new();
     out.push("binary_id", Value::from(binary.id.to_string()));
     out.push("sha256", Value::from(hex::encode(&meta.sha256)));
-    out.push("file_name", Value::from(binary.file_name.as_str()));
+    out.push("file_name", Value::from(safe(&binary.file_name)));
     out.push("format", Value::from(meta.format.name()));
     out.push("arch", Value::from(meta.arch.to_string()));
     out.push("kind", Value::from(kind));
@@ -355,6 +428,10 @@ fn report(binary: &OpenBinary, already: bool, steps_used: u64) -> Object {
     out.push("size", Value::from(meta.file_size));
     out.push("already_loaded", Value::Bool(already));
     out.push("read_only", Value::Bool(binary.read_only));
+    if let Some(reason) = refusal {
+        out.push("persisted", Value::Bool(false));
+        out.push("persist_reason", Value::from(safe(reason)));
+    }
     out.push(
         "analysis",
         Value::object([
@@ -375,6 +452,23 @@ fn report(binary: &OpenBinary, already: bool, steps_used: u64) -> Object {
     out
 }
 
+/// Adds the repair call of a stale project lock to `error`: the same call with
+/// `break_lock: true`. Another error, or an error with a repair call, stays the same.
+fn lock_repair(error: ToolError, args: &Args) -> ToolError {
+    let stale = error.code == ErrorCode::ProjectLocked
+        && error.details.as_ref().and_then(|d| d.get("stale")) == Some(&Value::Bool(true));
+    if !stale || !error.next.is_empty() || args.bool("break_lock") == Some(true) {
+        return error;
+    }
+    let mut call = args.canonical().as_object().cloned().unwrap_or_default();
+    let _ = call.insert("break_lock", Value::Bool(true));
+    error.next(Call::new(
+        "binary_load",
+        Value::Object(call),
+        WHY_BREAK_LOCK,
+    ))
+}
+
 /// Runs the analysis that the call asks for after an open. Gives the fuel used.
 fn analyze_after(
     session: &mut Session,
@@ -388,12 +482,12 @@ fn analyze_after(
         Some("triage") => Until::Triage,
         _ => Until::Full,
     };
-    let report = match admitted {
-        Admitted::Fresh => session.analyze(id, until, &mut ctx.fuel)?,
+    let run = match admitted {
+        Admitted::Fresh => session.analyze_sliced(id, until, ctx)?,
         Admitted::Current => None,
-        Admitted::Stale(band) => session.reanalyze(id, band, &mut ctx.fuel)?,
+        Admitted::Stale(band) => session.reanalyze_sliced(id, band, ctx)?,
     };
-    Ok(report.map_or(0, |r| r.steps_used))
+    Ok(run.map_or(0, |r| r.steps_used))
 }
 
 /// Opens the binary `text` for a call with `binary_id`: an open binary, else its project.
@@ -409,7 +503,11 @@ fn open_by_id(
     if session.binary(id).is_some() {
         return finish(session, id, true, 0, ctx);
     }
-    let Some((admitted, warnings)) = session.reopen(id)? else {
+    let break_lock = args.bool("break_lock").unwrap_or(false);
+    let reopened = session
+        .reopen_with(id, break_lock)
+        .map_err(|e| lock_repair(e, args))?;
+    let Some((admitted, warnings)) = reopened else {
         return Err(session.unknown_binary_id(text));
     };
     ctx.warnings.extend(warnings);
@@ -450,7 +548,10 @@ fn finish(
         Value::object([("binary_id", Value::from(id.to_string()))]),
         WHY_SURVEY,
     ));
-    Ok(Payload::Object(report(binary, already, steps_used)))
+    let refusal = session.store(id).and_then(Store::persist_reason);
+    Ok(Payload::Object(report(
+        binary, already, steps_used, refusal,
+    )))
 }
 
 fn run(session: &mut Session, args: &Args, ctx: &mut Ctx) -> Result<Payload, ToolError> {
@@ -461,6 +562,14 @@ fn run(session: &mut Session, args: &Args, ctx: &mut Ctx) -> Result<Payload, Too
     let program = make_program(session, args, &bytes)?;
     let id = program.meta().binary_id;
     if session.binary(id).is_some() {
+        let asked = load_spec(args)?;
+        if let Some(stored) = session
+            .store(id)
+            .and_then(Store::load_spec)
+            .filter(|s| *s != asked)
+        {
+            return Err(spec_differs(id, stored, asked));
+        }
         return finish(session, id, true, 0, ctx);
     }
     let binary = OpenBinary {
@@ -477,9 +586,12 @@ fn run(session: &mut Session, args: &Args, ctx: &mut Ctx) -> Result<Payload, Too
             noop: true,
             diff: Some(Value::Array(Vec::new())),
         });
-        return Ok(Payload::Object(report(&binary, false, 0)));
+        return Ok(Payload::Object(report(&binary, false, 0, None)));
     }
-    let (admitted, warnings) = session.admit(binary, &bytes, load_spec(args)?)?;
+    let break_lock = args.bool("break_lock").unwrap_or(false);
+    let (admitted, warnings) = session
+        .admit(binary, &bytes, load_spec(args)?, break_lock)
+        .map_err(|e| lock_repair(e, args))?;
     ctx.warnings.extend(warnings);
     let steps = analyze_after(session, id, admitted, args, ctx)?;
     finish(session, id, false, steps, ctx)
