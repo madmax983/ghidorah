@@ -684,6 +684,72 @@ fn regress_concurrent_create_has_one_writer() {
 }
 
 #[test]
+fn regress_failed_append_leaves_no_partial_line() {
+    let fs = sim(&[100]);
+    let (mut project, mut p, dir) = create(&fs, 100);
+    let path = dir.join(JOURNAL_FILE);
+    let visited = Line::Meta(MetaLine::Progress {
+        func: ghidorah_base::FuncId(Address::ram(0x1080)),
+        row: FuncProgress {
+            visited: true,
+            ..FuncProgress::default()
+        },
+    });
+    // A full disk: the meta line goes in part, and the append fails.
+    fs.tear_next_append();
+    assert!(project.append(&visited, &p).is_err());
+    let mut h = History::new();
+    rename(&mut p, &mut project, &mut h, 0x1084, "alpha");
+    let text = fs.get(&path).unwrap();
+    let journal = crate::journal::parse(&text).unwrap();
+    assert_eq!(journal.lines.len(), 1, "only the good commit");
+    assert!(!journal.torn);
+    drop(project);
+    let opened = reopen(&fs, &dir, &write(100)).unwrap();
+    assert_eq!(opened.program.rev(), Rev(1));
+    assert_eq!(hash(&opened.program), hash(&p));
+    assert!(!opened.tail_discarded);
+}
+
+#[test]
+fn failed_cut_stops_the_project_until_a_reload() {
+    let fs = sim(&[100]);
+    let (mut project, p, dir) = create(&fs, 100);
+    let path = dir.join(JOURNAL_FILE);
+    let brief = Line::Meta(MetaLine::Brief {
+        session: session("mcp-1"),
+        rev: Rev(0),
+    });
+    project.append(&brief, &p).unwrap();
+    let good = fs.get(&path).unwrap();
+    // The short write works, and the cut after it fails.
+    fs.tear_next_append();
+    fs.stop_after(1);
+    let first = project.append(&brief, &p).unwrap_err();
+    fs.resume();
+    let torn = fs.get(&path).unwrap();
+    assert!(torn.len() > good.len(), "the cut failed");
+    let ops = fs.ops();
+    assert_eq!(project.append(&brief, &p), Err(first.clone()));
+    assert_eq!(project.snapshot(&p), Err(first));
+    assert_eq!(fs.ops(), ops, "a stopped project writes nothing");
+    assert_eq!(fs.get(&path).unwrap(), torn);
+    // A reload repairs the torn tail, and the project works again.
+    let loaded = project.load(&Limits::DEFAULT).unwrap();
+    assert!(loaded.tail_discarded);
+    assert_eq!(fs.get(&path).unwrap(), good);
+    project.append(&brief, &p).unwrap();
+    let journal = crate::journal::parse(&fs.get(&path).unwrap()).unwrap();
+    assert_eq!(journal.lines.len(), 2);
+    assert!(!journal.torn);
+    // A failed sync and a failed cut also stop the project.
+    fs.stop_after(1);
+    assert!(project.append(&brief, &p).is_err());
+    fs.resume();
+    assert!(project.append(&brief, &p).is_err(), "the cut also failed");
+}
+
+#[test]
 fn ac_128b_forward_undo() {
     let fs = sim(&[100]);
     let (mut project, mut p, dir) = create(&fs, 100);

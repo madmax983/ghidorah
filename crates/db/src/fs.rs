@@ -9,6 +9,7 @@
 //! | [`Fs::create_new`] | a new empty file. It fails when the path exists. |
 //! | [`Fs::append`] | one journal line |
 //! | [`Fs::write_all`] | the content of a file that exists |
+//! | [`Fs::truncate`] | cuts a journal back after a failed append |
 //! | [`Fs::sync_file`] | makes the data of a file durable |
 //! | [`Fs::rename`] | puts a temporary file in place |
 //! | [`Fs::link_new`] | puts a temporary file at a new name. It fails when the name exists. |
@@ -128,6 +129,13 @@ pub trait Fs: Send {
     ///
     /// Returns [`FsError::NotFound`] when the file does not exist.
     fn write_all(&mut self, path: &Path, bytes: &[u8]) -> Result<(), FsError>;
+
+    /// Cuts a file that exists to `len` bytes and makes the result durable.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`FsError::NotFound`] when the file does not exist.
+    fn truncate(&mut self, path: &Path, len: u64) -> Result<(), FsError>;
 
     /// Makes the data of a file durable.
     ///
@@ -284,6 +292,16 @@ impl Fs for RealFs {
             .map_err(|e| FsError::io("write_all", path, &e))?;
         file.write_all(bytes)
             .map_err(|e| FsError::io("write_all", path, &e))
+    }
+
+    fn truncate(&mut self, path: &Path, len: u64) -> Result<(), FsError> {
+        let file = std::fs::OpenOptions::new()
+            .write(true)
+            .open(path)
+            .map_err(|e| FsError::io("truncate", path, &e))?;
+        file.set_len(len)
+            .and_then(|()| file.sync_all())
+            .map_err(|e| FsError::io("truncate", path, &e))
     }
 
     fn sync_file(&mut self, path: &Path) -> Result<(), FsError> {

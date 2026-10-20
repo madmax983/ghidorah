@@ -39,6 +39,7 @@ struct State {
     dirs: BTreeSet<PathBuf>,
     log: Vec<String>,
     budget: Option<usize>,
+    tear: bool,
 }
 
 impl State {
@@ -150,6 +151,12 @@ impl SimFs {
         self.state().budget = None;
     }
 
+    /// Makes the next `append` a short write: it adds the first half of its bytes and then
+    /// fails with an I/O error, as on a full disk.
+    pub fn tear_next_append(&self) {
+        self.state().tear = true;
+    }
+
     /// Gives the number of logged operations.
     #[must_use]
     pub fn ops(&self) -> usize {
@@ -208,7 +215,18 @@ impl Fs for SimFs {
     fn append(&mut self, path: &Path, bytes: &[u8]) -> Result<(), FsError> {
         let mut s = self.state();
         s.step(format!("append {}", short(path)))?;
-        s.node(path)?.data.extend_from_slice(bytes);
+        let tear = std::mem::take(&mut s.tear);
+        let node = s.node(path)?;
+        if tear {
+            let half = bytes.get(..bytes.len() / 2).unwrap_or_default();
+            node.data.extend_from_slice(half);
+            return Err(FsError::Io {
+                op: "append",
+                path: path.to_path_buf(),
+                message: "No space left on device (simulated)".to_owned(),
+            });
+        }
+        node.data.extend_from_slice(bytes);
         Ok(())
     }
 
@@ -216,6 +234,16 @@ impl Fs for SimFs {
         let mut s = self.state();
         s.step(format!("write_all {}", short(path)))?;
         s.node(path)?.data = bytes.to_vec();
+        Ok(())
+    }
+
+    fn truncate(&mut self, path: &Path, len: u64) -> Result<(), FsError> {
+        let mut s = self.state();
+        s.step(format!("truncate {} {len}", short(path)))?;
+        let node = s.node(path)?;
+        node.data
+            .resize(usize::try_from(len).unwrap_or(usize::MAX), 0);
+        node.durable = node.data.clone();
         Ok(())
     }
 

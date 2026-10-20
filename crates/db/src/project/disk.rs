@@ -133,8 +133,8 @@ pub(super) fn bin_path(dir: &Path, meta: &ProjectMeta) -> PathBuf {
 }
 
 /// Writes the files of a new project: `.gitignore`, the input copy, the journal and the
-/// project file last. The caller holds the lock.
-pub(super) fn write_new(project: &mut Project, bytes: &[u8]) -> Result<(), ProjectError> {
+/// project file last. The caller holds the lock. Gives the length of the journal.
+pub(super) fn write_new(project: &mut Project, bytes: &[u8]) -> Result<u64, ProjectError> {
     let dir = project.dir.clone();
     let fs = project.fs.as_mut();
     let ignore = dir.join(GITIGNORE_FILE);
@@ -144,10 +144,13 @@ pub(super) fn write_new(project: &mut Project, bytes: &[u8]) -> Result<(), Proje
     fs.set_read_only(&bin)?;
     fs.sync_dir(&dir.join(BIN_DIR))?;
     let journal = dir.join(JOURNAL_FILE);
-    if !fs.exists(&journal) {
+    let journal_len = if fs.exists(&journal) {
+        len_of(&fs.read(&journal)?)
+    } else {
         fs.create_new(&journal)?;
         fs.sync_file(&journal)?;
-    }
+        0
+    };
     let mut text = ghidorah_json::write_pretty(&project.meta.to_json());
     text.push('\n');
     replace_file(
@@ -160,7 +163,12 @@ pub(super) fn write_new(project: &mut Project, bytes: &[u8]) -> Result<(), Proje
     if let Some(root) = dir.parent() {
         fs.sync_dir(root)?;
     }
-    Ok(())
+    Ok(journal_len)
+}
+
+/// Gives the length of `bytes` as a file length.
+fn len_of(bytes: &[u8]) -> u64 {
+    u64::try_from(bytes.len()).unwrap_or(u64::MAX)
 }
 
 /// Reads a file, or gives an empty file for a path that does not exist.
@@ -224,13 +232,19 @@ pub(super) fn load(project: &mut Project, limits: &Limits) -> Result<Loaded, Pro
     let mut history = History::new();
     let replayed = replay::replay(&mut program, &journal.lines, skip, &mut history)
         .map_err(ProjectError::Replay)?;
-    if journal.torn && !project.read_only {
+    let journal_len = if journal.torn && !project.read_only {
         let valid = text.get(..journal.valid_len).unwrap_or_default();
         replace_file(fs, &journal_path, &dir.join(JOURNAL_TMP), valid)?;
         fs.sync_dir(&dir)?;
-    }
+        len_of(valid)
+    } else {
+        len_of(&text)
+    };
     let lines = u64::try_from(journal.lines.len()).unwrap_or(u64::MAX);
     let covered = u64::try_from(skip).unwrap_or(u64::MAX);
+    // The journal on disk now ends with a whole line, so the project can write again.
+    project.journal_len = journal_len;
+    project.failed = None;
     project.lines = lines;
     project.since_snapshot = lines.saturating_sub(covered);
     project.last_run = replayed.last_run;

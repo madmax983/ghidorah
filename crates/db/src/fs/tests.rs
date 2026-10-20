@@ -43,6 +43,27 @@ fn real_fs_operations() {
     assert_eq!(fs.read(&file).unwrap(), b"one\ntwo\n");
     fs.write_all(&file, b"three").unwrap();
     assert_eq!(fs.read(&file).unwrap(), b"three");
+    fs.truncate(&file, 2).unwrap();
+    assert_eq!(fs.read(&file).unwrap(), b"th");
+    assert!(
+        fs.truncate(&dir.join("none"), 0)
+            .unwrap_err()
+            .is_not_found()
+    );
+    fs.write_all(&file, b"three").unwrap();
+    let linked = dir.join("c.txt");
+    fs.link_new(&file, &linked).unwrap();
+    assert_eq!(fs.read(&linked).unwrap(), b"three");
+    assert_eq!(
+        fs.link_new(&file, &linked),
+        Err(FsError::Exists(linked.clone()))
+    );
+    assert!(
+        fs.link_new(&dir.join("none"), &dir.join("d.txt"))
+            .unwrap_err()
+            .is_not_found()
+    );
+    fs.remove(&linked).unwrap();
     let moved = dir.join("b.txt");
     fs.rename(&file, &moved).unwrap();
     fs.sync_dir(&dir).unwrap();
