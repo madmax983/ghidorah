@@ -1,7 +1,7 @@
 //! The decompile cache of each open binary (design Sections 3.9 and 8.5, AC-104b).
 //!
 //! Each open binary has one [`Cache`] of [`DEFAULT_CAPACITY`] outputs. The key of an output
-//! is [`cache::key`]: the function, its `func_epoch` and the hash of the decompile options.
+//! is [`ghidorah_decomp::cache::key`]: the function, its `func_epoch` and the options hash.
 //! The cache also holds the identity of the program of its outputs. The identity changes when
 //! the session builds the program again. Then the old outputs go, so a new program never
 //! reads an old output:
