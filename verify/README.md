@@ -7,7 +7,7 @@ This directory holds the proof record of `ghidorah-kernel` (design Sections 13.1
 | `results.json` | The record of the last good `cargo xtask verify` run. |
 | `results.failed.json` | The record of a failed run. A good run removes it. Do not commit it. |
 | `oracle-results.json` | The record of the last good `cargo xtask oracle bash` run (AC-066). A failed run writes `oracle-results.failed.json`. |
-| `negative/<kernel>.patch` | One hunk that breaks one kernel. Its Verus run must fail. |
+| `negative/<name>.patch` | A change that breaks one kernel. Its Verus run must fail with its expected error. |
 
 ## Run the proofs
 
@@ -22,8 +22,9 @@ A kernel gets the status `verified` only when Verus gives no error and lists eac
 Verus does not list an `external` function, so such a function makes the kernel fail.
 
 Then the command applies each negative patch to a copy of the kernel in `target/xtask-verify/` and runs Verus again.
-A negative run must give `postcondition not satisfied`, `assertion failed` or `precondition not satisfied`.
-It must also verify at least one item. A compile error does not count.
+A negative run must give the expected error of its patch in the table below.
+`KERNELS` in `xtask/src/verify/kernels.rs` holds the patches of each kernel and their expected errors.
+A negative run must also verify at least one item. A compile error does not count.
 
 Only a good run writes `results.json`. A failed run writes `results.failed.json`, keeps `results.json` and exits with code 1.
 

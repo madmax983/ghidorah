@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use super::{ARGV, FAILED_PATH, KERNELS, Kernel, RESULTS_PATH, Tools, patch, tree};
+use super::{ARGV, FAILED_PATH, KERNELS, Kernel, Negative, RESULTS_PATH, Tools, patch, tree};
 use crate::json::{self, Value};
 use crate::{Error, proc};
 
@@ -146,10 +146,10 @@ enum Prepared {
     Refused(String),
 }
 
-/// Applies the negative patch of `kernel` to a copy of the kernel sources.
-fn negative_copy(root: &Path, kernel: &Kernel) -> Result<Prepared, Error> {
-    let Ok(text) = std::fs::read_to_string(root.join(kernel.patch())) else {
-        return Ok(Prepared::Refused(format!("{} is missing", kernel.patch())));
+/// Applies the negative patch `negative` of `kernel` to a copy of the kernel sources.
+fn negative_copy(root: &Path, kernel: &Kernel, negative: &Negative) -> Result<Prepared, Error> {
+    let Ok(text) = std::fs::read_to_string(root.join(negative.path())) else {
+        return Ok(Prepared::Refused(format!("{} is missing", negative.path())));
     };
     let parsed = match patch::parse(&text) {
         Ok(parsed) => parsed,
@@ -163,7 +163,7 @@ fn negative_copy(root: &Path, kernel: &Kernel) -> Result<Prepared, Error> {
             parsed.path, kernel.name
         )));
     }
-    let copy = root.join(COPY_DIR).join(kernel.name);
+    let copy = root.join(COPY_DIR).join(negative.name);
     if copy.exists() {
         std::fs::remove_dir_all(&copy).map_err(|e| Error::io(&copy, e))?;
     }
@@ -182,13 +182,21 @@ fn negative_copy(root: &Path, kernel: &Kernel) -> Result<Prepared, Error> {
     }
 }
 
-/// Runs the negative patch of one kernel and gives its record row.
-fn negative(root: &Path, verus: &Path, z3: Option<&Path>, kernel: &Kernel) -> Result<Value, Error> {
+/// Runs one negative patch of one kernel and gives its record row.
+///
+/// The row has `ok: true` only when Verus fails with the expected error of the patch.
+fn negative(
+    root: &Path,
+    verus: &Path,
+    z3: Option<&Path>,
+    kernel: &Kernel,
+    negative: &Negative,
+) -> Result<Value, Error> {
     let mut row = vec![
         ("kernel", Value::from(kernel.name)),
-        ("patch", Value::from(kernel.patch())),
+        ("patch", Value::from(negative.path())),
     ];
-    match negative_copy(root, kernel)? {
+    match negative_copy(root, kernel, negative)? {
         Prepared::Refused(message) => {
             row.extend([
                 ("error_kind", Value::Null),
@@ -202,7 +210,7 @@ fn negative(root: &Path, verus: &Path, z3: Option<&Path>, kernel: &Kernel) -> Re
             let out = verus_run(verus, z3, &copy, kernel.module)?;
             let counts = super::parse_counts(&out.stdout).unwrap_or_default();
             let kind = super::error_kind(&out.stderr);
-            let ok = kind.is_some() && counts.verified >= 1 && !counts.success;
+            let ok = kind == Some(negative.kind) && counts.verified >= 1 && !counts.success;
             row.extend([
                 ("error_kind", kind.map_or(Value::Null, Value::from)),
                 ("verified", Value::from(counts.verified)),
@@ -210,6 +218,7 @@ fn negative(root: &Path, verus: &Path, z3: Option<&Path>, kernel: &Kernel) -> Re
                 ("ok", Value::from(ok)),
             ]);
             if !ok {
+                row.push(("expected_kind", Value::from(negative.kind)));
                 row.push(("error", Value::from(proc::tail(&out.stderr, 20))));
             }
         }
@@ -235,9 +244,11 @@ pub(super) fn proofs(root: &Path, verus: &Path, z3: Option<&Path>) -> Result<Val
     }
     let mut negatives = Vec::new();
     for kernel in KERNELS {
-        let row = negative(root, verus, z3, kernel)?;
-        all_ok &= row.get("ok").and_then(Value::as_bool) == Some(true);
-        negatives.push(row);
+        for item in kernel.negatives {
+            let row = negative(root, verus, z3, kernel, item)?;
+            all_ok &= row.get("ok").and_then(Value::as_bool) == Some(true);
+            negatives.push(row);
+        }
     }
     let copies = root.join(COPY_DIR);
     if copies.exists() {

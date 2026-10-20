@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use xtask::json::{self, Value};
 use xtask::verify::patch::{self, PatchError};
 use xtask::verify::tree::{self, hash_files, hex, sha256};
-use xtask::verify::{self, KERNELS, Settings};
+use xtask::verify::{self, KERNELS, POSTCONDITION, PRECONDITION, Settings, VERIFY_ERRORS};
 
 fn root() -> PathBuf {
     xtask::workspace::root()
@@ -181,41 +181,72 @@ fn verify_patch_rejects_bad_patches() {
 #[test]
 fn verify_negative_patches_apply() {
     for kernel in KERNELS {
-        let path = root().join(kernel.patch());
-        let text =
-            std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
-        let p = patch::parse(&text).unwrap_or_else(|e| panic!("{}: {e}", kernel.name));
-        let dir = format!("crates/kernel/src/{}", kernel.module);
-        assert!(
-            p.path == kernel.file() || p.path.starts_with(&format!("{dir}/")),
-            "{}: the patch changes a file of its kernel, not {}",
-            kernel.name,
-            p.path
-        );
-        let source = std::fs::read_to_string(root().join(&p.path)).expect("the file exists");
-        let out = patch::apply(&source, &p).unwrap_or_else(|e| panic!("{}: {e}", kernel.name));
-        assert_ne!(out, source);
+        for negative in kernel.negatives {
+            let path = root().join(negative.path());
+            let text = std::fs::read_to_string(&path)
+                .unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+            let p = patch::parse(&text).unwrap_or_else(|e| panic!("{}: {e}", negative.name));
+            let dir = format!("crates/kernel/src/{}", kernel.module);
+            assert!(
+                p.path == kernel.file() || p.path.starts_with(&format!("{dir}/")),
+                "{}: the patch changes a file of its kernel, not {}",
+                negative.name,
+                p.path
+            );
+            let source = std::fs::read_to_string(root().join(&p.path)).expect("the file exists");
+            let out =
+                patch::apply(&source, &p).unwrap_or_else(|e| panic!("{}: {e}", negative.name));
+            assert_ne!(out, source);
+        }
     }
+}
+
+/// Gives the name and the expected error of each negative patch in table order.
+fn negative_table() -> Vec<(&'static str, &'static str)> {
+    KERNELS
+        .iter()
+        .flat_map(|k| k.negatives.iter().map(|n| (n.name, n.kind)))
+        .collect()
 }
 
 #[test]
 fn verify_kernel_table() {
     let names: Vec<&str> = KERNELS.iter().map(|k| k.name).collect();
     assert_eq!(names, ["K1", "K2", "K3", "K5", "K6", "K7"]);
+    assert_eq!(
+        negative_table(),
+        [
+            ("K1", POSTCONDITION),
+            ("K2", POSTCONDITION),
+            ("K3", PRECONDITION),
+            ("K5", POSTCONDITION),
+            ("K6", POSTCONDITION),
+            ("K7", POSTCONDITION),
+        ]
+    );
     for kernel in KERNELS {
         assert_eq!(
             kernel.file(),
             format!("crates/kernel/src/{}.rs", kernel.module)
-        );
-        assert_eq!(
-            kernel.patch(),
-            format!("verify/negative/{}.patch", kernel.name)
         );
         assert!(
             root().join(kernel.file()).is_file(),
             "{} exists",
             kernel.file()
         );
+        assert!(
+            !kernel.negatives.is_empty(),
+            "{} has a negative patch",
+            kernel.name
+        );
+        for negative in kernel.negatives {
+            assert!(negative.name.starts_with(kernel.name), "{}", negative.name);
+            assert_eq!(
+                negative.path(),
+                format!("verify/negative/{}.patch", negative.name)
+            );
+            assert!(VERIFY_ERRORS.contains(&negative.kind), "{}", negative.name);
+        }
     }
 }
 
@@ -464,10 +495,25 @@ fn copy_dir(from: &Path, to: &Path) {
 /// Writes a fake Verus program. A run in a negative copy fails with a postcondition error.
 #[cfg(unix)]
 fn fake_verus(dir: &Path, good: &str, bad: &str) -> PathBuf {
+    fake_verus_with(dir, good, bad, &negative_table())
+}
+
+/// Writes a fake Verus program. The copy of the negative patch `name` fails with `kind`.
+/// The copy of another patch fails with a postcondition error.
+#[cfg(unix)]
+fn fake_verus_with(dir: &Path, good: &str, bad: &str, kinds: &[(&str, &str)]) -> PathBuf {
     use std::os::unix::fs::PermissionsExt as _;
     let path = dir.join("fake-verus");
+    let fail = |pattern: &str, kind: &str| {
+        format!("  {pattern})\n    echo 'error: {kind}' >&2\n    echo '{bad}'\n    exit 1 ;;\n")
+    };
+    let mut arms: String = kinds
+        .iter()
+        .map(|(name, kind)| fail(&format!("*/xtask-verify/{name}"), kind))
+        .collect();
+    arms.push_str(&fail("*xtask-verify*", POSTCONDITION));
     let script = format!(
-        "#!/bin/sh\ncase \"$PWD\" in\n  *xtask-verify*)\n    echo 'error: postcondition not satisfied' >&2\n    echo '{bad}'\n    exit 1 ;;\nesac\necho \"$@\" >> \"{log}\"\necho '{good}'\n",
+        "#!/bin/sh\ncase \"$PWD\" in\n{arms}esac\necho \"$@\" >> \"{log}\"\necho '{good}'\n",
         log = dir.join("argv.log").display()
     );
     std::fs::write(&path, script).expect("the script is writable");
@@ -586,12 +632,14 @@ fn verify_run_with_a_fake_verus() {
         .get("negatives")
         .and_then(Value::as_array)
         .expect("negatives");
-    assert_eq!(negatives.len(), KERNELS.len());
-    for row in negatives {
+    let table = negative_table();
+    assert_eq!(negatives.len(), table.len());
+    for (row, (name, kind)) in negatives.iter().zip(table) {
         assert_eq!(row.get("ok").and_then(Value::as_bool), Some(true), "{row}");
+        assert_eq!(row.get("error_kind").and_then(Value::as_str), Some(kind));
         assert_eq!(
-            row.get("error_kind").and_then(Value::as_str),
-            Some("postcondition not satisfied")
+            row.get("patch").and_then(Value::as_str),
+            Some(format!("verify/negative/{name}.patch").as_str())
         );
     }
     let log = std::fs::read_to_string(dir.join("argv.log")).expect("the fake Verus ran");
@@ -657,4 +705,42 @@ fn regress_verify_failed_run_keeps_the_record() {
     let out = verify::run_with(&dir, &settings).expect("the run gives a report");
     assert_eq!(out.get("ok").and_then(Value::as_bool), Some(true), "{out}");
     assert!(!failed.exists(), "a good run removes the failed record");
+}
+
+#[cfg(unix)]
+#[test]
+fn regress_negative_needs_its_expected_kind() {
+    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("verify_fake_kind");
+    let _ = std::fs::remove_dir_all(&dir);
+    copy_inputs(&dir);
+    // Every copy fails with a postcondition error. K3 expects a precondition error.
+    let verus = fake_verus_with(
+        &dir,
+        &report_with(500, 0, &kernel_functions(&dir)),
+        &report(2, 1),
+        &[],
+    );
+    let settings = Settings {
+        verus: Some(verus),
+        z3: None,
+        optional: false,
+    };
+    let out = verify::run_with(&dir, &settings).expect("the run gives a report");
+    assert_eq!(out.get("ok").and_then(Value::as_bool), Some(false), "{out}");
+    let negatives = out
+        .get("negatives")
+        .and_then(Value::as_array)
+        .expect("negatives");
+    for row in negatives {
+        let name = row.get("kernel").and_then(Value::as_str).unwrap_or("");
+        let ok = row.get("ok").and_then(Value::as_bool);
+        assert_eq!(ok, Some(name != "K3"), "{row}");
+        if name == "K3" {
+            assert_eq!(
+                row.get("expected_kind").and_then(Value::as_str),
+                Some(PRECONDITION),
+                "{row}"
+            );
+        }
+    }
 }

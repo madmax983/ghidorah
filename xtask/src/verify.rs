@@ -5,8 +5,9 @@
 //! A kernel gets the status `verified` only when Verus gives no error and lists each
 //! `#[verus_spec]` function.
 //!
-//! Then the command applies the negative patch of each kernel to a copy of the kernel and runs Verus again.
-//! A negative run must fail with a verification error and at least one verified item.
+//! Then the command applies each negative patch of each kernel to a copy of the kernel and runs
+//! Verus again. A negative run must fail with the expected error of its patch, one of
+//! [`VERIFY_ERRORS`], and at least one verified item.
 //! A good run writes [`RESULTS_PATH`]. A failed run writes [`FAILED_PATH`] and keeps
 //! [`RESULTS_PATH`], so the record always holds a good run. The command prints the written
 //! object with `ok`, `status` and `results`, the path of the written file.
@@ -18,6 +19,7 @@
 //! module, verified, errors, spec_items, status } }, negatives: [{ kernel, patch, error_kind,
 //! verified, errors, ok }] }`.
 
+mod kernels;
 pub mod patch;
 mod run;
 pub mod tree;
@@ -25,77 +27,16 @@ pub mod tree;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
+pub use kernels::{
+    ASSERTION, KERNELS, Kernel, Negative, POSTCONDITION, PRECONDITION, VERIFY_ERRORS,
+};
 pub use tree::{ARGV, RESULTS_PATH, tree_sha256};
 
 use crate::json::{self, Value};
 use crate::{Error, rustsrc};
 
-/// One kernel of design Section 13.1.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Kernel {
-    /// The kernel name, for example `K1`.
-    pub name: &'static str,
-    /// The module of the kernel in `ghidorah-kernel`.
-    pub module: &'static str,
-}
-
-impl Kernel {
-    /// Gives the main source file of the kernel, relative to the workspace root.
-    #[must_use]
-    pub fn file(&self) -> String {
-        format!("crates/kernel/src/{}.rs", self.module)
-    }
-
-    /// Gives the directory of the submodules of the kernel, relative to the workspace root.
-    #[must_use]
-    pub fn dir(&self) -> String {
-        format!("crates/kernel/src/{}", self.module)
-    }
-
-    /// Gives the negative patch of the kernel, relative to the workspace root.
-    #[must_use]
-    pub fn patch(&self) -> String {
-        format!("verify/negative/{}.patch", self.name)
-    }
-}
-
-/// The kernels that `xtask verify` proves, in name order.
-pub const KERNELS: &[Kernel] = &[
-    Kernel {
-        name: "K1",
-        module: "reader",
-    },
-    Kernel {
-        name: "K2",
-        module: "range",
-    },
-    Kernel {
-        name: "K3",
-        module: "rangeset",
-    },
-    Kernel {
-        name: "K5",
-        module: "flags",
-    },
-    Kernel {
-        name: "K6",
-        module: "budget",
-    },
-    Kernel {
-        name: "K7",
-        module: "source",
-    },
-];
-
 /// The record of a failed run, relative to the workspace root. A good run removes it.
 pub const FAILED_PATH: &str = "verify/results.failed.json";
-
-/// The Verus messages that count as a verification error of a negative run.
-pub const VERIFY_ERRORS: &[&str] = &[
-    "postcondition not satisfied",
-    "assertion failed",
-    "precondition not satisfied",
-];
 
 /// The environment values of one run.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
