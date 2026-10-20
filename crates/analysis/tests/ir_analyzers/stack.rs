@@ -111,6 +111,20 @@ fn cfa_rows_outside_cold_parts() {
     assert!(bad.is_empty(), "{} of {checked}: {bad:#?}", bad.len());
 }
 
+#[test]
+fn regress_vzeroupper_keeps_stack_height() {
+    // push rbp; mov rbp, rsp; vzeroupper; leave; ret
+    let bytes = [0x55, 0x48, 0x89, 0xe5, 0xc5, 0xf8, 0x77, 0xc9, 0xc3];
+    let mut p = load(&bytes, 0);
+    let _ = crate::support::analyze(&mut p);
+    let base = crate::blob::BASE;
+    let ir = fir_of(&p, base);
+    let frame = ir.frame.as_ref().expect("a frame");
+    assert_eq!(frame.sp_at(base + 0x4), Some(-8), "rsp at vzeroupper");
+    assert_eq!(frame.sp_at(base + 0x7), Some(-8), "rsp at leave");
+    assert_eq!(frame.sp_at(base + 0x8), Some(0), "rsp at ret");
+}
+
 /// The ops of the instruction at `addr` of the IR of the blob function.
 fn opcodes(ir: &ghidorah_analysis::FuncIr, addr: u64) -> Vec<Opc> {
     let span = ir.insn(addr).expect("an instruction");

@@ -344,14 +344,14 @@ pub fn lift(insn: &Insn, b: &mut Builder) -> Result<(), LiftError> {
 ///
 /// The defs and uses hold the general and XMM registers of [`Insn::regs_written`] and
 /// [`Insn::regs_read`]. They hold the flags word when the instruction writes or reads a
-/// status flag. The uses hold the `fs` or `gs` base of a memory operand. An opaque form also writes and reads the
-/// flags word. The memory effect comes from the first memory operand. A size of 0 means an
-/// unknown size.
+/// status flag. The uses hold the `fs` or `gs` base of a memory operand. An opaque form
+/// also writes and reads the flags word, except `vzeroupper` and `vzeroall`. The memory
+/// effect comes from the first memory operand. A size of 0 means an unknown size.
 #[must_use]
 pub fn effect(insn: &Insn) -> Effect {
     let mut defs: LocSet = insn.regs_written().iter().filter_map(loc).collect();
     let mut uses: LocSet = insn.regs_read().iter().filter_map(loc).collect();
-    let opaque = insn.is_opaque();
+    let opaque = insn.is_opaque() && crate::implicit::opaque_flags(insn);
     if opaque || !insn.flags_written().is_empty() {
         defs.insert(Loc::Flags);
     }

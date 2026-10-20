@@ -91,6 +91,7 @@ fn header(addr: u64, lay: &Layout) -> Insn {
         disp_at: (lay.disp_off << 4) | (lay.disp_size & 0xf),
         imm_at: (lay.imm_off << 4) | (lay.imm_size & 0xf),
         hdr: (lay.opcode_off & 0xf) | has_modrm | has_sib,
+        vex: crate::fields::vex_fields(lay.enc, lay.payload),
     }
 }
 

@@ -102,6 +102,70 @@ impl Encoding {
     }
 }
 
+/// Gives bit `n` of `v` as a `u16`.
+fn bit(v: u8, n: u8) -> u16 {
+    u16::from((v >> n) & 1)
+}
+
+/// Packs the register fields of a VEX, EVEX or XOP payload `p`, not inverted.
+///
+/// | Bits | Field |
+/// |---|---|
+/// | 0 to 4 | `vvvv`, with EVEX `V'` as bit 4 |
+/// | 5 and 6 | `R`, and EVEX `R'` |
+/// | 7 and 8 | `X`, and the APX `X4` of EVEX |
+/// | 9 and 10 | `B`, and the APX `B4` of EVEX |
+/// | 11 and 12 | `pp`: 0 none, 1 `66`, 2 `F3`, 3 `F2` |
+/// | 13 to 15 | the EVEX mask register `aaa` |
+///
+/// Other encodings give 0.
+pub(crate) fn vex_fields(enc: Encoding, p: [u8; 3]) -> u16 {
+    let [p0, p1, p2] = p;
+    let (n0, n1, n2) = (!p0, !p1, !p2);
+    let vvvv = |byte: u8| u16::from((byte >> 3) & 0xf);
+    let (vreg, ext_r, ext_x, ext_b, pp, aaa) = match enc {
+        Encoding::Vex2 => (vvvv(n0), bit(n0, 7), 0, 0, p0 & 3, 0),
+        Encoding::Vex3 | Encoding::Xop => (vvvv(n1), bit(n0, 7), bit(n0, 6), bit(n0, 5), p1 & 3, 0),
+        Encoding::Evex => (
+            vvvv(n1) | (bit(n2, 3) << 4),
+            bit(n0, 7) | (bit(n0, 4) << 1),
+            bit(n0, 6) | (bit(n1, 2) << 1),
+            bit(n0, 5) | (bit(p0, 3) << 1),
+            p1 & 3,
+            p2 & 7,
+        ),
+        Encoding::Legacy | Encoding::Rex2 => return 0,
+    };
+    vreg | (ext_r << 5)
+        | (ext_x << 7)
+        | (ext_b << 9)
+        | (u16::from(pp) << 11)
+        | (u16::from(aaa) << 13)
+}
+
+/// The register numbers that the encoding fields of an instruction name.
+///
+/// Each number has its REX, REX2, VEX, EVEX or XOP extension bits. The fields do not tell
+/// the register class: an opaque form can use them for general or vector registers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) struct RegFields {
+    /// The `ModRM` `reg` field.
+    pub(crate) reg: u8,
+    /// The `ModRM` `rm` field of a register form (`mod` 3).
+    pub(crate) rm: Option<u8>,
+    /// The `vvvv` field. It is 0 without a VEX, EVEX or XOP prefix.
+    pub(crate) vvvv: u8,
+    /// The base register of a memory form. A RIP-relative form has none.
+    pub(crate) base: Option<u8>,
+    /// The SIB index register of a memory form.
+    pub(crate) index: Option<u8>,
+    /// The `pp` field, or the last mandatory prefix of a legacy form: 0 none, 1 `66`, 2 `F3`,
+    /// 3 `F2`.
+    pub(crate) pp: u8,
+    /// The EVEX mask register `aaa`. It is 0 for no mask.
+    pub(crate) mask: u8,
+}
+
 /// The identity of an opaque form (design Section 5.1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct OpaqueForm {
