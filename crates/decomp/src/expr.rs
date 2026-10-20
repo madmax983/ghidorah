@@ -169,6 +169,72 @@ impl Expr {
         out
     }
 
+    /// Tells if two expressions have the same value: the same tree with each op ID ignored.
+    /// Two reads of memory or two calls can give different values, so a tree with a load or a
+    /// call gives `false`.
+    #[must_use]
+    pub fn same_value(&self, other: &Self) -> bool {
+        let mut stack = vec![(self, other)];
+        while let Some((a, b)) = stack.pop() {
+            let same = match (a, b) {
+                (Self::Var { var: x, w: wx }, Self::Var { var: y, w: wy }) => x == y && wx == wy,
+                (Self::Const { value: x, w: wx }, Self::Const { value: y, w: wy }) => {
+                    x == y && wx == wy
+                }
+                (Self::Str { addr: x }, Self::Str { addr: y }) => x == y,
+                (
+                    Self::Un {
+                        op: ox,
+                        w: wx,
+                        sub: sx,
+                        ..
+                    },
+                    Self::Un {
+                        op: oy,
+                        w: wy,
+                        sub: sy,
+                        ..
+                    },
+                )
+                | (
+                    Self::Bin {
+                        op: ox,
+                        w: wx,
+                        sub: sx,
+                        ..
+                    },
+                    Self::Bin {
+                        op: oy,
+                        w: wy,
+                        sub: sy,
+                        ..
+                    },
+                )
+                | (
+                    Self::Ite {
+                        op: ox,
+                        w: wx,
+                        sub: sx,
+                        ..
+                    },
+                    Self::Ite {
+                        op: oy,
+                        w: wy,
+                        sub: sy,
+                        ..
+                    },
+                ) => ox == oy && wx == wy && sx == sy,
+                _ => false,
+            };
+            let (xs, ys) = (a.inputs(), b.inputs());
+            if !same || xs.len() != ys.len() {
+                return false;
+            }
+            stack.extend(xs.into_iter().zip(ys));
+        }
+        true
+    }
+
     /// Gives the variables that the expression reads, in preorder.
     #[must_use]
     pub fn vars(&self) -> Vec<VarIdx> {

@@ -60,6 +60,14 @@ pub trait Env {
         None
     }
 
+    /// Gives the count of the parameter slots of the function at `addr`: from its signature,
+    /// its Tier-0 prototype or the parameter recovery. The stack parameters come after all
+    /// integer argument registers. The default knows no count.
+    fn param_count(&self, addr: u64) -> Option<u8> {
+        let _ = addr;
+        None
+    }
+
     /// Tells if the facts hold an unresolved jump table at the indirect jump `site`. Such a
     /// fact is a jump-table record with no targets or the caveat `W_JUMPTABLE_UNRESOLVED`.
     /// The default knows no fact, so it gives `true` for each site.
@@ -258,6 +266,7 @@ pub fn build(
         l0: input.l0,
         conv: input.conv,
         entry,
+        params: env.param_count(entry),
     };
     let assigned = vars::assign(&cx);
     let mut warnings = Vec::new();

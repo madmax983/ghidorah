@@ -45,6 +45,9 @@ pub(crate) struct Ctx<'a> {
     pub(crate) l0: &'a Arena,
     pub(crate) conv: Option<&'a CallConv>,
     pub(crate) entry: u64,
+    /// The count of the parameter slots of the function, when the facts know it. An entry
+    /// value of a later slot is not a parameter.
+    pub(crate) params: Option<u8>,
 }
 
 /// Gives the values that a statement reads.

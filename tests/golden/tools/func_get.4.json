@@ -27,7 +27,7 @@
     "flags": [],
     "caveats": [],
     "decomp": {
-      "text": "uint64_t main(uint64_t param_1, uint64_t param_2)\n{\n    if ((int32_t)param_1 <= 1) {\n        puts(\"usage: crackme <password>\");\n        v25 = 2;\n    } else {\n        v10 = check_password(*(uint64_t *)(param_2 + 8));\n        if (((uint32_t)v10 & (uint32_t)v10) != 0) {\n            v24 = puts(\"Access granted\");\n            v25 = (uint64_t)((uint32_t)v24 ^ (uint32_t)v24);\n        } else {\n            puts(\"Access denied\");\n            v25 = 1;\n        }\n    }\n    return v25;\n}\n",
+      "text": "uint64_t main(uint64_t param_1, uint64_t param_2)\n{\n    if ((int32_t)param_1 <= 1) {\n        puts(\"usage: crackme <password>\");\n        v28 = 2;\n    } else {\n        v14 = check_password(*(uint64_t *)(param_2 + 8));\n        if ((uint32_t)v14 != 0) {\n            puts(\"Access granted\");\n            v28 = 0;\n        } else {\n            puts(\"Access denied\");\n            v28 = 1;\n        }\n    }\n    return v28;\n}\n",
       "line_start": 1,
       "line_count": 17,
       "total_lines": 17,
@@ -73,7 +73,6 @@
           "start": "0x1096",
           "size": 4,
           "ops": [
-            "op:0x1096:1",
             "op:0x1096:3",
             "op:0x1098:1",
             "op:0x1098:2"
@@ -89,13 +88,10 @@
         },
         {
           "line": 10,
-          "start": "0x10bc",
-          "size": 2,
+          "start": "0x10ab",
+          "size": 4,
           "ops": [
-            "op:0x10bc:1",
-            "op:0x10bc:3",
-            "op:0x10bc:4",
-            "op:0x10bc:7"
+            "op:0x10ab:61441"
           ]
         },
         {
@@ -145,6 +141,11 @@
           "reason": "no effect"
         },
         {
+          "start": "0x10bc",
+          "size": 2,
+          "reason": "no effect"
+        },
+        {
           "start": "0x10be",
           "size": 2,
           "reason": "control flow"
@@ -182,23 +183,16 @@
         },
         {
           "id": "var:0x1080/reg:tmp@0x1091",
-          "name": "v10",
+          "name": "v14",
           "type": "uint64_t",
           "storage": "reg:tmp@0x1091",
           "source": "default"
         },
         {
-          "id": "var:0x1080/reg:tmp@0x10b7",
-          "name": "v24",
-          "type": "int",
-          "storage": "reg:tmp@0x10b7",
-          "source": "default"
-        },
-        {
-          "id": "var:0x1080/reg:rax@0x10ab",
-          "name": "v25",
+          "id": "var:0x1080/reg:tmp@0x10ab",
+          "name": "v28",
           "type": "uint64_t",
-          "storage": "reg:rax@0x10ab",
+          "storage": "reg:tmp@0x10ab",
           "source": "default"
         }
       ],

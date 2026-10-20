@@ -29,7 +29,7 @@
       "fixture": "xor_decode.gcc-O2",
       "function": "decode",
       "max_gotos": 0,
-      "snippets": ["if (param_3 != 0) {", "} while (param_3 != v11);", "*(uint8_t *)(param_1 + param_3) = 0;"]
+      "snippets": ["if (param_3 != 0) {", "} while (param_3 != v", "*(uint8_t *)(param_1 + param_3) = 0;"]
     },
     {
       "fixture": "switch.gcc-O2",

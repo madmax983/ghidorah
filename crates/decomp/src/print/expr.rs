@@ -297,7 +297,7 @@ impl Printer<'_> {
     /// else `(x & y) == 0`.
     fn test(&mut self, zero: bool, x: &Expr, y: &Expr, buf: &mut Buf) -> (String, u8) {
         let op = if zero { "==" } else { "!=" };
-        if x == y {
+        if x == y || x.same_value(y) {
             let (tx, px) = self.expr(x, buf);
             return (format!("{} {op} 0", wrap(&tx, px, EQ, false)), EQ);
         }
@@ -445,7 +445,7 @@ impl Printer<'_> {
 
     /// Gives the text of a data op with two inputs.
     fn binary(&mut self, op: Opc, w: u8, x: &Expr, y: &Expr, buf: &mut Buf) -> (String, u8) {
-        if matches!(op, Opc::Xor | Opc::Sub) && x == y {
+        if matches!(op, Opc::Xor | Opc::Sub) && (x == y || x.same_value(y)) {
             for node in x.preorder() {
                 if let Some(at) = node.at() {
                     buf.op(at);

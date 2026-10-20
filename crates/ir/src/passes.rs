@@ -2,7 +2,7 @@
 //!
 //! | Order | Pass | Effect |
 //! |---|---|---|
-//! | 1 | `fold` | An op with constant inputs becomes `Copy` of its constant result. |
+//! | 1 | `fold` | An op with constant inputs becomes `Copy` of its constant result. A zero idiom (`x ^ x`, `x - x`) becomes `Copy` of 0. |
 //! | 2 | `fuse` | `Cond(cc, Flags(op, a, b, c))` becomes one compare through K5. |
 //! | 3 | `copyprop` | A use of a `Copy` that keeps the value reads the input of the copy. |
 //! | 4 | `sccp` | Wegman-Zadeck constants with two worklists. It removes the CFG edges that never run. |
@@ -202,7 +202,36 @@ fn known_value(arg: Arg, known: &BTreeMap<Val, u128>) -> Option<u128> {
     }
 }
 
-/// The pass `fold`: each op with constant inputs becomes `Copy` of its result.
+/// The largest count of extensions and truncations that [`same_value`] looks through.
+const MAX_SAME_VIEWS: usize = 8;
+
+/// Tells if two inputs always have the same value: the same value, or the same `Trunc`,
+/// `ZExt` or `SExt` of inputs with the same value. The walk looks through `Copy` ops that keep
+/// the value. So the two reads of `xor eax, eax` give `true`.
+fn same_value(ssa: &Ssa, first: Arg, second: Arg) -> bool {
+    let (mut lhs, mut rhs) = (ssa.root(first), ssa.root(second));
+    for _ in 0..MAX_SAME_VIEWS {
+        if lhs == rhs {
+            return matches!(lhs, Arg::V(_) | Arg::K(_));
+        }
+        let (Arg::V(lv), Arg::V(rv)) = (lhs, rhs) else {
+            return false;
+        };
+        let (Some(ldef), Some(rdef)) = (ssa.live_def(lv), ssa.live_def(rv)) else {
+            return false;
+        };
+        let view = matches!(ldef.opc, Opc::Trunc | Opc::ZExt | Opc::SExt);
+        if !view || ldef.opc != rdef.opc || ldef.w != rdef.w || ldef.sub != rdef.sub {
+            return false;
+        }
+        lhs = ssa.root(ldef.a[0]);
+        rhs = ssa.root(rdef.a[0]);
+    }
+    false
+}
+
+/// The pass `fold`: each op with constant inputs becomes `Copy` of its result. A zero idiom
+/// (`Xor` or `Sub` of two inputs with the same value) becomes `Copy` of 0.
 ///
 /// The walk follows the run order, so a def comes before its uses outside phis. A phi with
 /// one constant on each argument gives that constant to its users. A result above 64 bits
@@ -229,10 +258,15 @@ fn fold(ssa: &mut Ssa, fuel: &mut Fuel) -> Result<u64, SsaError> {
             }
             continue;
         }
-        let [Some(x), Some(y), Some(z)] = op.a.map(|a| known_value(a, &known)) else {
-            continue;
-        };
-        let Ok(result) = eval(op.opc, op.w, op.sub, x, y, z) else {
+        let result = if let [Some(x), Some(y), Some(z)] = op.a.map(|a| known_value(a, &known)) {
+            let Ok(result) = eval(op.opc, op.w, op.sub, x, y, z) else {
+                continue;
+            };
+            result
+        } else if matches!(op.opc, Opc::Xor | Opc::Sub) && same_value(ssa, op.a[0], op.a[1]) {
+            // The zero idiom: `x ^ x` and `x - x` are 0 for each `x`.
+            0
+        } else {
             continue;
         };
         known.insert(out, result);

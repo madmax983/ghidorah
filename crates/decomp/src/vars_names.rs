@@ -7,6 +7,9 @@
 //! | a value of the stack slot `k` | `stack:<k>` |
 //! | other values | `reg:<name>@<first def address>` |
 //!
+//! A parameter number must be below the parameter count of the facts ([`crate::Env::param_count`]).
+//! An entry value of a later slot is a register value.
+//!
 //! Two variables never share an identity. A taken identity gets a register storage, and a
 //! taken register name gets a number suffix.
 
@@ -57,8 +60,17 @@ impl<'a> Namer<'a> {
         }
     }
 
-    /// Gives the parameter number of an entry location.
+    /// Gives the parameter number of an entry location. A number at or above the parameter
+    /// count of the facts gives `None`, so an entry value of such a register is a register
+    /// value.
     fn param(&self, loc: Loc) -> Option<u16> {
+        let n = self.slot(loc)?;
+        let count = self.cx.params.map_or(u16::MAX, u16::from);
+        (n < count).then_some(n)
+    }
+
+    /// Gives the parameter slot of an entry location in the calling convention.
+    fn slot(&self, loc: Loc) -> Option<u16> {
         let conv = self.cx.conv?;
         if let Some(n) = conv.int_args.iter().position(|r| loc_of(r) == Some(loc)) {
             return u16::try_from(n).ok();

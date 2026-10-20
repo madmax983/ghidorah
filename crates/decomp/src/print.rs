@@ -92,12 +92,6 @@ pub trait PrintEnv: Env {
         None
     }
 
-    /// Gives the recovered count of integer parameters of the function at `addr`.
-    fn param_count(&self, addr: u64) -> Option<u8> {
-        let _ = addr;
-        None
-    }
-
     /// Gives the bytes of the string literal at `addr`, without the terminator.
     fn string_bytes(&self, addr: u64) -> Option<Vec<u8>> {
         let _ = addr;

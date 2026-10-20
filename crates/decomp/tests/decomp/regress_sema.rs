@@ -6,7 +6,7 @@ use ghidorah_decomp::{Cond, Exit, Opts, Stmt, Tree};
 use ghidorah_ir::{Loc, NoNames, Opc};
 
 use crate::fixtures::{entry_of, fid, program};
-use crate::out_print::{Spec, bin, decomp, k, op, param, text_of, v};
+use crate::out_print::{Spec, bin, decomp, k, op, param, text_of, un, v};
 use crate::shapes::node;
 
 /// Gives the decompiled text of the function `name` of the fixture `fixture`.
@@ -67,6 +67,52 @@ fn regress_negated_test_polarity() {
     assert_eq!(z[2], "    if (param_1 != 0) {", "{z:?}");
     let nz = negated_test(Opc::TestNZ);
     assert_eq!(nz[2], "    if (param_1 == 0) {", "{nz:?}");
+}
+
+/// `xor eax, eax` reads `eax` through two `Trunc` ops with two op IDs. Its value is 0, so the
+/// text is `0`. The zero rule of the printer compared the op IDs too (decomp-07).
+#[test]
+fn regress_zero_rule_ignores_op_ids() {
+    let trunc = |seq| un(Opc::Trunc, 32, 0, v(0, 64), op(0, 0, seq));
+    let xor = bin(Opc::Xor, 32, trunc(1), trunc(3), op(0, 0, 4));
+    let d = decomp(
+        vec![Spec::new(
+            Exit::Stop,
+            vec![Stmt::Return {
+                uses: vec![(Loc::RAX, xor)],
+                at: op(0, 1, 0),
+            }],
+        )],
+        vec![param(0, 64)],
+        Tree::Block(node(0)),
+    );
+    let t = text_of(&d);
+    assert_eq!(t[2], "    return 0;", "{t:?}");
+}
+
+/// `sum_squares` reads only `edi` (`and edi, 0x3f`). Its `xor eax, eax` and `xor edx, edx`
+/// give 0, so the text has no `^`, and the function line has one parameter. The text read
+/// `v1 ^ v1` of a variable with no def, and the function line had 3 parameters (decomp-07).
+#[test]
+fn regress_zero_idiom_params() {
+    let sum = text("loops.gcc-O2", "sum_squares");
+    assert!(
+        sum.starts_with("uint64_t sum_squares(uint64_t param_1)\n"),
+        "{sum}"
+    );
+    assert!(sum.contains("return 0;"), "{sum}");
+    assert!(!sum.contains(" ^ "), "{sum}");
+    let count = text("loops.gcc-O2", "count_bits");
+    assert!(
+        count.starts_with("uint64_t count_bits(uint64_t param_1)\n"),
+        "{count}"
+    );
+    let grid = text("loops.gcc-O2", "grid_walk");
+    assert!(
+        grid.starts_with("uint64_t grid_walk(uint64_t param_1, uint64_t param_2)\n"),
+        "{grid}"
+    );
+    assert!(grid.contains("return 0;"), "{grid}");
 }
 
 /// `test rdx,rdx; je 12fc` at 0x12d2 of `decode` skips the loop when `n == 0`. So the loop

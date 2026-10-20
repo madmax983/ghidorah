@@ -986,7 +986,7 @@ Opcodes (about 55): `Get Put Copy Load Store Add Sub Mul UMulHi SMulHi UDiv SDiv
 
 - L1 is the same arena after Braun SSA. `Get` and `Put` become values and `Phi` ops. The builder seals all blocks first, because the CFG is known. An SCC pass removes redundant phis in irreducible regions. All graph walks are iterative with explicit stacks (AC-075).
 - SSA locations: full-width registers, `Flags` and `Stack(k)` slots that do not escape (stack tracking decides escape, Section 7.9). Memory is not in SSA. A load never moves across a store, a call or an `Intrinsic` with a memory effect.
-- Passes in fixed order, each with a name that switches can turn off: `fold` (constant fold), `fuse` (flag fusion), `copyprop`, `sccp` (Wegman-Zadeck, two worklists, prunes branches that never run), `cond_through_phi`, `materialize_flags` (left-over flag reads), `dce` (worklist).
+- Passes in fixed order, each with a name that switches can turn off: `fold` (constant fold, and `x ^ x` and `x - x` to 0), `fuse` (flag fusion), `copyprop`, `sccp` (Wegman-Zadeck, two worklists, prunes branches that never run), `cond_through_phi`, `materialize_flags` (left-over flag reads), `dce` (worklist).
 - The SSA checker (single def, def dominates use, phi arity equals predecessor count, no use of a removed value) runs in tests (AC-073).
 - WP-18 builds SSA and the passes over the IR arena. It tests them on random L0 programs and synthetic CFGs (AC-256, AC-075b). WP-21 connects them to the function IR builder (Section 7.12).
 - `func_get include ir` with `ir_opts.level: "l1"` returns L1 (WP-23). The default level is `l0`.
