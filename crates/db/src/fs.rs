@@ -23,7 +23,7 @@
 //! A temporary file has a name of this process: `<base>.<pid>.<n>`. `n` counts up in the
 //! process. So two processes never use the same temporary file. A process that stops between
 //! the create and the rename leaves its temporary file. A write open removes these files with
-//! [`remove_dead_temps`]. It keeps the temporary files of live processes.
+//! `remove_dead_temps`. It keeps the temporary files of live processes.
 //!
 //! [`RealFs`] never writes through a symbolic link. `create_new`, `append`, `write_all` and
 //! `truncate` give [`FsError::WrongKind`] for a path that is not a regular file.
