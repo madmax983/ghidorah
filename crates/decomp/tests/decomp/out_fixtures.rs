@@ -12,7 +12,7 @@ use ghidorah_base::{Address, Fuel, Limits, VarId};
 use ghidorah_db::{CommentKind, Edit, Program, RefType, SessionLabel, Source, SymKind, VarField};
 use ghidorah_decomp::print::{self, CallTarget, PrintEnv, Signature};
 use ghidorah_decomp::selfcheck::Validation;
-use ghidorah_decomp::{Cache, Env, Mode, Opts, Output, ProgramEnv};
+use ghidorah_decomp::{Cache, ElideReason, Elided, Env, Mode, Opts, Output, ProgramEnv};
 use ghidorah_ir::{NoNames, Switches};
 use ghidorah_json::Value;
 use ghidorah_loader::{LoadOpts, load};
@@ -137,24 +137,42 @@ fn ac_106b_flat_rate() {
     }
 }
 
-/// Gives the call targets of the CFG of a function. They are the call references from sites
-/// outside the elided ranges and the targets of the tail jumps.
-fn cfg_targets(p: &Program, entry: u64, out: &Output) -> BTreeSet<u64> {
-    let in_elided = |a: u64| {
-        out.elided
-            .iter()
-            .any(|e| (e.start..e.start.saturating_add(e.size)).contains(&a))
-    };
+/// Gives the reason of the elided row of `out` that holds `addr`.
+pub fn elided_at(out: &Output, addr: u64) -> Option<ElideReason> {
+    out.elided
+        .iter()
+        .find(|e| e.start <= addr && addr - e.start < e.size)
+        .map(|e| e.reason)
+}
+
+/// Gives the targets of the references of `kind` from `site`.
+fn refs_of(p: &Program, site: u64, kind: impl Fn(RefType) -> bool) -> Vec<u64> {
+    p.refs_from(Address::ram(site))
+        .iter()
+        .filter(|r| kind(r.value.key.kind))
+        .map(|r| r.value.key.to.off)
+        .collect()
+}
+
+/// Gives the call targets of the CFG of a function: the call references from the body sites
+/// and the targets of the tail jumps. A site in a canary or unreachable row has no target.
+/// A call site in another elided row is a problem: the output hides the call.
+fn cfg_targets(p: &Program, entry: u64, out: &Output) -> (BTreeSet<u64>, Vec<String>) {
     let mut want = BTreeSet::new();
+    let mut hidden = Vec::new();
+    let mut add = |site: u64, targets: Vec<u64>| {
+        if targets.is_empty() {
+            return;
+        }
+        match elided_at(out, site) {
+            Some(ElideReason::Canary | ElideReason::Unreachable) => return,
+            Some(reason) => hidden.push(format!("the call at {site:#x} is {}", reason.name())),
+            None => {}
+        }
+        want.extend(targets);
+    };
     for (site, _) in print::body_units(p, fid(entry)) {
-        if in_elided(site) {
-            continue;
-        }
-        for r in p.refs_from(Address::ram(site)) {
-            if r.value.key.kind.is_call() {
-                want.insert(r.value.key.to.off);
-            }
-        }
+        add(site, refs_of(p, site, RefType::is_call));
     }
     let ir = l1::build(
         p,
@@ -165,46 +183,125 @@ fn cfg_targets(p: &Program, entry: u64, out: &Output) -> BTreeSet<u64> {
     )
     .expect("the L1 form");
     for site in &ir.tail_calls {
-        for r in p.refs_from(Address::ram(*site)) {
-            if r.value.key.kind == RefType::UnconditionalJump {
-                want.insert(r.value.key.to.off);
-            }
-        }
+        add(
+            *site,
+            refs_of(p, *site, |k| k == RefType::UnconditionalJump),
+        );
     }
-    want
+    (want, hidden)
+}
+
+/// Gives the call problems of one function: a hidden call site, or decompile calls that are
+/// not the CFG call targets. Adds the count of the decompile call targets to `calls`.
+fn call_problems(p: &Program, entry: u64, out: &Output, calls: &mut usize) -> Vec<String> {
+    let got: BTreeSet<u64> = out
+        .lines
+        .iter()
+        .flat_map(|l| &l.calls)
+        .filter_map(|c| match c.target {
+            CallTarget::Addr(a) => Some(a),
+            CallTarget::Syscall(_) => None,
+        })
+        .collect();
+    *calls += got.len();
+    let (want, mut bad) = cfg_targets(p, entry, out);
+    if got != want {
+        bad.push(format!("{got:x?} != {want:x?}"));
+    }
+    bad
+}
+
+/// Gives the call problems of each function of `items`, with 4 worker threads.
+fn corpus_call_problems(items: &[&Item]) -> (Vec<String>, usize) {
+    let chunks: Vec<Vec<&Item>> = (0..4)
+        .map(|k| items.iter().skip(k).step_by(4).copied().collect())
+        .collect();
+    let parts: Vec<(Vec<String>, usize)> = std::thread::scope(|s| {
+        #[expect(
+            clippy::needless_collect,
+            reason = "every thread starts before the first join"
+        )]
+        let handles: Vec<_> = chunks
+            .iter()
+            .map(|c| {
+                s.spawn(move || {
+                    let mut calls = 0usize;
+                    let mut bad = Vec::new();
+                    for item in c {
+                        let p = program(&item.fixture);
+                        for b in call_problems(p, item.entry, &item.out, &mut calls) {
+                            bad.push(format!("{} {:#x}: {b}", item.fixture, item.entry));
+                        }
+                    }
+                    (bad, calls)
+                })
+            })
+            .collect();
+        handles
+            .into_iter()
+            .map(|h| h.join().expect("a worker thread"))
+            .collect()
+    });
+    let calls = parts.iter().map(|p| p.1).sum();
+    (parts.into_iter().flat_map(|p| p.0).collect(), calls)
 }
 
 #[test]
 fn ac_086b_decomp_calls() {
-    let mut bad = Vec::new();
-    let mut calls = 0usize;
-    for item in corpus().iter().filter(|i| !i.fixture.starts_with("large.")) {
-        let p = program(&item.fixture);
-        let got: BTreeSet<u64> = item
-            .out
-            .lines
-            .iter()
-            .flat_map(|l| &l.calls)
-            .filter_map(|c| match c.target {
-                CallTarget::Addr(a) => Some(a),
-                CallTarget::Syscall(_) => None,
-            })
-            .collect();
-        calls += got.len();
-        let want = cfg_targets(p, item.entry, &item.out);
-        if got != want {
-            bad.push(format!(
-                "{} {:#x}: {got:x?} != {want:x?}",
-                item.fixture, item.entry
-            ));
-        }
-    }
+    let items: Vec<&Item> = corpus().iter().collect();
+    assert!(
+        items.iter().any(|i| i.fixture.starts_with("large.")),
+        "the corpus holds the T2 fixtures"
+    );
+    let (bad, calls) = corpus_call_problems(&items);
     assert!(calls > 500, "only {calls} call targets");
     assert!(
         bad.is_empty(),
-        "{} functions: {:?}",
+        "{} problems: {:?}",
         bad.len(),
         &bad[..bad.len().min(10)]
+    );
+}
+
+/// A negative control of AC-086b: a call that the output hides as "no effect" fails the
+/// check, although the call leaves both target sets.
+#[test]
+fn ac_086b_decomp_calls_sees_a_hidden_call() {
+    let item = corpus()
+        .iter()
+        .find(|i| i.fixture == "hello.gcc-O0" && i.out.lines.iter().any(|l| !l.calls.is_empty()))
+        .expect("a function with a call");
+    let p = program(&item.fixture);
+    let mut out = item.out.clone();
+    let mut calls = 0usize;
+    assert_eq!(
+        call_problems(p, item.entry, &out, &mut calls),
+        Vec::<String>::new()
+    );
+    let k = out
+        .lines
+        .iter()
+        .position(|l| !l.calls.is_empty())
+        .expect("a call line");
+    let line = out.lines.remove(k);
+    let (start, size) = line.span.expect("a call line has a range");
+    out.elided.push(Elided {
+        start,
+        size,
+        reason: ElideReason::NoEffect,
+    });
+    let bad = call_problems(p, item.entry, &out, &mut calls);
+    assert!(bad.iter().any(|b| b.contains("is no effect")), "{bad:?}");
+    out.elided.pop();
+    out.elided.push(Elided {
+        start,
+        size,
+        reason: ElideReason::Canary,
+    });
+    let bad = call_problems(p, item.entry, &out, &mut calls);
+    assert!(
+        bad.iter().all(|b| !b.contains("is no effect")),
+        "a canary call leaves the targets: {bad:?}"
     );
 }
 

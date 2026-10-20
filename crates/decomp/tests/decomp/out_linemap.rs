@@ -7,11 +7,11 @@ use ghidorah_analysis::fir::Opts as FirOpts;
 use ghidorah_analysis::fir::l1;
 use ghidorah_base::{Fuel, WarningCode};
 use ghidorah_db::Program;
-use ghidorah_decomp::{ElideReason, Output, linemap, print};
+use ghidorah_decomp::{ElideReason, linemap, print};
 use ghidorah_ir::{Arg, Node, Op, OpId, Opc, Switches, rpo};
 
 use crate::fixtures::{fid, program};
-use crate::out_fixtures::{Item, corpus};
+use crate::out_fixtures::{Item, corpus, elided_at};
 
 /// Tells if a line must hold the L1 op `op`: a store, a call, a return, a branch or an
 /// opaque op with a memory address.
@@ -28,14 +28,6 @@ fn must_show(op: &Op) -> bool {
         Opc::Intrinsic => op.a[1] != Arg::Nil,
         _ => false,
     }
-}
-
-/// Gives the reason of the elided row of `out` that holds `addr`.
-fn elided_at(out: &Output, addr: u64) -> Option<ElideReason> {
-    out.elided
-        .iter()
-        .find(|e| e.start <= addr && addr - e.start < e.size)
-        .map(|e| e.reason)
 }
 
 /// Gives the problems of the line map of one function. The check reads the L1 form, not
