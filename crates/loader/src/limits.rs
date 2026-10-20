@@ -4,12 +4,15 @@
 //! A count above its cap gives `E_LIMIT`. A table that runs past its bytes gives `E_OOB`.
 //! The load continues with the clamped count.
 //!
-//! Two more caps keep the heap of a load below 32 times the file size plus 16 MiB (AC-055):
+//! Three more caps keep the heap of a load below 32 times the file size plus 16 MiB (AC-055):
 //!
 //! | Cap | Value |
 //! |---|---|
 //! | Heap bytes of copied text and notes (names, versions, note data) | 4 x file size + 1 MiB |
 //! | Relocations of all tables together | file size / 4 + 65,536, and at most `Limits::relocations` |
+//! | PE imports of all import and delay descriptors together | file size / 16 + 32,768 |
+//!
+//! One PE import keeps about 200 heap bytes: the import and the symbol of its IAT slot.
 //!
 //! Each cap gives one `E_LIMIT` diagnostic when the load reaches it.
 
@@ -23,6 +26,9 @@ pub const TEXT_SLACK: u64 = 1 << 20;
 /// The extra relocations of the relocation cap.
 pub const RELOC_SLACK: u64 = 65_536;
 
+/// The extra imports of the import cap.
+pub const IMPORT_SLACK: u64 = 32_768;
+
 /// The caps and the counters of one load.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Budget {
@@ -32,10 +38,14 @@ pub(crate) struct Budget {
     text_left: u64,
     /// The relocations that the load can still keep.
     relocs_left: u64,
+    /// The imports that the load can still keep.
+    imports_left: u64,
     /// The text cap gave its diagnostic.
     text_told: bool,
     /// The relocation cap gave its diagnostic.
     relocs_told: bool,
+    /// The import cap gave its diagnostic.
+    imports_told: bool,
 }
 
 impl Budget {
@@ -47,8 +57,12 @@ impl Budget {
             relocs_left: (file_len / 4)
                 .saturating_add(RELOC_SLACK)
                 .min(limits.relocations),
+            imports_left: (file_len / 16)
+                .checked_add(IMPORT_SLACK)
+                .unwrap_or(u64::MAX),
             text_told: false,
             relocs_told: false,
+            imports_told: false,
         }
     }
 
@@ -89,6 +103,24 @@ impl Budget {
                     .need(want)
                     .have(got)
                     .hint("the load keeps no more relocations"),
+            );
+        }
+        got
+    }
+
+    /// Takes room for up to `want` imports and gives the room that the cap allows.
+    ///
+    /// The first request that the cap cuts gives one `E_LIMIT` diagnostic.
+    pub(crate) fn take_imports(&mut self, want: u64, path: &str, diags: &mut Diags) -> u64 {
+        let got = want.min(self.imports_left);
+        self.imports_left = self.imports_left.saturating_sub(got);
+        if got < want && !self.imports_told {
+            self.imports_told = true;
+            diags.push(
+                Diagnostic::new(DiagCode::Limit, path)
+                    .need(want)
+                    .have(got)
+                    .hint("the load keeps no more imports"),
             );
         }
         got

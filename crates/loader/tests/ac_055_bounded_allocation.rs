@@ -215,6 +215,39 @@ fn ac_055_bounded_allocation() {
 }
 
 #[test]
+fn regress_pe_shared_ilt_import_cap() {
+    for name in ["shared_ilt", "shared_ilt_ordinal"] {
+        let bytes = ghidorah_testkit::pe::builder(name)
+            .expect("the variant")
+            .build();
+        let (result, stats) =
+            ALLOC.measure(|| load(&bytes, &LoadOpts::AUTO, &Limits::DEFAULT).map(|(b, _)| b));
+        let b = result.expect("the load");
+        // The import cap of the loader is file size / 16 + 32,768, below this bound.
+        let cap = bytes.len() / 8 + 65_536;
+        assert!(
+            b.imports.len() <= cap,
+            "{name}: {} imports above {cap}",
+            b.imports.len()
+        );
+        assert!(b.imports.len() >= 65_535, "{name}: the first DLL stays");
+        let limits: Vec<_> = b
+            .diagnostics
+            .iter()
+            .filter(|d| d.code.name() == "E_LIMIT")
+            .collect();
+        assert_eq!(limits.len(), 1, "{name}: {limits:?}");
+        let limit = bound(bytes.len());
+        assert!(
+            stats.peak_bytes <= limit,
+            "{name}: peak {} above {limit} for {} bytes",
+            stats.peak_bytes,
+            bytes.len()
+        );
+    }
+}
+
+#[test]
 fn hostile_files_keep_their_tables_bounded() {
     let relr = relr_bitmaps();
     let (b, _) = load(&relr, &LoadOpts::AUTO, &Limits::DEFAULT).expect("relr");
