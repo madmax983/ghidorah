@@ -58,7 +58,7 @@ use std::fmt;
 use ghidorah_analysis::cc::conv_of;
 use ghidorah_analysis::fir::Opts as FirOpts;
 use ghidorah_analysis::fir::l1::{self, L1Error, L1Ir};
-use ghidorah_base::{Address, Fuel, FuncId, WarningCode};
+use ghidorah_base::{Address, Fuel, FuncId, JumpTableId, WarningCode};
 use ghidorah_db::Program;
 use ghidorah_ir::{IntrinsicNames, Switches};
 
@@ -244,7 +244,7 @@ impl Env for ProgramEnv<'_> {
             .0
             .imports()
             .values()
-            .find(|r| r.stub == Some(at))
+            .find(|r| r.stub == Some(at) || (r.stub.is_none() && r.slot == Some(at)))
             .and_then(|r| r.id.name())
         {
             return Some(name.to_owned());
@@ -261,6 +261,38 @@ impl Env for ProgramEnv<'_> {
 
     fn is_string(&self, addr: u64) -> bool {
         self.0.string(addr).is_some()
+    }
+
+    fn is_thunk(&self, entry: u64) -> bool {
+        self.0
+            .func(FuncId(Address::ram(entry)))
+            .is_some_and(|f| f.func.flags.thunk)
+    }
+
+    fn import_at_slot(&self, slot: u64) -> Option<u64> {
+        let at = Address::ram(slot);
+        let row = self.0.imports().values().find(|r| r.slot == Some(at))?;
+        Some(row.stub.unwrap_or(at).off)
+    }
+
+    fn jumptable_unresolved(&self, site: u64) -> bool {
+        let at = Address::ram(site);
+        let Some(owner) = self.0.owner_of(at).and_then(|f| self.0.func(f)) else {
+            return false;
+        };
+        if owner.func.flags.thunk {
+            return false;
+        }
+        let table = self
+            .0
+            .jump_table(JumpTableId(at))
+            .is_some_and(|t| !t.value.resolved);
+        table
+            || owner
+                .func
+                .caveats
+                .iter()
+                .any(|c| c.code == WarningCode::JumptableUnresolved && c.at == Some(at))
     }
 }
 

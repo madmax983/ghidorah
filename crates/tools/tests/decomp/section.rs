@@ -1,15 +1,19 @@
 //! The shape of the `decomp` section, the IR level `l1`, the budget cut and the agent texts.
 
-use ghidorah_base::Fuel;
+use std::path::PathBuf;
+
+use ghidorah_base::{FixedClock, Fuel};
 use ghidorah_decomp::Opts;
 use ghidorah_json::Value;
 use ghidorah_testkit::ste::check_agent_text;
 use ghidorah_tools::registry::lint;
-use ghidorah_tools::{ArgKind, ArgSpec, handlers};
+use ghidorah_tools::{
+    ArgKind, ArgSpec, Call, Host, Roots, Session, SessionConfig, handlers, hints,
+};
 
 use crate::support::{
-    call, call_value, chars, data, decomp, fixture, json, program, registry, session, text_at,
-    text_of,
+    call, call_value, chars, data, decomp, fixture, json, program, registry, root, session,
+    text_at, text_of,
 };
 
 #[test]
@@ -258,4 +262,78 @@ fn a_small_budget_cuts_the_window() {
         "CURSOR_INVALID",
         "{envelope}"
     );
+}
+
+/// Makes a session of the shipped registry with the analysis engine, so a remedy can name
+/// `func_edit`.
+fn shipped() -> Session {
+    let config =
+        SessionConfig::new(Roots::new(&root(), &[PathBuf::from(".")]).expect("the root is valid"));
+    let mut s = Session::new(config, Box::new(FixedClock::new(0)));
+    handlers::analysis_run::install(&mut s);
+    s
+}
+
+/// Gives the warning `code` at `at` of a decompile section.
+fn warning_at<'a>(section: &'a Value, code: &str, at: &str) -> Option<&'a Value> {
+    section
+        .get("warnings")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .find(|w| text_at(w, "/code") == code && text_at(w, "/at") == at)
+}
+
+/// Makes sure that `remedy` is a call object that `hints::check` accepts in `s`.
+fn assert_checked_call(s: &Session, remedy: &Value) {
+    let tool = text_at(remedy, "/tool");
+    let args = remedy.get("args").cloned().expect("a remedy has args");
+    assert!(!text_at(remedy, "/why").is_empty(), "{remedy}");
+    let found = Call::new(&tool, args, &text_at(remedy, "/why"));
+    let registry = s.active_registry();
+    hints::check(&registry, &|name| s.in_profile(name), &found)
+        .unwrap_or_else(|e| panic!("{remedy}: {e}"));
+}
+
+/// A PLT stub jumps through its GOT slot. Its decompile is a tail call to the import with no
+/// `W_JUMPTABLE_UNRESOLVED`. A real unresolved jump keeps the warning, and its remedy is a
+/// `func_edit` call that `hints::check` accepts (maintainability-docs-03).
+#[test]
+fn regress_plt_stub_decomp_tail_call() {
+    let mut s = shipped();
+    let _ = data(&call(&mut s, "binary_load", r#"{"builtin":"demo"}"#));
+    let section = decomp(&mut s, "fn:0x1060", "{}");
+    let text = text_of(&section);
+    assert!(text.contains("return puts("), "{text}");
+    assert!(!text.contains("goto *"), "{text}");
+    assert!(
+        warning_at(&section, "W_JUMPTABLE_UNRESOLVED", "0x1064").is_none(),
+        "{section}"
+    );
+    let calls = section
+        .get("calls")
+        .and_then(Value::as_array)
+        .expect("calls");
+    assert!(
+        calls.iter().any(|c| text_at(c, "/name") == "puts"),
+        "{section}"
+    );
+    let mut s = shipped();
+    let _ = data(&call(
+        &mut s,
+        "binary_load",
+        r#"{"path":"fixtures/bin/func_ptrs.gcc-O2"}"#,
+    ));
+    let section = decomp(&mut s, "fn:0x1350", "{}");
+    let warning = warning_at(&section, "W_JUMPTABLE_UNRESOLVED", "0x1366")
+        .unwrap_or_else(|| panic!("no warning at 0x1366: {section}"));
+    let remedy = warning.get("remedy").expect("the warning has a remedy");
+    assert_eq!(text_at(remedy, "/tool"), "func_edit", "{remedy}");
+    assert_eq!(text_at(remedy, "/args/at"), "0x1366", "{remedy}");
+    assert_eq!(
+        text_at(remedy, "/args/action"),
+        "set_call_targets",
+        "{remedy}"
+    );
+    assert_checked_call(&s, remedy);
 }

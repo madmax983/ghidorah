@@ -5,7 +5,7 @@ use ghidorah_base::{ErrorCode, Fuel, FuncId};
 use ghidorah_db::PartKind;
 use ghidorah_json::{Object, Value};
 
-use super::MIN_SHARE;
+use super::{MIN_SHARE, remedy};
 use crate::args::Args;
 use crate::budget::section_weight;
 use crate::content::{self, ContentMode};
@@ -126,7 +126,13 @@ impl Job<'_> {
             scope.encode(key)
         };
         let caps = self.render.caps;
-        let window = |k: usize| fs::decomp_value(p, &out, start, k, caps, &cursor);
+        let check = |c| remedy::checked(self.session, c);
+        let remedies = fs::Remedies {
+            program: p,
+            func,
+            check: &check,
+        };
+        let window = |k: usize| fs::decomp_value(&remedies, &out, start, k, caps, &cursor);
         let whole = window(self.decomp.count);
         let need = self.member("decomp", &whole);
         if need <= share {

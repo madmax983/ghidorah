@@ -22,6 +22,7 @@ use ghidorah_json::{Object, Value};
 use super::IrRows;
 use super::text::{hex, string_text};
 use crate::args::Args;
+use crate::handlers::func_get::remedy;
 use crate::hints::Call;
 
 /// The section byte of a `func_get` decompile cursor.
@@ -99,9 +100,21 @@ fn int(n: usize) -> Value {
     Value::from(u64::try_from(n).unwrap_or(u64::MAX))
 }
 
-/// Gives the remedy call of a warning row.
-fn remedy(r: Remedy) -> Value {
-    match r {
+/// The parts of a decompile section that the remedy calls read. They are the program, the
+/// function and the check of a call.
+#[derive(Clone, Copy)]
+pub struct Remedies<'a> {
+    /// The program.
+    pub program: &'a Program,
+    /// The function of the decompile.
+    pub func: FuncId,
+    /// Keeps a call that the agent can send, or drops it.
+    pub check: &'a dyn Fn(Call) -> Option<Call>,
+}
+
+/// Gives the remedy call of a warning row, or `None` when no complete call exists.
+fn remedy(r: Remedy, ctx: &Remedies<'_>) -> Option<Value> {
+    let call = match r {
         Remedy::Disasm(at) => Call::new(
             "func_get",
             Value::object([
@@ -109,8 +122,7 @@ fn remedy(r: Remedy) -> Value {
                 ("include", Value::Array(vec![Value::from("disasm")])),
             ]),
             WHY_DISASM,
-        )
-        .to_json(),
+        ),
         Remedy::Insn(at) => Call::new(
             "mem_read",
             Value::object([
@@ -119,28 +131,30 @@ fn remedy(r: Remedy) -> Value {
                 ("count", Value::from(1)),
             ]),
             WHY_INSN,
-        )
-        .to_json(),
-    }
+        ),
+        Remedy::JumpTable(at) => remedy::site(ctx.program, ctx.func, at, true)?,
+        Remedy::CallTargets(at) => remedy::site(ctx.program, ctx.func, at, false)?,
+    };
+    (ctx.check)(call).map(|c| c.to_json())
 }
 
 /// Gives the JSON row of one warning.
-fn warning(w: &WarningRow) -> Value {
+fn warning(w: &WarningRow, ctx: &Remedies<'_>) -> Value {
     let info = w.code.info();
     let mut out = Object::new();
     out.push("code", Value::from(info.name));
     out.push("num", Value::from(info.num));
     out.push("at", hex(w.at));
     out.push("message", Value::from(info.message));
-    if let Some(r) = w.remedy {
-        out.push("remedy", remedy(r));
+    if let Some(r) = w.remedy.and_then(|r| remedy(r, ctx)) {
+        out.push("remedy", r);
     }
     Value::Object(out)
 }
 
 /// Gives the members of an output that every window shares: the elided ranges, the
 /// variables, the metrics and the warnings.
-fn shared(out: &Output) -> Vec<(&'static str, Value)> {
+fn shared(out: &Output, ctx: &Remedies<'_>) -> Vec<(&'static str, Value)> {
     let elided = out
         .elided
         .iter()
@@ -183,22 +197,23 @@ fn shared(out: &Output) -> Vec<(&'static str, Value)> {
         ("metrics", metrics),
         (
             "warnings",
-            Value::Array(out.warnings.iter().map(warning).collect()),
+            Value::Array(out.warnings.iter().map(|w| warning(w, ctx)).collect()),
         ),
     ]
 }
 
 /// Gives the section value of the window of `count` lines from the line `start`. `cursor`
-/// gives the cursor text of a next line.
+/// gives the cursor text of a next line. `remedies` gives the remedy calls of the warnings.
 #[must_use]
 pub fn value(
-    program: &Program,
+    remedies: &Remedies<'_>,
     out: &Output,
     start: usize,
     count: usize,
     caps: Caps,
     cursor: &dyn Fn(usize) -> String,
 ) -> Value {
+    let program = remedies.program;
     let w = out.window(start, count);
     let mut o = Object::new();
     o.push("text", Value::from(w.text()));
@@ -227,7 +242,7 @@ pub fn value(
         })
         .collect();
     o.push("line_map", Value::Array(rows));
-    let mut members = shared(out).into_iter();
+    let mut members = shared(out, remedies).into_iter();
     if let Some((name, elided)) = members.next() {
         o.push(name, elided);
     }

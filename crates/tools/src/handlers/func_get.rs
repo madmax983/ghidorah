@@ -15,6 +15,7 @@
 //! A call with `disasm` or `ir` marks the function `visited`. The mark changes no fact and no
 //! `rev`.
 
+pub mod remedy;
 mod render;
 
 use ghidorah_analysis::CallGraph;

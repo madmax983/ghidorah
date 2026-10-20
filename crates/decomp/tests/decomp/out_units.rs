@@ -283,7 +283,7 @@ fn warning_rows_sort_and_name_remedies() {
             WarningRow {
                 at: 0x1004,
                 code: WarningCode::JumptableUnresolved,
-                remedy: None,
+                remedy: Some(Remedy::JumpTable(0x1004)),
             },
             WarningRow {
                 at: 0x1004,
