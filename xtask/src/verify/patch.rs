@@ -1,19 +1,30 @@
-//! Negative patches: one unified-diff hunk against one kernel file (ADR-0011).
+//! Negative patches: one or two unified-diff hunks against one kernel file (ADR-0011).
 //!
 //! `xtask verify` applies each patch to a copy of the kernel. The copy must fail verification.
-//! The hunk must match the current source exactly once. So a stale patch fails with an error.
+//! Each hunk must match the current source exactly once. So a stale patch fails with an error.
+//! A patch can have two hunks. For example, a K5 patch changes a spec table and its exec copy.
 
 use std::fmt;
 
-/// One parsed patch: one file and one hunk.
+/// The maximum count of hunks in one patch.
+pub const MAX_HUNKS: usize = 2;
+
+/// One hunk of a patch.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Patch {
-    /// The path of the changed file, relative to the workspace root.
-    pub path: String,
+pub struct Hunk {
     /// The lines of the hunk before the change: context lines and removed lines.
     pub old: Vec<String>,
     /// The lines of the hunk after the change: context lines and added lines.
     pub new: Vec<String>,
+}
+
+/// One parsed patch: one file and its hunks in file order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Patch {
+    /// The path of the changed file, relative to the workspace root.
+    pub path: String,
+    /// The hunks, from 1 to [`MAX_HUNKS`].
+    pub hunks: Vec<Hunk>,
 }
 
 /// The cause of a patch failure.
@@ -21,13 +32,15 @@ pub struct Patch {
 pub enum PatchError {
     /// The patch has no `+++ b/<path>` line.
     NoFile,
-    /// The patch has more than one file, or not exactly one hunk.
-    NotOneHunk,
+    /// The patch changes more than one file.
+    TwoFiles,
+    /// The patch has no hunk, or more than [`MAX_HUNKS`] hunks.
+    HunkCount,
     /// A hunk line has a bad form, or the line counts differ from the hunk header.
     BadHunk(String),
-    /// The old lines of the hunk do not occur in the source.
+    /// The old lines of a hunk do not occur in the source.
     Stale,
-    /// The old lines of the hunk occur more than one time in the source.
+    /// The old lines of a hunk occur more than one time in the source.
     Ambiguous,
 }
 
@@ -35,12 +48,11 @@ impl fmt::Display for PatchError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::NoFile => f.write_str("the patch names no file"),
-            Self::NotOneHunk => {
-                f.write_str("the patch does not have exactly one file and one hunk")
-            }
+            Self::TwoFiles => f.write_str("the patch changes more than one file"),
+            Self::HunkCount => write!(f, "the patch does not have 1 to {MAX_HUNKS} hunks"),
             Self::BadHunk(line) => write!(f, "the hunk has a bad line: {line}"),
-            Self::Stale => f.write_str("the hunk does not match the current source"),
-            Self::Ambiguous => f.write_str("the hunk matches the source more than one time"),
+            Self::Stale => f.write_str("a hunk does not match the current source"),
+            Self::Ambiguous => f.write_str("a hunk matches the source more than one time"),
         }
     }
 }
@@ -52,11 +64,18 @@ const MAX_HUNK_LINES: usize = 4096;
 
 /// One hunk while the parser reads it.
 #[derive(Debug, Default)]
-struct Hunk {
+struct Open {
     old: Vec<String>,
     new: Vec<String>,
     old_left: usize,
     new_left: usize,
+}
+
+impl Open {
+    /// Tells if the hunk needs more body lines.
+    const fn is_open(&self) -> bool {
+        self.old_left > 0 || self.new_left > 0
+    }
 }
 
 /// Reads the line count of one side of a hunk header, for example `-12,5` gives 5.
@@ -72,7 +91,7 @@ fn side_count(field: &str, sign: char) -> Option<usize> {
 }
 
 /// Reads a hunk header such as `@@ -1,4 +1,5 @@ fn a()`.
-fn header(line: &str) -> Result<Hunk, PatchError> {
+fn header(line: &str) -> Result<Open, PatchError> {
     let bad = || PatchError::BadHunk(line.to_owned());
     let mut fields = line.split_whitespace().skip(1);
     let old_left = fields
@@ -86,15 +105,15 @@ fn header(line: &str) -> Result<Hunk, PatchError> {
     if fields.next() != Some("@@") || old_left.max(new_left) > MAX_HUNK_LINES {
         return Err(bad());
     }
-    Ok(Hunk {
+    Ok(Open {
         old_left,
         new_left,
-        ..Hunk::default()
+        ..Open::default()
     })
 }
 
 /// Adds one body line to the open hunk.
-fn body_line(hunk: &mut Hunk, line: &str) -> Result<(), PatchError> {
+fn body_line(hunk: &mut Open, line: &str) -> Result<(), PatchError> {
     let bad = || PatchError::BadHunk(line.to_owned());
     let (kind, text) = line.split_at_checked(1).unwrap_or((" ", ""));
     let to_old = matches!(kind, " " | "-");
@@ -120,29 +139,29 @@ fn is_header(line: &str) -> bool {
         .any(|p| line.starts_with(p))
 }
 
-/// Parses a unified diff with one file and one hunk.
+/// Parses a unified diff with one file and 1 to [`MAX_HUNKS`] hunks.
 ///
 /// # Errors
 ///
-/// Gives a [`PatchError`] when the text is not one file with one valid hunk.
+/// Gives a [`PatchError`] when the text is not one file with 1 to [`MAX_HUNKS`] valid hunks.
 pub fn parse(text: &str) -> Result<Patch, PatchError> {
     let mut path: Option<String> = None;
-    let mut hunks: Vec<Hunk> = Vec::new();
+    let mut hunks: Vec<Open> = Vec::new();
     for line in text.lines() {
-        if let Some(open) = hunks
-            .last_mut()
-            .filter(|h| h.old_left > 0 || h.new_left > 0)
-        {
+        if let Some(open) = hunks.last_mut().filter(|h| h.is_open()) {
             if !line.starts_with('\\') {
                 body_line(open, line)?;
             }
         } else if let Some(name) = line.strip_prefix("+++ ") {
             if path.is_some() {
-                return Err(PatchError::NotOneHunk);
+                return Err(PatchError::TwoFiles);
             }
             let name = name.split('\t').next().unwrap_or(name);
             path = Some(name.strip_prefix("b/").unwrap_or(name).to_owned());
         } else if line.starts_with("@@ ") {
+            if hunks.len() >= MAX_HUNKS {
+                return Err(PatchError::HunkCount);
+            }
             hunks.push(header(line)?);
         } else if hunks.is_empty() || is_header(line) {
             // A preamble line, a file header line or a "no newline" mark.
@@ -151,38 +170,52 @@ pub fn parse(text: &str) -> Result<Patch, PatchError> {
         }
     }
     let path = path.ok_or(PatchError::NoFile)?;
-    let [hunk] = <[Hunk; 1]>::try_from(hunks).map_err(|_| PatchError::NotOneHunk)?;
-    if hunk.old_left > 0 || hunk.new_left > 0 {
+    if hunks.is_empty() {
+        return Err(PatchError::HunkCount);
+    }
+    if hunks.iter().any(Open::is_open) {
         return Err(PatchError::BadHunk("the hunk ends early".to_owned()));
     }
-    Ok(Patch {
-        path,
-        old: hunk.old,
-        new: hunk.new,
-    })
+    let hunks = hunks
+        .into_iter()
+        .map(|h| Hunk {
+            old: h.old,
+            new: h.new,
+        })
+        .collect();
+    Ok(Patch { path, hunks })
 }
 
-/// Applies `patch` to `source` and gives the changed text.
-///
-/// # Errors
-///
-/// Gives [`PatchError::Stale`] or [`PatchError::Ambiguous`] when the old lines do not match one place.
-pub fn apply(source: &str, patch: &Patch) -> Result<String, PatchError> {
-    let lines: Vec<&str> = source.lines().collect();
-    let width = patch.old.len();
+/// Applies one hunk to the lines of a source.
+fn apply_hunk<'a>(lines: &[&'a str], hunk: &'a Hunk) -> Result<Vec<&'a str>, PatchError> {
+    let width = hunk.old.len();
     let mut found = (0..=lines.len().saturating_sub(width)).filter(|&at| {
         lines
-            .get(at..at + width)
-            .is_some_and(|run| run.iter().zip(&patch.old).all(|(a, b)| *a == b))
+            .get(at..at.saturating_add(width))
+            .is_some_and(|run| run.iter().zip(&hunk.old).all(|(a, b)| *a == b))
     });
     let at = found.next().ok_or(PatchError::Stale)?;
     if found.next().is_some() {
         return Err(PatchError::Ambiguous);
     }
     let mut out: Vec<&str> = lines.get(..at).unwrap_or_default().to_vec();
-    out.extend(patch.new.iter().map(String::as_str));
-    out.extend(lines.get(at + width..).unwrap_or_default());
-    let mut text = out.join("\n");
+    out.extend(hunk.new.iter().map(String::as_str));
+    out.extend(lines.get(at.saturating_add(width)..).unwrap_or_default());
+    Ok(out)
+}
+
+/// Applies the hunks of `patch` to `source` in order and gives the changed text.
+///
+/// # Errors
+///
+/// Gives [`PatchError::Stale`] or [`PatchError::Ambiguous`] when the old lines of a hunk do not
+/// match one place.
+pub fn apply(source: &str, patch: &Patch) -> Result<String, PatchError> {
+    let mut lines: Vec<&str> = source.lines().collect();
+    for hunk in &patch.hunks {
+        lines = apply_hunk(&lines, hunk)?;
+    }
+    let mut text = lines.join("\n");
     if source.ends_with('\n') {
         text.push('\n');
     }

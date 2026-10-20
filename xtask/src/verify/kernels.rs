@@ -84,18 +84,30 @@ pub const KERNELS: &[Kernel] = &[
     Kernel {
         name: "K3",
         module: "rangeset",
-        negatives: &[Negative {
-            name: "K3",
-            kind: PRECONDITION,
-        }],
+        negatives: &[
+            Negative {
+                name: "K3",
+                kind: PRECONDITION,
+            },
+            Negative {
+                name: "K3b",
+                kind: POSTCONDITION,
+            },
+        ],
     },
     Kernel {
         name: "K5",
         module: "flags",
-        negatives: &[Negative {
-            name: "K5",
-            kind: POSTCONDITION,
-        }],
+        negatives: &[
+            Negative {
+                name: "K5",
+                kind: POSTCONDITION,
+            },
+            Negative {
+                name: "K5b",
+                kind: POSTCONDITION,
+            },
+        ],
     },
     Kernel {
         name: "K6",
@@ -108,9 +120,15 @@ pub const KERNELS: &[Kernel] = &[
     Kernel {
         name: "K7",
         module: "source",
-        negatives: &[Negative {
-            name: "K7",
-            kind: POSTCONDITION,
-        }],
+        negatives: &[
+            Negative {
+                name: "K7",
+                kind: POSTCONDITION,
+            },
+            Negative {
+                name: "K7b",
+                kind: POSTCONDITION,
+            },
+        ],
     },
 ];

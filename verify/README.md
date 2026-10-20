@@ -51,13 +51,29 @@ Then `ac_034_proof_freshness` gives a warning, and it fails under `GHIDORAH_REQU
 
 ## Negative patches
 
-| Kernel | File | Change | Expected error |
+| Patch | File | Change | Expected error |
 |---|---|---|---|
 | K1 | `reader/leb.rs` | `leb_scan` accepts an unsigned 10th byte up to 3. | postcondition not satisfied |
 | K1b | `reader/leb.rs` | `leb_scan` rejects the unsigned 10th byte 1, so the encoding of `u64::MAX` fails. | postcondition not satisfied |
 | K2 | `range.rs` | `va_to_file` accepts the first address after the file bytes. | postcondition not satisfied |
 | K3 | `rangeset.rs` | `insert` does not extend the merged range to the left. | precondition not satisfied |
+| K3b | `rangeset.rs` | `insert` drops a range of one value. | postcondition not satisfied |
+| K5 | `flags.rs` | `fused_pred` gives `ULt` for `Sub` and the condition code 12, not `SLt`. | postcondition not satisfied |
+| K5b | `flags.rs` | `spec_fused_pred` and `fused_pred` both give `ULt` for `Sub` and the condition code 12. `lemma_fuses` fails. | postcondition not satisfied |
 | K6 | `budget.rs` | `fit_prefix` rejects a prefix with a cost equal to `max`. | postcondition not satisfied |
 | K7 | `source.rs` | `may_overwrite` rejects a write of the same rank. | postcondition not satisfied |
+| K7b | `source.rs` | `may_overwrite` and the copy of its rule in `ensures` both reject a write of the same rank. The order properties fail. | postcondition not satisfied |
 
-Make a new patch with `diff -u` against the current source. Each patch has exactly one hunk.
+Make a new patch with `diff -u` against the current source.
+A patch changes one file with one or two hunks. Each hunk must match the source exactly one time.
+Add the patch to `KERNELS` in `xtask/src/verify/kernels.rs` with its expected error.
+
+### Why K3 fails at a precondition
+
+The precondition of `lemma_insert` gives the exact formula of the merged range and of the run `[lo, hi)`.
+Then `insert` asserts that its new list is the splice of the merged range into the old list.
+So a change to the merge or to the splice fails at the precondition or at the assertion.
+Such a change does not get to the `covers` postcondition.
+
+K3 keeps this precondition failure as the evidence of the merge rule.
+K3b changes the early return of an empty range. That path does not call the lemma, so the `covers` postcondition rejects it.

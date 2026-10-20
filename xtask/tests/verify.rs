@@ -145,10 +145,34 @@ diff --git a/crates/kernel/src/demo.rs b/crates/kernel/src/demo.rs
 fn verify_patch_applies_one_hunk() {
     let p = patch::parse(GOOD).expect("the patch parses");
     assert_eq!(p.path, "crates/kernel/src/demo.rs");
-    assert_eq!(p.old.len(), 4);
-    assert_eq!(p.new.len(), 4);
+    assert_eq!(p.hunks.len(), 1);
+    assert_eq!(p.hunks[0].old.len(), 4);
+    assert_eq!(p.hunks[0].new.len(), 4);
     let out = patch::apply(SOURCE, &p).expect("the patch applies");
     assert_eq!(out, SOURCE.replace("x + 1", "x + 2"));
+}
+
+/// The second hunk of a two-hunk patch: `fn b` gets `let x = 3`.
+const SECOND: &str = "@@ -6,3 +6,3 @@\n fn b() {\n-    let x = 2;\n+    let x = 3;\n }\n";
+
+#[test]
+fn regress_patch_applies_two_hunks() {
+    // A negative patch of K5 changes a spec table and the exec table of one file.
+    let p = patch::parse(&format!("{GOOD}{SECOND}")).expect("the patch parses");
+    assert_eq!(p.hunks.len(), 2);
+    let out = patch::apply(SOURCE, &p).expect("the patch applies");
+    assert_eq!(
+        out,
+        SOURCE
+            .replace("x + 1", "x + 2")
+            .replace("let x = 2", "let x = 3")
+    );
+    // Each hunk must match one place. A stale second hunk fails the patch.
+    let stale = patch::parse(&format!("{GOOD}{}", SECOND.replace("fn b()", "fn c()")))
+        .expect("the patch parses");
+    assert_eq!(patch::apply(SOURCE, &stale), Err(PatchError::Stale));
+    let three = format!("{GOOD}{SECOND}{SECOND}");
+    assert_eq!(patch::parse(&three), Err(PatchError::HunkCount));
 }
 
 #[test]
@@ -158,13 +182,10 @@ fn verify_patch_rejects_bad_patches() {
     let twice = format!("{SOURCE}{SOURCE}");
     assert_eq!(patch::apply(&twice, &p), Err(PatchError::Ambiguous));
     assert_eq!(patch::parse("no diff here\n"), Err(PatchError::NoFile));
-    let two_hunks =
-        format!("{GOOD}@@ -6,3 +6,3 @@\n fn b() {{\n-    let x = 2;\n+    let x = 3;\n }}\n");
-    assert_eq!(patch::parse(&two_hunks), Err(PatchError::NotOneHunk));
     let two_files = format!("{GOOD}{GOOD}");
-    assert_eq!(patch::parse(&two_files), Err(PatchError::NotOneHunk));
+    assert_eq!(patch::parse(&two_files), Err(PatchError::TwoFiles));
     let no_hunk = "--- a/x.rs\n+++ b/x.rs\n";
-    assert_eq!(patch::parse(no_hunk), Err(PatchError::NotOneHunk));
+    assert_eq!(patch::parse(no_hunk), Err(PatchError::HunkCount));
     let bad_count = GOOD.replace("@@ -1,4 +1,4 @@", "@@ -1,5 +1,4 @@");
     assert!(matches!(
         patch::parse(&bad_count),
@@ -220,9 +241,12 @@ fn verify_kernel_table() {
             ("K1b", POSTCONDITION),
             ("K2", POSTCONDITION),
             ("K3", PRECONDITION),
+            ("K3b", POSTCONDITION),
             ("K5", POSTCONDITION),
+            ("K5b", POSTCONDITION),
             ("K6", POSTCONDITION),
             ("K7", POSTCONDITION),
+            ("K7b", POSTCONDITION),
         ]
     );
     for kernel in KERNELS {
@@ -733,10 +757,11 @@ fn regress_negative_needs_its_expected_kind() {
         .and_then(Value::as_array)
         .expect("negatives");
     for row in negatives {
-        let name = row.get("kernel").and_then(Value::as_str).unwrap_or("");
+        let patch = row.get("patch").and_then(Value::as_str).unwrap_or("");
+        let k3 = patch == "verify/negative/K3.patch";
         let ok = row.get("ok").and_then(Value::as_bool);
-        assert_eq!(ok, Some(name != "K3"), "{row}");
-        if name == "K3" {
+        assert_eq!(ok, Some(!k3), "{row}");
+        if k3 {
             assert_eq!(
                 row.get("expected_kind").and_then(Value::as_str),
                 Some(PRECONDITION),
