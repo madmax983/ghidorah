@@ -480,11 +480,12 @@ fn hints<S: Host>(call: &Invocation<'_, S>, host: &S, ctx: &mut Ctx) -> Vec<Call
     let in_profile = |name: &str| host.in_profile(name);
     let mut next = std::mem::take(&mut ctx.next);
     if ctx.frame.partial() && call.tool.name != "analysis_run" {
-        next.push(Call::new(
-            "analysis_run",
-            Value::Object(Object::new()),
-            WHY_ANALYSIS,
-        ));
+        // The call names the binary of the frame, so it works with more open binaries.
+        let mut args = Object::new();
+        if let Some(id) = &ctx.frame.binary_id {
+            args.push("binary_id", Value::from(id.as_str()));
+        }
+        next.push(Call::new("analysis_run", Value::Object(args), WHY_ANALYSIS));
     }
     for warning in &mut ctx.warnings {
         if warning

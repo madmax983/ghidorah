@@ -3,7 +3,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use ghidorah_base::BinaryId;
 use ghidorah_db::fs::EntryKind;
@@ -264,14 +264,89 @@ fn regress_git_tree_root_reports_not_persisted() {
     );
 }
 
-/// The real file system, but the first check of a project file gives `false`. So the test
-/// sees the race with a second process that makes the project.
-#[derive(Clone)]
-struct LateProject {
-    hidden: Arc<AtomicUsize>,
+/// Makes sure that `text` holds no absolute path and no part of the test directory `dir`
+/// (design Section 10.11 rule 10).
+fn assert_path_free(text: &str, dir: &Path, envelope: &Value) {
+    assert!(!text.is_empty(), "{envelope}");
+    assert!(!text.contains('/'), "an absolute path: {envelope}");
+    let name = dir.file_name().and_then(|n| n.to_str()).unwrap_or("?");
+    assert!(!text.contains(name), "a part of the root path: {envelope}");
 }
 
-impl Fs for LateProject {
+#[test]
+fn regress_persist_reason_has_no_absolute_path() {
+    use ghidorah_base::FixedClock;
+    use ghidorah_tools::{Host, Session, SessionConfig};
+
+    let shipped = |cfg: SessionConfig| {
+        Session::with_registry(
+            <Session as Host>::registry(),
+            cfg,
+            Box::new(FixedClock::new(0)),
+        )
+    };
+    let dir = tmp("git_tree_path_free");
+    std::fs::create_dir_all(dir.join(".git")).expect("a git directory");
+    let mut cfg = config();
+    cfg.projects = Some(ProjectsConfig {
+        root: dir.join("projects"),
+        named: false,
+        break_lock: false,
+    });
+    let mut s = shipped(cfg);
+    let brief = call(&mut s, "session_brief", "{}");
+    let load = call(
+        &mut s,
+        "binary_load",
+        r#"{"builtin":"demo","analysis":"none"}"#,
+    );
+    for envelope in [&brief, &load] {
+        let reason = data(envelope)
+            .get("persist_reason")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        assert!(reason.contains("git working tree"), "{envelope}");
+        assert_path_free(reason, &dir, envelope);
+    }
+    // A failed journal write names the file relative to the project directory.
+    let full = Arc::new(AtomicBool::new(false));
+    let mut s = shipped(config_in(&dir.join("named")));
+    s.set_fs(Box::new(HookFs {
+        full: Arc::clone(&full),
+        ..HookFs::default()
+    }));
+    let load = call(
+        &mut s,
+        "binary_load",
+        r#"{"builtin":"demo","analysis":"none"}"#,
+    );
+    assert!(data(&load).get("persisted").is_none(), "{load}");
+    full.store(true, Ordering::SeqCst);
+    let error = call(
+        &mut s,
+        "comment_set",
+        r#"{"target":"0x1080","kind":"eol","text":"full disk"}"#,
+    );
+    assert_eq!(code(&error), "INTERNAL_ERROR", "{error}");
+    let reason = error
+        .pointer("/error/details/reason")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    assert!(reason.contains("journal.jsonl"), "{error}");
+    assert!(reason.contains("append"), "{error}");
+    assert_path_free(reason, &dir, &error);
+}
+
+/// The real file system with two hooks. The first `hidden` checks of a project file give
+/// `false`, so the test sees the race with a second process that makes the project. While
+/// `full` holds `true`, each append to a journal fails like a full disk.
+#[derive(Clone, Default)]
+struct HookFs {
+    hidden: Arc<AtomicUsize>,
+    full: Arc<AtomicBool>,
+}
+
+impl Fs for HookFs {
     fn create_dir_all(&mut self, path: &Path) -> Result<(), FsError> {
         RealFs.create_dir_all(path)
     }
@@ -279,6 +354,13 @@ impl Fs for LateProject {
         RealFs.create_new(path)
     }
     fn append(&mut self, path: &Path, bytes: &[u8]) -> Result<(), FsError> {
+        if self.full.load(Ordering::SeqCst) && path.ends_with("journal.jsonl") {
+            return Err(FsError::Io {
+                op: "append",
+                path: path.to_path_buf(),
+                message: "No space left on device (os error 28)".to_owned(),
+            });
+        }
         RealFs.append(path, bytes)
     }
     fn write_all(&mut self, path: &Path, bytes: &[u8]) -> Result<(), FsError> {
@@ -335,8 +417,9 @@ fn regress_admit_reopens_a_project_made_meanwhile() {
         load_demo(&mut first);
     }
     let mut s = session_with(config_in(&dir));
-    s.set_fs(Box::new(LateProject {
+    s.set_fs(Box::new(HookFs {
         hidden: Arc::new(AtomicUsize::new(1)),
+        ..HookFs::default()
     }));
     // The check of admit misses the project, so the create finds the project file.
     let envelope = call(&mut s, "binary_load", r#"{"builtin":"demo"}"#);

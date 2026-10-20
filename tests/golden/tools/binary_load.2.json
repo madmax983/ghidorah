@@ -43,7 +43,9 @@
     },
     {
       "tool": "analysis_run",
-      "args": {},
+      "args": {
+        "binary_id": "10b91ebce0f0230f"
+      },
       "why": "Finish the analysis of the binary."
     }
   ],

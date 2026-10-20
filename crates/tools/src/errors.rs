@@ -212,6 +212,17 @@ impl ToolError {
     /// The template values fill the placeholders.
     #[must_use]
     pub fn hint(&self, has_next: bool) -> String {
+        self.hint_in(has_next, &|_| false)
+    }
+
+    /// Gives the hint of the error object for the active tools.
+    ///
+    /// The text is the text of [`ToolError::hint`], but a sentence that names an inactive
+    /// tool drops out. So the hint sends the agent to no tool outside the profile. `inactive`
+    /// tells if a word of the catalog text names a tool outside the active tools. A catalog
+    /// text that names a tool also has a sentence that names no tool.
+    #[must_use]
+    pub fn hint_in(&self, has_next: bool, inactive: &dyn Fn(&str) -> bool) -> String {
         let info = self.code.info();
         let plain = self.plain
             || (info.hint_names_next() && !has_next)
@@ -219,7 +230,7 @@ impl ToolError {
         let text = if plain { info.plain } else { info.hint };
         let values = self.values();
         let pairs: Vec<(&str, &str)> = values.iter().map(|(k, v)| (*k, v.as_str())).collect();
-        render(text, &pairs)
+        render(&active_sentences(text, inactive), &pairs)
     }
 
     /// Gives the message: the template of the code with the values filled in.
@@ -246,7 +257,14 @@ impl ToolError {
     /// valid `next` calls.
     #[must_use]
     pub fn to_json_with(&self, has_next: bool) -> Value {
-        let hint = self.hint(has_next);
+        self.to_json_in(has_next, &|_| false)
+    }
+
+    /// Gives the frozen error object of an envelope with the hint for the active tools (see
+    /// [`ToolError::hint_in`]). `has_next` tells if the envelope has valid `next` calls.
+    #[must_use]
+    pub fn to_json_in(&self, has_next: bool, inactive: &dyn Fn(&str) -> bool) -> Value {
+        let hint = self.hint_in(has_next, inactive);
         let mut shown = self.candidates.len().min(MAX_CANDIDATES);
         let mut details = self.details.is_some();
         loop {
@@ -311,6 +329,21 @@ pub(crate) fn int(value: u64) -> Value {
 /// Gives a JSON integer of a count.
 pub(crate) fn count(value: usize) -> Value {
     int(u64::try_from(value).unwrap_or(u64::MAX))
+}
+
+/// Gives the sentences of the catalog text `text` that name no inactive tool. A word is a run
+/// of ASCII letters, digits and `_`. When each sentence names an inactive tool, the text is
+/// empty.
+fn active_sentences(text: &str, inactive: &dyn Fn(&str) -> bool) -> String {
+    let kept: String = text
+        .split_inclusive(". ")
+        .filter(|sentence| {
+            !sentence
+                .split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+                .any(inactive)
+        })
+        .collect();
+    kept.trim_end().to_owned()
 }
 
 /// Cuts `text` to at most `max` characters.

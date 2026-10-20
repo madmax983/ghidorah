@@ -12,7 +12,8 @@ use ghidorah_tools::session::{AnalysisEngine, FULL_BAND, ProjectsConfig};
 use ghidorah_tools::{AnalysisState, Session, ToolError};
 
 use crate::support::{
-    DEMO_ID, DEMO_MAIN, call, config, data, fixture, session, session_with, text_at,
+    DEMO_ID, DEMO_MAIN, call, call_value, code, config, data, fixture, session, session_with,
+    text_at,
 };
 
 fn int(v: &Value, pointer: &str) -> u64 {
@@ -177,6 +178,37 @@ fn regress_triage_done_resume_false() {
         "{stopped}"
     );
     assert_eq!(text_at(&stopped, "/next/0/why"), analysis_run::WHY_RESUME);
+}
+
+/// With two open binaries, the `analysis_run` hint of a binary with no analysis names that
+/// binary. So the hint does not give `BINARY_REQUIRED` (r2-surface-07).
+#[test]
+fn regress_partial_hint_names_binary() {
+    let mut s = session();
+    let demo = call(&mut s, "binary_load", r#"{"builtin":"demo"}"#);
+    assert_eq!(text_at(data(&demo), "/binary_id"), DEMO_ID, "{demo}");
+    let args = r#"{"path":"fixtures/bin/two_helpers.gcc-O2","analysis":"none"}"#;
+    let load = call(&mut s, "binary_load", args);
+    let id = text_at(data(&load), "/binary_id");
+    let hint = load
+        .get("next")
+        .and_then(Value::as_array)
+        .unwrap_or_default()
+        .iter()
+        .find(|c| c.get("tool").and_then(Value::as_str) == Some("analysis_run"))
+        .cloned()
+        .unwrap_or_default();
+    assert_eq!(text_at(&hint, "/args/binary_id"), id, "{load}");
+    let run = call_value(
+        &mut s,
+        "analysis_run",
+        hint.get("args").cloned().unwrap_or_default(),
+    );
+    assert_eq!(code(&run), "", "{run}");
+    assert_eq!(
+        run.get("binary_id").and_then(Value::as_str),
+        Some(id.as_str())
+    );
 }
 
 #[test]

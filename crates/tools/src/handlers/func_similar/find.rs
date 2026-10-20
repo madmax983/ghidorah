@@ -136,9 +136,9 @@ impl From<OutOfFuel> for Halt {
     }
 }
 
-/// Gives the result of each target of the call in input order. Before each target the loop
-/// checks the cancel flag and the `max_ms` guard of `ctx`: the call started at the
-/// monotonic time `began`.
+/// Puts the result of each target of the call in `out`, in input order. Before each target
+/// the loop checks the cancel flag and the `max_ms` guard of `ctx`: the call started at the
+/// monotonic time `began`. After a stop, `out` holds the results of the targets before it.
 ///
 /// # Errors
 ///
@@ -151,10 +151,11 @@ pub fn find(
     args: &Args,
     ctx: &mut Ctx,
     began: u64,
-) -> Result<Vec<Item>, Halt> {
+    out: &mut Vec<Item>,
+) -> Result<(), Halt> {
     let opts = Opts::of(args);
     let Some(program) = program_of(session, bound) else {
-        return Ok(Vec::new());
+        return Ok(());
     };
     let (inputs, name) = match args.list("targets") {
         Some(list) => (list.to_vec(), "targets"),
@@ -163,7 +164,7 @@ pub fn find(
             "target",
         ),
     };
-    let mut out = Vec::with_capacity(inputs.len());
+    out.reserve(inputs.len());
     for (i, input) in inputs.into_iter().enumerate() {
         if ctx.cancelled() {
             return Err(Halt::Cancel);
@@ -209,7 +210,7 @@ pub fn find(
             proposal,
         });
     }
-    Ok(out)
+    Ok(())
 }
 
 /// Gives the proposal of the query `doc` by the rules of the module doc.

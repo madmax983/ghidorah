@@ -24,7 +24,7 @@ use ghidorah_db::snapshot::{inputs_hash, result_hash};
 use ghidorah_db::{Line, Project, ProjectError, ProjectSummary, RunLine, RunState};
 use ghidorah_json::{Limits as JsonLimits, Object, Value};
 
-use super::store::project_error;
+use super::store::{project_error, project_reason};
 use super::{OpenBinary, RunReport, Session, Store, Until};
 use crate::api::Progress;
 use crate::dispatch::Ctx;
@@ -94,10 +94,10 @@ impl Session {
     }
 
     /// Gives the reason why the session keeps its binaries in memory only: the text of the
-    /// refusal of its projects root. Gives `None` when the root keeps projects, or when the
-    /// session has no projects root.
+    /// refusal of its projects root. The text names no path. Gives `None` when the root keeps
+    /// projects, or when the session has no projects root.
     pub fn persist_refusal(&mut self) -> Option<String> {
-        self.root_check().err().map(|e| e.to_string())
+        self.root_check().err().map(|e| project_reason(&e, None))
     }
 
     /// Gives the projects on disk, newest revision first.
@@ -160,7 +160,10 @@ impl Session {
             Ok(Some(root)) => root,
             Ok(None) => return Ok(self.keep(binary, load, None)),
             // The binary stays in memory, and the store keeps the reason for the agent.
-            Err(refusal) => return Ok(self.keep(binary, load, Some(refusal.to_string()))),
+            Err(refusal) => {
+                let reason = project_reason(&refusal, None);
+                return Ok(self.keep(binary, load, Some(reason)));
+            }
         };
         let dir = Project::dir_of(&root, binary.id);
         if Project::exists(self.fs.as_mut(), &dir) {
@@ -180,7 +183,7 @@ impl Session {
             Err(_) if Project::exists(self.fs.as_mut(), &dir) => {
                 return self.admit_project(&dir, binary.id, load, break_lock);
             }
-            Err(error) => return Err(project_error(&error)),
+            Err(error) => return Err(project_error(&error, Some(&dir))),
         };
         self.stores.insert(
             binary.id,
@@ -264,7 +267,8 @@ impl Session {
         }
         let read_only = self.config.read_only;
         let opts = self.open_options(read_only, break_lock);
-        let opened = Project::open(self.fs.boxed(), &dir, &opts).map_err(|e| project_error(&e))?;
+        let opened = Project::open(self.fs.boxed(), &dir, &opts)
+            .map_err(|e| project_error(&e, Some(&dir)))?;
         let status = opened.analysis;
         let analysis = status.last_run.map(|run| AnalysisInfo {
             state: if status.current {
@@ -521,7 +525,7 @@ impl Session {
             if let Some(project) = store.project.as_mut().filter(|p| !p.is_read_only()) {
                 project
                     .append(&Line::Run(line), program)
-                    .map_err(|e| project_error(&e))?;
+                    .map_err(|e| project_error(&e, Some(project.dir())))?;
             }
             store.history.record_run(&line);
         }
@@ -529,7 +533,9 @@ impl Session {
             if let (RunState::Complete, Some(project)) =
                 (state, store.project.as_mut().filter(|p| !p.is_read_only()))
             {
-                project.snapshot(program).map_err(|e| project_error(&e))?;
+                project
+                    .snapshot(program)
+                    .map_err(|e| project_error(&e, Some(project.dir())))?;
             }
             store.checkpoint(program);
         }

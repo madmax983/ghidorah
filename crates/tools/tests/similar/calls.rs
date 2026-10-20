@@ -333,9 +333,8 @@ fn regress_func_similar_honors_max_ms() {
     let args = r#"{"targets":["main","fn:0x11e0"],"min_score":0,"max_ms":1}"#;
     let mut s = slow_session(false);
     let envelope = call(&mut s, "func_similar", args);
-    assert_eq!(code(&envelope), "BUDGET_EXCEEDED", "{envelope}");
     assert_eq!(
-        text_at(&envelope, "/error/details/stopped_by"),
+        text_at(data(&envelope), "/stopped_by"),
         "time",
         "{envelope}"
     );
@@ -358,4 +357,37 @@ fn regress_func_similar_honors_max_ms() {
         "cancel",
         "{envelope}"
     );
+}
+
+/// A `max_ms` stop follows design Section 10.11 rule 3: `stopped_by` is `time`,
+/// `deterministic` is false and the result has `W_TIME_STOP`. The hint names a resend or
+/// `max_ms`, not `max_steps` (r2-surface-08).
+#[test]
+fn regress_similar_time_stop_names_max_ms() {
+    let args = r#"{"targets":["main","fn:0x11e0"],"min_score":0,"max_ms":1}"#;
+    // The new session of a new test thread has no cached index, and eval mode is off.
+    let mut s = slow_session(false);
+    let envelope = call(&mut s, "func_similar", args);
+    let got = data(&envelope);
+    assert_eq!(text_at(got, "/stopped_by"), "time", "{envelope}");
+    assert_eq!(
+        got.get("deterministic"),
+        Some(&Value::Bool(false)),
+        "{envelope}"
+    );
+    let warnings = list_at(&envelope, "/warnings");
+    let stop = warnings
+        .iter()
+        .find(|w| text_at(w, "/code") == "W_TIME_STOP")
+        .unwrap_or_else(|| panic!("no W_TIME_STOP: {envelope}"));
+    assert_eq!(text_at(stop, "/remedy/tool"), "func_similar", "{envelope}");
+    let text = ghidorah_json::write(&envelope);
+    assert!(!text.contains("max_steps"), "{envelope}");
+    let resend = list_at(&envelope, "/next")
+        .first()
+        .cloned()
+        .unwrap_or_default();
+    assert_eq!(text_at(&resend, "/tool"), "func_similar", "{envelope}");
+    assert_eq!(resend.get("args"), Some(&json(args)), "{envelope}");
+    assert!(text_at(&resend, "/why").contains("max_ms"), "{envelope}");
 }

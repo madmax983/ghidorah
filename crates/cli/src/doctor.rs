@@ -42,10 +42,6 @@ pub const PROBE: &str = ".ghidorah-doctor-probe";
 /// The error code of a handler panic.
 const INTERNAL: &str = "INTERNAL_ERROR";
 
-/// The reason of a default projects root inside a git working tree (ADR-0022). It names no
-/// path, because the report holds no absolute path.
-const IN_GIT_TREE: &str = "The default projects root is inside a git working tree, so no project persists. Send --project-root DIR, or set XDG_DATA_HOME to a directory outside the git working tree.";
-
 fn check(name: &str, ok: bool, extra: Vec<(&str, Value)>) -> Value {
     let mut out = Object::new();
     out.push("name", Value::from(name));
@@ -189,13 +185,10 @@ fn project_dir(options: &Options) -> Value {
         named: options.project_root_named,
         break_lock: false,
     };
-    // The root rule comes before the probe, so a refused root gets no directory.
-    if rule.check().is_err() {
-        return check(
-            "project_dir",
-            false,
-            vec![("reason", Value::from(IN_GIT_TREE))],
-        );
+    // The root rule comes before the probe, so a refused root gets no directory. The reason
+    // of the rule names no path, because the report holds no absolute path.
+    if let Err(reason) = rule.check() {
+        return check("project_dir", false, vec![("reason", Value::from(reason))]);
     }
     // A root that does not exist yet stays so: the probe writes in its nearest parent, and
     // the first project makes the root.

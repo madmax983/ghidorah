@@ -1,6 +1,9 @@
 //! The catalog data of `ErrorCode` (design Section 10.8).
 //!
 //! Each message has the form "What failed. Why. Action." in STE (AC-024).
+//!
+//! The server drops each hint sentence that names a tool outside the active profile. So a
+//! hint with a sentence that names a tool also has a sentence that names no tool.
 
 use crate::catalog::{CodeInfo, ErrorCode, RepairClass};
 
@@ -127,7 +130,9 @@ pub(crate) const fn info(code: ErrorCode) -> CodeInfo {
             "The binary_id is not open in this session. The session has no binary with this ID. Use a candidate binary_id.",
             "Send next[0] when it exists. It opens the project of the binary.",
         )
-        .with_plain("Load the binary again with binary_load."),
+        .with_plain(
+            "Use the binary_id of an open binary. Load the binary again with binary_load.",
+        ),
         E::BinaryRequired => row(
             code,
             "BINARY_REQUIRED",
@@ -203,7 +208,7 @@ pub(crate) const fn info(code: ErrorCode) -> CodeInfo {
             "The call conflicts with the current state. The expected_rev differs from the current rev, or a later transaction changed the same facts. Read the later edits before you send the call again.",
             "Send next[0] to read the later edits. The candidates hold the call with the current rev or the later transactions.",
         )
-        .with_plain("Call history_list to read the later edits."),
+        .with_plain("Call history_list to read the later edits. Read rev in this result. Send the call again with that rev as expected_rev."),
         E::BlockedByHigherPrioritySource => row(
             code,
             "BLOCKED_BY_HIGHER_PRIORITY_SOURCE",
@@ -220,14 +225,16 @@ pub(crate) const fn info(code: ErrorCode) -> CodeInfo {
             "The new function body overlaps another function. Two function bodies cannot share an address. Change or delete the other function first.",
             "The candidates name the owner function.",
         )
-        .with_plain("Call addr_info to find the owner function."),
+        .with_plain(
+            "Call addr_info to find the owner function. Change or delete the owner function first.",
+        ),
         E::NotInFunction => row(
             code,
             "NOT_IN_FUNCTION",
             N,
             false,
             "The address is not in a function. The call needs an address inside a function body. Use an address in a function.",
-            "Call func_edit with the action create to make a function.",
+            "Use an address inside a function body. Call func_edit with the action create to make a function.",
         ),
         E::CParseError => row(
             code,
