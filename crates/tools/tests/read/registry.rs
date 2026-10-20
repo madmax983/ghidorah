@@ -7,7 +7,7 @@ use ghidorah_testkit::ste::check_agent_text;
 use ghidorah_tools::args::{globals_of, parse};
 use ghidorah_tools::outshape::Fit;
 use ghidorah_tools::registry::lint;
-use ghidorah_tools::{ArgKind, ArgSpec, Host, Session, demo, handlers};
+use ghidorah_tools::{ArgKind, ArgSpec, Host, Session, budget, demo, handlers};
 
 use crate::support::{WP17B, call, demo as demo_session, json, registry, root};
 
@@ -132,4 +132,56 @@ fn read_examples_are_deterministic() {
             );
         }
     }
+}
+
+#[test]
+fn regress_tool_max_chars_defaults() {
+    // The defaults of design Section 10.9: 16,000 for list tools, 24,000 for the four large
+    // tools, 12,000 for binary_survey and 8,000 for all other tools.
+    let large = ["func_get", "batch_run", "fact_check", "func_similar"];
+    let shipped = <Session as Host>::registry();
+    let mut lists = Vec::new();
+    for tool in shipped.tools() {
+        let want = if tool.list.is_some() {
+            lists.push(tool.name);
+            16_000
+        } else if large.contains(&tool.name) {
+            24_000
+        } else if tool.name == "binary_survey" {
+            12_000
+        } else {
+            8_000
+        };
+        assert_eq!(tool.max_chars, want, "{}", tool.name);
+    }
+    lists.sort_unstable();
+    assert_eq!(
+        lists,
+        [
+            "func_list",
+            "history_list",
+            "search",
+            "tool_search",
+            "xref_list"
+        ]
+    );
+    assert_eq!(
+        [
+            budget::LIST_MAX_CHARS,
+            budget::LARGE_MAX_CHARS,
+            budget::SURVEY_MAX_CHARS,
+            budget::OTHER_MAX_CHARS,
+        ],
+        [16_000, 24_000, 12_000, 8_000]
+    );
+    // The why tree defaults of fact_check come from the explain module of the analysis crate.
+    let default = |name: &str| handlers::fact_check::SPEC.arg(name).and_then(|a| a.default);
+    let depth = ghidorah_analysis::facts::explain::DEFAULT_DEPTH.to_string();
+    let nodes = ghidorah_analysis::facts::explain::DEFAULT_NODES.to_string();
+    assert_eq!(default("depth"), Some(depth.as_str()));
+    assert_eq!(default("max_nodes"), Some(nodes.as_str()));
+    assert_eq!(
+        (default("depth"), default("max_nodes")),
+        (Some("3"), Some("200"))
+    );
 }

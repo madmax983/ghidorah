@@ -27,9 +27,15 @@
 //! | Xref | [`RefId`] | `ref:<from>><to>:<kind name>` | `ref:0x401136>0x402010:read` |
 //!
 //! [`BinaryId`] has no prefix. Its text is 16 hex digits. [`Rev`] is a JSON integer field.
+//!
+//! The name parts are in symbol, import, export and section IDs. A name part with a character
+//! that `BinText` escapes shows in a quoted form, for example `imp:"\x1b[2J"`. A name part
+//! that starts with `"` shows quoted too. The module `quote` gives the escapes. Every other
+//! name keeps its exact text.
 
 mod composite;
 mod names;
+mod quote;
 mod simple;
 
 use std::fmt;
@@ -51,8 +57,12 @@ use crate::catalog::ErrorCode;
 /// The largest name in an ID, in bytes. It equals the string limit of Section 4.7.
 pub const MAX_NAME_LEN: usize = 4096;
 
-/// The largest ID text in bytes. An import ID holds two names.
-pub const MAX_ID_TEXT: usize = 2 * MAX_NAME_LEN + 64;
+/// The largest quoted name part in bytes: an escape of at most 4 bytes for each name byte, and
+/// two quotes.
+pub const MAX_QUOTED_NAME: usize = 4 * MAX_NAME_LEN + 2;
+
+/// The largest ID text in bytes. An import ID holds two quoted names.
+pub const MAX_ID_TEXT: usize = 2 * MAX_QUOTED_NAME + 64;
 
 /// The kind of an ID. The order is the prefix order of Section 10.5, rule 3.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -343,7 +353,7 @@ impl Id {
             IdKind::JumpTable => Self::JumpTable(JumpTableId(address()?)),
             IdKind::External => Self::External(hex("offset")?),
             IdKind::File => Self::File(FileOffset(hex("offset")?)),
-            IdKind::Sym => Self::Sym(SymId::new(body)?),
+            IdKind::Sym => Self::Sym(SymId::parse_body(body)?),
             IdKind::Var => Self::Var(VarId::parse_body(body)?),
             IdKind::Note => Self::Note(NoteId(number("number")?)),
             IdKind::Set => Self::Set(SetName::new(body)?),

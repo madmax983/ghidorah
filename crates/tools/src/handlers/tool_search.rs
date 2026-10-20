@@ -122,7 +122,7 @@ pub const SPEC: ToolSpec<Session> = ToolSpec {
         },
     ],
     binary: BinaryArg::None,
-    max_chars: 16_000,
+    max_chars: crate::budget::LIST_MAX_CHARS,
     list: Some(ListSpec {
         default_limit: DEFAULT_LIMIT,
     }),

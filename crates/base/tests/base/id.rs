@@ -1,5 +1,6 @@
 //! Tests of the ID grammar (design Section 3.5, ADR-0008, AC-045).
 
+use ghidorah_base::bintext::escapes;
 use ghidorah_base::id::{MAX_ID_TEXT, MAX_NAME_LEN};
 use ghidorah_base::{
     Address, BinaryId, BlockId, ExportId, FileOffset, FuncId, Id, IdError, IdKind, ImportId,
@@ -8,9 +9,29 @@ use ghidorah_base::{
 };
 use ghidorah_testkit::pbt::{self, Gen};
 
-/// Pieces of names. They hold the separators of every ID form.
-const PIECES: [&str; 16] = [
-    "a", "Z", "_", "0", "7", "!", "#", ":", "/", "@", ">", "+", "-", ".", " ", "\u{e9}",
+/// Pieces of names. They hold the separators of every ID form, and characters that the quoted
+/// form escapes.
+const PIECES: [&str; 20] = [
+    "a",
+    "Z",
+    "_",
+    "0",
+    "7",
+    "!",
+    "#",
+    ":",
+    "/",
+    "@",
+    ">",
+    "+",
+    "-",
+    ".",
+    " ",
+    "\u{e9}",
+    "\"",
+    "\\",
+    "\u{1b}",
+    "\u{e0041}",
 ];
 
 fn name(g: &mut Gen, max_pieces: usize) -> String {
@@ -554,4 +575,144 @@ fn id_error_text() {
         .to_string()
         .contains("address")
     );
+}
+
+/// Tells if `text` holds no character that `BinText` escapes, except the backslash of an
+/// escape.
+fn shows_clean(text: &str) -> bool {
+    text.chars().all(|c| c == '\\' || !escapes(c))
+}
+
+/// Gives the name IDs of `name`: import, symbol, export and section forms.
+fn name_ids(name: &str) -> Vec<Id> {
+    let mut out = Vec::new();
+    out.extend(ImportId::elf(name).ok().map(Id::Import));
+    out.extend(
+        ImportId::pe_by_name("kernel32.dll", name)
+            .ok()
+            .map(Id::Import),
+    );
+    out.extend(ImportId::pe_by_name(name, "puts").ok().map(Id::Import));
+    out.extend(ImportId::pe_by_ordinal(name, 7).ok().map(Id::Import));
+    out.extend(SymId::new(name).ok().map(Id::Sym));
+    out.extend(ExportId::by_name(name).ok().map(Id::Export));
+    out.extend(SectionId::new(3, name).ok().map(Id::Section));
+    out
+}
+
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one table of hostile names and text forms"
+)]
+fn regress_hostile_name_id_is_escaped() {
+    let tag: String = "IGN"
+        .chars()
+        .filter_map(|c| char::from_u32(0xe0000 + u32::from(c)))
+        .collect();
+    let hostile = [
+        "\u{1b}[2J".to_owned(),
+        "\u{202e}IGN".to_owned(),
+        "line\nbreak".to_owned(),
+        format!("x{tag}"),
+        "\"quoted".to_owned(),
+        "back\\slash".to_owned(),
+        "\\x1b".to_owned(),
+        "\u{1b}!x".to_owned(),
+        "a\"b\\c\u{85}\u{7f}\u{0}".to_owned(),
+        "\"#12".to_owned(),
+        "!\u{feff}".to_owned(),
+        "\u{10fffd}\u{e000}\u{ad}".to_owned(),
+        "\"".to_owned(),
+    ];
+    let mut checked = 0;
+    for name in &hostile {
+        for id in name_ids(name) {
+            let text = id.to_string();
+            assert!(shows_clean(&text), "{name:?} gives {text:?}");
+            assert_eq!(Id::parse(&text), Ok(id.clone()), "{text:?}");
+            checked += 1;
+        }
+    }
+    assert!(checked >= 70, "{checked} IDs");
+    // The quoted form: a double quote, the name with escapes, and a closing double quote.
+    let quoted: [(Id, &str); 9] = [
+        (
+            Id::Sym(SymId::new("\u{1b}[2J").unwrap()),
+            r#"sym:"\x1b[2J""#,
+        ),
+        (
+            Id::Sym(SymId::new("\u{202e}IGN\n").unwrap()),
+            r#"sym:"\u{202e}IGN\x0a""#,
+        ),
+        (Id::Sym(SymId::new("\"q").unwrap()), r#"sym:"\"q""#),
+        (
+            Id::Sym(SymId::new("back\\slash").unwrap()),
+            r#"sym:"back\\slash""#,
+        ),
+        (
+            Id::Import(ImportId::elf("x\u{1b}!y").unwrap()),
+            r#"imp:"x\x1b!y""#,
+        ),
+        (
+            Id::Import(ImportId::pe_by_name("Evil\u{1b}.DLL", "a\u{e0049}").unwrap()),
+            r#"imp:"evil\x1b.dll"!"a\u{e0049}""#,
+        ),
+        (
+            Id::Import(ImportId::pe_by_ordinal("\"x.dll", 7).unwrap()),
+            r#"imp:"\"x.dll"!#7"#,
+        ),
+        (
+            Id::Export(ExportId::by_name("e\u{9f}").unwrap()),
+            r#"exp:"e\x9f""#,
+        ),
+        (
+            Id::Section(SectionId::new(3, "s:\u{200b}").unwrap()),
+            r#"sec:3:"s:\u{200b}""#,
+        ),
+    ];
+    for (id, text) in quoted {
+        assert_eq!(id.to_string(), text, "{id:?}");
+        assert_eq!(Id::parse(text), Ok(id), "{text}");
+    }
+    // Every other name keeps its exact text.
+    for (name, text) in [
+        ("puts@GLIBC_2.2.5", "sym:puts@GLIBC_2.2.5"),
+        ("a\"b", "sym:a\"b"),
+        ("caf\u{e9} x!y", "sym:caf\u{e9} x!y"),
+    ] {
+        assert_eq!(SymId::new(name).unwrap().to_string(), text);
+    }
+    assert_eq!(ImportId::elf("a!b").unwrap().to_string(), "imp:!a!b");
+    assert_eq!(SectionId::new(0, "").unwrap().to_string(), "sec:0:");
+    // Input can quote a name that needs no quotes. A bad quoted form gives an error.
+    assert_eq!(
+        Id::parse(r#"sym:"puts""#),
+        Ok(Id::Sym(SymId::new("puts").unwrap()))
+    );
+    assert_eq!(
+        Id::parse(r#"sym:"\u{41}\x42""#),
+        Ok(Id::Sym(SymId::new("AB").unwrap()))
+    );
+    for bad in [
+        r#"sym:"open"#,
+        r#"sym:"a"b"#,
+        r#"sym:"\q""#,
+        r#"sym:"\x4""#,
+        r#"sym:"\u{d800}""#,
+        r#"sym:"\u{110000}""#,
+        r#"sym:"\u{41""#,
+        r#"sym:"""#,
+        r#"imp:"a"b"#,
+        r#"imp:"k.dll"!"#,
+        r#"exp:"x"y"#,
+        r#"sec:1:"x"y"#,
+    ] {
+        assert!(Id::parse(bad).is_err(), "{bad}");
+    }
+    // The longest quoted name still parses back.
+    let long = "\u{1}".repeat(MAX_NAME_LEN);
+    for id in name_ids(&long) {
+        assert_eq!(Id::parse(&id.to_string()), Ok(id));
+    }
 }

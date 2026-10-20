@@ -366,7 +366,7 @@ impl<S: 'static> ToolSpec<S> {
             examples: &[],
             binary: BinaryArg::Bound,
             force: false,
-            max_chars: 8_000,
+            max_chars: crate::budget::OTHER_MAX_CHARS,
             list: None,
             fuel: None,
             handler,

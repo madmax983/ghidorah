@@ -18,7 +18,7 @@ pub const HARD_MAX_CHARS: u32 = 60_000;
 /// The default `max_chars` of a list tool.
 pub const LIST_MAX_CHARS: u32 = 16_000;
 
-/// The default `max_chars` of `func_get` and `batch_run`.
+/// The default `max_chars` of `func_get`, `batch_run`, `fact_check` and `func_similar`.
 pub const LARGE_MAX_CHARS: u32 = 24_000;
 
 /// The default `max_chars` of `binary_survey`.
