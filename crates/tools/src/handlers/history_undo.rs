@@ -196,7 +196,15 @@ fn run(session: &mut Session, args: &Args, ctx: &mut Ctx) -> Result<Payload, Too
         source: session.config().source,
         session: session_label(&label)?,
     };
-    let out = session.undo(id, &req)?;
+    let wide = matches!(req.scope, Scope::All);
+    let out = session.undo(id, &req).map_err(|e| {
+        // The scope is already every session, so the hint to widen it does not apply.
+        if wide && e.code == ErrorCode::NothingToUndo {
+            e.plain_hint()
+        } else {
+            e
+        }
+    })?;
     let mut result = Object::new();
     let selected = entries(session, id, &out.entries);
     result.push(if redo { "redone" } else { "undone" }, selected);

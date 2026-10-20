@@ -283,3 +283,53 @@ fn profile_parse_and_allowlist() {
     assert_eq!(code(&envelope), "", "{envelope}");
     assert_eq!(s.active_tools().len(), 1);
 }
+
+/// Gives the tool names of `line` that the catalog holds.
+fn tools_of(line: &str) -> Vec<&str> {
+    line.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+        .filter(|token| CATALOG.contains(token))
+        .collect()
+}
+
+/// Every shipped profile gets a workflow line with active tools only. The batch line of
+/// `readonly` has no edit sentence, and `mini` keeps the rev and `dry_run` line for its edits.
+#[test]
+fn regress_every_profile_has_workflow() {
+    let reg = registry();
+    for profile in Profile::ALL {
+        let set = ProfileSet::new(profile, None);
+        let text = instructions::generate(&reg, &set);
+        let workflow = text.lines().find(|l| l.starts_with("Workflow:"));
+        let Some(workflow) = workflow else {
+            panic!("{} has no workflow line:\n{text}", profile.as_str());
+        };
+        for tool in tools_of(workflow) {
+            assert!(set.holds(&reg, tool), "{tool}: {workflow}");
+        }
+        for name in ["binary_survey", "func_get"] {
+            assert!(workflow.contains(name), "{workflow}");
+        }
+        let batch = text.lines().find(|l| l.starts_with("batch_run"));
+        let edits = text.lines().find(|l| l.contains("dry_run"));
+        match profile {
+            Profile::Readonly => {
+                let batch = batch.expect("readonly has batch_run");
+                assert!(!batch.contains("edits"), "{batch}");
+                assert!(edits.is_none(), "{text}");
+            }
+            Profile::Mini => {
+                let edits = edits.expect("mini has edit tools");
+                assert!(edits.contains("rev"), "{edits}");
+                assert!(!edits.contains("history_undo"), "{edits}");
+                assert!(text.contains("binary_load {path}"), "{text}");
+            }
+            Profile::Full => {
+                // In full, each built line gives the text of design Section 10.15.
+                let active = |tool: &str| set.holds(&reg, tool);
+                for line in LINES {
+                    assert_eq!(line.render(&active).as_deref(), Some(line.text));
+                }
+            }
+        }
+    }
+}

@@ -1,9 +1,13 @@
 //! The envelope frame, `partial` and the repair hints of failures (design Sections 10.6
 //! and 10.8).
 
-use ghidorah_json::Value;
+use std::path::{Path, PathBuf};
 
-use crate::support::{call, fixture, text_at};
+use ghidorah_json::Value;
+use ghidorah_tools::session::ProjectsConfig;
+use ghidorah_tools::{Profile, ProfileSet, Session};
+
+use crate::support::{call, code, config, fixture, load, session_with, text_at};
 
 /// A binary with no analysis run gives partial results, an `analysis` member with the
 /// state `none` and the `analysis_run` hint.
@@ -15,4 +19,79 @@ fn regress_no_analysis_is_partial() {
     assert_eq!(list.get("partial"), Some(&Value::Bool(true)), "{list}");
     assert_eq!(text_at(&list, "/analysis/state"), "none", "{list}");
     assert_eq!(text_at(&list, "/next/0/tool"), "analysis_run", "{list}");
+}
+
+/// Gives a new empty directory for one test.
+fn tmp(name: &str) -> PathBuf {
+    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+        .join("session")
+        .join(name);
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("the temp directory exists");
+    dir
+}
+
+/// Makes a session with `profile` and the projects root `projects`, or no projects root.
+fn session_in(profile: ProfileSet, projects: Option<&Path>) -> Session {
+    let mut c = config();
+    c.profile = profile;
+    c.projects = projects.map(|root| ProjectsConfig {
+        root: root.to_path_buf(),
+        named: true,
+        break_lock: false,
+    });
+    session_with(c)
+}
+
+/// Makes sure that the hint of a failure names `next[0]` and the candidates only when the
+/// envelope holds them.
+fn assert_hint_matches(envelope: &Value) {
+    assert_eq!(envelope.get("ok"), Some(&Value::Bool(false)), "{envelope}");
+    let hint = text_at(envelope, "/error/hint");
+    assert!(!hint.is_empty(), "{envelope}");
+    if envelope.get("next").is_none() {
+        assert!(!hint.contains("next[0]"), "{envelope}");
+    }
+    if envelope.pointer("/error/candidates").is_none() {
+        assert!(!hint.contains("candidate"), "{envelope}");
+    }
+}
+
+/// The hint of a failure never names `next[0]`, the candidates or the scope `*` when the
+/// envelope does not hold them.
+#[test]
+fn regress_hint_matches_payload() {
+    let mini = || ProfileSet::new(Profile::Mini, None);
+    let mut s = session_in(mini(), None);
+    let open = call(&mut s, "func_list", "{}");
+    assert_eq!(code(&open), "NO_BINARY_OPEN", "{open}");
+    assert_hint_matches(&open);
+    let tools = ["func_list", "func_get", "xref_list"].map(str::to_owned);
+    let mut s = session_in(ProfileSet::new(Profile::Full, Some(tools.to_vec())), None);
+    let _ = load(&mut s, "fixtures/bin/hello.gcc-O0");
+    let missing = call(&mut s, "func_get", "{}");
+    assert_eq!(code(&missing), "MISSING_ARGUMENT", "{missing}");
+    assert_hint_matches(&missing);
+    let (mut s, _) = fixture("hello.gcc-O0");
+    let found = call(&mut s, "func_get", r#"{"target":"nosuchname"}"#);
+    assert_eq!(code(&found), "NOT_FOUND", "{found}");
+    assert!(found.pointer("/error/candidates").is_none(), "{found}");
+    assert_hint_matches(&found);
+    let undo = call(&mut s, "history_undo", r#"{"session":"*"}"#);
+    assert_eq!(code(&undo), "NOTHING_TO_UNDO", "{undo}");
+    assert_hint_matches(&undo);
+    for part in ["/error/hint", "/error/message"] {
+        assert!(!text_at(&undo, part).contains('*'), "{undo}");
+    }
+    // In mini, the repair of NO_BINARY_OPEN opens the newest project.
+    let dir = tmp("hint_mini_project");
+    let mut full = session_in(ProfileSet::default(), Some(&dir));
+    let id = load(&mut full, "fixtures/bin/hello.gcc-O0");
+    drop(full);
+    let mut s = session_in(mini(), Some(&dir));
+    let open = call(&mut s, "func_list", "{}");
+    assert_eq!(code(&open), "NO_BINARY_OPEN", "{open}");
+    assert_eq!(text_at(&open, "/next/0/tool"), "binary_load", "{open}");
+    assert_eq!(text_at(&open, "/next/0/args/binary_id"), id, "{open}");
+    assert_hint_matches(&open);
 }

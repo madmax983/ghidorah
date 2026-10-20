@@ -9,6 +9,8 @@
 //!
 //! A failure envelope holds the error object and the valid repair calls.
 
+use std::any::Any;
+
 use ghidorah_base::{ErrorCode, IdKind};
 use ghidorah_json::{Object, Value};
 
@@ -21,6 +23,7 @@ use crate::hints::{
     Call, MAX_NEXT, WHY_BINARY, WHY_BRIEF, WHY_HISTORY, WHY_SCHEMA, WHY_SEARCH, keep_valid,
 };
 use crate::registry::Registry;
+use crate::session::{Session, WHY_REOPEN};
 
 /// The data members that a trimmed commit always keeps.
 const KEEP: [&str; 4] = ["id", "rev", "tx", "noop"];
@@ -195,10 +198,34 @@ pub(super) fn failure<S: Host>(
         };
         next.extend(helper.map(|(name, args, why)| Call::new(name, args, why)));
     }
+    let next = keep_valid(registry, &|name| host.in_profile(name), next);
     Envelope {
         frame,
-        body: Body::Err(error.to_json()),
-        next: keep_valid(registry, &|name| host.in_profile(name), next),
+        body: Body::Err(error.to_json_with(!next.is_empty())),
+        next,
+    }
+}
+
+/// Adds the repair call of a `NO_BINARY_OPEN` error in a profile with no `session_brief`:
+/// `binary_load { binary_id }` of the newest project of the session. Other errors, errors
+/// with a repair call and other hosts stay the same.
+pub(super) fn project_repair<S: Host>(host: &mut S, error: ToolError) -> ToolError {
+    if error.code != ErrorCode::NoBinaryOpen
+        || !error.next.is_empty()
+        || host.in_profile("session_brief")
+    {
+        return error;
+    }
+    let any: &mut dyn Any = host;
+    let newest = any
+        .downcast_mut::<Session>()
+        .and_then(|session| session.projects().into_iter().next());
+    match newest {
+        Some(project) => {
+            let args = Value::object([("binary_id", Value::from(project.binary_id.to_string()))]);
+            error.next(Call::new("binary_load", args, WHY_REOPEN))
+        }
+        None => error,
     }
 }
 

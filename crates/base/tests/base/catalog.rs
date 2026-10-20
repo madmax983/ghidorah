@@ -186,9 +186,29 @@ fn diag_codes_frozen() {
     assert_eq!(DiagCode::from_num(16), None);
 }
 
+/// Checks the plain hint of one error code. A result with no repair call, no candidates or a
+/// wide scope takes it, so it names none of them.
+fn check_plain(info: &CodeInfo, failures: &mut Vec<String>) {
+    for mark in ["next[0]", "candidate", "*"] {
+        if info.plain.contains(mark) {
+            failures.push(format!("{} plain hint names {mark}", info.name));
+        }
+    }
+    let plain_needed =
+        info.hint_names_next() || info.hint_names_candidates() || info.hint.contains('*');
+    if !plain_needed && info.plain != info.hint {
+        failures.push(format!("{} needs no plain hint", info.name));
+    }
+}
+
 /// Checks the text fields of one code.
 fn check_text(info: &CodeInfo, failures: &mut Vec<String>) {
-    for (what, text) in [("message", info.message), ("hint", info.hint)] {
+    let texts = [
+        ("message", info.message),
+        ("hint", info.hint),
+        ("plain hint", info.plain),
+    ];
+    for (what, text) in texts {
         if text.trim().is_empty() {
             failures.push(format!("{} has an empty {what}", info.name));
         }
@@ -228,6 +248,9 @@ fn ac_141a_catalog_complete() {
     }
     for info in DiagCode::ALL.iter().map(|c| c.info()) {
         check_text(&info, &mut failures);
+    }
+    for code in ErrorCode::ALL {
+        check_plain(&code.info(), &mut failures);
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
     assert_eq!(

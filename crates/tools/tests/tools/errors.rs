@@ -305,6 +305,7 @@ fn ac_142_no_debug_text() {
             .var("kind", "set");
         texts.push(error.message());
         texts.push(error.to_string());
+        texts.push(error.hint(false));
         texts.extend(agent_texts(&Value::object([("error", error.to_json())])));
     }
     for code in WarningCode::ALL {

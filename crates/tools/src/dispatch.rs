@@ -33,7 +33,7 @@ use crate::errors::{Candidate, ToolError, int};
 use crate::hints::{Call, WHY_ANALYSIS, WHY_FIRST_PAGE, WHY_REV, check, keep_valid};
 use crate::registry::Registry;
 use crate::spec::{ArgKind, ToolSpec};
-use fit::{binary_repair, fail};
+use fit::{binary_repair, fail, project_repair};
 
 /// One part of a sort key.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -377,6 +377,7 @@ fn open<S: Host>(
         Ok(frame) => frame,
         Err(error) => {
             let error = binary_repair(tool.name, parsed.args.canonical(), error);
+            let error = project_repair(host, error);
             return Err(Box::new(fail(registry, host, bare, tool.name, error)));
         }
     };

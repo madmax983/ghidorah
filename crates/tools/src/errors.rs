@@ -111,6 +111,8 @@ pub struct ErrorParts {
     pub crash_id: Option<String>,
     /// The repair calls. The envelope puts them in its top-level `next`.
     pub next: Vec<Call>,
+    /// `true` makes the error object take the plain hint of the code.
+    pub plain: bool,
 }
 
 impl Deref for ToolError {
@@ -139,6 +141,7 @@ impl ToolError {
             details: None,
             crash_id: None,
             next: Vec::new(),
+            plain: false,
         }))
     }
 
@@ -180,30 +183,72 @@ impl ToolError {
         self
     }
 
+    /// Makes the error object take the plain hint of the code. A handler calls it when the
+    /// hint does not apply, for example when the scope is already wide.
+    #[must_use]
+    pub fn plain_hint(mut self) -> Self {
+        self.plain = true;
+        self
+    }
+
+    /// Gives the template values, each cut to [`MAX_TEXT_CHARS`] characters.
+    fn values(&self) -> Vec<(&'static str, String)> {
+        self.vars
+            .iter()
+            .map(|(key, value)| (*key, cut(value, MAX_TEXT_CHARS)))
+            .collect()
+    }
+
+    /// Gives the hint of the error object.
+    ///
+    /// The plain hint of the code replaces the hint in three cases:
+    ///
+    /// - The error asks for it with [`ToolError::plain_hint`].
+    /// - The hint names `next[0]`, and `has_next` is `false`.
+    /// - The hint names the candidates, and the error has none.
+    ///
+    /// The template values fill the placeholders.
+    #[must_use]
+    pub fn hint(&self, has_next: bool) -> String {
+        let info = self.code.info();
+        let plain = self.plain
+            || (info.hint_names_next() && !has_next)
+            || (info.hint_names_candidates() && self.candidates.is_empty());
+        let text = if plain { info.plain } else { info.hint };
+        let values = self.values();
+        let pairs: Vec<(&str, &str)> = values.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        render(text, &pairs)
+    }
+
     /// Gives the message: the template of the code with the values filled in.
     ///
     /// Each value is cut to [`MAX_TEXT_CHARS`] characters.
     #[must_use]
     pub fn message(&self) -> String {
-        let values: Vec<(&str, String)> = self
-            .vars
-            .iter()
-            .map(|(key, value)| (*key, cut(value, MAX_TEXT_CHARS)))
-            .collect();
+        let values = self.values();
         let pairs: Vec<(&str, &str)> = values.iter().map(|(k, v)| (*k, v.as_str())).collect();
         render(self.code.info().message, &pairs)
     }
 
     /// Gives the frozen error object, cut to [`ERROR_CAP`] characters.
     ///
-    /// The cut drops `details` first, then candidates from the end. `candidates_total`
-    /// keeps the count of all candidates.
+    /// The hint counts the repair calls of the error as `next`. The cut drops `details`
+    /// first, then candidates from the end. `candidates_total` keeps the count of all
+    /// candidates.
     #[must_use]
     pub fn to_json(&self) -> Value {
+        self.to_json_with(!self.next.is_empty())
+    }
+
+    /// Gives the frozen error object of an envelope. `has_next` tells if the envelope has
+    /// valid `next` calls.
+    #[must_use]
+    pub fn to_json_with(&self, has_next: bool) -> Value {
+        let hint = self.hint(has_next);
         let mut shown = self.candidates.len().min(MAX_CANDIDATES);
         let mut details = self.details.is_some();
         loop {
-            let object = self.object(shown, details);
+            let object = self.object(&hint, shown, details);
             let fits = chars(&ghidorah_json::write(&object)) <= ERROR_CAP;
             if fits || (!details && shown == 0) {
                 return object;
@@ -216,14 +261,15 @@ impl ToolError {
         }
     }
 
-    /// Builds the object with the first `shown` candidates, with or without `details`.
-    fn object(&self, shown: usize, details: bool) -> Value {
+    /// Builds the object with `hint`, the first `shown` candidates, and with or without
+    /// `details`.
+    fn object(&self, hint: &str, shown: usize, details: bool) -> Value {
         let info = self.code.info();
         let mut out = Object::new();
         out.push("code", Value::from(info.name));
         out.push("num", int(u64::from(info.num)));
         out.push("message", Value::from(self.message()));
-        out.push("hint", Value::from(info.hint));
+        out.push("hint", Value::from(hint));
         out.push("retryable", Value::Bool(info.retry));
         if let Some(path) = &self.field_path {
             out.push("field_path", Value::from(cut(path, MAX_PATH_CHARS)));
