@@ -7,7 +7,7 @@
 use std::path::PathBuf;
 use std::process::Command;
 
-use ghidorah_testkit::fuzz::{self, Config, Outcome, PENDING_FILE};
+use ghidorah_testkit::fuzz::{self, Config, Outcome, PENDING_FILE, SEED_ENV};
 
 /// The child reads the pending directory from this variable.
 const CHILD_ENV: &str = "GHIDORAH_TESTKIT_ABORT_CHILD";
@@ -32,9 +32,11 @@ fn fuzz_pending_file_survives_abort() {
     let _ = std::fs::remove_dir_all(&dir);
     let exe = std::env::current_exe().unwrap_or_else(|e| panic!("current_exe: {e}"));
     // The parent keeps the output of the child, so the libtest output holds no child line.
+    // The batch seed makes the child a long run, which keeps the pending file in its directory.
     let child = Command::new(exe)
         .args(["--exact", "abort_child", "--test-threads=1", "--nocapture"])
         .env(CHILD_ENV, &dir)
+        .env(SEED_ENV, "1")
         .output()
         .unwrap_or_else(|e| panic!("spawn the child: {e}"));
     assert!(
@@ -75,6 +77,45 @@ fn fuzz_pending_file_is_deleted_after_a_normal_run() {
     let report = fuzz::run(&config, &[vec![1, 2, 3]], |_| Outcome::reached(0));
     assert_eq!(report.map(|r| r.cases), Ok(50));
     assert!(!dir.join(PENDING_FILE).exists());
+}
+
+/// A tier-1 run keeps its pending file out of the source tree.
+///
+/// Two runs with one configured directory both pass, and the directory gets no pending file.
+/// Without [`SEED_ENV`], the configured directory is only the place of the checked-in inputs.
+#[test]
+fn regress_tier1_fuzz_pending_outside_tree() {
+    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("fuzz_pending_shared");
+    let _ = std::fs::remove_dir_all(&dir);
+    let shared = dir.join(PENDING_FILE);
+    let run = || {
+        let mut config = Config::new("shared", 300);
+        config.pending_dir = Some(dir.clone());
+        fuzz::run(&config, &[vec![1, 2, 3]], |_| {
+            if shared.exists() {
+                Outcome::violation(0, format!("{} exists", shared.display()))
+            } else {
+                Outcome::reached(0)
+            }
+        })
+    };
+    let results = std::thread::scope(|scope| {
+        let first = scope.spawn(run);
+        let second = scope.spawn(run);
+        [first.join(), second.join()]
+    });
+    for joined in results {
+        let Ok(result) = joined else {
+            panic!("a run thread panics");
+        };
+        let report = result.unwrap_or_else(|e| panic!("the run fails: {e}"));
+        assert_eq!(report.cases, 300);
+        assert!(report.ok(), "{:?}", report.crashes.first());
+    }
+    assert!(
+        !dir.exists(),
+        "the configured directory stays out of the run"
+    );
 }
 
 /// The output of the abort child stays out of the libtest output of the parent test.
