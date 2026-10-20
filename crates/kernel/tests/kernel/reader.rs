@@ -33,7 +33,7 @@ fn sleb(mut v: i64) -> Vec<u8> {
 }
 
 #[test]
-fn k1_reader_boundaries() {
+fn ac_028_k1_reader_boundaries() {
     // Empty buffer: every read fails and the position stays at 0.
     let mut r = Reader::new(&[], Endian::Little);
     assert_eq!(r.remaining(), 0);

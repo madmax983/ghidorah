@@ -515,6 +515,10 @@ One parser in `base::id` reads every ID kind and every address expression (Secti
 | Revision | `Rev(u64)` | integer field `rev` | `"rev": 57` |
 | Why rule | `RuleCode` | `R_` + UPPER_SNAKE | `R_FDE_START` |
 
+- Quoted names (ADR-0008): a name part of a symbol, import, export or section ID can hold a character that `BinText` escapes, or start with a double quote. Then the part shows in the quoted form.
+- The quoted form is a double quote, the name with escapes and a closing double quote. The escapes are `\\`, `\"`, `\xNN` for C0, DEL and C1, and `\u{hex}` for each other escaped code point.
+- Example: `sym:"\x1b[2J"`. The parser undoes the quotes, and a bad quoted form gives `INVALID_ARGUMENT`. Every other name keeps its exact text.
+
 ### 3.6 Source ranks and provenance
 
 Every name, signature, comment, type application, reference, flow override, jump-table target set, indirect call target set and function that an agent creates is a `Fact<T> { value, source, tx: TxId, session: SessionLabel, force: bool }`.
@@ -600,13 +604,17 @@ ADR-0004 and ADR-0016 fix these rules:
 | `SetName`, `SetComment`, `SetVarFact`, `WriteNote`, `DeleteNote` | not analysis-affecting |
 
 - Rule: no analyzer below band 800 reads signatures. Each analyzer `SPEC` lists its trigger kinds, and a test checks that only bands 800 and above list `Signatures` (AC-210).
-- Derived data (decoded instructions, L0, CFG, IR views, why trees, SSA, pseudo-C and similarity vectors) is never journaled. Caches are LRU maps with a size bound and the key `(FuncId, func_epoch)`: IR cache 256 entries, decompile cache 512 entries or 64 MiB, similarity vector cache 65,536 vectors (Section 7.13).
+- Derived data (decoded instructions, L0, CFG, IR views, why trees, SSA, pseudo-C and similarity vectors) is never journaled. Caches have a size bound. The session keeps one decompile cache of 512 entries for each open binary, with the key `(FuncId, func_epoch, options hash)` (Section 8.5). A full cache drops the entry with the oldest use. The session builds no IR cache, so each IR view lifts the function again. The similarity vector cache holds 65,536 vectors (Section 7.13).
 - Orphaned facts: an agent fact can refer to a function entry that is no longer a function after re-analysis. The fact then stays as a label or comment at its address and gets `W_FACT_ORPHANED`. `session_brief` lists it. Lower-rank analysis never deletes an object that carries a higher-rank fact.
 - OpId evidence in notes stores `lift_ver`. A read with another `lift_ver` reports `W_STALE_OP_ID`.
 
 ### 3.10 Persistence layout
 
-Default projects root: `$XDG_DATA_HOME/ghidorah/projects` (fallback `$HOME/.local/share/ghidorah/projects`). `--project-root DIR` overrides it. The session never creates a project directory inside the current git working tree unless `--project-root` names it (ADR-0022).
+Default projects root: `$XDG_DATA_HOME/ghidorah/projects` (fallback `$HOME/.local/share/ghidorah/projects`). `--project-root DIR` overrides it.
+
+- The session refuses a default projects root inside a git working tree: the root or one of its parents holds a `.git` entry (ADR-0022). A root that `--project-root` names can be anywhere.
+- With a refused root, the session keeps each binary in memory only. `binary_load` and `session_brief` then give `persisted: false` and `persist_reason`, the text of the refusal.
+- `ghidorah doctor` applies the same rule before its probe. A refused root gives `ok: false` with a reason, and the probe makes no directory. The doctor runs the registry examples in memory, with no projects root.
 
 ```text
 <projects_root>/<binary_id>/
@@ -812,16 +820,19 @@ The `MemoryMap` follows the Windows loader, not a strict reading of the specific
 - Headers: RVAs below `SizeOfHeaders` map to the same file offsets. The region `headers` has `READ`.
 - Each section header (40 bytes) gives one region:
   - `vsize` is `VirtualSize`. A `VirtualSize` of 0 means `SizeOfRawData`.
-  - `file_off` is `PointerToRawData` rounded down to a multiple of 0x200. So a value below 0x200 becomes 0.
-  - `file_size` is `min(SizeOfRawData, vsize)`, clamped to the bytes left in the file. Bytes in `[file_size, vsize)` read as zero. A section that starts or ends past EOF gives `E_OOB` and keeps its zero-filled part.
-  - Perms come from `IMAGE_SCN_MEM_READ` (0x40000000), `IMAGE_SCN_MEM_WRITE` (0x80000000) and `IMAGE_SCN_MEM_EXECUTE` (0x20000000). A section with `IMAGE_SCN_CNT_UNINITIALIZED_DATA` has no file bytes.
+  - The region starts at `ImageBase + VirtualAddress`. Its length is `vsize` rounded up to `SectionAlignment`. The region stops at the next section start and at `SizeOfImage`, but it is never shorter than `vsize`.
+  - `file_off` is `PointerToRawData`. When `FileAlignment` is 0x200 or more, `file_off` rounds down to a multiple of 0x200, so a value below 0x200 becomes 0. A low-alignment image (`FileAlignment` below 0x200) uses the value as it is (the `pefile` rule). So such an image maps flat: each RVA equals its file offset.
+  - `file_size` is `min(SizeOfRawData, vsize)`, clamped to the bytes left in the file. The bytes of the region after the file part read as zero. A section that starts or ends past EOF gives `E_OOB` and keeps its zero-filled part.
+  - Raw bytes map when `SizeOfRawData` is above 0. This rule also applies to a section with `IMAGE_SCN_CNT_UNINITIALIZED_DATA`, as in the Windows loader.
+  - Perms come from `IMAGE_SCN_MEM_READ` (0x40000000), `IMAGE_SCN_MEM_WRITE` (0x80000000) and `IMAGE_SCN_MEM_EXECUTE` (0x20000000).
 - Overlap: sections map in table order. A later section replaces the overlapped part of an earlier region, and each overlap gives `E_OVERLAP`. So the `IntervalMap` stays disjoint.
-- `sections` keeps every section header with its raw values. `segments` holds one segment per mapped region, because PE has no program headers.
+- `sections` keeps every section header with its raw values. The `va` range of a section has `vsize` bytes. `segments` holds one segment per mapped region, because PE has no program headers. A region and its segment can be longer than the `va` range of the section.
 - `rva_to_file` uses the same rules as reads. So every parser that reads by RVA sees the bytes that the loader maps.
 
 ### 4.11 PE32+ imports, delay imports and IAT names
 
 - Import descriptors (20 bytes) end at an all-zero entry. The loader ignores the directory size, as Windows does, and stops at the `dlls` limit.
+- Descriptors can share one lookup table, so the file size does not bound the import count. Each import of a load takes one unit of the import cap: file size / 16 + 32,768. When the cap is empty, the walk stops all descriptors with one `E_LIMIT`.
 - ILT and IAT entries are 8 bytes. Bit 63 set means import by ordinal (the low 16 bits). Else bits 0-30 are the RVA of a hint-name entry (`u16` hint, then the name).
 - A null ILT (`OriginalFirstThunk` 0) means "use the IAT". A pre-bound IAT holds VAs, so names come from the ILT when it exists.
 - Delay import descriptors are 32 bytes. `Attributes` bit 0 set means RVAs. Bit 0 clear (the old VC6 form) means VAs, and the loader subtracts `ImageBase`. Corrupt delay data gives a diagnostic, never a fatal error. Delay imports have `delay: true`.
@@ -875,7 +886,7 @@ The `MemoryMap` follows the Windows loader, not a strict reading of the specific
   - `pe_flags.exe`: `pe_main` linked again with `/guard:cf /integritycheck /highentropyva:no`, for the protections truth.
 - Truth (`fixtures/truth/pe/<name>.json`) comes from the C sources, the `.def` files and the link maps: function starts, imports, exports, the switch case count, parameter counts and protections.
 - Goldens (`tests/golden/loader/pe/`): `llvm-readobj -h --sections --coff-imports --coff-exports --coff-basereloc --coff-tls-directory --coff-debug-directory --unwind` and `llvm-objdump -d`.
-- `PeBuilder` (`crates/testkit/src/pe.rs`) writes minimal PE32+ files and malformed variants: `VirtualSize` 0, `PointerToRawData` below 0x200 and not aligned, RVAs inside the headers, overlapping sections, a section past EOF, `NumberOfRvaAndSizes` above 16, a null ILT, ordinal imports, VC6 delay descriptors, a huge `NumberOfNames`, forwarder cycles, `BlockSize` 0 and 7, CHAININFO entries and chain cycles, 257 TLS callbacks, and PE32 and ARM64 headers.
+- `PeBuilder` (`crates/testkit/src/pe.rs`) writes minimal PE32+ files and malformed variants: `VirtualSize` 0, `PointerToRawData` below 0x200 and not aligned, RVAs inside the headers, overlapping sections, a section past EOF, `NumberOfRvaAndSizes` above 16, a low-alignment image (`low_alignment`), `VirtualSize` slack before the next section (`vsize_slack`), raw bytes in a `CNT_UNINITIALIZED_DATA` section (`uninit_raw`), 256 descriptors that share one lookup table of 65,535 entries by name and by ordinal (`shared_ilt`, `shared_ilt_ordinal`), a null ILT, ordinal imports, VC6 delay descriptors, a huge `NumberOfNames`, forwarder cycles, `BlockSize` 0 and 7, CHAININFO entries and chain cycles, 257 TLS callbacks, and PE32 and ARM64 headers.
 - The `pe_load` fuzz target (Section 13.5) takes its seeds from the fixtures and the `PeBuilder` variants.
 
 ## 5 Decoders
@@ -1022,11 +1033,11 @@ flowchart TD
   N --> O[StackFrames 700]
   O --> P[CallingConvention 800]
   P --> Q[Syscalls 810]
-  Q --> S[Metrics 950]
-  S --> T[Gaps worklist 990]
 ```
 
 The numbers are priority bands (Ghidra style: FORMAT 100, BLOCK 200, DISASSEMBLY 300, CODE 400, FUNCTION 500, REFERENCE 600, DATA 700, FUNCTION_ID 800, DATA_TYPE_PROPAGATION 900). Lower numbers run first. `Overrides` (160) seeds agent functions, flow overrides, jump-table targets, indirect call targets and agent refs.
+
+Metrics, the gaps worklist and the language detection are derived views of the committed facts (Section 7.11). They have no band and no work state, so they are not in the pipeline.
 
 Format rules: `ImportStubs`, `FdeSeeds`, `MainDiscovery` and `Syscalls` do work only on ELF. `PdataSeeds` and `IatThunks` (WP-30) do work only on PE. An analyzer whose format does not match adds no fact.
 
@@ -1037,7 +1048,7 @@ Format rules: `ImportStubs`, `FdeSeeds`, `MainDiscovery` and `Syscalls` do work 
 - New facts emit events. A const event-to-trigger table re-queues the affected ranges for the analyzers that listen to the trigger. The run stops at a fixpoint (all pending sets empty) or when fuel runs out.
 - `AnalysisCtx` wraps an internal Tx with `source = Analysis` and a `Fuel` counter. Every insert function takes a required `Why { rule, premises }` argument, so no analyzer can add a fact without a reason (ADR-0023).
 - The scheduler writes into the committed set during the first analysis and into the shadow set during a re-analysis (Section 3.9). A re-analysis starts at the start band of the edit.
-- `analysis_run { until?: triage | full, max_steps? }` runs synchronously in fuel slices. It returns `{ state: complete | budget_stopped, steps_used, resume: bool }` (ADR-0016). `triage` stops after band 700. The default is `full`.
+- `analysis_run { until?: triage | full, max_steps? }` runs synchronously in fuel slices. It returns `{ state: complete | budget_stopped | stale, steps_used, resume: bool, analyzers, changed }`, as in Section 10.4 (ADR-0016). `triage` stops after band 700. The default is `full`.
 - `binary_load` runs `full` analysis by default. Its default `max_steps` (100,000,000) completes every T1 and T2 fixture (AC-209). A read that returns `partial: true` carries a hint that names `analysis_run`.
 - Key property: for random fixtures and random slice sizes `k`, repeated `run(k)` until complete gives the same `state_hash` as one `run(unlimited)` (AC-092). A second full run changes nothing (AC-093).
 
@@ -1157,7 +1168,7 @@ Seeds in confidence order. Each start keeps `start_reason`, a `Why` and a confid
 - `MainDiscovery` (ELF only): block-local evaluation (Section 6.6) gives the value of `rdi` at the call to `__libc_start_main` in `_start`. The target gets the name `main` (source `Analysis`) and `start_reason: Main`.
 - `Syscalls` (ELF only): block-local evaluation gives `rax` at each `Syscall` op. An embedded x86-64 table (about 370 entries from the Linux uapi numbers, recorded as facts) gives the name. Each site gets the pseudo-import `sys:<name>`, a ref and an annotation. Arguments come from `rdi rsi rdx r10 r8 r9`.
 - Call-site arguments (`xref_list { args: true }`) are derived data. `analysis::callargs` computes them on demand. Block-local evaluation gives the value of each argument register at the call. A value is an integer, a string (when it points to a string), a function pointer, an address or `unknown`.
-- `Metrics`: per function, blocks, instructions, cyclomatic complexity, callers, callees, string refs and calls to imports by capability category. Project coverage: functions analyzed, visited, named, typed and commented, plus a worklist of unresolved indirect jumps and calls, override conflicts and gap items.
+- `Metrics` (a derived view with no band): per function, blocks, instructions, cyclomatic complexity, callers, callees, string refs and calls to imports by capability category. Project coverage: functions analyzed, visited, named, typed and commented, plus a worklist of unresolved indirect jumps and calls, override conflicts and gap items.
 - `priority` (for `func_list { sort: "priority" }`) uses analysis facts only: in-degree, string refs, calls to imports in risky categories and size, with the address as the tie-break. Each completed analysis run freezes it (AC-157). `visited` is a live filter, not a priority input.
 - `ApiNames` (S17) is a stretch item. WP-29 replaces the former `Hashes` item (S23) with the similarity vectors of Section 7.13.
 
@@ -1263,7 +1274,9 @@ decomp {
 - Comments: the printer puts PLATE comments before the function, PRE comments before the first line of their address, POST comments after the last line of their address and EOL comments at the end of the line. Each comment line has a `line_map` row with `comment` set (AC-237).
 - Printer: precedence climbing with Ghidra's numbers. Conditions negate by a flip of the compare operator. `for` only when init, condition and step on one variable are adjacent. A cast only where widths or lattice types differ. String literals inline. Call names come from symbols, PLT names, IAT names and `sys:` IDs. Labels use addresses (`L_401234`).
 - Default names: `param_N`, `local_<hex>` (stack offset) and `v<N>` for register temporaries. Names from agent facts win.
-- Unresolved indirect jump: `goto *(expr);` plus `W_JUMPTABLE_UNRESOLVED`. It never prints `return` (AC-108).
+- Import thunk: a PLT stub or an IAT thunk (analysis flag `thunk`) whose jump loads a constant import slot prints a tail call of the import, for example `return puts(param_1);`. It gets no `W_JUMPTABLE_UNRESOLVED`.
+- Other unresolved indirect jump: `goto *(expr);`. It never prints `return` (AC-108).
+- The decompiler takes jump-table caveats from the analysis facts. A jump gets `W_JUMPTABLE_UNRESOLVED` only when the facts hold a jump-table record with no targets there, or the function caveat `W_JUMPTABLE_UNRESOLVED`.
 - Every instruction of the body is in a `line_map` range or in `elided` with a reason (AC-099).
 
 ### 8.4 Type lattice
@@ -1356,7 +1369,10 @@ OutputShape = Str | Int | Bool | Addr | Id(IdKind) | List(&OutputShape) | Obj(&[
 
 - Registration per item: each handler file exports `pub const SPEC: ToolSpec`. `tools/src/registry.rs` is a plain list of `&SPEC` items in the fixed `tools/list` order. A WP appends its items in one final register commit (Section 14.3).
 - From these tables come: the JSON Schema subset (root `type: object`, `additionalProperties: false`, no root combinators), the argument parser and validator, lenient coercion, CLI help, MCP `tools/list`, `ghidorah tools --json`, the `tool_search` index, the server instructions, the schema fuzzer, the eval lints and the registry lint. Handlers are `fn` pointers, not `dyn` objects.
-- Schema levels (`tools::schema::Detail`): `tools/list` sends the catalog level. It keeps the type, the enum and `maxItems` of each argument, and of the global arguments only `binary_id`, `limit` and `cursor`. The `mini` profile sends the compact level, which gives each nested object as `{ type: "object" }`. `tool_search` with `level: "full"` gives the full schema with each doc, default, bound and global argument. The server instructions name the other global arguments (AC-131a, AC-131b).
+- Schema levels (`tools::schema::Detail`): `tools/list` sends the catalog level. It keeps the type, the enum and `maxItems` of each argument. The `mini` profile sends the compact level, which gives each nested object as `{ type: "object" }`. The server instructions name the other global arguments (AC-131a, AC-131b).
+- The catalog levels keep the global arguments `binary_id`, `limit` and `cursor`. They also keep `force`, the fuel `max_steps` and each global that the text, an example or a repair call of the tool names. So a schema holds each key that the tool tells the agent to send.
+- `tool_search` with `level: "full"` gives the full schema with each doc, bound and global argument. It also gives the defaults of the tool: `max_chars`, the page size of `limit` and the fuel of `max_steps`.
+- A tool that binds no binary has no `binary_id` and no `in`, because a set belongs to a binary.
 - `OutputShape` is a small typed tree. Test `ac_132` checks each example result against it. `batch_run` uses it to type references before any step runs (Section 11.3).
 - Selector tools (`func_edit`, `search`, `mem_read`, `note_write`, `type_edit`) list their actions in `actions`. Each action has one description line, one executed example and its required and forbidden arguments (AC-129f, AC-221).
 - `dispatch_with(&Registry, request)` runs any registry. Tests inject test-only tools through it, for example a panicking tool for AC-148. The shipped registry has no test items.
@@ -1385,7 +1401,7 @@ The dispatcher applies these global arguments. A tool's schema includes only the
 | `fields` | all | List of JSON pointers into `data` (the pointer dialect of Section 11.2). The result keeps only these fields. |
 | `max_chars` | all | Budget for the whole serialized result (Section 10.9). Per-tool default, hard cap 60,000. |
 | `limit`, `cursor`, `count_only`, `shape` | list tools | Page size, keyset cursor, count only, `objects` (default) or `table` (`{cols, rows}`). |
-| `in` | list tools | Keep only members of `set:<name>`. |
+| `in` | list tools that bind a binary | Keep only members of `set:<name>`. A set belongs to a binary. |
 | `session` | all | Attribution label for provenance, filters and the undo scope. |
 | `expected_rev` | mutating tools | A mismatch gives `CONFLICT` with the current rev. |
 | `dry_run` | mutating tools | Run the edit in a Tx, return the planned edit list `diff: [{ op, key, old, new }]`, roll back. |
@@ -1446,12 +1462,19 @@ Profiles (registry data, ADR-0005):
 
 Key inputs, then output shape. All outputs sit in the envelope `data` (Section 10.6). Lists are `data.items`. Defaults are in parentheses.
 
-1. `binary_load { path | builtin: "demo" | binary_id, file_format?: auto|elf|pe|raw, arch?: x86_64, base?, entry?, analysis?: none|triage|full (full), max_steps? (100,000,000) }` -> `{ binary_id, sha256, file_name, format, arch, kind, entry, size, already_loaded, read_only, analysis: { state, steps_used }, diagnostics: { total, by_code: [{code, count}] } }`. Group: exactly one of `path`, `builtin` and `binary_id`. `path` must be under a configured root. `binary_id` reopens a project from `bin/<sha256>` with no root check. The argument is `file_format`, because the global argument `format` (concise or detailed) applies to every tool (revision 4).
+1. `binary_load { path | builtin: "demo" | binary_id, file_format?: auto|elf|pe|raw, arch?: x86_64, base?, entry?, analysis?: none|triage|full (full), break_lock?: bool (false), max_steps? (100,000,000) }` -> `{ binary_id, sha256, file_name, format, arch, kind, entry, size, already_loaded, read_only, persisted?, persist_reason?, analysis: { state, steps_used }, diagnostics: { total, by_code: [{code, count}] } }`. Group: exactly one of `path`, `builtin` and `binary_id`. `path` must be under a configured root. `binary_id` reopens a project from `bin/<sha256>` with no root check. The argument is `file_format`, because the global argument `format` (concise or detailed) applies to every tool (revision 4).
+   - The binary ID is the hash of the bytes only. So a binary keeps the load settings (`file_format`, `base`, `entry`) of its first load or of its project. A load with other settings gives `INVALID_ARGUMENT` with `details.reason: "load_spec_differs"`, `details.stored` and `next[0]` `binary_load { binary_id }`. Nothing opens.
+   - `file_name` is the escaped form of the file name. The project file keeps the exact name.
+   - `break_lock: true` replaces a stale project lock for this call only. A live owner keeps its lock. `PROJECT_LOCKED` with `stale: true` gives this call as `next[0]`.
+   - `persisted: false` and `persist_reason` tell that the session keeps the binary in memory only, because the session refuses the projects root (Section 3.10).
+   - `binary_load`, the `func_edit` re-analysis and the `batch_run` re-analysis run in the fuel slices of `analysis_run`. Each slice sends one progress report. A cancel stops the run at the next slice end. `max_ms` stops it with `W_TIME_STOP`.
 2. `binary_survey { include?: [identity, protections, segments, sections, imports, exports, strings, entries, functions, syscalls, notes, coverage, languages, diagnostics] (all 14), max_chars? (12,000) }` -> one object per included section. Each section has its own sub-budget. A cut section has `omitted: { count, next }`, where `next` is the `search` call that lists the rest. ELF imports group by Tier-0 category. PE imports group by DLL, and inside each DLL by Tier-0 category. Ordinal imports show `#<ordinal>`, and delay imports show `delay: true`. Strings show the top referenced strings with `ref_count` and up to 3 referencing functions. `next` proposes `func_list { sort: "priority" }` and `func_get` on `main`.
-3. `analysis_run { until?: triage|full (full), max_steps? }` -> `{ state: complete|budget_stopped|stale, steps_used, resume, analyzers: [{ name, priority, pending, runs }], changed: { functions, refs, strings, jumptables } }`. MCP progress notifications go out per fuel slice when the request has a `progressToken`.
+3. `analysis_run { until?: triage|full (full), max_steps? }` -> `{ state: complete|budget_stopped|stale, steps_used, resume, analyzers: [{ name, priority, pending, runs }], changed: { functions, refs, strings, jumptables } }`. MCP progress notifications go out per fuel slice when the request has a `progressToken`. The state is relative to the full analysis. A call with `until: "triage"` whose last slice does no work has no more triage work. It gives `resume: false` and `next[0]` `analysis_run { binary_id, until: "full" }`. Another stop before completion gives `resume: true`, and `next[0]` is the same call with the same `until`.
 4. `func_list { filter?: { name (glob), min_confidence, start_reason[], visited, named, typed, has_caveat, calls (import glob), size_min, size_max }, in?, sort?: addr|name|size|priority|in_degree (addr) }` -> items `{ id, addr, name, size, start_reason, confidence, flags[], callers, callees, caveats, visited, named }`. Each analysis run freezes `priority` (Section 7.11). `visited` is a live filter.
 5. `func_get { target | targets (<= 50), include?: [summary, disasm, ir, decomp, xrefs, callers, callees, strings, vars, notes, why, cfg, jumptables] ([summary]), ir_opts?: { level: l0|l1 (l0) }, decomp_opts?: { lines?: { start, count }, passes?: { fold, sailr, canary, tailcall } }, disasm_limit? (200, max 2,000), cursors?: { disasm?, ir?, decomp? } }` -> `{ id, name, entry, size, parts, signature, start_reason, confidence, caveats, summary, disasm?: { rows, next_cursor? }, ir?, decomp? (Section 8.3), xrefs?, callers?, callees?, strings?, vars?, notes?, why?, cfg?: { blocks, edges }, jumptables?, omitted: { <section>: { chars | null } } }`. An omitted section reports its exact size when its render is in the cache, else `null`. A call with `disasm`, `ir` or `decomp` marks the function `visited`.
 6. `xref_list { targets (<= 50), direction?: to|from (to), kinds?: [call, jump, read, write, data, ptr, string, syscall], depth?: 1..3, max_nodes? (200), context?: 0..3, args?: bool }` -> items `{ from, from_func: { id, name }, to, to_name, kind, via?, op_index, insn?, context?, args?: [{ index, reg, name?, value }] }`, `edges` for depth > 1, and `basis: { complete, unresolved: [ids] }`. An argument `value` is `{ kind: "int", v: "0x.." }`, `{ kind: "str", id: "str:0x..", text: BinText }`, `{ kind: "func", id }`, `{ kind: "addr", v }` or `{ kind: "unknown" }`. `name` comes from the prototype or the signature. An empty result with `complete: false` names the unresolved indirect calls. These calls can add callers.
+   - `basis` counts each gap: an `ICall` or `IJmp` with no target, by the rule of `fact_check`. Direction `from` reads the gaps of the instructions that it reads, and direction `to` reads the gaps of every function.
+   - `complete` is false while the analysis state is not `complete`. In direction `from`, each name or address target gets a `resolved` row (Section 10.5).
 7. `search { kind | ids, query?, match?: substr|glob|exact (substr), pattern? (bytes: "48 8b ?? 4?"), in?, scope?: { section, perms, start, size, func }, include_unreferenced?, note_filter?: { kind, status, tags } }` -> items `{ kind, id, addr?, text?, func?, extra }`. Kinds: `name`, `string`, `bytes`, `comment`, `note`, `type`, `import`, `export`, `section`, `segment`, `library`, `symbol`, `set`, `jumptable`. Group: exactly one of `kind` and `ids`. An empty `query` lists every item of the kind. With `ids` (`note:`, `set:` and `jt:` IDs), items are full records, and a set record pages its members with the cursor. Item order: kind in the frozen order `function, import, export, symbol, data, string, section, segment, library, comment, note, set, jumptable, type`, then address, then ID. String items carry `ref_count`, `funcs` (at most 3) and `next` = `xref_list { targets: ["str:.."] }`. Glob matching is linear time. Name search uses fuel.
 8. `mem_read { target, len? (256, max 4,096), as?: hex|u8|u16|u32|u64|i8|i16|i32|i64|ptr|cstr|utf16|insn|type (hex), c?, count?, cursor? }` -> `{ addr, len, hex?, text?, values?, fields?: [{ path, offset, type, value }], type?, rows?, next_cursor?, region: { name, perms } }`. `as: "type"` needs `c`, the C type text, for example `struct timespec`. A sweep (`as: "insn"`) has no `hex` and no `text`, because its rows hold the bytes. `as: "insn"` decodes a linear sweep of `count` instructions (default 100, max 500). Its rows have the shape of `func_get` disassembly rows, and its cursor pages on. It needs no function (AC-216).
 9. `addr_info { target | targets (<= 50), include?: [refs, comments] (none) }` -> items `{ input, addr, resolved_from: { rule, matched }, region, section, func?: { id, name, offset }, symbol?, code_unit: { kind: insn|data|undefined, len, mnem?, text?, type? }, override?, xrefs_in, xrefs_out, notes, comments?, refs?, file_offset }`.
@@ -1460,6 +1483,7 @@ Key inputs, then output shape. All outputs sit in the envelope `data` (Section 1
 12. `type_get { target | c, include?: [decl, layout] (both) }` -> `{ id, name, kind, c, size, align, layout: [lines], fields: [{ name, offset, size, type }] }`. `target` is a `t:` ID or a type name. `c` is C type text.
 13. `history_list { since_rev?, kinds?, session?, exclude_session?, coalesce?: bool (true) }` -> coalesced rows `{ kind, id, addr, fields, last_rev, session }` or raw rows `{ rev, tx, label, source, session, kind, id, addr?, fields, undone_by? }`, plus analysis-run markers.
 14. `session_brief { session?, max_chars? (8,000) }`. With open binaries -> `{ binaries, progress: { functions, visited, named, typed, commented, pct }, open_notes: { todo, hypothesis, top }, recent_findings (10), recent_edits (10), changed_since_last_brief, weak_names, orphans, next }`. `weak_names` lists high-priority functions that still have default names. With zero open binaries -> `{ projects: [{ binary_id, file_name, rev, last_session, last_rev, open: false }], next }`. `projects` holds at most 20 rows, newest journal rev first, and `next[0]` is `binary_load { binary_id }` for the first row (AC-212). The call writes the last-brief mark of the session.
+   - With a refused projects root (Section 3.10), the brief with no binary and each binary row give `persisted: false` and `persist_reason`.
 15. `tool_search { query? | name? | topic?: addresses|ids|budgets|batch|errors|rules|relations|profiles|resume, level?: names|summaries|full (summaries), limit? }` -> items `{ name, summary, schema?, examples?, annotations }` or `{ topic, text }`. Ranking is deterministic: token match over name parts, keywords, the first sentence, action lines and example args, plus a synonym table (`fn`, `function`, `sub` -> `func`; `disassemble` -> `func_get`). Ties sort by registry order. `level: full` returns one example per action.
 16. `symbol_rename { target, name } | items: [{ target, name, evidence? }] (<= 100), evidence?: [ids or feature texts] (<= 16), confidence?: low|medium|high, force? }` -> items `{ target, id, old, new, source, noop }`, `rev`, `tx`. An evidence entry is an ID or a `func_similar` feature text (Section 7.13) of at most 200 characters. An item `evidence` replaces the call `evidence` for that item. Each `SetName` edit keeps its evidence in the journal, and `history_list` raw rows show it in `fields`.
 17. `comment_set { target, kind: eol|pre|post|plate|repeatable, text } | items: [{ target, kind, text }] (<= 100) }` -> items `{ target, addr, kind, old, new, noop }`. Empty text deletes.
@@ -1519,7 +1543,7 @@ Target resolution: one table maps each input kind to the addresses that a tool f
 
 | Input kind | Address tools (`mem_read`, `addr_info`, `comment_set`, `at`) | Function tools (`func_get`, `func_edit target`, relation `fn` args) | `xref_list` direction `to` | `xref_list` direction `from` |
 |---|---|---|---|---|
-| address, name, `bb:`, `op:` | that address | the function that owns it, else `NOT_IN_FUNCTION` | refs to that address | refs from that one instruction |
+| address, name, `bb:`, `op:` | that address | the function that owns it, else `NOT_IN_FUNCTION` | refs to that address | refs from that one instruction; a name of a function entry gives all refs from the body of the function |
 | `fn:F`, `exp:F` | entry of F | F | refs to the entry of F | all refs whose `from` is in the body of F |
 | `imp:X` | the PLT stub or IAT thunk entry, else the GOT or IAT slot, else the EXTERNAL address | the stub or thunk function, else invalid | the call and jump sites of the stub or thunk, `call [rip+slot]` sites and data refs to the slot, each with `via` set to `plt`, `got` or `direct` (ELF) or `thunk`, `iat` or `direct` (PE) | invalid |
 | `sys:N` | invalid | invalid | the syscall sites with that number | invalid |
@@ -1528,6 +1552,8 @@ Target resolution: one table maps each input kind to the addresses that a tool f
 | `sec:`, `seg:`, `file:` | the start address | invalid | invalid | invalid |
 | `ext:0x..` | that EXTERNAL address | invalid | refs to it | invalid |
 | `var:`, `t:`, `note:`, `set:`, `tx:`, `ref:` | invalid | invalid | invalid | invalid |
+
+In direction `from`, `xref_list` gives `resolved: [{ index, input, resolved_from: { rule, matched, scope } }]` for each name or address target. `scope` is `function` when the call reads the body of a function, else `insn`.
 
 ### 10.6 Result envelope
 
@@ -1548,11 +1574,13 @@ Every tool result, on every surface, is this object (MCP `structuredContent`, CL
 }
 ```
 
-- `partial` is true when `analysis.state` is not `complete`. The hint then names `analysis_run`.
+- `partial` is true when the call binds a binary and `analysis.state` is not `complete`. A binary with no analysis run gives `partial: true` and `analysis: { state: "none" }`. The hint then names `analysis_run`.
 - `page` exists only for list results. `total` can change to `total_lower_bound` when a full count costs more fuel than the budget.
 - `next` holds at most 3 call objects in a fixed order. Each must name a tool of the active profile and parse with its `ArgSpec` parser (AC-143). Hint args carry IDs and addresses only, never binary-derived names (ADR-0022).
 - A list input (`targets`, `items`) returns `data.items: [{ input, ok, data | error }]` in input order plus `ok_count` and `error_count`. One bad item never fails the call (AC-144).
 - Mutating tools add `tx`, `noop` and, for `dry_run`, `diff: [{ op, key, old, new }]`.
+- A committed edit never fails on the output budget. Its result drops `data` members, largest first, until it fits. It keeps `tx`, `rev`, `noop` and each ID member.
+- Such a result sets `data.truncated` and `data.omitted`, and `next[0]` is `history_list { since_rev }` with the rev before the call. Read-only calls and dry runs keep the normal budget rule.
 - A failed call is `{ "ok": false, "binary_id"?, "rev", "session", "error": {..}, "next"? }` with MCP `isError: true`. `next` sits at the top level, the same as in a success envelope.
 - Every binary-derived string has one JSON shape, `BinText`: `{ "text": "..", "hex": "..", "len": N, "truncated"?: true, "src": "binary" }`.
 
@@ -1586,11 +1614,11 @@ Repair classes: **R** (repair): `next[0]` is the complete corrected call, so a c
 
 | Num | Code | Class | Retry | When | `details` and `next[0]` |
 |---|---|---|---|---|---|
-| 1 | `INVALID_ARGUMENT` | N | no | Value has the wrong type or range. | `field_path`, `details.expected` |
+| 1 | `INVALID_ARGUMENT` | N | no | Value has the wrong type or range. | `field_path`, `details.expected`. For `details.reason: "load_spec_differs"`: `details.stored` and `next[0]` `binary_load { binary_id }` (Section 10.4). |
 | 2 | `UNKNOWN_ARGUMENT` | R | no | Key is not in the schema. | Candidates: closest fields. `next[0]`: the key renamed or removed. |
 | 3 | `MISSING_ARGUMENT` | H | no | A required key is absent. | `details: { action?, example }`. `next[0]`: `tool_search { name, level: "full" }`. |
 | 4 | `UNKNOWN_TOOL` | H | no | Tool name is unknown (batch step). | Candidates. `next[0]`: `tool_search { query }`. |
-| 5 | `TOOL_NOT_IN_PROFILE` | H | no | Tool is outside the active profile, or a batch step is destructive. | `details.reason`: `not_in_profile` or `destructive_in_batch`. `next[0]`: the direct call for a destructive step. |
+| 5 | `TOOL_NOT_IN_PROFILE` | H | no | Tool is outside the active profile, or a batch step is destructive. | `details.reason`: `not_in_profile` or `destructive_in_batch`. For `not_in_profile`: candidates (the active tools with close names) and `next[0]` `tool_search { query: <tool> }` when `tool_search` is active. For a destructive step: `next[0]` is the direct call. |
 | 6 | `ADDRESS_INVALID` | R* | no | Address text does not parse, or a JSON integer is 2^53 or more. | `next[0]` for a large integer (hex string) or hex text with letters and no `0x` (prefix added). |
 | 7 | `ADDRESS_UNMAPPED` | C | no | Address is not in a mapped region. | Candidates: nearest mapped VAs. |
 | 8 | `ADDRESS_BASE_AMBIGUOUS` | C | no | A string of digits only. | Candidates: both readings. |
@@ -1605,7 +1633,7 @@ Repair classes: **R** (repair): `next[0]` is the complete corrected call, so a c
 | 17 | `FORMAT_MALFORMED` | N | no | Bad magic or truncated main header. | `details.diagnostic` |
 | 18 | `CURSOR_INVALID` | R | no | Cursor does not decode, fails its check or belongs to another query. | `next[0]`: the call without `cursor`. |
 | 19 | `CURSOR_STALE` | R | no | The sort key of the boundary item changed (Section 10.9). | `next[0]`: the call without `cursor`. |
-| 20 | `CONFLICT` | R* | yes | `expected_rev` differs, or a selective undo overlaps a later Tx. | `details.current_rev`; `next[0]` with the current rev. For undo: candidates (later Tx IDs). |
+| 20 | `CONFLICT` | H | yes | `expected_rev` differs, or a selective undo overlaps a later Tx. | `details.current_rev`. `next[0]`: `history_list { since_rev: expected_rev }`, so the client reads the later edits first. The call with the current rev is only a candidate. For undo: candidates (later Tx IDs). |
 | 21 | `BLOCKED_BY_HIGHER_PRIORITY_SOURCE` | N | no | Write rank is lower than the current fact. | `details: { current, source }`. `next[0]` adds `force: true` when force applies. A client never sends it by rule. |
 | 22 | `BODY_OVERLAP` | N | no | New function body overlaps another function. | Candidates: the owner. |
 | 23 | `NOT_IN_FUNCTION` | N | no | The address is not inside a function, and the call needs one. | - |
@@ -1619,14 +1647,16 @@ Repair classes: **R** (repair): `next[0]` is the complete corrected call, so a c
 | 31 | `EXPECT_FAILED` | N | no | A batch guard failed. | `details.actual` |
 | 32 | `PLUCK_TOO_LONG` | R | no | A `*` reference gives more values than the target list cap. | `next[0]`: the batch with `limit` on the source step. |
 | 33 | `BUDGET_EXCEEDED` | R | yes | Fuel ran out in a call that cannot return partial data. | `next[0]`: the resume call. |
-| 34 | `PROJECT_LOCKED` | N | yes | Another writer holds the project lock. | `details.owner` |
+| 34 | `PROJECT_LOCKED` | N | yes | Another writer holds the project lock. | `details.owner`. A stale lock gives `details.stale: true` and `next[0]`: the same `binary_load` with `break_lock: true`. |
 | 35 | `JOURNAL_CORRUPT` | N | no | A journal line in the middle fails its checksum. | `details.line` |
 | 36 | `READ_ONLY_PROJECT` | N | no | The project is open read-only. | - |
-| 37 | `OUTPUT_BUDGET_EXCEEDED` | N | no | Internal guard. A test asserts that it never fires. | - |
+| 37 | `OUTPUT_BUDGET_EXCEEDED` | N | no | Internal guard of a call that commits nothing. A test asserts that it never fires. | A committed edit never gives it: its result drops data members, sets `data.truncated` and `data.omitted`, and `next[0]` is `history_list` (Section 10.6). |
 | 38 | `INTERNAL_ERROR` | N | no | A handler panicked. | `crash_id` |
 | 39 | reserved | - | - | `IDEMPOTENCY_MISMATCH` (stretch S19). | - |
-| 40 | `NO_BINARY_OPEN` | H | no | No binary is open and the call needs one. | `next[0]`: `session_brief {}`. |
+| 40 | `NO_BINARY_OPEN` | H | no | No binary is open and the call needs one. | `next[0]`: `session_brief {}`. In a profile without `session_brief`: `binary_load { binary_id }` of the newest project. |
 | 41 | `NOTHING_TO_REDO` | N | no | No undone entry is in reach (Section 3.7). | - |
+
+Each error row whose hint names `next[0]` or the candidates also has a plain hint. The error object takes the plain hint in two cases. Its hint names `next[0]`, and the result has no valid `next[0]`. Or its hint names the candidates, and the error has none. `docs/errors.md` lists both hints.
 
 Warnings use the frozen enum `base::WarningCode` (`#[repr(u16)]`). `docs/errors.md` lists it. A warning item is `{ code, num, at?, message, remedy? }`, and `remedy` is a complete call.
 
@@ -1657,7 +1687,7 @@ Warnings use the frozen enum `base::WarningCode` (`#[repr(u16)]`). `docs/errors.
 
 | Item | Default | Hard cap |
 |---|---|---|
-| Result size (`max_chars`, the whole serialized `tools/call` result) | 16,000 for lists; 24,000 for `func_get` and `batch_run`; 12,000 for `binary_survey`; 8,000 for other tools | 60,000 |
+| Result size (`max_chars`, the whole serialized `tools/call` result) | 16,000 for lists; 24,000 for `func_get`, `batch_run`, `fact_check` and `func_similar`; 12,000 for `binary_survey`; 8,000 for other tools | 60,000 |
 | Error object | - | 10,000 |
 | List page (`limit`) | 50 (100 for `func_list`) | 1,000 |
 | Disassembly section | 200 rows | 2,000 |
@@ -1730,11 +1760,11 @@ ADR-0006 fixes this behavior. One module (`crates/cli/src/mcp/era.rs`, about 300
 |---|---|
 | `initialize` with any `protocolVersion` | Legacy mode for this process. Reply `{ protocolVersion, capabilities: { tools: { listChanged: false } }, serverInfo, instructions }`. The version is the requested one if it is `2025-11-25` or `2025-06-18`, else `2025-11-25`. |
 | `notifications/initialized` | No reply. |
-| `ping` (legacy) | Reply `{}`. |
+| `ping` with no version key | Reply `{}` in every state, also before `initialize`. The ping starts no era. |
 | `server/discover` | Reply with the supported versions (`2026-07-28`, `2025-11-25`, `2025-06-18`), capabilities (tools only), `serverInfo`, `instructions` and `resultType: "complete"`. It needs no prior handshake. It must answer within the cold-start budget (AC-171). |
 | Request with `_meta["io.modelcontextprotocol/protocolVersion"] = "2026-07-28"` | Modern stateless handling. Every result carries `resultType: "complete"`. |
 | Modern-looking request without the `_meta` keys, outside legacy mode | -32602 with the missing key names. |
-| Other `protocolVersion` in `_meta` | -32022 with `{ supported, requested }`. |
+| Other `protocolVersion` in `_meta` | -32022 with `{ supported, requested }`. `supported` is `["2026-07-28"]`, because a legacy version needs `initialize`. |
 | `tools/list` | The active profile in fixed order. No pagination (the catalog fits one page). |
 | `tools/call` | Dispatch through the registry. A tool failure is `isError: true`. |
 | `notifications/cancelled { requestId }` | Set the cancel flag of that in-flight request. Send no response for it. |
@@ -1743,8 +1773,12 @@ ADR-0006 fixes this behavior. One module (`crates/cli/src/mcp/era.rs`, about 300
 | Unparseable line | -32700 with `id: null`. |
 | Line above 16 MiB | -32600 with `id: null`. The server keeps running. |
 | Unknown method | -32601. |
+| `ping` with the modern version key | -32601. `ping` exists only in the legacy era. |
 
 - Legacy results carry no `resultType`.
+- The reader thread puts each request into a work queue of 64 requests. A full queue makes the reader wait, so a flood of requests does not grow the memory.
+- A broken pipe or another I/O error on stdout stops the worker. The running request gets its cancel flag, and the server waits at most 5 s for the worker. Then the session writes its snapshot and releases the project lock.
+- A cancelled request whose call committed (a `tx`, or `noop: false`) still gets its reply. A cancelled `analysis_run` gets no reply (AC-172).
 - Progress: when a request carries `_meta.progressToken`, the server sends `notifications/progress { progressToken, progress, total?, message }` per fuel slice. `progress` increases strictly.
 - Capabilities: only `tools`. No prompts, resources, logging, completions or tasks.
 - stdout carries only protocol lines. Logs go to stderr. Library crates deny `clippy::print_stdout` and `clippy::print_stderr`.
@@ -1757,7 +1791,7 @@ ADR-0006 fixes this behavior. One module (`crates/cli/src/mcp/era.rs`, about 300
 | `ghidorah call <tool> [<json> or @file or -] [--project-root DIR] [--root DIR]... [--select PTR] [--format json or jsonl or text] [--source agent or user] [--session NAME]` | One tool call. Prints the envelope on stdout. |
 | `ghidorah jsonl [same options]` | Reads independent requests `{"id", "tool", "args"}` from stdin, one per line. Writes one envelope line per request with the same `id`. |
 | `ghidorah tools [--json] [--profile P]` | Prints the catalog. `--json` prints the same objects as `tools/list`. |
-| `ghidorah doctor [--project-root DIR]` | Self-test: registry lint, registry examples on the demo binary, result size per content mode, project directory write and sync, era support. Prints one JSON object (AC-231). |
+| `ghidorah doctor [--project-root DIR]` | Self-test: registry lint, registry examples on the demo binary, result size per content mode, project directory write and sync, era support. Prints one JSON object (AC-231). It refuses a projects root inside a git working tree, and it runs the examples in memory (Section 3.10). |
 | `ghidorah --version`, `ghidorah --help` | Version and help. |
 
 - Exit codes: 0 success, 1 tool error (`ok: false`), 2 usage or protocol error.
@@ -1769,7 +1803,9 @@ ADR-0006 fixes this behavior. One module (`crates/cli/src/mcp/era.rs`, about 300
 
 ### 10.15 Server instructions text
 
-The registry generates this text from the registered tools. Each line lists the tools that it names, and the generator drops a line when one of its tools is not in the active profile. The first line takes the format names from `loader::SUPPORTED_FORMATS`, so WP-30 changes no instruction file. A test fails when the text is longer than 2,000 characters or names a tool that is not in the active profile (AC-131c).
+The registry generates this text from the active tools. A fixed line names its tools and goes when one of them is not active. The Workflow, resume, batch and edit lines take their text from the active tools. So every shipped profile has a Workflow line, and each line names only active tools.
+
+The first line takes the format names from `loader::SUPPORTED_FORMATS`, so WP-30 changes no instruction file. A test fails when the text is longer than 2,000 characters or names a tool that is not in the active profile (AC-131c). In `full`, the lines give the text below.
 
 ```text
 ghidorah analyzes x86-64 ELF and PE binaries and raw code blobs for reverse engineering. All tools work offline and never run the binary.
@@ -1792,6 +1828,7 @@ tool_search finds tools and topics: addresses, ids, budgets, batch, errors, resu
 ### 10.16 Safety rules
 
 - `BinText` is the only type that carries binary-derived text to output. It escapes C0 and C1 controls, DEL, U+2028, U+2029 and bidi overrides, caps the length, keeps an exact `hex` field and tags `src: "binary"` (ADR-0022, AC-146).
+- `BinText` also escapes the invisible code points as `\u{..}`. These are the format characters (Cf), the tag characters and the variation selectors. The Hangul fillers, U+FFF0 to U+FFF8 and the private-use code points are also on the list. `U_ESCAPES` in `base::bintext` holds the full list.
 - `binary_load` reads only under the configured roots (`--root`, default the current directory) after `canonicalize`. Absolute paths, `..` and symlinks that leave the roots give `PATH_OUTSIDE_ROOT` (AC-147). A reopen by `binary_id` reads only the project's own `bin/<sha256>`.
 - Project writes stay inside the project directory. Input copies are mode 0444.
 - No tool runs native code. `openWorldHint` is false for all tools. Only the dev-only `ghidorah-oracle` crate contains `unsafe` code (ADR-0025).
@@ -1962,7 +1999,9 @@ A claim is one relation atom with ID arguments. The registry holds the relation 
 
 ### 11.10 CLI code mode
 
-- `ghidorah call` runs one call in a new session. The project directory keeps the facts and the journal, so a later call opens the same project with `binary_load { binary_id }`. A call cannot use a binary that an earlier `call` process opened, and it gives `UNKNOWN_BINARY` with that `binary_load` call as `next[0]`.
+- `ghidorah call` runs one call in a new session. The project directory keeps the facts and the journal.
+- A call with a valid `binary_id`, for a tool other than `binary_load`, first opens the project of that binary from the projects root. It opens the project read-only when another writer holds the lock.
+- A project that does not open leaves the call to give its own error, for example `UNKNOWN_BINARY` with `next[0]` `binary_load { binary_id }`.
 - A shell script composes calls through one `ghidorah jsonl` process, which keeps one session: `printf '%s\n' '{"id":1,"tool":"binary_load","args":{"builtin":"demo"}}' '{"id":2,"tool":"func_list","args":{"sort":"priority","limit":20}}' | ghidorah jsonl`. A python3 script can hold the process open and read one line for each request.
 - `ghidorah jsonl` serves independent requests through the same dispatcher. The names differ on purpose: `jsonl` is a transport for independent calls, `batch_run` is a tool for dependent steps.
 
@@ -1988,7 +2027,7 @@ flowchart LR
   GATE --> LOG[eval/bless-log.jsonl]
 ```
 
-- Crate `ghidorah-eval` (dev-only). `cargo test -p ghidorah-eval` runs all gates. `xtask eval --json` writes the scorecard. `xtask eval --bless` changes baselines under the rules of Section 12.6.
+- Crate `ghidorah-eval` (dev-only). `cargo test -p ghidorah-eval` runs all gates. `xtask eval --json` writes the scorecard. `xtask eval --bless --reason TEXT` changes baselines under the rules of Section 12.6.
 - The runner calls the dispatcher in process. Five scenarios and the restart scenario also run over a spawned `ghidorah mcp` to cover the protocol path.
 
 ### 12.2 Questions and scenario files
@@ -2067,9 +2106,9 @@ ADR-0020 fixes the test tiers and the fixture policy. Truth files come from the 
 - `eval/thresholds.json` holds `{ floor, baseline, tolerance }` for each metric, `questions_sha256` and `intents_sha256`. WP-06 creates it with the floors and the two hashes. WP-26 adds the baselines.
 - Gate for a metric where higher is better: `value >= max(floor, baseline - tolerance)`. Gate for a cost metric: `value <= baseline x (1 + tolerance)`, with tolerance 0.10.
 - Only an ADR amendment lowers a floor. Floors: discoverability 0.70, context-reset recall 0.60, survey fact recall 0.60.
-- `xtask eval --bless` writes new baselines. It refuses to lower a floor. It appends `{ commit, metric, old, new, reason }` to `eval/bless-log.jsonl` for each change.
+- `xtask eval --bless --reason TEXT` writes new baselines. `--bless` without `--reason`, and `--reason` without `--bless`, give a usage error. The command refuses to lower a floor. It appends `{ commit, metric, old, new, reason }` to `eval/bless-log.jsonl` for each change.
 - `ac_196` fails when a cost baseline rises by more than 10% and the same commit has no bless-log line for it.
-- WP-26 records the first-run values with `xtask eval --bless`. If a first value is below its floor, M8 cannot close. The WP then improves descriptions, hints or tools, or writes an ADR amendment with a reason.
+- WP-26 records the first-run values with `xtask eval --bless --reason TEXT`. If a first value is below its floor, M8 cannot close. The WP then improves descriptions, hints or tools, or writes an ADR amendment with a reason.
 - `intents_sha256` is the SHA-256 of `eval/intents/heldout.jsonl`, and `ac_198b` asserts the match. `questions_sha256` is the SHA-256 of `eval/questions.jsonl`, and `ac_195` asserts the match. The dev half of the intents can change. The held-out half and the questions never change, except the one append of the `pe` group by WP-30 (Section 12.2).
 - WP-26 calibrates `chars_per_token` (default 3) once from 5 representative outputs with the API token counter. The thresholds file stores it.
 
@@ -2090,7 +2129,7 @@ ADR-0020 fixes the test tiers and the fixture policy. Truth files come from the 
 
 ### 13.1 Verus kernels
 
-All Verus code lives in `ghidorah-kernel` (ADR-0011). Each kernel is at most 300 lines and verifies in about 1 s. Verus runs with `--no-cheating`. Each kernel has a negative patch in `verify/negative/` that must fail with a verification error.
+All Verus code lives in `ghidorah-kernel` (ADR-0011). Each kernel is at most 300 lines and verifies in about 1 s. Verus runs with `--no-cheating`. Each kernel has at least one negative patch in `verify/negative/` that must fail with a verification error.
 
 | Kernel | File | Exec items | Proved properties | Tier-1 test (second evidence) |
 |---|---|---|---|---|
@@ -2103,7 +2142,8 @@ All Verus code lives in `ghidorah-kernel` (ADR-0011). Each kernel is at most 300
 
 - K3 implements `insert` and `remove` as a binary search for the affected run `[i, j)`, then a rebuild with `push` loops. It uses no `splice` and no `drain`.
 - K4 (undo law) is not in the MVP. The model-based undo test with a stack of full `Program` clones (AC-116) checks the real `Edit` inverses, which is stronger evidence (ADR-0011).
-- Negative patches: `verify/negative/<kernel>.patch` is one hunk against the current source. `xtask verify` applies it to a temporary copy. It requires a verification error (`postcondition not satisfied`, `assertion failed` or `precondition not satisfied`) with `verified >= 1`. A compile error does not count.
+- Negative patches: `verify/negative/<name>.patch` is a patch against the current source. A kernel can have more than one negative patch, for example `K1b` and `K5b` next to `K1` and `K5`. `KERNELS` in `xtask/src/verify.rs` gives the patches of each kernel and the expected error kind of each patch.
+- `xtask verify` applies each patch to a temporary copy. It requires the expected verification error (`postcondition not satisfied`, `assertion failed` or `precondition not satisfied`) with `verified >= 1`. A different error kind or a compile error fails the run.
 - The first task of WP-03 is K1 `uleb128` in the measured form of Section 13.2. The other kernels follow.
 - Time box: each kernel gets at most one WP day of proof work. A kernel that does not verify in its time box gets `"status": "unproven"` in `verify/results.json`. Its tier-1 test then carries the gate, and an ADR amendment records the gap.
 
@@ -2127,7 +2167,11 @@ AC-006b checks that a function with a `cfg_attr` loop invariant and a `proof!{}`
 
 ### 13.3 Proof freshness
 
-- `xtask verify` (WP-03) runs Verus when `VERUS` and `VERUS_Z3_PATH` are set. It writes `verify/results.json`: `{ verus_commit: "ffc9d20", toolchain: "1.98.1", z3: "4.16.0", argv, tree_sha256, kernels: [{ name, file, verified, errors, spec_items, status }], negatives: [{ kernel, patch, error_kind, verified }] }`. Without Verus it prints `{ "status": "skipped" }`.
+- `xtask verify` (WP-03) runs Verus when `VERUS` and `VERUS_Z3_PATH` are set. It writes `verify/results.json`: `{ verus_commit: "ffc9d20", toolchain: "1.98.1", z3: "4.16.0", argv, tree_sha256, kernels: { <name>: { name, file, module, verified, errors, spec_items, status } }, negatives: [{ kernel, patch, error_kind, errors, verified, ok }] }`. Without Verus it prints `{ "status": "skipped" }`.
+- `xtask verify` writes `verify/results.json` only when the run is ok. A failing run writes `verify/results.failed.json` and exits 1. So a failed proof run never replaces the checked-in record.
+- `xtask oracle bash` follows the same rule. A run with a mismatch writes `verify/oracle-results.failed.json` and exits 1.
+- `xtask ac` checks the claims of each record item, not only its hash: the kernel status, the errors, the negative rows and the mismatches (Section 15).
+- The CI job `verus` runs `xtask verify` and then `git diff --exit-code verify/results.json`. The job fails when the new record differs from the checked-in record. The record has no time members, so a run gives the same bytes.
 - `tree_sha256` is the SHA-256 over the sorted `(path, bytes)` pairs of `crates/kernel/src/**` and `crates/spec/src/**`, plus the Verus argv string. So a change to a shared spec function, to the stub crate or to the flags makes the proof stale.
 - Test `ac_034_proof_freshness` computes the tree hash and compares it with `results.json`. A mismatch is a warning in plain `cargo test` and a failure under `GHIDORAH_REQUIRE_PROOFS=1`. `xtask ci` sets that variable for its child `cargo` process.
 - Test `ac_035_no_proof_cheats` scans the kernel (AC-035a to AC-035c).
@@ -2172,7 +2216,8 @@ Metamorphic relations (AC-189):
 - Pipeline targets: `x86_lift_interp` (WP-16: random bytes, decode, lift, run the L0 interpreter with fuel), `journal_replay`, `snapshot_load` and `project_json` (WP-20), `pipeline_raw` (WP-27: random bytes as a raw blob with an entry, `analysis_run` full with a fuel cap, then `func_get` with every section for every function) and `pipeline_elf` (WP-27: havoc on T1 fixtures, then the same steps).
 - Each target is one test binary `crates/<crate>/tests/fuzz_<target>.rs` with one test function. So the global panic hook has no race (research 3.10 pitfall). `xtask ci` runs these binaries with `--test-threads=1`. A panic hook counter (`AtomicU64`) counts every panic.
 - Tier 1 runs 2,000 fixed-seed cases per target (10,000 for `pe_load`, AC-251) (AFL-style havoc: bit flip, random byte, interesting values, add 1..35, delete block, insert byte) in a thread with a 256 KiB stack. ELF targets take their seed corpus from the T1 fixtures and the `ElfBuilder` variants. `pe_load` takes its seeds from the PE fixtures and the `PeBuilder` variants, and its stages are headers, sections, imports, exports, relocs, tls and pdata. Each case reports the deepest stage that it reached (header, phdr, dynamic, symbols, relocs, eh_frame). The test asserts that at least 10% of cases reach each stage (AC-190d).
-- The harness writes `tests/regress/<target>/pending.bin` before each case and deletes it after the case. An abort, a stack overflow or a hang leaves the file.
+- In an `xtask fuzz` run, the harness writes `tests/regress/<target>/pending.bin` before each case and deletes it after the case. An abort, a stack overflow or a hang leaves the file.
+- A tier-1 fuzz test writes its pending input into a directory of its own process under the system temporary directory (`ghidorah-fuzz-<pid>/<target>`). So two test runs at the same time do not share a file, and the tree gets no `pending.bin`.
 - Tier 2: `xtask fuzz <target> --iters N --seed S` runs batches in child processes with a test-only wall-clock watchdog. It shrinks a crashing or pending input and writes `tests/regress/<target>/<sha8>.bin`. CI runs 100,000 cases per target. Every test run replays the regression files.
 - Pipeline and schema fuzzing assert zero `INTERNAL_ERROR` results and a panic counter of 0 (AC-190c, AC-191a).
 - Schema-driven tool fuzzing (AC-191) generates args from each `ToolSpec`.
@@ -2204,8 +2249,8 @@ Metamorphic relations (AC-189):
 | `clang --target=x86_64-pc-windows-msvc`, `rust-lld -flavor link` | PE fixture builds (Section 4.15) | `xtask fixtures build` |
 | Native `asm!` flag oracle (`ghidorah-oracle`) | semantic vectors `tests/golden/semantics/x86/*.jsonl` | `xtask oracle semantics`, each instruction form in a child process |
 | Leaf driver (`fixtures/src/leaf_driver.c` linked with each leaf object) | `tests/golden/semantics/leaf/*.jsonl` (inputs and outputs per leaf function) | `xtask fixtures build` |
-| gcc `-fsyntax-only` and recompile of leaf output | optional decompiler check | `xtask oracle decomp`, `{status: skipped}` without gcc |
-| `clang -fdump-record-layouts` | optional layout differential | `xtask oracle layout` |
+| AST value interpreter against the L0 interpreter on the `O0` and `O2nv` leaf functions | decompiler semantics (AC-101) | `cargo test`: `ac_101_expression_oracle` in `crates/decomp/tests/decomp/oracle.rs` |
+| gcc and clang compile and run a C program that prints the size, alignment and field offsets of each record | SysV layout differential (AC-112a) | tier-2 test `ac_112a_layout_oracle_gcc_clang` |
 | Host bash and libc | 100% boundary agreement (AC-066) | `xtask oracle bash`, result JSON in `verify/oracle-results.json` |
 
 Internal oracles that run in every `cargo test`: cross-view consistency, CFG invariants, exhaustive fusion, pagination conservation, undo and redo state hashes, crash consistency, two-run determinism, structurer trace equivalence and the expression oracle.
@@ -2234,6 +2279,8 @@ ADR-0026 fixes the std-only bench harness (`testkit::bench`):
 - Tier 2 tests carry `#[ignore = "tier2"]`. `xtask ci` runs `cargo test --workspace -- --include-ignored` plus the other jobs: long fuzz runs, full T3, T2 determinism, the 50,000-function ELF, coverage, the hermetic run, proof freshness and benchmarks.
 - `[profile.test]` sets `opt-level = 1` for the workspace. `[profile.dev.package]` and `[profile.test.package]` set `opt-level = 2` for `ghidorah-x86`, `ghidorah-ir`, `ghidorah-analysis` and `ghidorah-decomp`.
 - `xtask ci` records the time of each test and fails any tier-1 test above 15 s.
+- `.github/workflows/ci.yml` has the jobs `tier1`, `tier2` and `verus`. The `tier1` job also runs `cargo xtask ac` and `cargo xtask fixtures check`.
+- The `tier2` job also runs `cargo xtask ac --run --tier2`. It fails when the `failed` list of that run is not empty. The `verus` job checks the proof record (Section 13.3).
 
 ## 14 TDD plan
 
@@ -2245,7 +2292,7 @@ ADR-0026 fixes the std-only bench harness (`testkit::bench`):
 4. GREEN: write the smallest code that passes. No `unwrap()`, no `todo!`, no stubs.
 5. REFACTOR: clean up with all tests green. Run `cargo fmt`, clippy pedantic and nursery, `xtask cov` and `xtask ste`.
 
-Regression rule: a bug fix starts with a test `regress_<slug>` that fails on the parent commit. The commit subject starts with `fix:`. AC-234 checks that each `fix:` commit changes a test file.
+Regression rule: a bug fix starts with a test `regress_<slug>` that fails on the parent commit. The commit subject starts with `fix:`. AC-234 checks that each `fix:` commit changes a `.rs` test file.
 
 Definition of done for a WP:
 
@@ -2351,7 +2398,7 @@ Revision 3 moved WP-16 to P8 and WP-20 to P10, so that WP-18 starts in P7, as so
 | Row | Named tests |
 |---|---|
 | Happy | `ac_006a_spec_stub_identity`, `ac_036_rangeset_model`, `ac_038_reader_props` |
-| Boundary | `ac_029_range_boundary_table`, `k1_reader_boundaries` (empty buffer, `seek` to the end, `take(0)`, 10-byte ULEB), `ac_032_budget_fit_brute_force`, `ac_033_source_table_exhaustive` |
+| Boundary | `ac_029_range_boundary_table`, `ac_028_k1_reader_boundaries` (empty buffer, `seek` to the end, `take(0)`, 10-byte ULEB), `ac_032_budget_fit_brute_force`, `ac_033_source_table_exhaustive` |
 | Regression | `ac_006b_loop_invariant_builds`, `ac_034_proof_freshness`, `ac_035_no_proof_cheats` |
 
 #### WP-04 JSON
@@ -2484,7 +2531,7 @@ Revision 3 moved WP-16 to P8 and WP-20 to P10, so that WP-18 starts in P7, as so
 
 | Row | Named tests |
 |---|---|
-| Happy | `ac_068a_fusion_exhaustive_8bit`, `ac_074_dominators_model`, `k5_wide_random_against_u128` |
+| Happy | `ac_068a_fusion_exhaustive_8bit`, `ac_074_dominators_model`, `ac_031_k5_wide_random_against_u128` |
 | Boundary | `ac_075a_deep_cfg_small_stack`, `ac_076_interpreter_budgets`, `interp_u128_store_load` |
 | Regression | `ac_068b_pred_opc_all_widths`, `ac_067_size_budgets` |
 
@@ -2760,7 +2807,7 @@ Revision 3 moved WP-16 to P8 and WP-20 to P10, so that WP-18 starts in P7, as so
 
 - Owns: `crates/eval/`, `eval/` except `questions.jsonl`, `intents/` and the first `thresholds.json` (WP-06), `xtask/src/eval.rs`.
 - Provides: the scenario runner with `$turn`, reset and restart turns, the argument-provenance lint, the repair robot and the mistake corpus, the hint-follower robot, discoverability on held-out intents (`tool_search` and raw descriptions), the three-process determinism compare, recall after edits, abstain checks, the scorecard, `xtask eval [--bless] [replay FILE]`, thresholds and the bless log, and at least 44 scenarios (decompile, similarity and PE scenarios included).
-- Touches after merge: `xtask/src/main.rs`, `eval/thresholds.json` (baselines through `xtask eval --bless`).
+- Touches after merge: `xtask/src/main.rs`, `eval/thresholds.json` (baselines through `xtask eval --bless --reason TEXT`).
 - Depends on: WP-21, WP-23, WP-25, WP-29, WP-30. The harness covers decompile, similarity and PE scenarios, so these WPs merge first.
 - Closes: AC-153b, AC-195, AC-196a, AC-196b, AC-197, AC-198a, AC-198b, AC-199, AC-200, AC-226, AC-227, AC-228, AC-229, AC-230.
 
@@ -2926,11 +2973,13 @@ Rules for this section:
 - Each AC is one testable statement. A lettered sub-AC (for example AC-129a) is a separate statement with its own test function.
 - Columns: AC, Statement, Evidence, Closes, Needs.
 - Evidence grammar (`xtask ac` parses it):
-  - `test:<crate>::<fn>@T1` or `@T2`: a cargo test function. `<crate>` is the crate directory name. Tier-2 tests carry `#[ignore = "tier2"]`.
+  - `test:<crate>::<fn>@T1` or `@T2`: a cargo test function. `<crate>` is the crate directory name. Tier-2 tests carry `#[ignore = "tier2"]`. `<fn>` starts with `ac_<nnn>`, `fuzz_` or `regress_`. A test item with a different name gives a grammar finding.
   - `cmd:<argv>`: an exact command that must exit 0 in tier 2.
   - `xtask:<subcommand>#<pointer> <op> <value>`: a value in the JSON output of an xtask command.
   - `record:<file>#<pointer>@sha256=<input>`: a checked-in record that must match the hash of its named input, for example `tree` (the kernel tree hash) or `host-bash`.
 - Record inputs: `tree` compares the `tree_sha256` member of the record with the tree hash of Section 13.3. `host-<name>` compares the `sha256` member of the object at the pointer with the SHA-256 of the host file at its `path` member. A host file that does not exist gives `skipped`. A different hash gives `fail`.
+- Record claims: a `tree` item also needs the kernel row at the pointer with `status: verified`, `errors: 0` and `verified >= spec_items`. Each `negatives` row of that kernel needs `ok: true`.
+- A `host-<name>` item also needs `mismatches: 0` and `agree` equal to `insns`. A record that fails a claim gives `fail`, also with a matching hash.
 - `xtask ac` writes `docs/ac-evidence.json` with rows `{ ac, tier, kind, status: pass | fail | recorded | skipped, commit }`. A run with a list of ACs replaces only the rows of those ACs.
 - `xtask ac` without `--run` reads the table and reports `failed`: one `{ ac, kind, tier }` item for each `fail` row. It checks each record item again, so a record row of the table does not count.
 - An `xtask:ac` item reads the table of the same run. The runner runs the other items first, writes the table, then runs the `xtask:ac` items.
@@ -2999,10 +3048,10 @@ Rules for this section:
 
 | AC | Statement | Evidence | Closes | Needs |
 |---|---|---|---|---|
-| AC-028 | K1 Reader verifies with `--no-cheating`, its negative patch fails with a verification error, and its tier-1 test passes. | `record:verify/results.json#/kernels/K1@sha256=tree`, `test:kernel::k1_reader_boundaries@T1` | 03 | - |
+| AC-028 | K1 Reader verifies with `--no-cheating`, each of its negative patches fails with its expected verification error, and its tier-1 test passes. | `record:verify/results.json#/kernels/K1@sha256=tree`, `test:kernel::ac_028_k1_reader_boundaries@T1` | 03 | - |
 | AC-029 | K2 range math verifies, its negative patch fails with a verification error, and its boundary and model test passes. | `record:verify/results.json#/kernels/K2@sha256=tree`, `test:kernel::ac_029_range_boundary_table@T1` | 03 | - |
 | AC-030 | K3 RangeSet verifies, its negative patch fails with a verification error, and its model test passes. | `record:verify/results.json#/kernels/K3@sha256=tree`, `test:kernel::ac_036_rangeset_model@T1` | 03 | - |
-| AC-031 | K5 `fused_pred` and `eval_pred` verify for 3 ops and 4 widths, and the negative patch fails with a verification error. | `record:verify/results.json#/kernels/K5@sha256=tree`, `test:kernel::k5_wide_random_against_u128@T1`, `test:ir::ac_068b_pred_opc_all_widths@T1` | 12 | - |
+| AC-031 | K5 `fused_pred` and `eval_pred` verify for 3 ops and 4 widths, and each of its negative patches fails with its expected verification error. | `record:verify/results.json#/kernels/K5@sha256=tree`, `test:kernel::ac_031_k5_wide_random_against_u128@T1`, `test:ir::ac_068b_pred_opc_all_widths@T1` | 12 | - |
 | AC-032 | K6 budget fit verifies, its negative patch fails with a verification error, and its brute-force test passes. | `record:verify/results.json#/kernels/K6@sha256=tree`, `test:kernel::ac_032_budget_fit_brute_force@T1` | 03 | - |
 | AC-033 | K7 provenance order verifies, its negative patch fails with a verification error, and its exhaustive test passes. | `record:verify/results.json#/kernels/K7@sha256=tree`, `test:kernel::ac_033_source_table_exhaustive@T1` | 03 | - |
 | AC-034 | The tree hash of the kernel and spec sources plus the Verus argv equals `verify/results.json`. | `test:kernel::ac_034_proof_freshness@T1` | 03 | - |
@@ -3066,7 +3115,7 @@ Rules for this section:
 | AC-063b | Moved to stretch S10 (`insn_fields`). | - | - | - |
 | AC-064 | Intel display text of every fixture function equals the printer golden. | `test:x86::ac_064_printer_golden@T1` | 08 | - |
 | AC-065 | VEX, EVEX and REX2 forms of the enumeration golden decode with the oracle length as opaque forms. | `test:x86::ac_065_vex_evex_length@T1` | 08 | - |
-| AC-066 | Boundary agreement is 100% on host bash and libc, recorded with their sha256. | `record:verify/oracle-results.json#/bash@sha256=host-bash` | 16 | - |
+| AC-066 | Boundary agreement is 100% on host bash and libc, recorded with their sha256. | `record:verify/oracle-results.json#/bash@sha256=host-bash`, `record:verify/oracle-results.json#/libc@sha256=host-libc` | 16 | - |
 
 ### 15.8 IR and lifter
 
@@ -3133,7 +3182,7 @@ All decompiler ACs (AC-073, AC-075b, AC-075c, AC-086b, AC-098 to AC-106, AC-108,
 | AC-109 | All Tier-0 prototypes (at least 150) parse in `sig` mode with zero errors. | `test:types::ac_109_tier0_parse@T1` | 10 | - |
 | AC-110 | Bit-fields, `__attribute__` and `#pragma pack` give `C_PARSE_ERROR` detail `E_UNSUPPORTED` with line, column and a hint. | `test:types::ac_110_c_unsupported@T1` | 10 | - |
 | AC-111 | Parser bombs stay within limits in a 256 KiB stack and give structured errors with candidates. | `test:types::ac_111_c_parser_limits@T1` | 10 | - |
-| AC-112a | SysV layouts of records built through the `TypeStore` API equal the golden gcc and clang cases. | `test:types::ac_112a_sysv_layout@T1` | 10 | - |
+| AC-112a | SysV layouts of records built through the `TypeStore` API equal the golden gcc and clang cases. | `test:types::ac_112a_sysv_layout@T1`, `test:types::ac_112a_layout_oracle_gcc_clang@T2` | 10 | - |
 | AC-112b | Moved to stretch S13 (layouts from parsed declarations). | - | - | - |
 | AC-113 | After `type_edit {signature}`, `func_get` parameters and `xref_list` argument names equal `tests/golden/types/sig_apply.json`. | `test:tools::ac_113_signature_apply@T1` | 22b | 17b |
 | AC-114 | `mem_read { as: "type", c: "struct sockaddr_in" }` returns field paths, offsets and values equal to its golden. | `test:tools::ac_114_typed_read@T1` | 22b | - |
@@ -3181,22 +3230,22 @@ All decompiler ACs (AC-073, AC-075b, AC-075c, AC-086b, AC-098 to AC-106, AC-108,
 | AC-131a | `tools/list` of `full` is at most 24,000 characters. | `test:tools::ac_131a_full_catalog_size@T1` | 13b/25 | 24 |
 | AC-131b | `tools/list` of `mini` is at most 6,000 characters. | `test:tools::ac_131b_mini_catalog_size@T1` | 13b/25 | 24 |
 | AC-131c | The server instructions are at most 2,000 characters and name only tools of the active profile. | `test:tools::ac_131c_instructions@T1` | 13b/25 | 24 |
-| AC-132a | Every example parses with its `ArgSpec`, runs on the demo or a fixture, matches its golden and fits its `OutputShape`. | `test:tools::ac_132a_examples_executed@T1` | 13a/25 | 24 |
-| AC-132b | Every `ArgSpec`, enum value and global argument occurs in an executed example or a request of `tests/data/requests/`. | `test:tools::ac_132b_argument_coverage@T1` | 13a/25 | 24 |
+| AC-132a | Every example parses with its `ArgSpec`, runs on the demo or a fixture, matches its golden and fits its `OutputShape`. | `test:tools::ac_132a_examples_executed@T1`, `test:tools::ac_132a_137_143_full_registry_examples@T1`; goldens: `test:tools::examples_on_demo@T1`, `test:tools::read_examples_on_demo@T1`, `test:tools::memory_examples_on_demo@T1`, `test:tools::overrides_examples_on_demo@T1`, `test:tools::history_examples_on_demo@T1`, `test:tools::fact_check_examples_on_demo@T1`, `test:tools::batch_examples_on_demo@T1`, `test:tools::func_similar_examples_on_demo@T1` | 13a/25 | 24 |
+| AC-132b | Every `ArgSpec`, enum value and global argument occurs in an executed example or a request of `tests/data/requests/`. | `test:tools::ac_132b_argument_coverage@T1`, `test:tools::ac_132b_full_argument_coverage@T1` | 13a/25 | 24 |
 | AC-133 | Every example with `limit` at its cap stays within 60,000 characters on 5,000-function and 50,000-function synthetic ELFs. | `test:tools::ac_133_output_budget@T1` (5,000), `test:tools::ac_133_output_budget_large@T2` (50,000) | 17b/25 | 24 |
 | AC-134 | Every error object is at most 10,000 characters with at most 5 candidates plus `candidates_total`. | `test:tools::ac_134_error_cap@T1` | 13a | - |
 | AC-135 | For every list tool on every fixture, cursors lead to exactly `total` unique items in a stable order. | `test:tools::ac_135_pagination_conservation@T1` | 17b/25 | 24 |
 | AC-136a | A `symbol_rename` between pages keeps `addr`-sorted and `priority`-sorted `func_list` cursors valid. | `test:tools::ac_136a_rename_keeps_cursors@T1` | 22a | - |
 | AC-136b | A rename of the boundary item under `name` sort gives `CURSOR_STALE`. | `test:tools::ac_136b_name_sort_stale@T1` | 22a | - |
 | AC-136c | A tampered cursor gives `CURSOR_INVALID`. | `test:tools::ac_136c_tampered_cursor@T1` | 22a | - |
-| AC-137 | In every example result, address-like keys hold `^0x[0-9a-f]+$` strings, and every JSON number is below 2^53. | `test:tools::ac_137_hex_strings@T1` | 13a/25 | 24 |
+| AC-137 | In every example result, address-like keys hold `^0x[0-9a-f]+$` strings, and every JSON number is below 2^53. | `test:tools::ac_137_hex_strings@T1`, `test:tools::ac_132a_137_143_full_registry_examples@T1` | 13a/25 | 24 |
 | AC-138 | The `two_helpers` fixture gives `AMBIGUOUS_NAME` with both candidates for `helper`, and `helper@0x..` resolves. | `test:tools::ac_138_ambiguous_names@T1` | 13b | - |
 | AC-139 | Stringified arrays, objects, integers, booleans and enum case give results equal to native values plus `W_COERCED`. | `test:tools::ac_139_coercion_matrix@T1` | 13b | - |
 | AC-140 | An unknown key gives `UNKNOWN_ARGUMENT`, and its `next[0]` is a call that passes validation. | `test:tools::ac_140_unknown_argument@T1` | 13a | - |
 | AC-141a | Every `ErrorCode` and `WarningCode` has a frozen number, a message template, a hint, a retry flag and a repair class. | `test:base::ac_141a_catalog_complete@T1` | 05 | - |
 | AC-141b | Each line of `tests/data/code_triggers.jsonl` gives its code, and the lines cover both enums except `OUTPUT_BUDGET_EXCEEDED`. | `test:tools::ac_141b_code_triggers@T1` | 25b | 24 |
 | AC-142 | No error or warning text contains `Some(`, `Os {`, `Error {` or `panicked at`. | `test:tools::ac_142_no_debug_text@T1` | 13a/25 | 24 |
-| AC-143 | Every `next` call and remedy names a tool of the active profile and parses with its `ArgSpec`, and a result has at most 3. | `test:tools::ac_143_executable_hints@T1` | 13a/25 | 24 |
+| AC-143 | Every `next` call and remedy names a tool of the active profile and parses with its `ArgSpec`, and a result has at most 3. | `test:tools::ac_143_executable_hints@T1`, `test:tools::ac_132a_137_143_full_registry_examples@T1` | 13a/25 | 24 |
 | AC-144 | A list input with one bad item returns per-item results in input order and `ok: true` for the call. | `test:tools::ac_144_per_item_results@T1` | 17b | - |
 | AC-145 | Reads during incomplete analysis carry `partial: true` and the analysis state. | `test:tools::ac_145_partial_flag@T1` | 17b | - |
 | AC-146a | In the `hostile_strings` fixture, every output string escapes controls and bidi marks. | `test:tools::ac_146a_controls_escaped@T1` | 17b | - |
@@ -3375,7 +3424,7 @@ These ACs are normal MVP ACs since revision 3 (Section 1.7). AC-018a counts them
 | AC-218 | `search {ids}` returns the full record of each `note:`, `set:` and `jt:` ID, and pages set members by cursor. | `test:tools::ac_218_search_ids@T1` | 22a | - |
 | AC-219 | No batch step runs a destructive tool or action, and such a step gives `TOOL_NOT_IN_PROFILE` with the direct call in `next[0]`. | `test:tools::ac_219_destructive_rejected@T1` | 25 | - |
 | AC-220 | For each R-code line of `code_triggers.jsonl`, `next[0]` is a complete call that passes validation and repairs the failure. | `test:tools::ac_220_repair_calls@T1` | 25 | 24 |
-| AC-221 | Each selector action enforces its required and forbidden arguments, and `MISSING_ARGUMENT` names the action in `details`. | `test:tools::ac_221_selector_rules@T1` | 13a/25 | 24 |
+| AC-221 | Each selector action enforces its required and forbidden arguments, and `MISSING_ARGUMENT` names the action in `details`. | `test:tools::ac_221_selector_rules@T1`, `test:tools::ac_221_full_selector_rules@T1` | 13a/25 | 24 |
 | AC-222 | The registry lint fails when two tools give different names to the same argument kind and role. | `test:tools::ac_222_vocabulary_lint@T1` | 13a/25 | 24 |
 | AC-223 | No crate source calls `std::env::set_var` or `std::env::remove_var`. | `test:xtask::ac_223_no_set_var@T1` | 01 | - |
 | AC-224 | Each tier-1 test finishes in at most 15 s, and `xtask ci` reports the time of each test. | `xtask:ci#/steps/test_times/max_seconds <= 15` | 27 | - |
@@ -3388,7 +3437,7 @@ These ACs are normal MVP ACs since revision 3 (Section 1.7). AC-018a counts them
 | AC-231 | `ghidorah doctor` prints one JSON object, and all its checks pass on the build host. | `test:cli::ac_231_doctor@T1` | 25 | - |
 | AC-232 | `history_list {since_rev}` returns one coalesced row per changed fact with its last rev and session. | `test:tools::ac_232_since_rev_coalesce@T1` | 20 | - |
 | AC-233 | MCP default session labels are `mcp-<k>` per process and binary, and every envelope echoes `session`. | `test:cli::ac_233_session_labels@T1` | 20 | - |
-| AC-234 | Each commit whose subject starts with `fix:` changes at least one test file. | `xtask:ci#/steps/fix_commits/ok == true` | 27 | - |
+| AC-234 | Each commit whose subject starts with `fix:` changes at least one `.rs` test file. Such a file is `tests.rs` or a `.rs` file under a `tests` directory. | `xtask:ci#/steps/fix_commits/ok == true` | 27 | - |
 
 ### 15.22 ACs appended in revision 3
 
@@ -3401,7 +3450,7 @@ These ACs are normal MVP ACs since revision 3 (Section 1.7). AC-018a counts them
 | AC-242 | A function with no decodable instruction, a one-block function and a raw blob with one function give no panic and a defined result: a zero vector gives `query.features: 0` and `matches: []`, and scope `binary` on the blob gives `matches: []`. | `test:analysis::ac_242_empty_and_tiny_functions@T1` | 29 | - |
 | AC-243 | A query set of 2,000 functions over the four T2 builds (vectors not cached) has a median time of at most the `perf/budget.json` value `similar_2k_ms` (5,000 ms) in the test profile. | `test:analysis::ac_243_similar_2k_budget@T2` | 29 | - |
 | AC-244 | For every PE fixture, the DOS, COFF and optional headers, the data directories and the section table equal the `llvm-readobj -h --sections` golden. | `test:loader::ac_244_pe_headers_golden@T1` | 30 | - |
-| AC-245 | Each `PeBuilder` mapping variant (`VirtualSize` 0, `PointerToRawData` below 0x200 and not aligned, RVAs inside the headers, overlapping sections, a section past EOF, `NumberOfRvaAndSizes` above 16) gives the regions, reads and diagnostics of Section 4.10. | `test:loader::ac_245_rva_mapping_variants@T1` | 30 | - |
+| AC-245 | Each `PeBuilder` mapping variant (`VirtualSize` 0, `PointerToRawData` below 0x200 and not aligned, RVAs inside the headers, overlapping sections, a section past EOF, `NumberOfRvaAndSizes` above 16, `low_alignment`, `vsize_slack`, `uninit_raw`) gives the regions, reads and diagnostics of Section 4.10. The `shared_ilt` and `shared_ilt_ordinal` variants stay in the import cap of Section 4.11 with one `E_LIMIT`. | `test:loader::ac_245_rva_mapping_variants@T1`, `test:loader::regress_pe_low_alignment_maps_flat@T1`, `test:loader::regress_pe_section_slack_and_uninit_raw@T1`, `test:loader::regress_pe_shared_ilt_import_cap@T1` | 30 | - |
 | AC-246 | Imports (by name with hint, by ordinal, null ILT), delay imports and exports (names, ordinals, forwarders) of every PE fixture equal the `llvm-readobj --coff-imports --coff-exports` goldens. | `test:loader::ac_246_imports_exports_golden@T1` | 30 | - |
 | AC-247 | Base relocations of every PE fixture equal the `llvm-readobj --coff-basereloc` golden, and a block with `BlockSize` 0 or 7 gives `E_LOOP` and stops the walk. | `test:loader::ac_247_basereloc_golden@T1` | 30 | - |
 | AC-248 | The `.pdata` function starts equal the `RUNTIME_FUNCTION` table of the `llvm-readobj --unwind` golden minus the CHAININFO fragments, and each entry that is not a fragment is a function with `start_reason: pdata`. | `test:analysis::ac_248_pdata_starts@T1` | 30 | - |
