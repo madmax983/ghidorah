@@ -6,15 +6,21 @@
 //! | `host-<name>` | the `sha256` member of the object at the pointer | the SHA-256 of the host file at its `path` member |
 //!
 //! A record gives `recorded` when the hashes are equal and the record holds the claim of its AC.
-//! A missing host file gives `skipped`. Each other case gives `fail`.
+//! A missing host file, or a host file with another hash, gives `skipped`. A stale tree gives
+//! `skipped` with a warning. Under a proof requirement, it gives `fail` (design Section 13.3).
+//! Each other case gives `fail`.
 //!
 //! | Input | Claim |
 //! |---|---|
 //! | `tree` | Each kernel row at the pointer has `status: verified`, `errors: 0` and `verified >= spec_items`. Each kernel has a negative row, and each of its negative rows has `ok: true`. |
 //! | `host-<name>` | The object at the pointer has `mismatches: 0` and `agree == insns`. |
 //!
-//! So a record of a failed run never gives `recorded`.
+//! So a record of a failed run never gives `recorded` or `skipped`.
+//!
+//! `GHIDORAH_REQUIRE_PROOFS=1` and an evidence run require proofs. The caller reads the variable
+//! once and gives the result to [`live`] or [`status`].
 
+use std::collections::BTreeSet;
 use std::path::Path;
 
 use crate::ac::{AcRow, Evidence};
@@ -27,6 +33,9 @@ pub const HOST_PREFIX: &str = "host-";
 
 /// The tree input.
 pub const TREE: &str = "tree";
+
+/// The variable that makes a stale proof record fail. Its value is `1` (design Section 13.3).
+pub const REQUIRE_PROOFS: &str = "GHIDORAH_REQUIRE_PROOFS";
 
 /// Gives the expected hash of a record item.
 #[must_use]
@@ -111,8 +120,16 @@ pub fn claims(record: &Value, pointer: &str, input: &str) -> bool {
 /// `current` is `None` when the input does not exist on this host.
 ///
 /// A record that does not hold its [`claims`] gives `fail`, also on a host without the input.
+/// A host input with no file or another hash gives `skipped`, because the record names the
+/// files of the recording host. A stale tree gives `skipped`, or `fail` with `require_proofs`.
 #[must_use]
-pub fn record_match(record: &Value, pointer: &str, input: &str, current: Option<&str>) -> Status {
+pub fn record_match(
+    record: &Value,
+    pointer: &str,
+    input: &str,
+    current: Option<&str>,
+    require_proofs: bool,
+) -> Status {
     let Some(want) = expected(record, pointer, input) else {
         return Status::Fail;
     };
@@ -121,7 +138,8 @@ pub fn record_match(record: &Value, pointer: &str, input: &str, current: Option<
     }
     match current {
         Some(have) if have == want => Status::Recorded,
-        None if input.starts_with(HOST_PREFIX) => Status::Skipped,
+        _ if input.starts_with(HOST_PREFIX) => Status::Skipped,
+        Some(_) if !require_proofs => Status::Skipped,
         _ => Status::Fail,
     }
 }
@@ -138,9 +156,9 @@ pub fn current(root: &Path, record: &Value, pointer: &str, input: &str) -> Optio
 }
 
 /// Gives the status of the record item `file#pointer@sha256=input` of the repository at
-/// `root`.
+/// `root`. `require_proofs` makes a stale tree give `fail` (see [`record_match`]).
 #[must_use]
-pub fn status(root: &Path, file: &str, pointer: &str, input: &str) -> Status {
+pub fn status(root: &Path, file: &str, pointer: &str, input: &str, require_proofs: bool) -> Status {
     let record = std::fs::read_to_string(root.join(file))
         .ok()
         .and_then(|text| json::parse(&text).ok());
@@ -148,13 +166,17 @@ pub fn status(root: &Path, file: &str, pointer: &str, input: &str) -> Status {
         return Status::Fail;
     };
     let now = current(root, &record, pointer, input);
-    record_match(&record, pointer, input, now.as_deref())
+    record_match(&record, pointer, input, now.as_deref(), require_proofs)
 }
 
 /// Checks the record items of the MVP rows again and gives one outcome for each.
+///
+/// Without `require_proofs`, a stale tree gives `skipped`, and the command writes one warning
+/// for each stale record file on stderr (design Section 13.3).
 #[must_use]
-pub fn live(root: &Path, rows: &[AcRow]) -> Vec<Outcome> {
+pub fn live(root: &Path, rows: &[AcRow], require_proofs: bool) -> Vec<Outcome> {
     let mut out = Vec::new();
+    let mut stale = BTreeSet::new();
     for row in rows.iter().filter(|r| r.is_gate()) {
         for item in &row.evidence {
             if let Evidence::Record {
@@ -163,14 +185,30 @@ pub fn live(root: &Path, rows: &[AcRow]) -> Vec<Outcome> {
                 input,
             } = item
             {
+                let status = status(root, file, pointer, input, require_proofs);
+                if status == Status::Skipped && input == TREE {
+                    stale.insert(file.as_str());
+                }
                 out.push(Outcome {
                     ac: row.id.clone(),
                     tier: item.tier(),
                     kind: item.kind(),
-                    status: status(root, file, pointer, input),
+                    status,
                 });
             }
         }
     }
+    warn_stale(&stale);
     out
+}
+
+/// Writes the warning of design Section 13.3 for each stale proof record.
+#[expect(
+    clippy::print_stderr,
+    reason = "a stale proof record is a warning without GHIDORAH_REQUIRE_PROOFS=1"
+)]
+fn warn_stale(files: &BTreeSet<&str>) {
+    for file in files {
+        eprintln!("warning: {file} is stale; run `cargo xtask verify`");
+    }
 }

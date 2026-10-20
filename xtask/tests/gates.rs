@@ -8,7 +8,8 @@
 
 use std::sync::OnceLock;
 
-use xtask::ac::{self, AcRow};
+use xtask::ac::{self, AcRow, Evidence};
+use xtask::acrun::{Status, record};
 use xtask::ci::{self, Step};
 use xtask::cov::{self, Counts, Coverage};
 use xtask::dag::{self, Edge};
@@ -641,6 +642,86 @@ fn ac_018b_failed_is_empty() {
         Some(&Value::Array(Vec::new())),
         "{report}"
     );
+}
+
+/// A proof record of the kernel K1 and a host record of bash. Every claim holds.
+const RECORD: &str = r#"{"tree_sha256":"aa",
+    "kernels":{"K1":{"name":"K1","status":"verified","errors":0,"verified":3,"spec_items":2}},
+    "negatives":[{"kernel":"K1","ok":true}],
+    "bash":{"path":"/usr/bin/bash","sha256":"bb","insns":10,"agree":10,"mismatches":0}}"#;
+
+fn record_status(text: &str, pointer: &str, input: &str, current: &str, require: bool) -> Status {
+    let record = json::parse(text).expect("the record parses");
+    record::record_match(&record, pointer, input, Some(current), require)
+}
+
+#[test]
+fn regress_host_record_other_hash_is_skipped() {
+    let host = |text: &str, current: &str, require: bool| {
+        record_status(text, "/bash", "host-bash", current, require)
+    };
+    let silent = RECORD.replace(r#","insns":10,"agree":10,"mismatches":0"#, "");
+    let mismatches = RECORD.replace(r#""mismatches":0"#, r#""mismatches":3"#);
+    for require in [false, true] {
+        assert_eq!(host(RECORD, "bb", require), Status::Recorded);
+        // Another host file: the claims hold, so only the host differs.
+        assert_eq!(host(RECORD, "bc", require), Status::Skipped);
+        // A record without its claims fails on each host.
+        assert_eq!(host(&silent, "bc", require), Status::Fail);
+        assert_eq!(host(&silent, "bb", require), Status::Fail);
+        assert_eq!(host(&mismatches, "bc", require), Status::Fail);
+    }
+}
+
+/// Gives a repository copy with one kernel file and the proof record `RECORD`.
+fn stale_repository() -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("ghidorah-xtask-record-{}", std::process::id()));
+    for (rel, text) in [
+        ("crates/kernel/src/lib.rs", "//! A kernel.\n"),
+        ("crates/spec/src/lib.rs", "//! A stub.\n"),
+        ("verify/results.json", RECORD),
+    ] {
+        let path = dir.join(rel);
+        std::fs::create_dir_all(path.parent().expect("the path has a parent"))
+            .expect("the directory is made");
+        std::fs::write(&path, text).expect("the file is written");
+    }
+    dir
+}
+
+#[test]
+fn regress_stale_tree_record_warns_without_require_proofs() {
+    let tree = |text: &str, current: &str, require: bool| {
+        record_status(text, "/kernels/K1", "tree", current, require)
+    };
+    assert_eq!(tree(RECORD, "aa", false), Status::Recorded);
+    assert_eq!(tree(RECORD, "aa", true), Status::Recorded);
+    // A stale tree is a warning in plain `cargo test` (design Section 13.3).
+    assert_eq!(tree(RECORD, "ab", false), Status::Skipped);
+    assert_eq!(tree(RECORD, "ab", true), Status::Fail);
+    // A record without its claims fails, also when the tree is stale.
+    let failed = RECORD.replace(r#""status":"verified""#, r#""status":"failed""#);
+    assert_eq!(tree(&failed, "ab", false), Status::Fail);
+    assert_eq!(tree(&failed, "aa", false), Status::Fail);
+
+    // The live check of `xtask ac` follows the same rule.
+    let root = stale_repository();
+    let mut ac_row = row("AC-028", &["03"], &[]);
+    ac_row.evidence = vec![Evidence::Record {
+        file: "verify/results.json".to_owned(),
+        pointer: "/kernels/K1".to_owned(),
+        input: "tree".to_owned(),
+    }];
+    let statuses = |require: bool| -> Vec<Status> {
+        record::live(&root, std::slice::from_ref(&ac_row), require)
+            .iter()
+            .map(|o| o.status)
+            .collect()
+    };
+    let (plain, strict) = (statuses(false), statuses(true));
+    std::fs::remove_dir_all(&root).expect("the repository copy is removed");
+    assert_eq!(plain, [Status::Skipped]);
+    assert_eq!(strict, [Status::Fail]);
 }
 
 #[test]

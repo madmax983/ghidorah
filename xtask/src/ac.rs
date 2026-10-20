@@ -470,10 +470,15 @@ fn findings_json(found: &[Finding]) -> Value {
 }
 
 /// Gives the effective rows of a check without `--run`: the table rows, with each record
-/// row replaced by a live check of its record.
-fn checked_rows(root: &Path, rows: &[AcRow], commit: &str) -> Result<Vec<table::Row>, Error> {
+/// row replaced by a live check of its record. `require_proofs` makes a stale proof record fail.
+fn checked_rows(
+    root: &Path,
+    rows: &[AcRow],
+    commit: &str,
+    require_proofs: bool,
+) -> Result<Vec<table::Row>, Error> {
     let old = table::read(root)?;
-    let live: Vec<table::Row> = record::live(root, rows)
+    let live: Vec<table::Row> = record::live(root, rows, require_proofs)
         .iter()
         .map(|o| table::Row::new(o, commit))
         .collect();
@@ -508,9 +513,11 @@ fn execute(
 /// Runs `xtask ac [--run] [--tier2] [AC...]`.
 ///
 /// Without `--run`, the command checks the grammar, the Needs order and missing evidence. It
-/// also reports `failed` from the evidence table, with each record item checked again. With
-/// `--run`, it also runs the evidence and writes `docs/ac-evidence.json`. A list of ACs runs
-/// only those ACs and replaces only their rows of the table.
+/// also reports `failed` from the evidence table, with each record item checked again. A stale
+/// proof record gives `skipped` and a warning, and `fail` under `GHIDORAH_REQUIRE_PROOFS=1`
+/// (design Section 13.3). With `--run`, it also runs the evidence and writes
+/// `docs/ac-evidence.json`. A list of ACs runs only those ACs and replaces only their rows of
+/// the table.
 ///
 /// # Errors
 ///
@@ -559,9 +566,10 @@ pub fn run(root: &Path, args: &[String]) -> Result<Value, Error> {
         report.push(("failed", table::failed(&table_rows)));
     } else {
         let commit = table::head_commit(root).unwrap_or_default();
+        let require_proofs = std::env::var(record::REQUIRE_PROOFS).is_ok_and(|v| v == "1");
         report.push((
             "failed",
-            table::failed(&checked_rows(root, &rows, &commit)?),
+            table::failed(&checked_rows(root, &rows, &commit, require_proofs)?),
         ));
     }
     report.push(("ok", Value::from(ok)));
