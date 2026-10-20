@@ -14,6 +14,8 @@
 //! | `JumpInd(Load(slot))` of a thunk in one instruction, through an import slot | a tail call of the import |
 //! | `Ret` | a stop |
 //!
+//! A call through an import slot, `Call(Load(slot))` in one instruction, calls the import.
+//!
 //! The store of the return address of a `call` gets no statement: the call line shows it. An
 //! example is the push of a call after `and rsp, -16` in `_start`, where the stack offset is
 //! unknown, so the store stays in memory.
@@ -240,14 +242,13 @@ impl Ex<'_> {
             out: None,
             a: [Arg::Nil; 3],
         });
-        let callee = match op.opc {
-            Opc::Call => match op.a[0] {
-                Arg::K(t) => Callee::Direct(t.get()),
-                other => Callee::Indirect(self.arg(other, 64)),
-            },
-            Opc::CallInd => Callee::Indirect(self.arg(op.a[0], 64)),
-            Opc::Syscall => Callee::Syscall,
-            Opc::Intrinsic => Callee::Intrinsic(
+        let callee = match (op.opc, op.a[0]) {
+            (Opc::Call, Arg::K(t)) => Callee::Direct(t.get()),
+            (Opc::Call | Opc::CallInd, target) => self
+                .slot_target(target, op.id.addr)
+                .map_or_else(|| Callee::Indirect(self.arg(target, 64)), Callee::Direct),
+            (Opc::Syscall, _) => Callee::Syscall,
+            (Opc::Intrinsic, _) => Callee::Intrinsic(
                 self.f
                     .ssa
                     .arena()
@@ -308,22 +309,24 @@ impl Ex<'_> {
         }
     }
 
-    /// Gives the call target of the indirect jump of a thunk through an import slot. The jump
-    /// target must be a load of a constant slot address in the same instruction. Another
-    /// function sets its argument registers before the jump. The jump reads no register in
-    /// L1, so the jump of such a function keeps its `goto`.
-    fn import_jump(&self, target: Arg, addr: u64) -> Option<u64> {
+    /// Gives the call target of the import whose slot `target` loads. The target must be a
+    /// load of a constant slot address in the instruction at `addr`. An example is the
+    /// `call [rip+x]` of a `-fno-plt` build: it calls the import, not a data address.
+    fn slot_target(&self, target: Arg, addr: u64) -> Option<u64> {
         let Arg::V(v) = target else {
             return None;
         };
-        if !self.thunk {
-            return None;
-        }
         let op = self.f.def.get(&v).and_then(|&i| self.f.op(i))?;
         if op.opc != Opc::Load || op.id.addr != addr {
             return None;
         }
         self.env.import_at_slot(op.a[0].as_k()?)
+    }
+
+    /// Gives the call target of the indirect jump of a thunk through an import slot. Another
+    /// function with such a jump at stack height 0 has a call in L1 in its place.
+    fn import_jump(&self, target: Arg, addr: u64) -> Option<u64> {
+        self.slot_target(target, addr).filter(|_| self.thunk)
     }
 
     /// Gives the statement of an indirect jump with no case: the tail call of the import of

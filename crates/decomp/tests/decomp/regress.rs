@@ -431,3 +431,45 @@ fn regress_positional_param_slots() {
     assert_eq!(arg_count(&start, "FUN_140001150"), 4, "{start}");
     assert_eq!(arg_count(&start, "FUN_1400011c0"), 2, "{start}");
 }
+
+/// Gives the output of the function `name` of the fixture `fixture`.
+fn output_of(fixture: &str, name: &str) -> ghidorah_decomp::Output {
+    let p = crate::fixtures::program(fixture);
+    let entry = crate::fixtures::entry_of(p, name);
+    ghidorah_decomp::render(
+        p,
+        crate::fixtures::fid(entry),
+        &Opts::default(),
+        &ghidorah_ir::NoNames,
+        &mut ghidorah_base::Fuel::new(50_000_000),
+    )
+    .unwrap_or_else(|e| panic!("{fixture} {name}: {e}"))
+}
+
+/// Gives the names of the call rows of an output.
+fn call_names(out: &ghidorah_decomp::Output) -> Vec<String> {
+    out.lines
+        .iter()
+        .flat_map(|l| &l.calls)
+        .map(|c| c.name.clone())
+        .collect()
+}
+
+/// `finish` of the `-fno-plt` build calls `puts` through its GOT slot: `call [rip+x]`. The
+/// call named its target `DAT_00000003`, the EXTERNAL address of the import (known-04).
+/// The finding names `main`, but `main` of hello only tail calls `run`.
+#[test]
+fn regress_noplt_got_call_names_import() {
+    let fixture = "hello.gcc-O2-noplt";
+    let finish = output_of(fixture, "finish");
+    let text = finish.text();
+    assert!(text.contains("puts(\"Goodbye.\");"), "{text}");
+    assert!(!text.contains("DAT_"), "{text}");
+    assert_eq!(call_names(&finish), ["puts"], "{text}");
+    let main = output_of(fixture, "main");
+    assert!(
+        call_names(&main).iter().all(|n| !n.starts_with("DAT_")),
+        "{}",
+        main.text()
+    );
+}
