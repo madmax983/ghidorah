@@ -21,6 +21,7 @@ mod out_units;
 mod progs;
 mod regress;
 mod regress_sema;
+mod regress_switch;
 mod shapes;
 mod structure;
 mod units;

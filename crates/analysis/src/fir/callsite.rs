@@ -22,7 +22,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use ghidorah_base::{Address, Fuel, FuncId};
 use ghidorah_db::{Program, Types};
-use ghidorah_ir::{Arg, Loc, Opc};
+use ghidorah_ir::{Arena, Arg, Loc, Opc};
 use ghidorah_types::CallConv;
 
 use super::FuncIr;
@@ -44,12 +44,15 @@ pub struct Arity {
     pub varargs: bool,
 }
 
-/// Gives the use list of each call op of `l0` (see the module doc). `callee` gives the arity
-/// of the direct callee at an address, or `None` for a callee with no facts. An indirect call
-/// has no facts.
+/// Gives the use list of each call op of `arena` (see the module doc).
+///
+/// `arena` is the arena of `l0` with its tail jumps as calls. `callee` gives the arity of the
+/// direct callee at an address, or `None` for a callee with no facts. An indirect call has no
+/// facts.
 #[must_use]
 pub fn uses(
     l0: &FuncIr,
+    arena: &Arena,
     conv: &CallConv,
     callee: &dyn Fn(u64) -> Option<Arity>,
 ) -> BTreeMap<u32, Vec<Loc>> {
@@ -67,12 +70,12 @@ pub fn uses(
         let first_insn = usize::try_from(block.first).unwrap_or(usize::MAX);
         let count = usize::try_from(block.count).unwrap_or(0);
         let mut written: BTreeSet<i64> = BTreeSet::new();
-        for span in l0.arena.insns().iter().skip(first_insn).take(count) {
+        for span in arena.insns().iter().skip(first_insn).take(count) {
             for k in 0..span.count {
                 let Some(index) = span.first.checked_add(k) else {
                     continue;
                 };
-                let Some(op) = l0.arena.op(index) else {
+                let Some(op) = arena.op(index) else {
                     continue;
                 };
                 match op.opc {

@@ -9,7 +9,7 @@
 //! | `Block(n)` | one line for each statement of `n` |
 //! | `If` | `if (c) {`, the branch, `} else {`, the other branch, `}` |
 //! | `Loop` | `while (c) {`, `for (init; c; step) {`, `do {` .. `} while (c);` or `while (true) {` |
-//! | `Switch` | `switch (x) {`, `case i:` lines, each arm with `break;` |
+//! | `Switch` | `switch (x) {` over the table index, `case <bias + i>:` and `default:` lines, each arm with `break;` |
 //! | `Goto(n)`, `Label(n)` | `goto L_<addr>;` and `L_<addr>:` |
 //! | `Break`, `Continue` | `break;` and `continue;` |
 //!

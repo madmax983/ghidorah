@@ -355,6 +355,7 @@ pub fn from_l1(
         l0: &ir.l0.arena,
         tail_calls: &ir.tail_calls,
         conv,
+        guards: &ir.guards,
     };
     from_input(&input, env, opts, fuel)
 }

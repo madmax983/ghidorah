@@ -27,6 +27,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use ghidorah_analysis::jumptable::GuardInfo;
 use ghidorah_base::WarningCode;
 use ghidorah_ir::{
     Arena, Arg, EffectOperand, InsnSpan, IntrinsicId, Loc, LocSet, Node, Op, OpId, Opc, Val,
@@ -51,8 +52,22 @@ pub(crate) enum Term {
         taken: u64,
         tail: Box<Stmt>,
     },
-    /// An indirect jump with cases in the CFG.
-    Switch { target: Expr },
+    /// An indirect jump with cases in the CFG, with the selector of its jump table.
+    Switch {
+        target: Expr,
+        selector: Option<Selector>,
+    },
+}
+
+/// The selector of a jump table: the value that the guard bounds, before its bias.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Selector {
+    /// The selector value.
+    pub(crate) expr: Expr,
+    /// The selector value of the first table entry.
+    pub(crate) bias: u64,
+    /// The guard of the table.
+    pub(crate) guard: GuardInfo,
 }
 
 /// The view of one block before the variables exist.
@@ -82,6 +97,8 @@ pub(crate) struct Ex<'a> {
     pub(crate) plan: &'a Plan,
     pub(crate) env: &'a dyn Env,
     pub(crate) tails: &'a BTreeSet<u64>,
+    /// The guard of each indirect jump with a jump table.
+    pub(crate) guards: &'a BTreeMap<u64, GuardInfo>,
     /// The function is a thunk, so it passes its arguments on to the target of its jump.
     pub(crate) thunk: bool,
 }
@@ -497,6 +514,7 @@ pub(crate) fn block(ex: &Ex<'_>, b: Node) -> Raw {
             Opc::JumpInd => {
                 term = Term::Switch {
                     target: ex.arg(f0.a[0], 64),
+                    selector: ex.guards.get(&f0.id.addr).and_then(|g| ex.selector(g)),
                 };
             }
             Opc::Ret => {

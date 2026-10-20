@@ -91,7 +91,12 @@ fn events(raw: &Raw) -> Vec<Ev> {
             .map(|v| Val(v.0))
             .chain(stmt_uses(tail))
             .collect(),
-        Term::Switch { target } => target.vars().into_iter().map(|v| Val(v.0)).collect(),
+        Term::Switch { target, selector } => target
+            .vars()
+            .into_iter()
+            .chain(selector.iter().flat_map(|s| s.expr.vars()))
+            .map(|v| Val(v.0))
+            .collect(),
     };
     out.extend(tail.into_iter().map(Ev::Use));
     out

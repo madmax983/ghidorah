@@ -50,7 +50,7 @@ pub(super) fn konst(value: u64, w: u8) -> String {
 }
 
 /// Gives the text of a constant as a signed value of `w` bits.
-fn signed_konst(value: u64, w: u8) -> String {
+pub(super) fn signed_konst(value: u64, w: u8) -> String {
     let v = value & mask(w);
     let top = w.clamp(1, 64) - 1;
     if v >> top & 1 == 1 {

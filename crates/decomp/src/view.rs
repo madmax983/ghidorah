@@ -20,6 +20,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
+use ghidorah_analysis::jumptable::GuardInfo;
 use ghidorah_base::{Fuel, VarId};
 use ghidorah_ir::ssa::Ssa;
 use ghidorah_ir::{Arena, Loc, Node, OpId};
@@ -33,6 +34,7 @@ mod args;
 mod assemble;
 pub(crate) mod facts;
 pub(crate) mod stmts;
+mod switch;
 
 use facts::Facts;
 use stmts::{Ex, Raw};
@@ -107,6 +109,8 @@ pub struct Input<'a> {
     pub tail_calls: &'a BTreeSet<u64>,
     /// The calling convention, for the parameter numbers.
     pub conv: Option<&'a CallConv>,
+    /// The guard of each indirect jump with a jump table, by the address of the jump.
+    pub guards: &'a BTreeMap<u64, GuardInfo>,
 }
 
 /// The kind of a variable.
@@ -146,6 +150,16 @@ pub struct NodeView {
     pub target: Option<Expr>,
     /// The block address of each case of a `Switch` exit.
     pub cases: Vec<u64>,
+    /// The selector of a `Switch` exit: the value whose table index chooses the case. With no
+    /// selector, the switch is over the computed target, and the labels are the positions.
+    pub index: Option<Expr>,
+    /// The selector value of the first table entry. The label of case `i` is `bias + i`.
+    pub bias: u64,
+    /// The last case of the `Switch` exit is the default: the target of the guard for an
+    /// index above the table.
+    pub default: bool,
+    /// The ops of the guard compare and branch that the line of the switch shows.
+    pub guard: Vec<OpId>,
     /// The flow op that ends a block node: a jump, a branch or an indirect jump.
     pub term: Option<OpId>,
     /// The L1 ops of a block node in run order. An added node has none.
@@ -262,6 +276,7 @@ pub fn build(
         plan: &plan,
         env,
         tails: input.tail_calls,
+        guards: input.guards,
         thunk: env.is_thunk(entry),
     };
     let mut raws: Vec<Raw> = f.reach.iter().map(|&b| stmts::block(&ex, b)).collect();

@@ -184,6 +184,7 @@ pub fn decomp(specs: Vec<Spec>, vars: Vec<Var>, tree: Tree) -> Decomp {
             term: s.term,
             ops: Vec::new(),
             span: Some((at_of(i), at_of(i) + 0x10)),
+            ..NodeView::default()
         });
     }
     Decomp {

@@ -176,6 +176,23 @@ struct Guard {
     max: u64,
     loc: Loc,
     pin: u32,
+    info: GuardInfo,
+}
+
+/// The guard `cmp idx, N; ja default` of a jump table, as the decompiler shows it in a
+/// `switch` with a `default` arm.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct GuardInfo {
+    /// The address of the conditional branch of the guard.
+    pub branch: u64,
+    /// The index of the compare op of the branch. The op keeps its index in L1.
+    pub cmp: u32,
+    /// The input of the compare that is the table index: 0 or 1.
+    pub operand: u8,
+    /// The largest index: the table has `max + 1` entries.
+    pub max: u64,
+    /// The address of the block that the branch takes for an index above `max`.
+    pub default: u64,
 }
 
 /// Finds the guard of the indirect jump at `site`. The guard is the compare of a conditional
@@ -196,6 +213,13 @@ fn guard(fir: &FuncIr, site: u64) -> Option<Guard> {
     None
 }
 
+/// Gives the guard of the indirect jump at `site` of `fir`, or `None` when no guard bounds the
+/// index (see [`method_a`]).
+#[must_use]
+pub fn guard_info(fir: &FuncIr, site: u64) -> Option<GuardInfo> {
+    guard(fir, site).map(|g| g.info)
+}
+
 /// Reads the guard of the branch at the end of the block `pred` when the flow goes to the
 /// block at `start`.
 fn branch_guard(fir: &FuncIr, pred: Node, start: u64) -> Option<Guard> {
@@ -204,17 +228,42 @@ fn branch_guard(fir: &FuncIr, pred: Node, start: u64) -> Option<Guard> {
     let span = fir.arena.insns().get(usize::try_from(last).ok()?)?;
     let ops = fir.arena.span_ops(span)?;
     let branch = ops.iter().find(|o| o.opc == Opc::CJump)?;
-    let taken = branch.a[1].as_k()? == start;
-    let cmp = fir.arena.op(fir.arena.def_of(branch.a[0].as_v()?)?)?;
-    let (x, max) = match (cmp.opc, cmp.a[0].as_k(), cmp.a[1].as_k(), taken) {
-        (Opc::ULt, Some(n), None, false) => (cmp.a[1], n),
-        (Opc::ULe, Some(n), None, false) => (cmp.a[1], n.checked_sub(1)?),
-        (Opc::ULe, None, Some(n), true) => (cmp.a[0], n),
-        (Opc::ULt, None, Some(n), true) => (cmp.a[0], n.checked_sub(1)?),
+    let target = branch.a[1].as_k()?;
+    let taken = target == start;
+    let cmp_index = fir.arena.def_of(branch.a[0].as_v()?)?;
+    let cmp = fir.arena.op(cmp_index)?;
+    let (operand, max) = match (cmp.opc, cmp.a[0].as_k(), cmp.a[1].as_k(), taken) {
+        (Opc::ULt, Some(n), None, false) => (1u8, n),
+        (Opc::ULe, Some(n), None, false) => (1, n.checked_sub(1)?),
+        (Opc::ULe, None, Some(n), true) => (0, n),
+        (Opc::ULt, None, Some(n), true) => (0, n.checked_sub(1)?),
         _ => return None,
     };
+    let x = *cmp.a.get(usize::from(operand))?;
     let (loc, pin) = index_loc(fir, x)?;
-    Some(Guard { max, loc, pin })
+    let default = if taken {
+        fir.body
+            .cfg
+            .succs(pred)
+            .iter()
+            .filter_map(|n| fir.starts.get(n.index()).copied())
+            .find(|&a| a != start)?
+    } else {
+        target
+    };
+    let info = GuardInfo {
+        branch: span.addr,
+        cmp: cmp_index,
+        operand,
+        max,
+        default,
+    };
+    Some(Guard {
+        max,
+        loc,
+        pin,
+        info,
+    })
 }
 
 /// Gives the location that an index value reads and the op index of that read: a `Get`,

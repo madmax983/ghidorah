@@ -6,6 +6,7 @@
 
 use std::collections::BTreeMap;
 
+use ghidorah_analysis::jumptable::GuardInfo;
 use ghidorah_ir::Node;
 
 use crate::expr::{Call, Callee, Expr, Stmt, VarIdx};
@@ -13,7 +14,7 @@ use crate::shape::{Exit, NodeKind, Shape, ShapeNode};
 use crate::vars::Assigned;
 use crate::view::facts::Facts;
 use crate::view::stmts::{Raw, Term};
-use crate::view::{NodeView, View};
+use crate::view::{NodeView, View, switch};
 
 /// Maps the placeholder variables of an expression to their variables.
 fn remap_expr(e: &mut Expr, of: &BTreeMap<ghidorah_ir::Val, VarIdx>) {
@@ -92,7 +93,12 @@ pub(crate) fn remap_raw(raw: &mut Raw, of: &BTreeMap<ghidorah_ir::Val, VarIdx>) 
             remap_expr(cond, of);
             remap_stmt(tail, of);
         }
-        Term::Switch { target } => remap_expr(target, of),
+        Term::Switch { target, selector } => {
+            remap_expr(target, of);
+            if let Some(s) = selector {
+                remap_expr(&mut s.expr, of);
+            }
+        }
     }
 }
 
@@ -138,12 +144,17 @@ enum BExit {
     Switch(Vec<Node>),
 }
 
-/// Gives the exit of a block and its view without the copies.
+/// Gives the exit of a block, its view without the copies and the guard of its jump table.
 #[expect(
     clippy::many_single_char_names,
     reason = "t and f name the branch targets of the shape table"
 )]
-fn block_exit(f: &Facts<'_>, raw: &mut Raw, succs: &[Node]) -> (BExit, NodeView) {
+fn block_exit(
+    f: &Facts<'_>,
+    raw: &mut Raw,
+    succs: &[Node],
+) -> (BExit, NodeView, Option<GuardInfo>) {
+    let mut guard = None;
     let mut view = NodeView {
         stmts: std::mem::take(&mut raw.stmts),
         term: raw.term_op,
@@ -179,8 +190,13 @@ fn block_exit(f: &Facts<'_>, raw: &mut Raw, succs: &[Node]) -> (BExit, NodeView)
                 BExit::Stop
             }
         }
-        Term::Switch { target } => {
+        Term::Switch { target, selector } => {
             if d.len() > 1 {
+                if let Some(s) = selector {
+                    view.index = Some(s.expr);
+                    view.bias = s.bias;
+                    guard = Some(s.guard);
+                }
                 view.target = Some(target);
                 view.cases = succs
                     .iter()
@@ -192,7 +208,7 @@ fn block_exit(f: &Facts<'_>, raw: &mut Raw, succs: &[Node]) -> (BExit, NodeView)
             }
         }
     };
-    (exit, view)
+    (exit, view, guard)
 }
 
 /// The facts of the edges of one block.
@@ -309,6 +325,7 @@ pub(crate) fn shape(f: &Facts<'_>, raws: &mut [Raw], assigned: &Assigned, entry:
         };
         let _ = b.add(node, NodeView::default());
     }
+    let mut guards: BTreeMap<Node, GuardInfo> = BTreeMap::new();
     for (i, raw) in raws.iter_mut().enumerate() {
         let me = Node(u32::try_from(i).unwrap_or(u32::MAX));
         let succs: Vec<Node> = f
@@ -319,7 +336,10 @@ pub(crate) fn shape(f: &Facts<'_>, raws: &mut [Raw], assigned: &Assigned, entry:
             .filter(|s| index.contains_key(s))
             .copied()
             .collect();
-        let (bexit, mut view) = block_exit(f, raw, &succs);
+        let (bexit, mut view, guard) = block_exit(f, raw, &succs);
+        if let Some(g) = guard {
+            guards.insert(me, g);
+        }
         let e = Edges {
             index: &index,
             assigned,
@@ -366,6 +386,9 @@ pub(crate) fn shape(f: &Facts<'_>, raws: &mut [Raw], assigned: &Assigned, entry:
             *v = view;
         }
     }
+    for (s, g) in &guards {
+        let _ = switch::fold_guard(f, &index, &mut b.nodes, &mut b.views, (*s, g));
+    }
     let start = start_node(f, assigned, entry, &mut b);
     View {
         entry,
@@ -377,11 +400,15 @@ pub(crate) fn shape(f: &Facts<'_>, raws: &mut [Raw], assigned: &Assigned, entry:
         vars: assigned.vars.clone(),
         insns: insns_of(f),
         effects: f.effects(),
-        sources: f
-            .ops
-            .values()
-            .flatten()
-            .filter_map(|&i| Some((f.op(i)?.id, f.ssa.fused_from(i)?)))
-            .collect(),
+        sources: sources(f),
     }
+}
+
+/// Gives the flag thunk op of each fused compare op of the reachable blocks.
+fn sources(f: &Facts<'_>) -> BTreeMap<ghidorah_ir::OpId, ghidorah_ir::OpId> {
+    f.ops
+        .values()
+        .flatten()
+        .filter_map(|&i| Some((f.op(i)?.id, f.ssa.fused_from(i)?)))
+        .collect()
 }

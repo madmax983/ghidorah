@@ -488,6 +488,7 @@ fn view_errors() {
         l0: &p.arena,
         tail_calls: &tails,
         conv: None,
+        guards: &std::collections::BTreeMap::new(),
     };
     let err = ghidorah_decomp::from_input(&input, &NoEnv, &Opts::default(), &mut Fuel::new(0));
     assert_eq!(err, Err(DecompError::View(ViewError::OutOfFuel)));
