@@ -249,6 +249,7 @@ fn warning_rows_sort_and_name_remedies() {
         callee: ghidorah_decomp::Callee::Direct(0x2000),
         args: Vec::new(),
         set: ghidorah_ir::LocSet::EMPTY,
+        push: None,
         mem: None,
         rets: Vec::new(),
         ret: None,

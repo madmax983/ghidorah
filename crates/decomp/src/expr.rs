@@ -285,6 +285,8 @@ pub struct Call {
     /// The argument registers that the caller sets for the call: a new value, or a write in
     /// the block of the call. The register of an indirect target is not in the set.
     pub set: LocSet,
+    /// The store of the return address that the call pushes. The call line shows it.
+    pub push: Option<OpId>,
     /// The memory address of an `Intrinsic` with a memory effect.
     pub mem: Option<Expr>,
     /// The locations that the op writes and that a later statement reads.

@@ -179,6 +179,9 @@ impl Printer<'_> {
     /// Gives the text of a call and adds its parts to `buf`.
     pub(super) fn call_text(&mut self, c: &Call, buf: &mut Buf) -> String {
         buf.op(c.at);
+        if let Some(push) = c.push {
+            buf.op(push);
+        }
         let site = c.at.addr;
         let regs: Vec<Loc> = self
             .env

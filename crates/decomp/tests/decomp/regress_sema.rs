@@ -284,6 +284,7 @@ fn regress_void_signature_drops_result() {
         callee: Callee::Direct(0x2000),
         args: Vec::new(),
         set: LocSet::EMPTY,
+        push: None,
         mem: None,
         rets: vec![(Loc::RAX, VarIdx(0))],
         ret: None,
@@ -354,6 +355,36 @@ fn regress_canary_statements_go_together() {
                 out.elided
             );
         }
+    }
+}
+
+/// `call [rip+0x2fd8]` at 0x11af of `_start` pushes its return address 0x11b5. After
+/// `and rsp, -16` the stack offset is unknown, so the push stayed a store and printed as
+/// `*(uint64_t *)(v - 8) = 0x11b5;` (decomp-12).
+#[test]
+fn regress_call_push_is_not_a_store() {
+    for fixture in ["xor_decode.gcc-O2", "hello.gcc-O2", "loops.clang-O2"] {
+        let p = program(fixture);
+        let entry = p.addrs_named("_start").first().map(|a| a.off);
+        let Some(entry) = entry else {
+            continue;
+        };
+        let out = ghidorah_decomp::render(
+            p,
+            fid(entry),
+            &Opts::default(),
+            &NoNames,
+            &mut Fuel::new(50_000_000),
+        )
+        .unwrap_or_else(|e| panic!("{fixture}: {e}"));
+        let t = out.text();
+        let stores: Vec<&str> = t
+            .lines()
+            .map(str::trim)
+            .filter(|l| l.starts_with("*(uint64_t *)") && l.contains(") = 0x"))
+            .collect();
+        assert!(stores.is_empty(), "{fixture}: {stores:?}\n{t}");
+        assert!(t.contains("(0x"), "{fixture}: the call of main stays: {t}");
     }
 }
 

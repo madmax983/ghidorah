@@ -104,6 +104,7 @@ fn expr_and_stmt_helpers() {
         callee: Callee::Indirect(var(5)),
         args: vec![(Loc::RDI, var(6))],
         set: std::iter::once(Loc::RDI).collect(),
+        push: None,
         mem: Some(var(7)),
         rets: vec![(Loc::RAX, VarIdx(8))],
         ret: Some(Loc::RAX),

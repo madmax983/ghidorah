@@ -14,6 +14,10 @@
 //! | `JumpInd(Load(slot))` of a thunk in one instruction, through an import slot | a tail call of the import |
 //! | `Ret` | a stop |
 //!
+//! The store of the return address of a `call` gets no statement: the call line shows it. An
+//! example is the push of a call after `and rsp, -16` in `_start`, where the stack offset is
+//! unknown, so the store stays in memory.
+//!
 //! An indirect jump without a case gets `W_JUMPTABLE_UNRESOLVED` only when the facts of the
 //! environment hold an unresolved table at it ([`Env::jumptable_unresolved`]). So a thunk
 //! or a jump through an import slot gets no such warning.
@@ -24,7 +28,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use ghidorah_base::WarningCode;
-use ghidorah_ir::{Arena, Arg, IntrinsicId, LocSet, Node, Op, OpId, Opc, Val};
+use ghidorah_ir::{Arena, Arg, InsnSpan, IntrinsicId, LocSet, Node, Op, OpId, Opc, Val};
 
 use crate::Warning;
 use crate::expr::{Call, Callee, Expr, Stmt, VarIdx};
@@ -245,10 +249,14 @@ impl Ex<'_> {
             .map(|&(loc, v)| (loc, VarIdx(v.0)))
             .collect();
         let tail = op.opc == Opc::Call && self.tails.contains(&op.id.addr);
+        let push = matches!(op.opc, Opc::Call | Opc::CallInd)
+            .then(|| self.push_of(op.id.addr))
+            .flatten();
         Call {
             callee,
             args,
             set,
+            push,
             mem,
             rets,
             ret: None,
@@ -299,6 +307,7 @@ impl Ex<'_> {
     fn stmt(&self, i: u32, op: &Op) -> Option<Stmt> {
         match op.opc {
             Opc::Phi | Opc::Nop | Opc::Get | Opc::Jump | Opc::CJump | Opc::JumpInd => None,
+            Opc::Store if self.return_push(op) => None,
             Opc::Store => Some(Stmt::Store {
                 w: op.w,
                 addr: self.arg(op.a[0], 64),
@@ -318,6 +327,32 @@ impl Ex<'_> {
                 })
             }
         }
+    }
+
+    /// Gives the store of the return address of the call at `addr`. It is a `Store` of the
+    /// address after the instruction, and the instruction has a `Call` or `CallInd` op.
+    fn push_of(&self, addr: u64) -> Option<OpId> {
+        let arena = self.f.ssa.arena();
+        let next = arena
+            .insn_index(addr)
+            .and_then(|k| arena.insns().get(k))
+            .and_then(InsnSpan::next_addr)?;
+        let ops = arena.insn_ops(addr);
+        if !ops
+            .iter()
+            .any(|o| matches!(o.opc, Opc::Call | Opc::CallInd))
+        {
+            return None;
+        }
+        ops.iter()
+            .find(|o| o.opc == Opc::Store && o.a[1].as_k() == Some(next))
+            .map(|o| o.id)
+    }
+
+    /// Tells if a store is the push of the return address of a call. The call line shows
+    /// the push, so the store has no statement of its own.
+    fn return_push(&self, op: &Op) -> bool {
+        self.push_of(op.id.addr) == Some(op.id)
     }
 
     /// Gives the return statement of the op `i`.
@@ -343,6 +378,7 @@ const fn forward(callee: u64, at: OpId) -> Call {
         callee: Callee::Direct(callee),
         args: Vec::new(),
         set: LocSet::EMPTY,
+        push: None,
         mem: None,
         rets: Vec::new(),
         ret: None,
