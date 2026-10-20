@@ -158,6 +158,16 @@ pub fn is_alive(fs: &mut dyn Fs, owner: &LockInfo) -> bool {
     process_info(fs, owner.pid).as_ref() == Some(owner)
 }
 
+/// Tells if no process has the ID `pid`: its file `/proc/<pid>/stat` does not exist. Another
+/// read error keeps the process alive.
+///
+/// A temporary file name holds only the process ID, so the test cannot see a reused ID. The
+/// file of a dead process with a reused ID stays.
+pub fn pid_dead(fs: &mut dyn Fs, pid: u32) -> bool {
+    fs.read(Path::new(&format!("/proc/{pid}/stat")))
+        .is_err_and(|e| e.is_not_found())
+}
+
 /// Takes the lock of the project directory `dir` for `me`.
 ///
 /// # Errors

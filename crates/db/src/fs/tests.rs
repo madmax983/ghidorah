@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use super::{EntryKind, Fs, FsError, RealFs, replace_file};
+use super::{EntryKind, Fs, FsError, RealFs, SWEEP_MAX, remove_dead_temps, replace_file, temp_pid};
 use crate::project::tests::fs_sim::SimFs;
 
 #[cfg(unix)]
@@ -136,4 +136,87 @@ fn real_fs_operations() {
     let mut other = fs.boxed();
     assert!(other.exists(&dir));
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn temp_pid_reads_only_the_temp_shape() {
+    let base = "snapshot.json.tmp";
+    assert_eq!(temp_pid("snapshot.json.tmp.42.0", base), Some(42));
+    assert_eq!(
+        temp_pid("snapshot.json.tmp.4294967295.18446744073709551615", base),
+        Some(u32::MAX)
+    );
+    for name in [
+        "snapshot.json.tmp",
+        "snapshot.json.tmp.",
+        "snapshot.json.tmp.42",
+        "snapshot.json.tmp.42.",
+        "snapshot.json.tmp..0",
+        "snapshot.json.tmp.4294967296.0",
+        "snapshot.json.tmp.42.18446744073709551616",
+        "snapshot.json.tmp.42.99999999999999999999999",
+        "snapshot.json.tmp.042.0",
+        "snapshot.json.tmp.42.00",
+        "snapshot.json.tmp.+42.0",
+        "snapshot.json.tmp.-1.0",
+        "snapshot.json.tmp.42.0.1",
+        "snapshot.json.tmp.4 2.0",
+        "snapshot.json.tmpx42.0",
+        "snapshot.json.tmp.\u{664}\u{662}.0",
+        "journal.jsonl.tmp.42.0",
+    ] {
+        assert_eq!(temp_pid(name, base), None, "{name}");
+    }
+}
+
+#[test]
+fn dead_temps_sweep_is_bounded_and_keeps_live_files() {
+    let fs = SimFs::new();
+    let dir = Path::new("/p/0011223344556677");
+    let mut handle = fs.boxed();
+    // No process has an ID above 4194304 (PID_MAX_LIMIT), so the test process has none of these.
+    let dead = |_: &mut dyn Fs, pid: u32| pid == 4_194_305;
+    let count = SWEEP_MAX + 3;
+    for n in 0..count {
+        fs.seed(&dir.join(format!("a.json.tmp.4194305.{n}")), b"x");
+    }
+    let me = std::process::id();
+    let keep = [
+        format!("a.json.tmp.{me}.0"),
+        "a.json.tmp.4194306.0".to_owned(),
+        "b.json.tmp.4194305.0".to_owned(),
+    ];
+    for name in &keep {
+        fs.seed(&dir.join(name), b"x");
+    }
+    handle
+        .create_dir_all(&dir.join("a.json.tmp.4194305.x"))
+        .unwrap();
+    handle
+        .create_dir_all(&dir.join("a.json.tmp.4194305.99999"))
+        .unwrap();
+    let first = remove_dead_temps(handle.as_mut(), dir, &["a.json.tmp"], dead);
+    assert!(
+        first <= SWEEP_MAX,
+        "one sweep reads at most {SWEEP_MAX} entries"
+    );
+    assert!(first < count, "{first}");
+    let second = remove_dead_temps(handle.as_mut(), dir, &["a.json.tmp"], dead);
+    assert_eq!(first + second, count);
+    let mut want: Vec<String> = keep.to_vec();
+    want.extend([
+        "a.json.tmp.4194305.99999".to_owned(),
+        "a.json.tmp.4194305.x".to_owned(),
+    ]);
+    want.sort();
+    assert_eq!(
+        handle.list(dir).unwrap(),
+        want,
+        "a live file, a directory and another base stay"
+    );
+    assert_eq!(
+        remove_dead_temps(handle.as_mut(), Path::new("/none"), &["a.json.tmp"], dead),
+        0,
+        "a directory that does not exist gives no remove"
+    );
 }

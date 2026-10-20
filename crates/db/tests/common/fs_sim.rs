@@ -8,8 +8,9 @@
 //!
 //! The log records each changing operation, for example `rename snapshot.json.tmp.7.0 snapshot.json`.
 //! [`SimFs::stop_after`] lets `k` more changing operations work. Each later operation fails
-//! with [`FsError::Stopped`]: the simulated crash. [`SimFs::crash_image`] gives a new file
-//! system with the durable view only.
+//! with [`FsError::Stopped`]: the simulated crash. [`SimFs::crash_after`] puts the crash after
+//! the first operation with a given log entry. [`SimFs::crash_image`] gives a new file system
+//! with the durable view only.
 //!
 //! All handles of [`Fs::boxed`] share one state.
 
@@ -40,6 +41,8 @@ struct State {
     log: Vec<String>,
     budget: Option<usize>,
     tear: bool,
+    /// The start of the log entry of the last operation before the crash.
+    crash_on: Option<String>,
 }
 
 impl State {
@@ -49,6 +52,14 @@ impl State {
             Some(0) => return Err(FsError::Stopped),
             Some(n) => *n -= 1,
             None => {}
+        }
+        if self
+            .crash_on
+            .as_deref()
+            .is_some_and(|start| entry.starts_with(start))
+        {
+            self.crash_on = None;
+            self.budget = Some(0);
         }
         self.log.push(entry);
         Ok(())
@@ -146,9 +157,17 @@ impl SimFs {
         self.state().budget = Some(k);
     }
 
+    /// Lets the operations work up to the first one whose log entry starts with `start`, for
+    /// example `create_new snapshot.json.tmp.`. Each later operation fails with `Stopped`.
+    pub fn crash_after(&self, start: &str) {
+        self.state().crash_on = Some(start.to_owned());
+    }
+
     /// Removes the crash point.
     pub fn resume(&self) {
-        self.state().budget = None;
+        let mut s = self.state();
+        s.budget = None;
+        s.crash_on = None;
     }
 
     /// Makes the next `append` a short write: it adds the first half of its bytes and then
