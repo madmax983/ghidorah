@@ -146,8 +146,8 @@ impl Session {
     }
 
     /// Ends the open batch of `id` with one commit: one journal line, then one re-analysis
-    /// within the fuel of `ctx` when an edit affects the analysis. The re-analysis runs in the
-    /// fuel slices of [`Session::analyze_sliced`], with the cancel checks of the call.
+    /// when an edit affects the analysis. The re-analysis runs in the fuel slices of
+    /// [`Session::analyze_sliced`] with the fuel and the cancel checks of `ctx`.
     ///
     /// # Errors
     ///

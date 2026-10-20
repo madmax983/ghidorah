@@ -3,15 +3,16 @@
 //! The handler runs the analysis engine of the session in fuel slices through
 //! [`Session::analyze_sliced`]. A slice has [`SLICE_STEPS`] work units or a quarter of the
 //! units so far, whichever is more. So the publish steps of one call cost at most a log factor
-//! over one publish. After each slice the session sends one progress report with the work
-//! units so far, so the progress value increases strictly (AC-173). It checks the cancel flag
-//! at the end of each slice. So `notifications/cancelled` stops the run at the next fuel
-//! checkpoint (AC-172). `binary_load` and the re-analysis of an edit use the same slices.
+//! over one publish. `binary_load` and the re-analysis of an edit use the same slices.
 //!
-//! The state is relative to the full analysis. A call with `until: "triage"` whose last slice
-//! does no work has done the triage bands: it gives `resume: false` and `next[0]`
-//! `analysis_run { until: "full" }`. Another stop before completion gives `resume: true`, and
-//! `next[0]` is the same call with the same `until`.
+//! After each slice the session sends one progress report with the work units so far, so the
+//! progress value increases strictly (AC-173). It checks the cancel flag at the end of each
+//! slice. So `notifications/cancelled` stops the run at the next fuel checkpoint (AC-172).
+//!
+//! The state is relative to the full analysis. When the last slice of a call with
+//! `until: "triage"` does no work, the triage bands have no more work. Then the call gives
+//! `resume: false` and `next[0]` `analysis_run { until: "full" }`. Another stop before
+//! completion gives `resume: true`, and `next[0]` is the same call with the same `until`.
 //!
 //! [`Engine`] is the analysis engine of the shipped tools: one [`Scheduler`] per open binary.
 //! A session with no engine gets one at the first call. A binary with no scheduler gets one

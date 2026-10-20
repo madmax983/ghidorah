@@ -364,10 +364,10 @@ impl Session {
     /// binary.
     ///
     /// A slice has [`SLICE_STEPS`] work units or a quarter of the units so far, whichever is
-    /// more. Each slice with work sends one progress report. After each slice the run stops
-    /// when the analysis is complete, the slice did no work, the fuel is empty, the client
-    /// cancelled the request, or the `max_ms` guard fired. A time stop adds `W_TIME_STOP`.
-    /// Eval mode turns the time guard off.
+    /// more. Each slice with work sends one progress report. After each slice the run can
+    /// stop. It stops when the analysis is complete, the slice does no work, the fuel is
+    /// empty, the client cancels, or the `max_ms` guard fires. A time stop adds
+    /// `W_TIME_STOP`. Eval mode turns the time guard off.
     ///
     /// # Errors
     ///

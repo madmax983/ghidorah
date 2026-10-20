@@ -74,9 +74,8 @@ pub(crate) fn is_blank(line: &[u8]) -> bool {
 /// no reply (AC-172): the next envelope shows the new rev and the analysis state.
 const ANALYSIS_ONLY: &[&str] = &["analysis_run"];
 
-/// Tells if the envelope `json` of a successful call of `tool` committed: it has a
-/// transaction, or its edit members say that the state changed (`noop: false`). An analysis
-/// publish alone does not count.
+/// Tells if the envelope `json` of a successful call of `tool` committed. A commit has a
+/// `tx`, or `noop: false` in the edit members. An analysis publish alone does not count.
 fn committed(tool: &str, json: &Value) -> bool {
     let tx = json.get("tx").is_some_and(|t| !t.is_null());
     let changed = json.get("noop") == Some(&Value::Bool(false)) && !ANALYSIS_ONLY.contains(&tool);

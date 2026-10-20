@@ -264,8 +264,8 @@ fn regress_git_tree_root_reports_not_persisted() {
     );
 }
 
-/// The real file system, but the first checks of a project file say that it does not exist:
-/// the view of a process that checks just before another process makes the project.
+/// The real file system, but the first check of a project file gives `false`. So the test
+/// sees the race with a second process that makes the project.
 #[derive(Clone)]
 struct LateProject {
     hidden: Arc<AtomicUsize>,
