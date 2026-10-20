@@ -17,7 +17,9 @@
 //!
 //! Record: `{ verus_commit, toolchain, z3, argv, tree_sha256, kernels: { <name>: { name, file,
 //! module, verified, errors, spec_items, status } }, negatives: [{ kernel, patch, error_kind,
-//! verified, errors, ok }] }`.
+//! verified, errors, ok }] }`. A failed kernel row also has `error` and `unproved`, the spec
+//! functions without a Verus entry. A failed negative row also has `error` and, after a Verus
+//! run, `expected_kind`.
 
 mod kernels;
 pub mod patch;
