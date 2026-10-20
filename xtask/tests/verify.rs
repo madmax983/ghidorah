@@ -217,6 +217,7 @@ fn verify_kernel_table() {
         negative_table(),
         [
             ("K1", POSTCONDITION),
+            ("K1b", POSTCONDITION),
             ("K2", POSTCONDITION),
             ("K3", PRECONDITION),
             ("K5", POSTCONDITION),

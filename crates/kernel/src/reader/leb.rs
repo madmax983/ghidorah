@@ -1,6 +1,8 @@
 //! The LEB128 reads of K1: unsigned and signed values of at most 64 bits.
 //!
 //! A value has at most 10 bytes. Verus proves that each read rejects a bad 10th byte.
+//! Verus also proves the error rule: each read gives an error only for data without a valid value.
+//! The data ends in the value, or the 10th byte is bad.
 
 #[cfg(not(verus_only))]
 use ghidorah_spec::{proof, verus_spec, verus_verify};
@@ -44,6 +46,47 @@ pub open spec fn sleb_valid(s: Seq<u8>, n: int) -> bool {
     leb_form(s, n) && (n == 10 ==> (s[9] == 0 || s[9] == 0x7f))
 }
 
+/// The data ends in a LEB128 value: fewer than 10 bytes are left, and each has the continuation bit.
+pub open spec fn leb_eof(s: Seq<u8>) -> bool {
+    &&& s.len() < 10
+    &&& forall|k: int| 0 <= k < s.len() ==> s[k] >= 0x80
+}
+
+/// The first 10 bytes of `s` are not a valid unsigned LEB128 value of 64 bits.
+///
+/// The first 9 bytes have the continuation bit. The 10th byte also has it, or it is more than 1.
+pub open spec fn uleb_bad(s: Seq<u8>) -> bool {
+    &&& s.len() >= 10
+    &&& forall|k: int| 0 <= k < 9 ==> s[k] >= 0x80
+    &&& !uleb_valid(s, 10)
+}
+
+/// The first 10 bytes of `s` are not a valid signed LEB128 value of 64 bits.
+///
+/// The first 9 bytes have the continuation bit. The 10th byte is not `0x00` and not `0x7f`.
+pub open spec fn sleb_bad(s: Seq<u8>) -> bool {
+    &&& s.len() >= 10
+    &&& forall|k: int| 0 <= k < 9 ==> s[k] >= 0x80
+    &&& !sleb_valid(s, 10)
+}
+
+/// `e` is the error of a failed LEB128 read of `s`.
+///
+/// The error is `Eof` exactly when the data ends in the value.
+/// Else it is `BadLeb`, and the first 10 bytes are not a valid value.
+pub open spec fn leb_error(s: Seq<u8>, signed: bool, e: ReadError) -> bool {
+    if leb_eof(s) {
+        e == ReadError::Eof
+    } else {
+        &&& e == ReadError::BadLeb
+        &&& if signed {
+            sleb_bad(s)
+        } else {
+            uleb_bad(s)
+        }
+    }
+}
+
 /// The signed value of the first `n` LEB128 bytes of `s`.
 pub open spec fn spec_sleb(s: Seq<u8>, n: nat) -> i64 {
     let bits = spec_leb_bits(s, n);
@@ -64,8 +107,9 @@ impl Reader<'_> {
     ///
     /// # Errors
     ///
-    /// Gives [`ReadError::Eof`] when the data ends in the value.
-    /// Gives [`ReadError::BadLeb`] for a bad 10th byte.
+    /// Gives [`ReadError::Eof`] when the data ends in the value: fewer than 10 bytes are left,
+    /// and each has the continuation bit.
+    /// Gives [`ReadError::BadLeb`] for a bad 10th byte. Each valid value gives `Ok`.
     #[verus_spec(r =>
         requires
             old(self).wf(),
@@ -77,8 +121,10 @@ impl Reader<'_> {
                     &&& v == spec_leb_bits(old(self).tail(), n as nat)
                     &&& final(self).moved(old(self), n)
                 },
-                Err(e) => (e == ReadError::Eof || e == ReadError::BadLeb)
-                    && final(self).moved(old(self), 0),
+                Err(e) => {
+                    &&& leb_error(old(self).tail(), false, e)
+                    &&& final(self).moved(old(self), 0)
+                },
             },
     )]
     #[expect(clippy::arithmetic_side_effects, reason = "bound proved by Verus")]
@@ -94,8 +140,9 @@ impl Reader<'_> {
     ///
     /// # Errors
     ///
-    /// Gives [`ReadError::Eof`] when the data ends in the value.
-    /// Gives [`ReadError::BadLeb`] for a bad 10th byte.
+    /// Gives [`ReadError::Eof`] when the data ends in the value: fewer than 10 bytes are left,
+    /// and each has the continuation bit.
+    /// Gives [`ReadError::BadLeb`] for a bad 10th byte. Each valid value gives `Ok`.
     #[verus_spec(r =>
         requires
             old(self).wf(),
@@ -107,8 +154,10 @@ impl Reader<'_> {
                     &&& v == spec_sleb(old(self).tail(), n as nat)
                     &&& final(self).moved(old(self), n)
                 },
-                Err(e) => (e == ReadError::Eof || e == ReadError::BadLeb)
-                    && final(self).moved(old(self), 0),
+                Err(e) => {
+                    &&& leb_error(old(self).tail(), true, e)
+                    &&& final(self).moved(old(self), 0)
+                },
             },
     )]
     #[expect(clippy::arithmetic_side_effects, reason = "bound proved by Verus")]
@@ -130,6 +179,7 @@ impl Reader<'_> {
     ///
     /// Gives the bits without sign extension, the byte count and the last byte.
     /// The 10th byte must be 0 or 1. With `signed`, it must be `0x00` or `0x7f`.
+    /// The error follows the rule of `leb_error`.
     #[verus_spec(r =>
         requires
             self.wf(),
@@ -145,7 +195,7 @@ impl Reader<'_> {
                     &&& v == spec_leb_bits(self.tail(), n as nat)
                     &&& last == self.tail()[n - 1]
                 },
-                Err(e) => e == ReadError::Eof || e == ReadError::BadLeb,
+                Err(e) => leb_error(self.tail(), signed, e),
             },
     )]
     #[expect(clippy::indexing_slicing, reason = "bound proved by Verus")]

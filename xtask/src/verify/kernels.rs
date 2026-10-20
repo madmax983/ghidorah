@@ -62,10 +62,16 @@ pub const KERNELS: &[Kernel] = &[
     Kernel {
         name: "K1",
         module: "reader",
-        negatives: &[Negative {
-            name: "K1",
-            kind: POSTCONDITION,
-        }],
+        negatives: &[
+            Negative {
+                name: "K1",
+                kind: POSTCONDITION,
+            },
+            Negative {
+                name: "K1b",
+                kind: POSTCONDITION,
+            },
+        ],
     },
     Kernel {
         name: "K2",
