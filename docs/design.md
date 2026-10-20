@@ -1674,7 +1674,7 @@ Repair classes: **R** (repair): `next[0]` is the complete corrected call, so a c
 
 Each error row whose hint names `next[0]` or the candidates also has a plain hint. The error object takes the plain hint in two cases. Its hint names `next[0]`, and the result has no valid `next[0]`. Or its hint names the candidates, and the error has none. `docs/errors.md` lists both hints.
 
-A plain hint never names a tool outside the active profile. If the plain hint of a code names such a tool, the error takes the neutral text of the code.
+A hint never names a tool outside the active profile. The error drops each hint sentence that names such a tool. So each catalog hint that names a tool also has a sentence that names no tool.
 
 Warnings use the frozen enum `base::WarningCode` (`#[repr(u16)]`). `docs/errors.md` lists it. A warning item is `{ code, num, at?, message, remedy? }`, and `remedy` is a complete call.
 
