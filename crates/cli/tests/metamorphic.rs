@@ -132,6 +132,139 @@ fn ac_189a_seed_order() {
         shuffled_seeds, seeded,
         "each shuffled run inserts the seeds in another order"
     );
+    let aliased = ALIAS_FIXTURES
+        .iter()
+        .filter(|name| alias_order_holds(&list, name))
+        .count();
+    assert!(
+        aliased >= 2,
+        "the alias fixtures have two or more symbols at one address"
+    );
+}
+
+/// The fixtures of the alias part of AC-189a. Each has two or more symbols at one defined
+/// address in `.symtab`.
+const ALIAS_FIXTURES: [&str; 3] = [
+    "switch.gcc-O2",
+    "recursion.clang-O2",
+    "adversarial_names.clang-O2",
+];
+
+/// Gives the little-endian value of `n` bytes at `at` of `bytes`.
+fn le(bytes: &[u8], at: usize, n: usize) -> Option<usize> {
+    let b = bytes.get(at..at.checked_add(n)?)?;
+    let v = b
+        .iter()
+        .rev()
+        .fold(0u64, |acc, x| (acc << 8) | u64::from(*x));
+    usize::try_from(v).ok()
+}
+
+/// Gives the bytes of the ELF file `bytes` with the `.symtab` entries at each defined address
+/// in reverse order. The local entries and the other entries reverse apart. File and section
+/// symbols stay. Gives `None` when no address has two entries of one group.
+fn aliases_reversed(bytes: &[u8]) -> Option<Vec<u8>> {
+    const ENTRY: usize = 24;
+    let (shoff, shentsize, shnum) = (
+        le(bytes, 0x28, 8)?,
+        le(bytes, 0x3a, 2)?,
+        le(bytes, 0x3c, 2)?,
+    );
+    let mut out = bytes.to_vec();
+    let mut moved = false;
+    for i in 0..shnum {
+        let sh = shoff.checked_add(i.checked_mul(shentsize)?)?;
+        if le(bytes, sh + 4, 4)? != 2 {
+            continue;
+        }
+        let (off, size, globals) = (
+            le(bytes, sh + 0x18, 8)?,
+            le(bytes, sh + 0x20, 8)?,
+            le(bytes, sh + 0x2c, 4)?,
+        );
+        let mut groups: BTreeMap<(bool, usize), Vec<usize>> = BTreeMap::new();
+        for k in 1..size / ENTRY {
+            let e = off + k * ENTRY;
+            let kind = le(bytes, e + 4, 1)? & 0xf;
+            let (shndx, value) = (le(bytes, e + 6, 2)?, le(bytes, e + 8, 8)?);
+            if shndx != 0 && value != 0 && !matches!(kind, 3 | 4) {
+                groups.entry((k < globals, value)).or_default().push(k);
+            }
+        }
+        for slots in groups.values().filter(|s| s.len() >= 2) {
+            moved = true;
+            for (to, from) in slots.iter().zip(slots.iter().rev()) {
+                let src = bytes.get(off + from * ENTRY..off + (from + 1) * ENTRY)?;
+                out.get_mut(off + to * ENTRY..off + (to + 1) * ENTRY)?
+                    .copy_from_slice(src);
+            }
+        }
+    }
+    moved.then_some(out)
+}
+
+/// The alias part of AC-189a: a copy of the fixture `name` with the symbols at each address
+/// in another order gives the same reads, modulo the binary ID and the file hash. Gives
+/// `false` when the fixture has no such symbols.
+fn alias_order_holds(list: &[Fixture], name: &str) -> bool {
+    let f = list.iter().find(|f| f.name == name).expect("the fixture");
+    let bytes = std::fs::read(root().join(&f.path)).expect("the fixture bytes");
+    let Some(copy) = aliases_reversed(&bytes) else {
+        return false;
+    };
+    let dir = scratch(&format!("seed_alias_{name}"));
+    let bin = dir.join("bin");
+    std::fs::create_dir_all(&bin).expect("the directory exists");
+    let path = bin.join(name);
+    std::fs::write(&path, &copy).expect("the copy");
+    let sha = |b: &[u8]| ghidorah_base::hex::encode(&ghidorah_base::sha256(b));
+    let (old_sha, new_sha) = (sha(&bytes), sha(&copy));
+    let new_id = new_sha.get(..16).expect("an ID").to_owned();
+    assert_ne!(new_id, f.id, "{name}: the copy is another file");
+    let ids: Vec<String> = functions(f, &format!("seed_alias_list_{name}"))
+        .into_iter()
+        .map(|(id, _)| id)
+        .collect();
+    let load = |p: &str| {
+        request(
+            "load",
+            "binary_load",
+            Value::object([("path", Value::from(p))]),
+        )
+    };
+    let mut lines = vec![load(&f.path)];
+    lines.extend(reads(&f.id, &ids));
+    let before = by_id(&jsonl(&dir.join("a"), &lines));
+    let mut lines = vec![load(&path.to_string_lossy())];
+    lines.extend(reads(&new_id, &ids));
+    let mut input = lines.join("\n");
+    input.push('\n');
+    let projects = dir.join("b").to_string_lossy().into_owned();
+    let workspace = root().to_string_lossy().into_owned();
+    let extra = bin.to_string_lossy().into_owned();
+    let command = binary(&[
+        "jsonl",
+        "--project-root",
+        projects.as_str(),
+        "--root",
+        workspace.as_str(),
+        "--root",
+        extra.as_str(),
+    ]);
+    let after = by_id(&output_of(command, &input));
+    let _ = std::fs::remove_dir_all(&dir);
+    for (id, b) in &before {
+        if id == "load" {
+            continue;
+        }
+        let a = map_strings(&after[id], &|t| {
+            t.replace(&new_sha, &old_sha).replace(&new_id, &f.id)
+        });
+        if let Some(diff) = first_difference(b, &a) {
+            panic!("{name} {id}: the symbol order at one address changes the read:{diff}");
+        }
+    }
+    true
 }
 
 #[test]
