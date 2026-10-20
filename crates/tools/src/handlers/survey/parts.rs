@@ -3,8 +3,8 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use ghidorah_analysis::CallGraph;
 use ghidorah_analysis::analyzers::{lang, metrics};
-use ghidorah_analysis::{CallGraph, Callee};
 use ghidorah_base::{Address, Caps, Fuel, FuncId};
 use ghidorah_db::Program;
 use ghidorah_json::{Object, Value};
@@ -386,10 +386,7 @@ fn functions(c: &Ctx<'_>, graph: &CallGraph) -> Part {
                 ("id", Value::from(r.func.to_string())),
                 ("name", Value::from(c.namer.of(p, r.func.0))),
                 ("size", Value::from(size)),
-                (
-                    "callers",
-                    Value::from(graph.callers(&Callee::Func(r.func)).len()),
-                ),
+                ("callers", Value::from(graph.callers_of_func(r.func).len())),
             ])
         })
         .collect();

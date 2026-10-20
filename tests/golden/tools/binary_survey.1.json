@@ -360,7 +360,7 @@
           "id": "fn:0x1060",
           "name": "puts@plt",
           "size": 10,
-          "callers": 0
+          "callers": 1
         },
         {
           "id": "fn:0x11e0",
@@ -390,13 +390,13 @@
           "id": "fn:0x1050",
           "name": "__cxa_finalize@plt",
           "size": 10,
-          "callers": 0
+          "callers": 1
         },
         {
           "id": "fn:0x1070",
           "name": "strlen@plt",
           "size": 10,
-          "callers": 0
+          "callers": 1
         },
         {
           "id": "fn:0x11c0",

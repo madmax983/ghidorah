@@ -10,9 +10,11 @@
 //! | `name` | name, then entry | `(name, addr)` |
 //! | `size` | size, large first | `(rank, addr)` |
 //! | `priority` | the frozen priority of design Section 7.11 | `(rank, addr)` |
-//! | `in_degree` | references to the entry from outside the body, many first | `(rank, addr)` |
+//! | `in_degree` | callers, many first | `(rank, addr)` |
 //!
 //! The rank of a descending sort is `u64::MAX` minus the value, or the priority position.
+//! `callers` and `in_degree` count the caller functions. The stub or thunk of an import also
+//! counts the callers of the import.
 //! `priority` reads only the analysis layer, so names, comments and `visited` never change it
 //! (AC-157). The filter `visited` is a live filter. Under `name` sort, a cursor whose boundary
 //! function has another name now gives `CURSOR_STALE` (AC-136b).
@@ -277,19 +279,6 @@ struct Facts {
     size: u64,
 }
 
-/// Gives the number of references to the entry of `f` from outside its body.
-fn in_degree(p: &Program, f: &FuncView<'_>) -> u64 {
-    let refs = p.refs_to(f.id().0);
-    let outside = refs
-        .iter()
-        .filter(|r| {
-            let from = r.value.key.from;
-            !(from.is_ram() && f.func.body.contains(from.off))
-        })
-        .count();
-    u64::try_from(outside).unwrap_or(u64::MAX)
-}
-
 /// Gives the item of one function.
 fn item(p: &Program, graph: &CallGraph, f: &FuncView<'_>, facts: &Facts, namer: &Namer) -> Value {
     let func = f.func;
@@ -309,7 +298,7 @@ fn item(p: &Program, graph: &CallGraph, f: &FuncView<'_>, facts: &Facts, namer: 
         .iter()
         .map(|c| Value::from(c.code.info().name))
         .collect();
-    let callers = graph.callers(&Callee::Func(id)).len();
+    let callers = graph.callers_of_func(id).len();
     let mut out = Object::new();
     out.push("id", Value::from(id.to_string()));
     out.push("addr", fs::addr(id.0));
@@ -402,7 +391,10 @@ fn run(session: &mut Session, args: &Args, ctx: &mut Ctx) -> Result<Payload, Too
                 KeyPart::Int(ranks.get(&id).copied().unwrap_or(u64::MAX)),
                 addr,
             ],
-            "in_degree" => vec![KeyPart::Int(u64::MAX - in_degree(p, &f)), addr],
+            "in_degree" => {
+                let callers = u64::try_from(graph.callers_of_func(id).len()).unwrap_or(u64::MAX);
+                vec![KeyPart::Int(u64::MAX - callers), addr]
+            }
             _ => vec![addr],
         };
         items.push(Item {

@@ -233,8 +233,11 @@ pub fn edges(graph: &CallGraph, start: &[Callee], to: bool, depth: u64, max: usi
         let mut next = Vec::new();
         for node in &level {
             let pairs: Vec<(Callee, Callee)> = if to {
-                graph
-                    .callers(node)
+                let callers = match node {
+                    Callee::Func(f) => graph.callers_of_func(*f),
+                    Callee::Import(_) => graph.callers(node),
+                };
+                callers
                     .into_iter()
                     .map(|c| (Callee::Func(c), node.clone()))
                     .collect()

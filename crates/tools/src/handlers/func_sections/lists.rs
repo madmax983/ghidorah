@@ -85,18 +85,18 @@ pub fn xrefs(program: &Program, func: FuncId, namer: &Namer) -> Value {
     Value::Array(list)
 }
 
-/// Gives the callers of `func`: `[{ id, name, sites }]` in entry order.
+/// Gives the callers of `func`: `[{ id, name, sites }]` in entry order. The stub or thunk of
+/// an import also lists the callers of the import.
 #[must_use]
 pub fn callers(program: &Program, graph: &CallGraph, func: FuncId, namer: &Namer) -> Value {
-    let me = Callee::Func(func);
     let list = graph
-        .callers(&me)
+        .callers_of_func(func)
         .into_iter()
         .map(|caller| {
             Value::object([
                 ("id", Value::from(caller.to_string())),
                 ("name", Value::from(namer.of(program, caller.0))),
-                ("sites", sites(&graph.sites(caller, &me))),
+                ("sites", sites(&graph.sites_of_func(caller, func))),
             ])
         })
         .collect();

@@ -288,7 +288,7 @@ pub fn func_metrics(program: &Program, graph: &CallGraph, func: FuncId) -> Optio
         insns: count(insns),
         edges,
         cyclomatic: decisions.saturating_add(1),
-        callers: count(graph.callers(&Callee::Func(func)).len()),
+        callers: count(graph.callers_of_func(func).len()),
         callees: count(callees.len()),
         string_refs,
         import_calls,

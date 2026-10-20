@@ -47,19 +47,7 @@ pub use table::{Family, Target, accepted, address, function, target, value_of};
 /// Else the entry is the function with the `thunk` flag that jumps through the import slot.
 #[must_use]
 pub fn import_entry(program: &Program, row: &ImportRow) -> Option<Address> {
-    if row.stub.is_some() {
-        return row.stub;
-    }
-    program
-        .refs_to(row.ext)
-        .iter()
-        .map(|r| r.value.key.from)
-        .filter(|from| {
-            program
-                .func(FuncId(*from))
-                .is_some_and(|f| f.func.flags.thunk)
-        })
-        .min()
+    ghidorah_analysis::callgraph::import_entry(program, row)
 }
 
 /// The rule that resolved an input.
