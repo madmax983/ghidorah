@@ -251,10 +251,9 @@ fn sections(p: &Program) -> Part {
         .iter()
         .filter(|s| !s.name.is_empty())
         .map(|s| {
-            let name = fs::safe(&s.name.render(Caps::DETAILED).text);
             let mut out = Object::new();
             out.push("id", Value::from(addr_info::section_id(s)));
-            out.push("name", Value::from(name));
+            out.push("name", Value::from(addr_info::shown(&s.name)));
             if let Some(r) = s.va {
                 out.push("start", fs::hex(r.first));
             }
@@ -460,10 +459,7 @@ fn notes(p: &Program) -> Part {
         .map(|n| {
             let shown = n.desc.get(..32).unwrap_or(&n.desc);
             Value::object([
-                (
-                    "name",
-                    Value::from(fs::safe(&n.name.render(Caps::DETAILED).text)),
-                ),
+                ("name", Value::from(addr_info::shown(&n.name))),
                 ("kind", Value::from(n.kind)),
                 ("desc", Value::from(ghidorah_base::hex::encode(shown))),
                 ("desc_size", Value::from(n.desc_size)),

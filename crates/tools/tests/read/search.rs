@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use ghidorah_base::{BinaryId, SectionId, SetName, SymId};
 use ghidorah_db::{Edit, Note, NoteKind, NoteSet, NoteStatus, SessionLabel, SetMembers, Source};
 use ghidorah_json::Value;
-use ghidorah_testkit::elf::{ElfBuilder, Loc, Section, Symbol};
+use ghidorah_testkit::elf::{ElfBuilder, Loc, Note as ElfNote, Section, Symbol};
 
 use crate::support::{
     addr_of, all_items, call, call_value, code, data, demo, fixture, items, json, load_bytes,
@@ -208,14 +208,24 @@ pub fn hostile_names() -> [String; 5] {
 /// The name of the section of [`hostile`] with a soft hyphen (U+00AD).
 pub const SOFT_SECTION: &str = ".x\u{ad}y";
 
-/// Loads an ELF file with the names of [`hostile_names`], one `ret` function each, and the
-/// sections `"q` and [`SOFT_SECTION`].
+/// The owner name of the ELF note of [`hostile`]: a name with a backslash.
+pub const NOTE_NAME: &str = "a\\b";
+
+/// Loads an ELF file with the names of [`hostile_names`], one `ret` function each, the
+/// sections `"q` and [`SOFT_SECTION`] and a note of the owner [`NOTE_NAME`].
 pub fn hostile(test: &str) -> ghidorah_tools::Session {
     let at = |off| Loc::section(".text", off);
     let mut b = ElfBuilder::exec()
         .section(Section::code(".text", &[0xc3; 8]))
         .section(Section::rodata("\"q", &[1, 2, 3, 4]))
-        .section(Section::rodata(SOFT_SECTION, &[5, 6, 7, 8]));
+        .section(Section::rodata(SOFT_SECTION, &[5, 6, 7, 8]))
+        .note(ElfNote {
+            section: ".note.test".to_owned(),
+            name: NOTE_NAME.to_owned(),
+            kind: 1,
+            desc: vec![0; 4],
+            align: 4,
+        });
     for (name, off) in hostile_names().iter().zip(0u64..) {
         b = b.symbol(Symbol::func(name, at(off), 1));
     }

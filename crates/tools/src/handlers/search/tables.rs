@@ -75,7 +75,7 @@ pub fn sections(items: &mut Items<'_>, m: &Matcher) {
         .sections
         .iter()
         .filter_map(|s| {
-            let name = fs::safe(&full(&s.name));
+            let name = addr_info::shown(&s.name);
             if !m.matches(&name) {
                 return None;
             }

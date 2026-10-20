@@ -8,7 +8,7 @@
 //! in and out). With `targets`, the result is `{ items: [{ input, ok, data | error }],
 //! ok_count, error_count }` in input order (AC-144).
 
-use ghidorah_base::{Address, FileOffset, FuncId, SectionId, SymId};
+use ghidorah_base::{Address, BinText, Caps, FileOffset, FuncId, SectionId, SymId};
 use ghidorah_db::{CommentKind, FlowOverride, Program};
 use ghidorah_json::{Object, Value};
 
@@ -128,6 +128,13 @@ pub(crate) fn section_id(s: &ghidorah_loader::Section) -> String {
     }
 }
 
+/// Gives the display text of the binary name `name`: the escapes of `BinText` once, at most
+/// [`fs::NAME_CHARS`] characters. A UTF-8 name gives the text of [`fs::safe`].
+#[must_use]
+pub(crate) fn shown(name: &BinText) -> String {
+    name.render(Caps::new(fs::NAME_CHARS, 0)).text
+}
+
 /// Gives the ID of the symbol `name` at `addr`: the [`SymId`] text of the exact name. So the
 /// ID parses back to the symbol.
 ///
@@ -154,10 +161,9 @@ fn section(p: &Program, addr: Address) -> Value {
         s.va.is_some_and(|r| addr.is_ram() && r.first <= addr.off && addr.off <= r.last)
     });
     found.map_or(Value::Null, |s| {
-        let name = fs::safe(&s.name.render(ghidorah_base::Caps::DETAILED).text);
         Value::object([
             ("id", Value::from(section_id(s))),
-            ("name", Value::from(name)),
+            ("name", Value::from(shown(&s.name))),
         ])
     })
 }
