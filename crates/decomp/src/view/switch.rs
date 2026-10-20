@@ -1,12 +1,13 @@
 //! The switch of a jump table: its selector, its labels and its default (design Section 8.1).
 //!
 //! The analysis gives the guard `cmp idx, N; ja default` of each table ([`GuardInfo`]). The
-//! view uses it in two steps:
+//! view uses it in three steps:
 //!
 //! | Step | Result |
 //! |---|---|
 //! | [`Ex::selector`] | the selector is the compared index. An index `x - b` or `x + c` gives the selector `x` with the bias `b` or `-c`, so case `i` has the label `bias + i`. The view does not show a selector that reads memory or calls. |
 //! | [`fold_guard`] | the guard branch goes into the switch: its out-of-range edge is the default case |
+//! | [`drop_index_defs`] | the def of a biased index that only the target reads goes, and the line of the switch shows its ops |
 //!
 //! The fold needs four conditions. The guard block ends with the guard branch, and its two
 //! edges go straight to the switch block and to the default block. The default edge can hold
@@ -15,12 +16,12 @@
 //! block computes only the jump target, and the switch with a default runs the same blocks
 //! as the guard and the switch.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use ghidorah_analysis::jumptable::GuardInfo;
 use ghidorah_ir::{Arg, Node, OpId, Opc};
 
-use crate::expr::Expr;
+use crate::expr::{Expr, Stmt, VarIdx};
 use crate::shape::{Exit, NodeKind, ShapeNode};
 use crate::view::NodeView;
 use crate::view::facts::Facts;
@@ -162,4 +163,75 @@ pub(crate) fn fold_guard(
         view.cases.push(default_addr);
     }
     true
+}
+
+/// Gives the count of defs of each variable: the assignments and the call results.
+fn def_counts(views: &[NodeView]) -> BTreeMap<VarIdx, usize> {
+    let mut out: BTreeMap<VarIdx, usize> = BTreeMap::new();
+    let mut add = |v: VarIdx| {
+        let count = out.entry(v).or_default();
+        *count = count.saturating_add(1);
+    };
+    for s in views.iter().flat_map(|v| &v.stmts) {
+        match s {
+            Stmt::Assign { var, .. } => add(*var),
+            Stmt::Call(c) => c.rets.iter().for_each(|(_, r)| add(*r)),
+            _ => {}
+        }
+        for e in s.exprs().into_iter().flat_map(Expr::preorder) {
+            if let Expr::Call(c) = e {
+                c.rets.iter().for_each(|(_, r)| add(*r));
+            }
+        }
+    }
+    out
+}
+
+/// Drops the def of each variable that only the target of a switch with a selector reads.
+///
+/// The line of such a switch shows the selector, not the target. The fold of the guard takes
+/// the guard compare away. So the def of a biased index `v = x - b` can have no reader in
+/// the text. The def goes when it is the only def of `v`, reads no memory and calls nothing.
+/// The line of the switch then shows its ops.
+pub(crate) fn drop_index_defs(views: &mut [NodeView]) {
+    let mut read: BTreeSet<VarIdx> = BTreeSet::new();
+    let mut only: BTreeMap<VarIdx, usize> = BTreeMap::new();
+    for (i, v) in views.iter().enumerate() {
+        let exprs = v.stmts.iter().flat_map(Stmt::exprs);
+        read.extend(
+            exprs
+                .chain(v.cond.iter())
+                .chain(&v.index)
+                .flat_map(Expr::vars),
+        );
+        match (&v.index, &v.target) {
+            (Some(_), Some(t)) => t.vars().into_iter().for_each(|x| {
+                only.entry(x).or_insert(i);
+            }),
+            (None, Some(t)) => read.extend(t.vars()),
+            _ => {}
+        }
+    }
+    let defs = def_counts(views);
+    only.retain(|v, _| !read.contains(v) && defs.get(v) == Some(&1));
+    let mut moved: Vec<(usize, Vec<OpId>)> = Vec::new();
+    for view in views.iter_mut() {
+        view.stmts.retain(|s| match s {
+            Stmt::Assign { var, value, at } if pure(value) => match only.get(var) {
+                Some(&on) => {
+                    let mut ops = vec![*at];
+                    ops.extend(value.preorder().iter().filter_map(|e| e.at()));
+                    moved.push((on, ops));
+                    false
+                }
+                None => true,
+            },
+            _ => true,
+        });
+    }
+    for (on, ops) in moved {
+        if let Some(view) = views.get_mut(on) {
+            view.guard.extend(ops);
+        }
+    }
 }

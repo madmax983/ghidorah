@@ -390,6 +390,7 @@ pub(crate) fn shape(f: &Facts<'_>, raws: &mut [Raw], assigned: &Assigned, entry:
         let _ = switch::fold_guard(f, &index, &mut b.nodes, &mut b.views, (*s, g));
     }
     let start = start_node(f, assigned, entry, &mut b);
+    switch::drop_index_defs(&mut b.views);
     View {
         entry,
         shape: Shape {
