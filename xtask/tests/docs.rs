@@ -347,6 +347,41 @@ fn regress_record_checks_claims() {
 }
 
 #[test]
+fn regress_acrun_requires_proofs() {
+    let names = ["ac_034_proof_freshness"];
+    for tier2 in [false, true] {
+        let cmd = acrun::test_command(&root(), "ghidorah-kernel", &names, tier2);
+        let require = cmd
+            .get_envs()
+            .find(|(key, _)| *key == "GHIDORAH_REQUIRE_PROOFS")
+            .and_then(|(_, value)| value);
+        assert_eq!(
+            require.and_then(|v| v.to_str()),
+            Some("1"),
+            "a stale proof record fails the evidence run, as in `xtask ci`"
+        );
+        let args: Vec<String> = cmd
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(
+            args.get(..3),
+            Some(&["test", "-p", "ghidorah-kernel"].map(String::from)[..])
+        );
+        assert!(
+            args.contains(&"ac_034_proof_freshness".to_owned()),
+            "{args:?}"
+        );
+        assert_eq!(
+            args.contains(&"--include-ignored".to_owned()),
+            tier2,
+            "{args:?}"
+        );
+        assert_eq!(cmd.get_current_dir(), Some(root().as_path()));
+    }
+}
+
+#[test]
 fn ac_018b_evidence_passes() {
     // The record check of each named input.
     let record = json::parse(CLAIMS).expect("record parses");
