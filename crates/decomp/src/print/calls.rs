@@ -87,12 +87,15 @@ impl Printer<'_> {
             .map_or(0, |i| i.saturating_add(1))
     }
 
-    /// Gives the argument texts of a call.
+    /// Gives the argument texts of a call. A tail call with no argument list passes the
+    /// parameters of the function on, so a missing register prints as `param_N`.
     fn args(&mut self, c: &Call, regs: &[Loc], count: usize, buf: &mut Buf) -> String {
+        let forward = c.tail && c.args.is_empty();
         let mut out = Vec::new();
-        for r in regs.iter().take(count) {
+        for (k, r) in regs.iter().take(count).enumerate() {
             let text = match c.args.iter().find(|(l, _)| l == r) {
                 Some((_, e)) => self.expr(e, buf).0,
+                None if forward => format!("param_{}", k.saturating_add(1)),
                 None => "0".to_owned(),
             };
             out.push(text);

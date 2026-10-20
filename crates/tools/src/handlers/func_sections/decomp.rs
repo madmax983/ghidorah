@@ -9,19 +9,21 @@
 //!
 //! `decomp_opts.lines` gives the first line and the most lines of the window. The default
 //! window is the first 150 lines. A window that does not fit its share keeps the lines that
-//! fit and gets a `next_cursor`. `line_map`, `calls` and `strings` hold only the rows of the
-//! window. Send `next_cursor` in `cursors.decomp` for the next window.
+//! fit and gets a `next_cursor`. `line_map`, `elided`, `vars`, `calls` and `strings` hold only
+//! the rows of the window (see [`Window`]). Send `next_cursor` in `cursors.decomp` for the
+//! next window.
 
 use ghidorah_base::{Address, Caps, Fuel, FuncId, StringId};
 use ghidorah_db::Program;
 use ghidorah_decomp::print::CallTarget;
 use ghidorah_decomp::window::DEFAULT_LINES;
-use ghidorah_decomp::{Opts, Output, Passes, Remedy, WarningRow};
+use ghidorah_decomp::{Opts, Output, Passes, Remedy, WarningRow, Window};
 use ghidorah_json::{Object, Value};
 
 use super::IrRows;
 use super::text::{hex, string_text};
 use crate::args::Args;
+use crate::handlers::func_get::remedy;
 use crate::hints::Call;
 
 /// The section byte of a `func_get` decompile cursor.
@@ -79,29 +81,26 @@ pub fn opts(args: &Args) -> DecompOpts {
     }
 }
 
-/// Gives the decompile of `func` with `opts`.
-///
-/// # Errors
-///
-/// Returns the text of the decompile error.
-pub fn output(
-    program: &Program,
-    func: FuncId,
-    opts: &Opts,
-    fuel: &mut Fuel,
-) -> Result<Output, String> {
-    ghidorah_decomp::render(program, func, opts, &ghidorah_x86::lift::Names, fuel)
-        .map_err(|e| e.to_string())
-}
-
 /// Gives a JSON integer of a `usize`.
 fn int(n: usize) -> Value {
     Value::from(u64::try_from(n).unwrap_or(u64::MAX))
 }
 
-/// Gives the remedy call of a warning row.
-fn remedy(r: Remedy) -> Value {
-    match r {
+/// The parts of a decompile section that the remedy calls read. They are the program, the
+/// function and the check of a call.
+#[derive(Clone, Copy)]
+pub struct Remedies<'a> {
+    /// The program.
+    pub program: &'a Program,
+    /// The function of the decompile.
+    pub func: FuncId,
+    /// Keeps a call that the agent can send, or drops it.
+    pub check: &'a dyn Fn(Call) -> Option<Call>,
+}
+
+/// Gives the remedy call of a warning row, or `None` when no complete call exists.
+fn remedy(r: Remedy, ctx: &Remedies<'_>) -> Option<Value> {
+    let call = match r {
         Remedy::Disasm(at) => Call::new(
             "func_get",
             Value::object([
@@ -109,8 +108,7 @@ fn remedy(r: Remedy) -> Value {
                 ("include", Value::Array(vec![Value::from("disasm")])),
             ]),
             WHY_DISASM,
-        )
-        .to_json(),
+        ),
         Remedy::Insn(at) => Call::new(
             "mem_read",
             Value::object([
@@ -119,31 +117,34 @@ fn remedy(r: Remedy) -> Value {
                 ("count", Value::from(1)),
             ]),
             WHY_INSN,
-        )
-        .to_json(),
-    }
+        ),
+        Remedy::JumpTable(at) => remedy::site(ctx.program, ctx.func, at, true)?,
+        Remedy::CallTargets(at) => remedy::site(ctx.program, ctx.func, at, false)?,
+    };
+    (ctx.check)(call).map(|c| c.to_json())
 }
 
 /// Gives the JSON row of one warning.
-fn warning(w: &WarningRow) -> Value {
+fn warning(w: &WarningRow, ctx: &Remedies<'_>) -> Value {
     let info = w.code.info();
     let mut out = Object::new();
     out.push("code", Value::from(info.name));
     out.push("num", Value::from(info.num));
     out.push("at", hex(w.at));
     out.push("message", Value::from(info.message));
-    if let Some(r) = w.remedy {
-        out.push("remedy", remedy(r));
+    if let Some(r) = w.remedy.and_then(|r| remedy(r, ctx)) {
+        out.push("remedy", r);
     }
     Value::Object(out)
 }
 
-/// Gives the members of an output that every window shares: the elided ranges, the
-/// variables, the metrics and the warnings.
-fn shared(out: &Output) -> Vec<(&'static str, Value)> {
-    let elided = out
-        .elided
-        .iter()
+/// Gives the members of the window `w` after its line map. They are the elided ranges and the
+/// variables of the window, then the metrics and the warnings.
+fn shared(w: &Window<'_>, ctx: &Remedies<'_>) -> Vec<(&'static str, Value)> {
+    let out = w.output;
+    let elided = w
+        .elided()
+        .into_iter()
         .map(|e| {
             Value::object([
                 ("start", hex(e.start)),
@@ -152,9 +153,9 @@ fn shared(out: &Output) -> Vec<(&'static str, Value)> {
             ])
         })
         .collect();
-    let vars = out
-        .vars
-        .iter()
+    let vars = w
+        .vars()
+        .into_iter()
         .map(|v| {
             Value::object([
                 ("id", Value::from(v.id.to_string())),
@@ -183,22 +184,23 @@ fn shared(out: &Output) -> Vec<(&'static str, Value)> {
         ("metrics", metrics),
         (
             "warnings",
-            Value::Array(out.warnings.iter().map(warning).collect()),
+            Value::Array(out.warnings.iter().map(|w| warning(w, ctx)).collect()),
         ),
     ]
 }
 
 /// Gives the section value of the window of `count` lines from the line `start`. `cursor`
-/// gives the cursor text of a next line.
+/// gives the cursor text of a next line. `remedies` gives the remedy calls of the warnings.
 #[must_use]
 pub fn value(
-    program: &Program,
+    remedies: &Remedies<'_>,
     out: &Output,
     start: usize,
     count: usize,
     caps: Caps,
     cursor: &dyn Fn(usize) -> String,
 ) -> Value {
+    let program = remedies.program;
     let w = out.window(start, count);
     let mut o = Object::new();
     o.push("text", Value::from(w.text()));
@@ -227,7 +229,7 @@ pub fn value(
         })
         .collect();
     o.push("line_map", Value::Array(rows));
-    let mut members = shared(out).into_iter();
+    let mut members = shared(&w, remedies).into_iter();
     if let Some((name, elided)) = members.next() {
         o.push(name, elided);
     }

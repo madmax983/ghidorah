@@ -1,11 +1,11 @@
 //! The render of one function of `func_get`: the header, the sections within their shares and
 //! the `omitted` and `budgets` members.
 
-use ghidorah_base::{ErrorCode, Fuel, FuncId};
+use ghidorah_base::{BinaryId, ErrorCode, Fuel, FuncId};
 use ghidorah_db::PartKind;
 use ghidorah_json::{Object, Value};
 
-use super::MIN_SHARE;
+use super::{MIN_SHARE, remedy, split};
 use crate::args::Args;
 use crate::budget::section_weight;
 use crate::content::{self, ContentMode};
@@ -13,6 +13,7 @@ use crate::dispatch::{KeyPart, SortKey};
 use crate::envelope::Frame;
 use crate::errors::ToolError;
 use crate::handlers::func_sections::{self as fs, CursorScope, Render};
+use crate::hints::Call;
 use crate::session::Session;
 
 /// The characters of the `omitted` entry of one section.
@@ -53,6 +54,8 @@ pub struct Job<'a> {
     pub cursors: Cursors,
     /// The session of the call.
     pub session: &'a Session,
+    /// The bound binary of the call.
+    pub binary: BinaryId,
     /// The frame of the call.
     pub frame: &'a Frame,
     /// The arguments of the call.
@@ -105,7 +108,10 @@ impl Job<'_> {
     ) -> (Result<Value, Value>, u64, u64) {
         let p = self.render.program;
         let entry = func.0.off;
-        let out = match fs::decomp_output(p, func, &self.decomp.opts, fuel) {
+        let out = match self
+            .session
+            .decompile(self.binary, func, &self.decomp.opts, fuel)
+        {
             Ok(out) => out,
             Err(text) => {
                 let value = Value::object([("error", Value::from(text))]);
@@ -126,7 +132,13 @@ impl Job<'_> {
             scope.encode(key)
         };
         let caps = self.render.caps;
-        let window = |k: usize| fs::decomp_value(p, &out, start, k, caps, &cursor);
+        let check = |c| remedy::checked(self.session, c);
+        let remedies = fs::Remedies {
+            program: p,
+            func,
+            check: &check,
+        };
+        let window = |k: usize| fs::decomp_value(&remedies, &out, start, k, caps, &cursor);
         let whole = window(self.decomp.count);
         let need = self.member("decomp", &whole);
         if need <= share {
@@ -223,7 +235,7 @@ fn row_section(
             let (rows, more) = match rows {
                 Ok(ir) => {
                     head.push("lift_ver", Value::from(ir.lift_ver));
-                    if ir.intrinsic {
+                    if ir.intrinsic && !marks.intrinsic.contains(&entry) {
                         marks.intrinsic.push(entry);
                     }
                     (ir.rows, ir.more)
@@ -245,8 +257,13 @@ fn row_section(
 }
 
 /// Gives the header of `func`: its ID, name, entry, size, parts, signature, start reason,
-/// confidence, flags and caveats.
-fn header(r: &Render<'_>, func: FuncId) -> Result<Object, ToolError> {
+/// confidence, flags and caveats. The remedy of a caveat is a call that `check` keeps (see
+/// [`remedy::caveat`]).
+fn header(
+    r: &Render<'_>,
+    func: FuncId,
+    check: &dyn Fn(Call) -> Option<Call>,
+) -> Result<Object, ToolError> {
     let p = r.program;
     let view = p.func(func).ok_or_else(|| {
         ToolError::new(ErrorCode::NotFound)
@@ -294,8 +311,8 @@ fn header(r: &Render<'_>, func: FuncId) -> Result<Object, ToolError> {
             if let Some(at) = c.at {
                 out.push("at", fs::addr(at));
             }
-            if let Some(remedy) = &c.remedy {
-                out.push("remedy", Value::from(remedy.as_str()));
+            if let Some(call) = remedy::caveat(p, func, c).and_then(check) {
+                out.push("remedy", call.to_json());
             }
             Value::Object(out)
         })
@@ -317,14 +334,6 @@ fn header(r: &Render<'_>, func: FuncId) -> Result<Object, ToolError> {
     Ok(out)
 }
 
-/// The budget record of one section: its weight, share, need and use.
-struct Spent {
-    section: &'static str,
-    share: u64,
-    need: u64,
-    used: u64,
-}
-
 /// What one function render gives besides its value.
 #[derive(Default)]
 pub struct Marks {
@@ -332,6 +341,8 @@ pub struct Marks {
     pub visited: Vec<FuncId>,
     /// The entries of the functions whose IR holds an `Intrinsic`.
     pub intrinsic: Vec<u64>,
+    /// The functions whose `decomp` section goes to `omitted`.
+    pub decomp_omitted: Vec<FuncId>,
 }
 
 /// Gives the most rows of `rows` whose section fits `share`, with the value and its cost.
@@ -414,7 +425,8 @@ pub fn one(
     fuel: &mut Fuel,
     marks: &mut Marks,
 ) -> Result<Value, ToolError> {
-    let mut out = header(&job.render, func)?;
+    let check = |c| remedy::checked(job.session, c);
+    let mut out = header(&job.render, func, &check)?;
     let count = u64::try_from(job.include.len()).unwrap_or(u64::MAX);
     let mut entry_cost = OMITTED_ENTRY;
     if job.detailed {
@@ -426,40 +438,23 @@ pub fn one(
             job.mode,
         ))
         .saturating_sub(entry_cost.saturating_mul(count));
-    let mut free = u128::from(total);
-    let mut left: u128 = job
-        .include
-        .iter()
-        .map(|s| u128::from(section_weight(s)))
-        .sum();
+    let sections = {
+        let mut render =
+            |name: &'static str, share: u64| render_section(job, name, func, share, fuel, marks);
+        split::split(total, job.include, MIN_SHARE, &mut render)
+    };
     let mut omitted = Object::new();
-    let mut spent = Vec::new();
-    for name in job.include {
-        let weight = u128::from(section_weight(name));
-        let share = u64::try_from(free.saturating_mul(weight) / left.max(1)).unwrap_or(u64::MAX);
-        left = left.saturating_sub(weight);
-        if share < MIN_SHARE {
-            omitted.push(*name, Value::Null);
-            spent.push(Spent {
-                section: name,
-                share,
-                need: 0,
-                used: 0,
-            });
-            continue;
+    for s in &sections {
+        match &s.value {
+            Ok(v) => out.push(s.name, v.clone()),
+            Err(entry) => omitted.push(s.name, entry.clone()),
         }
-        let (value, need, used) = render_section(job, name, func, share, fuel, marks);
-        match value {
-            Ok(v) => out.push(*name, v),
-            Err(entry) => omitted.push(*name, entry),
-        }
-        free = free.saturating_sub(u128::from(used));
-        spent.push(Spent {
-            section: name,
-            share,
-            need,
-            used,
-        });
+    }
+    if sections
+        .iter()
+        .any(|s| s.name == "decomp" && s.value.is_err())
+    {
+        marks.decomp_omitted.push(func);
     }
     if job
         .include
@@ -472,12 +467,12 @@ pub fn one(
         out.push("omitted", Value::Object(omitted));
     }
     if job.detailed {
-        let rows = spent
+        let rows = sections
             .iter()
             .map(|s| {
                 Value::object([
-                    ("section", Value::from(s.section)),
-                    ("weight", Value::from(section_weight(s.section))),
+                    ("section", Value::from(s.name)),
+                    ("weight", Value::from(section_weight(s.name))),
                     ("share", Value::from(s.share)),
                     ("need", Value::from(s.need)),
                     ("used", Value::from(s.used)),

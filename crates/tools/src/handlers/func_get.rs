@@ -6,16 +6,22 @@
 //! ok_count, error_count }` in input order, and one bad item never fails the call (AC-144).
 //!
 //! Budget (design Section 10.9): with `targets`, the budget first splits evenly per target.
-//! The sections of one function split their part by weight in include order: `disasm` 3,
-//! `ir` 3, every other section 1. A section that needs less gives the rest to the later
-//! sections. A row section that does not fit keeps the rows that fit and gets a
-//! `next_cursor`. Send it in `cursors` for the next rows (AC-154b). Another section that
-//! does not fit goes to `omitted` with its exact size (AC-154a).
+//! The sections of one function split their part by weight in include order: `decomp` 6,
+//! `disasm` 3, `ir` 3, every other section 1. A section that needs less gives the rest to
+//! the later sections.
+//!
+//! A row section that does not fit keeps the rows that fit and gets a `next_cursor`. Send it
+//! in `cursors` for the next rows (AC-154b). Another section that does not fit goes to
+//! `omitted` with its exact size (AC-154a). Its share comes back, and the sections that stay
+//! split the budget again ([`split`]). An omitted `decomp` section gives a `next` call that
+//! reads the decompile alone.
 //!
 //! A call with `disasm` or `ir` marks the function `visited`. The mark changes no fact and no
 //! `rev`.
 
+pub mod remedy;
 mod render;
+pub mod split;
 
 use ghidorah_analysis::CallGraph;
 use ghidorah_base::{BinaryId, ErrorCode, FuncId, WarningCode};
@@ -352,6 +358,7 @@ fn run(session: &mut Session, args: &Args, ctx: &mut Ctx) -> Result<Payload, Too
             limit: usize::try_from(limit).unwrap_or(usize::MAX),
             cursors: Cursors::default(),
             session,
+            binary: binary.id,
             frame: &frame,
             args,
             mode: ctx.budget.mode,
@@ -391,6 +398,10 @@ fn run(session: &mut Session, args: &Args, ctx: &mut Ctx) -> Result<Payload, Too
         warning.at = Some(ghidorah_base::hex::u64_text(*at));
         ctx.warn(warning);
     }
+    let window = fs::decomp_opts(args);
+    for func in &marks.decomp_omitted {
+        ctx.next.push(read_decomp(id, *func, &window));
+    }
     mark_visited(session, id, &marks.visited);
     match data {
         Value::Object(object) => Ok(Payload::Object(object)),
@@ -417,6 +428,31 @@ fn mark_visited(session: &mut Session, id: BinaryId, funcs: &[FuncId]) {
         };
         let _ = session.write_meta(id, &line);
     }
+}
+
+/// Gives the call that reads the decompile of `func` alone, so the `decomp` section gets the
+/// whole budget. A cut window pages with its `next_cursor`.
+fn read_decomp(id: BinaryId, func: FuncId, window: &fs::DecompOpts) -> Call {
+    let lines = Value::object([
+        (
+            "start",
+            Value::from(u64::try_from(window.start).unwrap_or(1)),
+        ),
+        (
+            "count",
+            Value::from(u64::try_from(window.count).unwrap_or(1)),
+        ),
+    ]);
+    Call::new(
+        "func_get",
+        Value::object([
+            ("binary_id", Value::from(id.to_string())),
+            ("target", Value::from(func.to_string())),
+            ("include", Value::Array(vec![Value::from("decomp")])),
+            ("decomp_opts", Value::object([("lines", lines)])),
+        ]),
+        split::WHY_DECOMP,
+    )
 }
 
 /// Adds the repair call of a cursor error: the call without `cursors`.

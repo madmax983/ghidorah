@@ -1,10 +1,12 @@
 //! Regression tests of the decompiler core.
 
+use std::collections::BTreeSet;
 use std::sync::mpsc;
 use std::time::Duration;
 
-use ghidorah_decomp::interp_ast;
-use ghidorah_decomp::{LoopKind, Opts, Tree};
+use ghidorah_base::WarningCode;
+use ghidorah_decomp::{ElideReason, Elided, Line, LineKind, LoopKind, Opts, Tree};
+use ghidorah_decomp::{interp_ast, linemap};
 use ghidorah_ir::{Arg, Builder, Config, Loc, NoImage, Opc, StopReason};
 
 use crate::progs::{Program, body_with, decompile, l1_of};
@@ -91,4 +93,126 @@ fn regress_long_block_view_is_not_quadratic() {
         .recv_timeout(Duration::from_secs(10))
         .expect("the decompile of one long block ends in 10 s");
     assert!(nodes > 0);
+}
+
+/// Gives a statement line with the address range `span`.
+fn line_at(span: (u64, u64)) -> Line {
+    Line {
+        text: "x;".to_owned(),
+        kind: LineKind::Stmt,
+        depth: 1,
+        ops: Vec::new(),
+        span: Some(span),
+        comment: None,
+        calls: Vec::new(),
+        strings: Vec::new(),
+    }
+}
+
+/// A range that ends at the top address holds its last byte. The old half-open ranges of the
+/// line map saturated at `u64::MAX`, so they lost that byte (verification-07).
+#[test]
+fn regress_linemap_covers_top_byte() {
+    let top = Elided {
+        start: u64::MAX,
+        size: 1,
+        reason: ElideReason::Padding,
+    };
+    assert!(linemap::covered(&[], &[top], u64::MAX));
+    assert!(!linemap::covered(&[], &[top], u64::MAX - 1));
+    let two = Elided {
+        start: u64::MAX - 1,
+        size: 2,
+        reason: ElideReason::Padding,
+    };
+    assert!(linemap::covered(&[], &[two], u64::MAX));
+    assert!(linemap::covered(&[], &[two], u64::MAX - 1));
+    let line = line_at((u64::MAX - 1, 2));
+    assert!(linemap::covered(std::slice::from_ref(&line), &[], u64::MAX));
+    assert!(!linemap::covered(&[line], &[], u64::MAX - 2));
+    let past = Elided {
+        start: u64::MAX - 1,
+        size: 8,
+        reason: ElideReason::Padding,
+    };
+    assert!(linemap::covered(&[], &[past], u64::MAX));
+    let merged = linemap::merge(vec![two, top]);
+    assert_eq!(merged, vec![two, top], "{merged:?}");
+}
+
+/// A printer that drops a store or a call must not hide it as `no effect`. With no printed
+/// line, `cover` gives no elided row for the store, the call and the return. It gives
+/// `W_STRUCTURE_SELFCHECK` at each of them. A dead add stays `no effect` (tests-tdd-01).
+#[test]
+fn regress_linemap_does_not_hide_dropped_store() {
+    let mut b = Builder::new();
+    b.begin(0x2000, 4).expect("in order");
+    let addr = b.get(Loc::RDI).expect("get");
+    b.store(64, addr.into(), Arg::k(1)).expect("store");
+    b.begin(0x2004, 5).expect("in order");
+    b.flow(Opc::Call, Arg::k(0x9000), Arg::Nil).expect("call");
+    b.begin(0x2009, 1).expect("in order");
+    let dead = b.get(Loc::RDI).expect("get");
+    let _ = b
+        .binary(Opc::Add, 64, dead.into(), Arg::k(1))
+        .expect("a dead add");
+    b.begin(0x200a, 1).expect("in order");
+    b.flow(Opc::Ret, Arg::Nil, Arg::Nil).expect("ret");
+    let arena = b.finish();
+    let body = body_with(&arena, &[0x2000], &[]);
+    let p = Program {
+        arena,
+        body,
+        entry: 0x2000,
+        setup: Vec::new(),
+    };
+    let ssa = l1_of(&p);
+    let d = decompile(&p, &ssa, &Opts::default());
+    assert_eq!(
+        d.view.effects,
+        BTreeSet::from([0x2000, 0x2004, 0x200a]),
+        "{:?}",
+        d.view.insns
+    );
+    let units = d.view.insns.clone();
+    let mut elided = Vec::new();
+    let warnings = linemap::cover(
+        &[],
+        &d.view.insns,
+        &BTreeSet::new(),
+        &d.view.effects,
+        &units,
+        &mut elided,
+    );
+    assert_eq!(
+        elided,
+        vec![Elided {
+            start: 0x2009,
+            size: 1,
+            reason: ElideReason::NoEffect,
+        }]
+    );
+    let at: Vec<u64> = warnings.iter().map(|w| w.at).collect();
+    assert_eq!(at, [0x2000, 0x2004, 0x200a], "{warnings:?}");
+    assert!(
+        warnings
+            .iter()
+            .all(|w| w.code == WarningCode::StructureSelfcheck),
+        "{warnings:?}"
+    );
+    let printed = ghidorah_decomp::finish(
+        d,
+        &ghidorah_decomp::NoEnv,
+        &ghidorah_ir::NoNames,
+        "f",
+        &units,
+    );
+    assert!(
+        printed
+            .warnings
+            .iter()
+            .all(|w| w.code != WarningCode::StructureSelfcheck),
+        "the printer shows each effect: {:?}",
+        printed.warnings
+    );
 }

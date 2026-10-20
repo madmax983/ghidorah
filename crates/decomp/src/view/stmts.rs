@@ -11,7 +11,12 @@
 //! | `CJump(c, t)`, then nothing or `Jump` | a branch on `c` |
 //! | `CJump(c, t)`, then `Ret` | a branch on `c` whose false side returns |
 //! | `JumpInd(x)` | a switch over the cases of the CFG, or `goto *(x);` without a case |
+//! | `JumpInd(Load(slot))` of a thunk in one instruction, through an import slot | a tail call of the import |
 //! | `Ret` | a stop |
+//!
+//! An indirect jump without a case gets `W_JUMPTABLE_UNRESOLVED` only when the facts of the
+//! environment hold an unresolved table at it ([`Env::jumptable_unresolved`]). So a thunk
+//! or a jump through an import slot gets no such warning.
 //!
 //! An instruction that jumps to its own address without a CFG edge is a `rep` loop. L1 cannot show its loop, so
 //! its flow ops are not control flow, and it gets `W_LIFT_UNSUPPORTED`.
@@ -65,6 +70,8 @@ pub(crate) struct Ex<'a> {
     pub(crate) plan: &'a Plan,
     pub(crate) env: &'a dyn Env,
     pub(crate) tails: &'a BTreeSet<u64>,
+    /// The function is a thunk, so it passes its arguments on to the target of its jump.
+    pub(crate) thunk: bool,
 }
 
 /// Gives the opcodes with one input.
@@ -241,6 +248,43 @@ impl Ex<'_> {
         }
     }
 
+    /// Gives the call target of the indirect jump of a thunk through an import slot. The jump
+    /// target must be a load of a constant slot address in the same instruction. Another
+    /// function sets its argument registers before the jump. The jump reads no register in
+    /// L1, so the jump of such a function keeps its `goto`.
+    fn import_jump(&self, target: Arg, addr: u64) -> Option<u64> {
+        let Arg::V(v) = target else {
+            return None;
+        };
+        if !self.thunk {
+            return None;
+        }
+        let op = self.f.def.get(&v).and_then(|&i| self.f.op(i))?;
+        if op.opc != Opc::Load || op.id.addr != addr {
+            return None;
+        }
+        self.env.import_at_slot(op.a[0].as_k()?)
+    }
+
+    /// Gives the statement of an indirect jump with no case: the tail call of the import of
+    /// a thunk, else `goto *(x);`. A `goto` gets `W_JUMPTABLE_UNRESOLVED` when the facts hold
+    /// an unresolved table at it.
+    fn jump_end(&self, jump: &Op, warnings: &mut Vec<Warning>) -> Stmt {
+        if let Some(callee) = self.import_jump(jump.a[0], jump.id.addr) {
+            return Stmt::Call(forward(callee, jump.id));
+        }
+        if self.env.jumptable_unresolved(jump.id.addr) {
+            warnings.push(Warning {
+                code: WarningCode::JumptableUnresolved,
+                at: jump.id.addr,
+            });
+        }
+        Stmt::Goto {
+            target: self.arg(jump.a[0], 64),
+            at: jump.id,
+        }
+    }
+
     /// Gives the statement of the op `i`, or `None` for an op without one.
     fn stmt(&self, i: u32, op: &Op) -> Option<Stmt> {
         match op.opc {
@@ -278,6 +322,22 @@ impl Ex<'_> {
                 .collect(),
             at: op.id,
         }
+    }
+}
+
+/// Gives the tail call of a jump through an import slot to `callee`. The jump passes the
+/// argument registers on, so the call has no argument list of its own: the printer shows the
+/// parameters of the function.
+const fn forward(callee: u64, at: OpId) -> Call {
+    Call {
+        callee: Callee::Direct(callee),
+        args: Vec::new(),
+        mem: None,
+        rets: Vec::new(),
+        ret: None,
+        noreturn: false,
+        tail: true,
+        at,
     }
 }
 
@@ -353,14 +413,7 @@ pub(crate) fn block(ex: &Ex<'_>, b: Node) -> Raw {
                 };
             }
             Opc::JumpInd if f.ssa.cfg().succs(b).is_empty() => {
-                warnings.push(Warning {
-                    code: WarningCode::JumptableUnresolved,
-                    at: f0.id.addr,
-                });
-                goto = Some(Stmt::Goto {
-                    target: ex.arg(f0.a[0], 64),
-                    at: f0.id,
-                });
+                goto = Some(ex.jump_end(&f0, &mut warnings));
             }
             Opc::JumpInd => {
                 term = Term::Switch {

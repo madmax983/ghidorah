@@ -44,6 +44,29 @@ pub trait Env {
     fn is_noreturn(&self, addr: u64) -> bool;
     /// Tells if a string literal starts at `addr`.
     fn is_string(&self, addr: u64) -> bool;
+
+    /// Tells if the function at `entry` is a thunk: a stub that jumps to another function and
+    /// passes its arguments on. The default knows no thunk.
+    fn is_thunk(&self, entry: u64) -> bool {
+        let _ = entry;
+        false
+    }
+
+    /// Gives the call target of the import with the slot `slot`, a GOT or IAT entry. The
+    /// target is the stub, or the slot for an import with no stub. Another address gives
+    /// `None`. The default knows no import.
+    fn import_at_slot(&self, slot: u64) -> Option<u64> {
+        let _ = slot;
+        None
+    }
+
+    /// Tells if the facts hold an unresolved jump table at the indirect jump `site`. Such a
+    /// fact is a jump-table record with no targets or the caveat `W_JUMPTABLE_UNRESOLVED`.
+    /// The default knows no fact, so it gives `true` for each site.
+    fn jumptable_unresolved(&self, site: u64) -> bool {
+        let _ = site;
+        true
+    }
 }
 
 /// An environment that knows no fact.
@@ -136,6 +159,10 @@ pub struct View {
     /// The address and the length of each instruction of the reachable blocks, in address
     /// order.
     pub insns: Vec<(u64, u8)>,
+    /// The addresses of the instructions with an effect that a line must show. An effect is a
+    /// store, a call, a return, a branch or an opaque memory op. The def of a value that a
+    /// return reads is an effect too.
+    pub effects: BTreeSet<u64>,
 }
 
 impl View {
@@ -222,6 +249,7 @@ pub fn build(
         plan: &plan,
         env,
         tails: input.tail_calls,
+        thunk: env.is_thunk(entry),
     };
     let mut raws: Vec<Raw> = f.reach.iter().map(|&b| stmts::block(&ex, b)).collect();
     let cx = vars::Ctx {

@@ -2,6 +2,7 @@
 //! section shapes (AC-154a to AC-154c).
 
 use ghidorah_json::Value;
+use ghidorah_tools::{Call, Host, hints};
 
 use crate::support::{call, call_value, code, data, demo, fixture, items, json, str_of, text_at};
 
@@ -142,6 +143,8 @@ fn ac_154b_section_cursors() {
     assert!(repair.get("cursors").is_none(), "{repair}");
 }
 
+/// The sections that stay split the budget by weight in include order. An omitted section
+/// uses nothing, and its share goes to the sections that stay.
 #[test]
 fn ac_154c_section_split() {
     let (mut session, _) = fixture("switch.gcc-O0");
@@ -164,11 +167,20 @@ fn ac_154c_section_split() {
             let names: Vec<String> = rows.iter().map(|r| str_of(r, "section")).collect();
             assert_eq!(names, include, "the budget rows follow the include order");
             let weight = |s: &str| u128::from(ghidorah_tools::budget::section_weight(s));
-            let mut left: u128 = include.iter().map(|s| weight(s)).sum();
+            let omitted = |s: &str| data(&envelope).pointer(&format!("/omitted/{s}")).is_some();
+            let mut left: u128 = include
+                .iter()
+                .filter(|s| !omitted(s))
+                .map(|s| weight(s))
+                .sum();
             for row in rows {
                 let section = str_of(row, "section");
                 let field = |k: &str| u128::from(row.get(k).and_then(Value::as_u64).unwrap_or(0));
                 assert_eq!(field("weight"), weight(&section), "{section}");
+                if omitted(&section) {
+                    assert_eq!(field("used"), 0, "an omitted {section} uses nothing");
+                    continue;
+                }
                 let share = free * weight(&section) / left;
                 assert_eq!(field("share"), share, "{section} at {max} in {include:?}");
                 assert!(field("used") <= share, "{section} uses its share at most");
@@ -252,4 +264,103 @@ fn func_get_sections_render() {
     assert!(summary.get("blocks").and_then(Value::as_u64).unwrap_or(0) >= 4);
     let missing = get(&mut session, "0x2004", &["summary"], "{}");
     assert_eq!(code(&missing), "NOT_IN_FUNCTION", "{missing}");
+}
+
+/// A caveat remedy is a call object `{ tool, args, why }` that `hints::check` accepts. It is
+/// never a raw string, and it has no `count` argument (agent-protocol-10).
+#[test]
+fn regress_caveat_remedy_is_a_call() {
+    let (mut session, _) = fixture("func_ptrs.gcc-O2");
+    let out = get(&mut session, "fn:0x1350", &["cfg"], "{}");
+    let caveats = data(&out)
+        .get("caveats")
+        .and_then(Value::as_array)
+        .map(<[Value]>::to_vec)
+        .expect("caveats");
+    let caveat = caveats
+        .iter()
+        .find(|c| str_of(c, "code") == "W_JUMPTABLE_UNRESOLVED")
+        .unwrap_or_else(|| panic!("no W_JUMPTABLE_UNRESOLVED: {out}"));
+    assert_eq!(str_of(caveat, "at"), "0x1366", "{caveat}");
+    let remedy = caveat.get("remedy").expect("the caveat has a remedy");
+    assert!(remedy.as_object().is_some(), "a call object: {remedy}");
+    assert_eq!(text_at(remedy, "/tool"), "func_edit", "{remedy}");
+    assert_eq!(text_at(remedy, "/args/at"), "0x1366", "{remedy}");
+    assert!(!text_at(remedy, "/args/action").is_empty(), "{remedy}");
+    assert!(remedy.pointer("/args/count").is_none(), "{remedy}");
+    let why = text_at(remedy, "/why");
+    assert!(!why.is_empty(), "{remedy}");
+    let args = remedy.get("args").cloned().expect("args");
+    let found = Call::new(&text_at(remedy, "/tool"), args, &why);
+    let registry = session.active_registry();
+    hints::check(&registry, &|name| session.in_profile(name), &found)
+        .unwrap_or_else(|e| panic!("{remedy}: {e}"));
+    for c in &caveats {
+        if let Some(r) = c.get("remedy") {
+            assert!(r.as_object().is_some(), "{c}");
+            assert!(r.pointer("/args/count").is_none(), "{c}");
+        }
+    }
+}
+
+/// Gives the next call of an envelope that reads the `decomp` section alone.
+fn decomp_next(envelope: &Value) -> Option<Value> {
+    envelope
+        .get("next")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .find(|c| {
+            text_at(c, "/tool") == "func_get"
+                && c.pointer("/args/include") == Some(&json(r#"["decomp"]"#))
+                && (c.pointer("/args/decomp_opts/lines").is_some()
+                    || c.pointer("/args/max_chars").is_some())
+        })
+        .cloned()
+}
+
+/// An omitted section gives its share back, so `func_get` uses most of its limit. When the
+/// `decomp` section goes to `omitted`, `disasm` gets about the rows of a call with `disasm`
+/// alone, and `next` reads the decompile alone (agent-protocol-16).
+#[test]
+fn regress_func_get_omitted_share_returns() {
+    let (mut session, _) = fixture("large.gcc-O2");
+    let out = get(
+        &mut session,
+        "main",
+        &["disasm", "decomp"],
+        r#"{"max_chars":4000}"#,
+    );
+    let used = size(&out);
+    assert!(used * 10 >= 4000 * 7, "{used} of 4000: {out}");
+    let d = data(&out);
+    assert!(
+        d.pointer("/omitted/decomp").is_none() || decomp_next(&out).is_some(),
+        "{out}"
+    );
+    let mut seen = false;
+    for max in (1000..4000).step_by(100) {
+        let extra = format!(r#"{{"max_chars":{max}}}"#);
+        let out = get(&mut session, "main", &["disasm", "decomp"], &extra);
+        let d = data(&out);
+        if d.pointer("/omitted/decomp").is_none() || d.get("disasm").is_none() {
+            continue;
+        }
+        seen = true;
+        let rows = |v: &Value| {
+            data(v)
+                .pointer("/disasm/rows")
+                .and_then(Value::as_array)
+                .map_or(0, <[Value]>::len)
+        };
+        let alone = get(&mut session, "main", &["disasm"], &extra);
+        assert!(rows(&out) > 0, "{out}");
+        assert!(
+            rows(&out) + 1 >= rows(&alone),
+            "disasm gets the share of decomp: {out}"
+        );
+        let next = decomp_next(&out).unwrap_or_else(|| panic!("no decomp next: {out}"));
+        assert_eq!(text_at(&next, "/args/target"), str_of(d, "id"), "{next}");
+    }
+    assert!(seen, "a small budget omits the decomp section");
 }

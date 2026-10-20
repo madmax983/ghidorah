@@ -58,7 +58,7 @@ use std::fmt;
 use ghidorah_analysis::cc::conv_of;
 use ghidorah_analysis::fir::Opts as FirOpts;
 use ghidorah_analysis::fir::l1::{self, L1Error, L1Ir};
-use ghidorah_base::{Address, Fuel, FuncId, WarningCode};
+use ghidorah_base::{Address, Fuel, FuncId, JumpTableId, WarningCode};
 use ghidorah_db::Program;
 use ghidorah_ir::{IntrinsicNames, Switches};
 
@@ -145,8 +145,8 @@ pub enum ElideReason {
     Unreachable,
     /// A jump at the end of a block. The structure of the text shows it.
     Flow,
-    /// An instruction of a reachable block whose effect no line shows, for example a push of
-    /// a callee-saved register.
+    /// An instruction of a reachable block with no effect that a line must show, for example
+    /// a push of a callee-saved register. See [`linemap`] for the effects.
     NoEffect,
     /// An instruction of the body outside every block, for example alignment bytes.
     Padding,
@@ -244,7 +244,7 @@ impl Env for ProgramEnv<'_> {
             .0
             .imports()
             .values()
-            .find(|r| r.stub == Some(at))
+            .find(|r| r.stub == Some(at) || (r.stub.is_none() && r.slot == Some(at)))
             .and_then(|r| r.id.name())
         {
             return Some(name.to_owned());
@@ -261,6 +261,38 @@ impl Env for ProgramEnv<'_> {
 
     fn is_string(&self, addr: u64) -> bool {
         self.0.string(addr).is_some()
+    }
+
+    fn is_thunk(&self, entry: u64) -> bool {
+        self.0
+            .func(FuncId(Address::ram(entry)))
+            .is_some_and(|f| f.func.flags.thunk)
+    }
+
+    fn import_at_slot(&self, slot: u64) -> Option<u64> {
+        let at = Address::ram(slot);
+        let row = self.0.imports().values().find(|r| r.slot == Some(at))?;
+        Some(row.stub.unwrap_or(at).off)
+    }
+
+    fn jumptable_unresolved(&self, site: u64) -> bool {
+        let at = Address::ram(site);
+        let Some(owner) = self.0.owner_of(at).and_then(|f| self.0.func(f)) else {
+            return false;
+        };
+        if owner.func.flags.thunk {
+            return false;
+        }
+        let table = self
+            .0
+            .jump_table(JumpTableId(at))
+            .is_some_and(|t| !t.value.resolved);
+        table
+            || owner
+                .func
+                .caveats
+                .iter()
+                .any(|c| c.code == WarningCode::JumptableUnresolved && c.at == Some(at))
     }
 }
 
@@ -423,10 +455,18 @@ pub fn finish(
     let printed = print::print(&decomp, env, names, name);
     let mut elided = decomp.elided.clone();
     let flow = print::flow_addrs(&decomp.view);
-    linemap::cover(&printed.lines, &decomp.view.insns, &flow, body, &mut elided);
+    let dropped = linemap::cover(
+        &printed.lines,
+        &decomp.view.insns,
+        &flow,
+        &decomp.view.effects,
+        body,
+        &mut elided,
+    );
     let elided = linemap::merge(elided);
     let mut all = decomp.warnings.clone();
     all.extend(printed.warnings);
+    all.extend(dropped);
     Output {
         entry: decomp.view.entry,
         name: name.to_owned(),

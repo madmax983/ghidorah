@@ -21,8 +21,10 @@
 //! The `store` module keeps the history and the project of each binary. Tool handlers commit
 //! through [`Session::transact`] and [`Session::undo`], so each commit gets its journal line.
 //! The `open` module opens and closes projects. [`batch`] makes one transaction of a batch.
+//! The `cache` module keeps the decompile cache of each binary ([`Session::decompile`]).
 
 pub mod batch;
+mod cache;
 mod open;
 mod store;
 
@@ -215,6 +217,7 @@ pub struct Session {
     recent: Vec<BinaryId>,
     engine: Option<Box<dyn AnalysisEngine>>,
     spill: RefCell<Spill>,
+    decomp: RefCell<cache::DecompCaches>,
     crashes: Vec<Crash>,
     stores: BTreeMap<BinaryId, Store>,
     fs: Box<dyn Fs>,
@@ -266,6 +269,7 @@ impl Session {
             recent: Vec::new(),
             engine: None,
             spill: RefCell::new(Spill::new()),
+            decomp: RefCell::new(cache::DecompCaches::default()),
             crashes: Vec::new(),
             stores: BTreeMap::new(),
             fs,
@@ -351,17 +355,6 @@ impl Session {
     #[must_use]
     pub fn new_label(&self) -> String {
         self.config.labels.label(0)
-    }
-
-    /// Adds an open binary and makes it the most recent one. A binary with the same ID goes.
-    /// A binary with no store gets a store in memory.
-    pub fn open(&mut self, binary: OpenBinary) {
-        let id = binary.id;
-        self.stores
-            .entry(id)
-            .or_insert_with(|| Store::in_memory(&binary.program));
-        self.binaries.insert(id, binary);
-        self.touch(id);
     }
 
     /// Makes `id` the most recent binary.
@@ -586,6 +579,7 @@ impl Host for Session {
         self.write_crash(crash);
         if let Some(id) = self.current {
             let _ = self.reload(id);
+            self.decomp.get_mut().renew(id);
         }
     }
 }

@@ -327,17 +327,21 @@ impl<'a> Printer<'a> {
         });
     }
 
-    /// Gives the address range of the instructions of `ops`.
+    /// Gives the address range of the instructions of `ops`: the first address and the size.
+    /// The size counts from the first address, so an instruction at `u64::MAX` keeps its byte.
     fn span(&self, ops: &[OpId]) -> Option<(u64, u64)> {
         let start = ops.iter().map(|o| o.addr).min()?;
-        let end = ops
+        let size = ops
             .iter()
             .map(|o| {
                 let len = self.view().insn_len(o.addr).map_or(1, u64::from);
-                o.addr.saturating_add(len)
+                o.addr
+                    .checked_sub(start)
+                    .and_then(|off| off.checked_add(len))
+                    .unwrap_or(u64::MAX)
             })
             .max()?;
-        Some((start, end.saturating_sub(start)))
+        Some((start, size))
     }
 
     /// Prints the statements of one node.

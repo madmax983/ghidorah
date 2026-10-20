@@ -1,15 +1,20 @@
 //! The shape of the `decomp` section, the IR level `l1`, the budget cut and the agent texts.
 
-use ghidorah_base::Fuel;
+use std::path::PathBuf;
+
+use ghidorah_base::{Address, BinaryId, FixedClock, Fuel};
+use ghidorah_db::{Edit, Source, SymKind};
 use ghidorah_decomp::Opts;
 use ghidorah_json::Value;
 use ghidorah_testkit::ste::check_agent_text;
 use ghidorah_tools::registry::lint;
-use ghidorah_tools::{ArgKind, ArgSpec, handlers};
+use ghidorah_tools::{
+    ArgKind, ArgSpec, Call, Host, Roots, Session, SessionConfig, handlers, hints,
+};
 
 use crate::support::{
-    call, call_value, chars, data, decomp, fixture, json, program, registry, session, text_at,
-    text_of,
+    call, call_value, chars, commit, data, decomp, entry_of, fixture, json, program, registry,
+    root, session, text_at, text_of,
 };
 
 #[test]
@@ -258,4 +263,153 @@ fn a_small_budget_cuts_the_window() {
         "CURSOR_INVALID",
         "{envelope}"
     );
+}
+
+/// Makes a session of the shipped registry with the analysis engine, so a remedy can name
+/// `func_edit`.
+fn shipped() -> Session {
+    let config =
+        SessionConfig::new(Roots::new(&root(), &[PathBuf::from(".")]).expect("the root is valid"));
+    let mut s = Session::new(config, Box::new(FixedClock::new(0)));
+    handlers::analysis_run::install(&mut s);
+    s
+}
+
+/// Gives the warning `code` at `at` of a decompile section.
+fn warning_at<'a>(section: &'a Value, code: &str, at: &str) -> Option<&'a Value> {
+    section
+        .get("warnings")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .find(|w| text_at(w, "/code") == code && text_at(w, "/at") == at)
+}
+
+/// Makes sure that `remedy` is a call object that `hints::check` accepts in `s`.
+fn assert_checked_call(s: &Session, remedy: &Value) {
+    let tool = text_at(remedy, "/tool");
+    let args = remedy.get("args").cloned().expect("a remedy has args");
+    assert!(!text_at(remedy, "/why").is_empty(), "{remedy}");
+    let found = Call::new(&tool, args, &text_at(remedy, "/why"));
+    let registry = s.active_registry();
+    hints::check(&registry, &|name| s.in_profile(name), &found)
+        .unwrap_or_else(|e| panic!("{remedy}: {e}"));
+}
+
+/// A PLT stub jumps through its GOT slot. Its decompile is a tail call to the import with no
+/// `W_JUMPTABLE_UNRESOLVED`. A real unresolved jump keeps the warning, and its remedy is a
+/// `func_edit` call that `hints::check` accepts (maintainability-docs-03).
+#[test]
+fn regress_plt_stub_decomp_tail_call() {
+    let mut s = shipped();
+    let _ = data(&call(&mut s, "binary_load", r#"{"builtin":"demo"}"#));
+    let section = decomp(&mut s, "fn:0x1060", "{}");
+    let text = text_of(&section);
+    assert!(text.contains("return puts("), "{text}");
+    assert!(!text.contains("goto *"), "{text}");
+    assert!(
+        warning_at(&section, "W_JUMPTABLE_UNRESOLVED", "0x1064").is_none(),
+        "{section}"
+    );
+    let calls = section
+        .get("calls")
+        .and_then(Value::as_array)
+        .expect("calls");
+    assert!(
+        calls.iter().any(|c| text_at(c, "/name") == "puts"),
+        "{section}"
+    );
+    let mut s = shipped();
+    let _ = data(&call(
+        &mut s,
+        "binary_load",
+        r#"{"path":"fixtures/bin/func_ptrs.gcc-O2"}"#,
+    ));
+    let section = decomp(&mut s, "fn:0x1350", "{}");
+    let warning = warning_at(&section, "W_JUMPTABLE_UNRESOLVED", "0x1366")
+        .unwrap_or_else(|| panic!("no warning at 0x1366: {section}"));
+    let remedy = warning.get("remedy").expect("the warning has a remedy");
+    assert_eq!(text_at(remedy, "/tool"), "func_edit", "{remedy}");
+    assert_eq!(text_at(remedy, "/args/at"), "0x1366", "{remedy}");
+    assert_eq!(
+        text_at(remedy, "/args/action"),
+        "set_call_targets",
+        "{remedy}"
+    );
+    assert_checked_call(&s, remedy);
+}
+
+/// Renames the function at `addr` of the open binary `id` to `name`.
+fn rename(s: &mut Session, id: BinaryId, addr: u64, name: &'static str) {
+    commit(s, id, |tx| Edit::SetName {
+        addr: Address::ram(addr),
+        key: None,
+        kind: SymKind::Function,
+        primary: true,
+        name: Some(tx.fact(name.to_owned())),
+        evidence: Vec::new(),
+    });
+}
+
+/// The second `func_get` decompile of one function reads the decompile cache of the session.
+/// An unrelated rename keeps the hit. A rename of the function or of a callee misses
+/// (maintainability-docs-02, tests-tdd-11).
+#[test]
+fn regress_func_get_decomp_cache_hits() {
+    let (agent, id) = fixture("hello.gcc-O0");
+    let binary = agent.binary(id).cloned().expect("the binary is open");
+    let mut config =
+        SessionConfig::new(Roots::new(&root(), &[PathBuf::from(".")]).expect("the root is valid"));
+    config.source = Source::User;
+    let mut s = Session::with_registry(registry(), config, Box::new(FixedClock::new(0)));
+    s.open(binary);
+    let p = program(&s, id);
+    let (run, finish, other) = (
+        entry_of(p, "run"),
+        entry_of(p, "finish"),
+        entry_of(p, "frame_dummy"),
+    );
+    let target = format!("fn:{run:#x}");
+    let look = |s: &mut Session| {
+        let text = text_of(&decomp(s, &target, "{}"));
+        let stats = s.decomp_stats(id);
+        (text, stats.hits, stats.misses)
+    };
+    let (first, hits, misses) = look(&mut s);
+    assert_eq!((hits, misses), (0, 1), "the first decompile misses");
+    let (again, hits, _) = look(&mut s);
+    assert_eq!(hits, 1, "the second decompile hits");
+    assert_eq!(again, first);
+    rename(&mut s, id, other, "other_renamed");
+    let (_, hits, _) = look(&mut s);
+    assert_eq!(hits, 2, "an unrelated rename keeps the hit");
+    rename(&mut s, id, run, "run_renamed");
+    let (text, hits, misses) = look(&mut s);
+    assert_eq!((hits, misses), (2, 2), "a rename of the function misses");
+    assert!(text.contains("run_renamed"), "{text}");
+    rename(&mut s, id, finish, "finish_renamed");
+    let (text, hits, misses) = look(&mut s);
+    assert_eq!((hits, misses), (2, 3), "a rename of a callee misses");
+    assert!(text.contains("finish_renamed"), "{text}");
+    let (_, hits, _) = look(&mut s);
+    assert_eq!(hits, 3, "the next decompile hits again");
+    let binary = s.binary(id).cloned().expect("the binary is open");
+    s.open(binary);
+    let (_, hits, misses) = look(&mut s);
+    assert_eq!(
+        (hits, misses),
+        (3, 4),
+        "a binary that opens again has a new cache"
+    );
+    s.batch_begin(id, "mcp-1").expect("a batch opens");
+    let (in_batch, hits, misses) = look(&mut s);
+    assert_eq!(
+        (hits, misses),
+        (3, 4),
+        "a decompile in a batch reads no cache"
+    );
+    assert!(in_batch.contains("finish_renamed"), "{in_batch}");
+    s.batch_rollback(id);
+    let (_, hits, _) = look(&mut s);
+    assert_eq!(hits, 4, "the cache serves again after the batch");
 }

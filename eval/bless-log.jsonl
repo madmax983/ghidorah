@@ -207,3 +207,20 @@
 {"commit":"8193524","metric":"cost:verify-05:est_tokens","old":null,"new":329,"reason":"First-run values of WP-26."}
 {"commit":"8193524","metric":"cost:verify-05:peak","old":null,"new":650,"reason":"First-run values of WP-26."}
 {"commit":"2531904","metric":"survey_fact_recall","old":0.996,"new":1.000,"reason":"clang relative string tables now give refs"}
+{"commit":"969bac2","metric":"cost:ab-understand-03:chars","old":3035,"new":3049,"reason":"recover-02 peak: the run_op caveat remedy is a func_edit call (agent-protocol-10); other costs move by at most 18 chars"}
+{"commit":"969bac2","metric":"cost:ab-understand-03:est_tokens","old":1012,"new":1017,"reason":"recover-02 peak: the run_op caveat remedy is a func_edit call (agent-protocol-10); other costs move by at most 18 chars"}
+{"commit":"969bac2","metric":"cost:ab-understand-03:peak","old":2389,"new":2403,"reason":"recover-02 peak: the run_op caveat remedy is a func_edit call (agent-protocol-10); other costs move by at most 18 chars"}
+{"commit":"969bac2","metric":"cost:annotate-03:chars","old":2670,"new":2688,"reason":"recover-02 peak: the run_op caveat remedy is a func_edit call (agent-protocol-10); other costs move by at most 18 chars"}
+{"commit":"969bac2","metric":"cost:annotate-03:est_tokens","old":890,"new":896,"reason":"recover-02 peak: the run_op caveat remedy is a func_edit call (agent-protocol-10); other costs move by at most 18 chars"}
+{"commit":"969bac2","metric":"cost:annotate-05:chars","old":2906,"new":2924,"reason":"recover-02 peak: the run_op caveat remedy is a func_edit call (agent-protocol-10); other costs move by at most 18 chars"}
+{"commit":"969bac2","metric":"cost:annotate-05:est_tokens","old":969,"new":975,"reason":"recover-02 peak: the run_op caveat remedy is a func_edit call (agent-protocol-10); other costs move by at most 18 chars"}
+{"commit":"969bac2","metric":"cost:recover-02:chars","old":2328,"new":2511,"reason":"recover-02 peak: the run_op caveat remedy is a func_edit call (agent-protocol-10); other costs move by at most 18 chars"}
+{"commit":"969bac2","metric":"cost:recover-02:est_tokens","old":776,"new":837,"reason":"recover-02 peak: the run_op caveat remedy is a func_edit call (agent-protocol-10); other costs move by at most 18 chars"}
+{"commit":"969bac2","metric":"cost:recover-02:peak","old":1002,"new":1185,"reason":"recover-02 peak: the run_op caveat remedy is a func_edit call (agent-protocol-10); other costs move by at most 18 chars"}
+{"commit":"969bac2","metric":"cost:similar-01:chars","old":5705,"new":5711,"reason":"recover-02 peak: the run_op caveat remedy is a func_edit call (agent-protocol-10); other costs move by at most 18 chars"}
+{"commit":"969bac2","metric":"cost:similar-01:est_tokens","old":1902,"new":1904,"reason":"recover-02 peak: the run_op caveat remedy is a func_edit call (agent-protocol-10); other costs move by at most 18 chars"}
+{"commit":"969bac2","metric":"cost:similar-01:peak","old":4409,"new":4411,"reason":"recover-02 peak: the run_op caveat remedy is a func_edit call (agent-protocol-10); other costs move by at most 18 chars"}
+{"commit":"969bac2","metric":"cost:similar-02:chars","old":2293,"new":2295,"reason":"recover-02 peak: the run_op caveat remedy is a func_edit call (agent-protocol-10); other costs move by at most 18 chars"}
+{"commit":"969bac2","metric":"cost:understand-03:chars","old":4056,"new":4070,"reason":"recover-02 peak: the run_op caveat remedy is a func_edit call (agent-protocol-10); other costs move by at most 18 chars"}
+{"commit":"969bac2","metric":"cost:understand-03:est_tokens","old":1352,"new":1357,"reason":"recover-02 peak: the run_op caveat remedy is a func_edit call (agent-protocol-10); other costs move by at most 18 chars"}
+{"commit":"969bac2","metric":"cost:understand-03:peak","old":2146,"new":2160,"reason":"recover-02 peak: the run_op caveat remedy is a func_edit call (agent-protocol-10); other costs move by at most 18 chars"}

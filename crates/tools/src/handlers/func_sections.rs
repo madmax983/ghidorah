@@ -26,9 +26,11 @@ use ghidorah_base::{Caps, FuncId};
 use ghidorah_db::Program;
 use ghidorah_json::Value;
 
+use crate::handlers::func_get::{remedy, split};
+
 pub use decomp::{
-    DECOMP, DecompOpts, WHY_DISASM, WHY_INSN, l1_rows, opts as decomp_opts,
-    output as decomp_output, value as decomp_value,
+    DECOMP, DecompOpts, Remedies, WHY_DISASM, WHY_INSN, l1_rows, opts as decomp_opts,
+    value as decomp_value,
 };
 pub use lists::{func_ref, jump_table, table_ids, type_text};
 pub use rows::{
@@ -43,7 +45,15 @@ pub use text::{
 pub const WHY_FIRST_ROWS: &str = "Read the sections again from their first rows.";
 
 /// Every fixed text of the renderers that an agent reads.
-pub const TEXTS: &[&str] = &[WHY_FIRST_ROWS, WHY_DISASM, WHY_INSN];
+pub const TEXTS: &[&str] = &[
+    WHY_FIRST_ROWS,
+    WHY_DISASM,
+    WHY_INSN,
+    remedy::WHY_CALL_TARGETS,
+    remedy::WHY_JUMPTABLE,
+    remedy::WHY_NORETURN,
+    split::WHY_DECOMP,
+];
 
 /// The parts of one function render that every section shares.
 #[derive(Debug, Clone, Copy)]

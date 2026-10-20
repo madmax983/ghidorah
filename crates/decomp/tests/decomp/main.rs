@@ -15,6 +15,7 @@ mod fold;
 mod goto;
 mod oracle;
 mod out_fixtures;
+mod out_linemap;
 mod out_print;
 mod out_units;
 mod progs;

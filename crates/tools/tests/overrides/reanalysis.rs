@@ -80,9 +80,10 @@ fn ac_163b_override_conflict() {
         .iter()
         .find(|c| text_at(c, "/code") == "W_AGENT_OVERRIDE_CONFLICT")
         .expect("the conflict caveat");
-    assert!(
-        text_at(conflict, "/remedy").contains("noreturn: false"),
-        "the caveat holds the analysis value: {conflict}"
+    assert_eq!(
+        conflict.pointer("/remedy/args/noreturn"),
+        Some(&Value::Bool(false)),
+        "the caveat remedy sets the analysis value: {conflict}"
     );
     let get = call(&mut s, "func_get", r#"{"target":"fn:0x11e0"}"#);
     let flags = data(&get)
