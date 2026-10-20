@@ -33,11 +33,15 @@ jobs:
         run: cargo xtask gates
       - name: STE check of docs and comments
         run: cargo xtask ste
+      - name: AC table check (gate 7)
+        run: cargo xtask ac
+      - name: Fixture checks
+        run: cargo xtask fixtures check
       - name: Coverage gate (llvm-tools)
         run: cargo xtask cov
 
   tier2:
-    name: tier 2 (ignored tests, offline build, test times, hermetic run, fuzz, bench)
+    name: tier 2 (ignored tests, offline build, test times, hermetic run, fuzz, bench, AC evidence)
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -56,6 +60,13 @@ jobs:
         run: cargo xtask fuzz
       - name: Benchmarks against perf/budget.json
         run: cargo xtask bench
+      # The step writes docs/ac-evidence.json, so it runs last.
+      # The bash shell sets pipefail, so the exit code of xtask stays.
+      - name: AC evidence run (the failed list must be empty)
+        shell: bash
+        run: |
+          cargo xtask ac --run --tier2 | tee "$RUNNER_TEMP/ac-run.json"
+          grep -q '"failed":\[\]' "$RUNNER_TEMP/ac-run.json"
 
   verus:
     name: verus (kernel proofs)
@@ -107,3 +118,6 @@ jobs:
           VERUS: ${{ runner.temp }}/verus-src/source/target-verus/release/verus
           VERUS_Z3_PATH: ${{ runner.temp }}/verus-src/source/z3
         run: cargo xtask verify
+      # The record has no time members, so a new run gives the same bytes.
+      - name: Compare the proof record with the committed record
+        run: git diff --exit-code verify/results.json

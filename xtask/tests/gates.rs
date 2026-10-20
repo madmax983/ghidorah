@@ -587,6 +587,60 @@ fn ac_019_ci_workflow() {
     assert!(!workflow::check(&node).is_empty());
     let no_tier2 = yaml.replacen("\n  tier2:", "\n  other:", 1);
     assert!(!workflow::check(&no_tier2).is_empty());
+    // Gate 7 and the fixture checks run in tier 1.
+    assert!(
+        job_runs(&yaml, "tier1", "cargo xtask ac"),
+        "tier1 runs xtask ac"
+    );
+    assert!(
+        job_runs(&yaml, "tier1", "cargo xtask fixtures check"),
+        "tier1 runs xtask fixtures check"
+    );
+    // The evidence run of tier 2 fails the job when its failed list is not empty.
+    let tier2 = workflow::job_text(&yaml, "tier2").expect("tier2 exists");
+    let run = step_of(&tier2, "cargo xtask ac --run --tier2").expect("tier2 runs xtask ac --run");
+    assert!(
+        run.contains("shell: bash"),
+        "pipefail keeps the exit code:\n{run}"
+    );
+    assert!(
+        run.contains(r#"grep -q '"failed":\[\]'"#),
+        "the step checks the failed list:\n{run}"
+    );
+    // The Verus job compares the new proof record with the committed record.
+    let verus = workflow::job_text(&yaml, "verus").expect("verus exists");
+    let verify = verus
+        .find("run: cargo xtask verify")
+        .expect("verus runs xtask verify");
+    let diff = verus
+        .find("run: git diff --exit-code verify/results.json")
+        .expect("verus compares the record");
+    assert!(verify < diff, "the diff runs after xtask verify");
+}
+
+/// Tells if a job runs `command` as the whole `run:` line of a step.
+fn job_runs(yaml: &str, job: &str, command: &str) -> bool {
+    workflow::job_text(yaml, job).is_some_and(|text| {
+        text.lines()
+            .any(|line| line.trim().strip_prefix("run:").map(str::trim) == Some(command))
+    })
+}
+
+/// Gives the text of the step of a job that holds a line that starts with `command`.
+fn step_of(job: &str, command: &str) -> Option<String> {
+    job.split("\n      - ")
+        .find(|step| step.lines().any(|l| l.trim().starts_with(command)))
+        .map(str::to_owned)
+}
+
+#[test]
+fn ac_018b_failed_is_empty() {
+    let report = ac::run(&workspace::root(), &[]).expect("xtask ac runs");
+    assert_eq!(
+        report.pointer("/failed"),
+        Some(&Value::Array(Vec::new())),
+        "{report}"
+    );
 }
 
 #[test]
