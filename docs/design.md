@@ -518,6 +518,8 @@ One parser in `base::id` reads every ID kind and every address expression (Secti
 - Quoted names (ADR-0008): a name part of a symbol, import, export or section ID can hold a character that `BinText` escapes, or start with a double quote. Then the part shows in the quoted form.
 - The quoted form is a double quote, the name with escapes and a closing double quote. The escapes are `\\`, `\"`, `\xNN` for C0, DEL and C1, and `\u{hex}` for each other escaped code point.
 - Example: `sym:"\x1b[2J"`. The parser undoes the quotes, and a bad quoted form gives `INVALID_ARGUMENT`. Every other name keeps its exact text.
+- The parser also accepts the quoted form of a name that needs no quotes. An ELF import name with `!` shows as `imp:!<name>`.
+- An emitted `sym:` or `sec:` ID comes from the `Display` form of its ID type, never from the escaped display name. When the ID type refuses a name, the output gives the function ID or the address.
 
 ### 3.6 Source ranks and provenance
 
@@ -629,12 +631,14 @@ Default projects root: `$XDG_DATA_HOME/ghidorah/projects` (fallback `$HOME/.loca
 
 - All file access goes through the `Fs` trait at the `db` edge: `create_new`, `append`, `write_all`, `sync_file`, `rename`, `sync_dir`, `remove`, `read`. Production uses `RealFs`. Tests use `RecordingFs` (an operation log) and `CrashFs` (stops after operation k and drops every write that has no sync).
 - A commit is `append` of one journal line, then `sync_file`.
-- A snapshot is `create_new` of `snapshot.json.tmp` in the same directory, `write_all`, `sync_file`, `rename` and `sync_dir` (AC-120a). The session writes a snapshot after each completed analysis run, every 256 journal lines and at clean shutdown.
+- A snapshot is `create_new` of its temp file in the same directory, `write_all`, `sync_file`, `rename` and `sync_dir` (AC-120a). The session writes a snapshot after each completed analysis run, every 256 journal lines and at clean shutdown.
+- Temp files: the snapshot, the input copy, `project.json`, the journal and the lock write their temp files with the per-process name `<base>.<pid>.<n>`. `<base>` is the name of the target file, and `<n>` counts the temp files of the process.
+- So two processes never write to the same temp file. A write open removes the temp files of dead processes.
 - `project.json` member `load` is `Auto` or `Raw { base, entry }`. A reopen loads the input copy the same way again.
 - `snapshot.json` member `journal_lines` is the count of journal lines that the snapshot covers. A valid snapshot has two properties. `journal_lines` is at most the line count of the journal. The rev of the last covered line equals the snapshot `rev`.
 - `format_version` starts at 1. Each later version ships a migration function and a golden v1 project fixture (AC-120c).
 - `crash_id` is the first 16 hex digits of `sha256(tool, JCS(args), rev)`. Output paths are relative to the project directory.
-- Lock: a write open creates `project.lock` with `create_new`. A lock whose process is alive (same `boot_id`, same start time in `/proc/<pid>/stat`) gives `PROJECT_LOCKED` with a read-only hint. The error names the owner of a stale lock. Only `--break-lock` replaces a stale lock.
+- Lock: a write open creates `project.lock` and never writes over the lock of a live process. Its temp file follows the temp-file rule above. A lock whose process is alive (same `boot_id`, same start time in `/proc/<pid>/stat`) gives `PROJECT_LOCKED` with a read-only hint. The error names the owner of a stale lock. Only `--break-lock` replaces a stale lock.
 - `binary_load { binary_id }` reopens a project from `bin/<sha256>` with no path and no root check. `session_brief {}` with zero open binaries lists the projects under the root (Section 10.4).
 
 Open flow:
@@ -1159,7 +1163,10 @@ Seeds in confidence order. Each start keeps `start_reason`, a `Why` and a confid
 - Conventions are data (`types::cc`). ELF binaries use SysV x86-64. PE binaries use MS x64 (WP-30). The format of the binary selects the table, and an agent signature can name another table.
 - SysV x86-64: integer arguments `rdi rsi rdx rcx r8 r9`, float arguments `xmm0-7`, returns `rax:rdx` and `xmm0:xmm1`, callee-saved `rbx rbp rsp r12-r15`, 128-byte red zone, `al` bounds vector registers for varargs.
 - MS x64: the first four arguments are positional. Argument n (n = 1 to 4) uses `rcx`, `rdx`, `r8` or `r9` for an integer or a pointer, and `xmm0` to `xmm3` for a float or a double. Later arguments are on the stack from `[rsp+0x28]` at entry. Returns use `rax`, or `xmm0` for a float or a double. The caller owns a 32-byte shadow space above the return address. Nonvolatile registers: `rbx rbp rdi rsi rsp r12-r15 xmm6-xmm15`. There is no red zone.
-- Parameters = live-in registers that are argument registers, minus callee-saved push and pop pairs and alignment pushes, filled up to the highest used register. For MS x64 the slots are positional: a live-in `r8` or `xmm2` means at least 3 parameters, and a read of a stack slot at `k >= 0x28` adds stack parameters.
+- Parameters = live-in registers that are argument registers, minus callee-saved push and pop pairs and alignment pushes, filled up to the highest used register.
+- A register that a call or a tail jump passes to a callee that reads it counts as read. A callee is a direct target or a tail jump out of the body. It is also the import slot of an indirect call or jump at stack height 0.
+- `cc::params` solves the callees first, depth first, up to 32 functions. It runs again in that fixed order until no count changes.
+- For a positional convention (MS x64), the parameter count is the highest used slot + 1. The integer and the float register of a slot share the slot. So a live-in `r8` or `xmm2` means at least 3 parameters, and a read of a stack slot at `k >= 0x28` adds stack parameters.
 - Varargs: the `test al, al` prologue that guards the XMM save area sets `varargs`. MS x64 has no varargs rule in the MVP.
 - Known prototypes (Tier-0, Section 9.4) and agent signatures override recovery for imports and for functions whose name matches a prototype.
 - The call-site cross-check and `W_CC_CONFLICT` are stretch S16.
@@ -1373,7 +1380,9 @@ OutputShape = Str | Int | Bool | Addr | Id(IdKind) | List(&OutputShape) | Obj(&[
 - Registration per item: each handler file exports `pub const SPEC: ToolSpec`. `tools/src/registry.rs` is a plain list of `&SPEC` items in the fixed `tools/list` order. A WP appends its items in one final register commit (Section 14.3).
 - From these tables come: the JSON Schema subset (root `type: object`, `additionalProperties: false`, no root combinators), the argument parser and validator, lenient coercion, CLI help, MCP `tools/list`, `ghidorah tools --json`, the `tool_search` index, the server instructions, the schema fuzzer, the eval lints and the registry lint. Handlers are `fn` pointers, not `dyn` objects.
 - Schema levels (`tools::schema::Detail`): `tools/list` sends the catalog level. It keeps the type, the enum and `maxItems` of each argument. The `mini` profile sends the compact level, which gives each nested object as `{ type: "object" }`. The server instructions name the other global arguments (AC-131a, AC-131b).
-- The catalog levels keep the global arguments `binary_id`, `limit` and `cursor`. They also keep `force`, the fuel `max_steps` and each global that the text, an example or a repair call of the tool names. So a schema holds each key that the tool tells the agent to send.
+- The catalog levels keep the global arguments `binary_id`, `limit` and `cursor` (`CATALOG_GLOBALS`). They also keep `force` and the fuel `max_steps`, because a repair call can send them.
+- They also keep each global that an example of the tool sends, and each global that the text of the tool names. The catalog level reads the description and the summary. The compact level reads only the summary.
+- So a schema holds each key that the tool tells the agent to send.
 - `tool_search` with `level: "full"` gives the full schema with each doc, bound and global argument. It also gives the defaults of the tool: `max_chars`, the page size of `limit` and the fuel of `max_steps`.
 - A tool that binds no binary has no `binary_id` and no `in`, because a set belongs to a binary.
 - `OutputShape` is a small typed tree. Test `ac_132` checks each example result against it. `batch_run` uses it to type references before any step runs (Section 11.3).
@@ -1413,6 +1422,7 @@ The dispatcher applies these global arguments. A tool's schema includes only the
 | `max_ms` | same as `max_steps` | Wall-clock safety net (Section 10.11). |
 
 - Strict input: an unknown key gives `UNKNOWN_ARGUMENT`. `candidates` hold the closest fields. `next[0]` is the call with the key renamed (one unique match within distance 2) or removed.
+- That call can fail its own argument check, for example when a required argument is missing. Then `next[0]` is `tool_search { name: <tool>, level: "full" }`, the schema of the tool, in a profile with `tool_search`.
 - Aliases live only in `ArgSpec.aliases` of each tool, for example `target` accepts `id`, `addr`, `address` and `function` in `func_get`. An alias gives `W_COERCED`. The published schema stays strict.
 - Lenient coercion before validation: a string that parses as the expected array or object, a numeric string for an integer argument, `"true"` and `"false"` for booleans, and an enum value in another letter case. Each coercion gives `W_COERCED`.
 
@@ -1538,6 +1548,8 @@ A string resolves by the first rule that matches, in this order:
 - A JSON integer of 2^53 or more gives `ADDRESS_INVALID`. `next[0]` repeats the call with the hex string.
 - A name with several matches gives `AMBIGUOUS_NAME`. Candidates are `{ value, label, id, addr, kind }` in address order, at most 5, plus `candidates_total`. Each `value` is the `sym:` or `name@0x..` form that resolves to that candidate.
 - An unknown name gives `NOT_FOUND` with did-you-mean candidates (Damerau-Levenshtein, top 5, under fuel).
+- A binary name that `BinText` changes starts with a double quote or holds an escaped character. Its candidate never shows the raw name. The label is the escaped name.
+- For such a name, the `value` of an `AMBIGUOUS_NAME` candidate is the address. The `value` of a `NOT_FOUND` candidate is the quoted `sym:` or `sec:` ID (Section 3.5).
 - A valid address that is not mapped gives `ADDRESS_UNMAPPED` with the nearest mapped VAs as candidates.
 - `calc` uses the same grammar inside expressions, with parentheses and the operators of Section 10.4.
 - Fixture `adversarial_names` holds `x@plt`, `puts@GLIBC_2.2.5`, a real `FUN_00401000`, a symbol named like a section and `foo.cold`. A property test checks that each name resolves through its `sym:` form. The bare form of each name resolves by the rule order or gives `AMBIGUOUS_NAME` (AC-215).
@@ -1581,6 +1593,7 @@ Every tool result, on every surface, is this object (MCP `structuredContent`, CL
 - `page` exists only for list results. `total` can change to `total_lower_bound` when a full count costs more fuel than the budget.
 - `next` holds at most 3 call objects in a fixed order. Each must name a tool of the active profile and parse with its `ArgSpec` parser (AC-143). Hint args carry IDs and addresses only, never binary-derived names (ADR-0022).
 - A list input (`targets`, `items`) returns `data.items: [{ input, ok, data | error }]` in input order plus `ok_count` and `error_count`. One bad item never fails the call (AC-144).
+- Bad address or ID syntax in one item is also a bad item. Its `error` has `ADDRESS_INVALID`, or `INVALID_ARGUMENT` that names the ID kind, and a `field_path` such as `/targets/2`.
 - Mutating tools add `tx`, `noop` and, for `dry_run`, `diff: [{ op, key, old, new }]`.
 - A committed edit never fails on the output budget. Its result drops `data` members, largest first, until it fits. It keeps `tx`, `rev`, `noop` and each ID member.
 - Such a result sets `data.truncated` and `data.omitted`, and `next[0]` is `history_list { since_rev }` with the rev before the call. Read-only calls and dry runs keep the normal budget rule.
@@ -1618,7 +1631,7 @@ Repair classes: **R** (repair): `next[0]` is the complete corrected call, so a c
 | Num | Code | Class | Retry | When | `details` and `next[0]` |
 |---|---|---|---|---|---|
 | 1 | `INVALID_ARGUMENT` | N | no | Value has the wrong type or range. | `field_path`, `details.expected`. For `details.reason: "load_spec_differs"`: `details.stored` and `next[0]` `binary_load { binary_id }` (Section 10.4). |
-| 2 | `UNKNOWN_ARGUMENT` | R | no | Key is not in the schema. | Candidates: closest fields. `next[0]`: the key renamed or removed. |
+| 2 | `UNKNOWN_ARGUMENT` | R | no | Key is not in the schema. | Candidates: closest fields. `next[0]`: the key renamed or removed. When that call fails its argument check: `tool_search { name, level: "full" }`. |
 | 3 | `MISSING_ARGUMENT` | H | no | A required key is absent. | `details: { action?, example }`. `next[0]`: `tool_search { name, level: "full" }`. |
 | 4 | `UNKNOWN_TOOL` | H | no | Tool name is unknown (batch step). | Candidates. `next[0]`: `tool_search { query }`. |
 | 5 | `TOOL_NOT_IN_PROFILE` | H | no | Tool is outside the active profile, or a batch step is destructive. | `details.reason`: `not_in_profile` or `destructive_in_batch`. For `not_in_profile`: candidates (the active tools with close names) and `next[0]` `tool_search { query: <tool> }` when `tool_search` is active. For a destructive step: `next[0]` is the direct call. |
@@ -1629,8 +1642,8 @@ Repair classes: **R** (repair): `next[0]` is the complete corrected call, so a c
 | 10 | `NOT_FOUND` | C | no | ID, name, type, note or set does not exist. | `details.kind`. Candidates: did-you-mean. |
 | 11 | `UNKNOWN_BINARY` | R* | no | `binary_id` is not open. | Candidates: open binaries and projects. `next[0]`: `binary_load { binary_id }` when the project exists. |
 | 12 | `BINARY_REQUIRED` | R | no | More than one binary is open and the call names none. | Candidates. `next[0]`: the call with the most recently used `binary_id`. |
-| 13 | `PATH_OUTSIDE_ROOT` | N | no | Path resolves outside the configured roots. | `details.roots` (relative names) |
-| 14 | `FILE_UNREADABLE` | N | no | The file does not exist, or the process cannot read it. | - |
+| 13 | `PATH_OUTSIDE_ROOT` | N | no | Path resolves outside the configured roots. | `details.roots` (relative names). For a relative path, also `details.relative_to`: the root names in the order of the tries. |
+| 14 | `FILE_UNREADABLE` | N | no | The file does not exist, or the process cannot read it. | For a relative path: `details.roots` and `details.relative_to`. |
 | 15 | `UNSUPPORTED_FORMAT` | N | no | The probe detects a format that the MVP does not support. | `details: { detected, supported }` |
 | 16 | `UNSUPPORTED_ARCH` | N | no | Code feature on a non-x86-64 binary. | - |
 | 17 | `FORMAT_MALFORMED` | N | no | Bad magic or truncated main header. | `details.diagnostic` |
@@ -1660,6 +1673,8 @@ Repair classes: **R** (repair): `next[0]` is the complete corrected call, so a c
 | 41 | `NOTHING_TO_REDO` | N | no | No undone entry is in reach (Section 3.7). | - |
 
 Each error row whose hint names `next[0]` or the candidates also has a plain hint. The error object takes the plain hint in two cases. Its hint names `next[0]`, and the result has no valid `next[0]`. Or its hint names the candidates, and the error has none. `docs/errors.md` lists both hints.
+
+A plain hint never names a tool outside the active profile. If the plain hint of a code names such a tool, the error takes the neutral text of the code.
 
 Warnings use the frozen enum `base::WarningCode` (`#[repr(u16)]`). `docs/errors.md` lists it. A warning item is `{ code, num, at?, message, remedy? }`, and `remedy` is a complete call.
 
@@ -1779,7 +1794,8 @@ ADR-0006 fixes this behavior. One module (`crates/cli/src/mcp/era.rs`, about 300
 | `ping` with the modern version key | -32601. `ping` exists only in the legacy era. |
 
 - Legacy results carry no `resultType`.
-- The reader thread puts each request into a work queue of 64 requests. A full queue makes the reader wait, so a flood of requests does not grow the memory.
+- The reader thread puts each request into a work queue of 64 requests. The reader never waits on a full queue. A request that finds the queue full gets a -32603 error reply at once.
+- So the reader reads each cancel notification (AC-172), and a flood of requests does not grow the memory.
 - A broken pipe or another I/O error on stdout stops the worker. The running request gets its cancel flag, and the server waits at most 5 s for the worker. Then the session writes its snapshot and releases the project lock.
 - A cancelled request whose call committed (a `tx`, or `noop: false`) still gets its reply. A cancelled `analysis_run` gets no reply (AC-172).
 - Progress: when a request carries `_meta.progressToken`, the server sends `notifications/progress { progressToken, progress, total?, message }` per fuel slice. `progress` increases strictly.
@@ -1830,9 +1846,12 @@ tool_search finds tools and topics: addresses, ids, budgets, batch, errors, resu
 
 ### 10.16 Safety rules
 
-- `BinText` is the only type that carries binary-derived text to output. It escapes C0 and C1 controls, DEL, U+2028, U+2029 and bidi overrides, caps the length, keeps an exact `hex` field and tags `src: "binary"` (ADR-0022, AC-146).
-- `BinText` also escapes the invisible code points as `\u{..}`. These are the format characters (Cf), the tag characters and the variation selectors. The Hangul fillers, U+FFF0 to U+FFF8 and the private-use code points are also on the list. `U_ESCAPES` in `base::bintext` holds the full list.
+- `BinText` is the only type that carries binary-derived text to output. It escapes the text, caps the length, keeps an exact `hex` field and tags `src: "binary"` (ADR-0022, AC-146).
+- Escapes: `\` gives `\\`. C0 controls, DEL and each byte of invalid UTF-8 give `\xNN`. Each code point of `U_ESCAPES` in `base::bintext` gives `\u{..}`.
+- `U_ESCAPES` holds the C1 controls, U+2028, U+2029, the bidi marks and all format characters (Cf). It also holds the combining grapheme joiner and the Khmer vowels U+17B4 and U+17B5.
+- It also holds the variation selectors, the Hangul fillers and U+FFF0 to U+FFFB. Last, it holds the tag characters, the other ignorable code points to U+E0FFF and the private-use code points.
 - `binary_load` reads only under the configured roots (`--root`, default the current directory) after `canonicalize`. Absolute paths, `..` and symlinks that leave the roots give `PATH_OUTSIDE_ROOT` (AC-147). A reopen by `binary_id` reads only the project's own `bin/<sha256>`.
+- A relative path whose first parts name a root starts at that root, without the name. Then the path starts at each root in order. The first candidate under a root is the file.
 - Project writes stay inside the project directory. Input copies are mode 0444.
 - No tool runs native code. `openWorldHint` is false for all tools. Only the dev-only `ghidorah-oracle` crate contains `unsafe` code (ADR-0025).
 - Each request runs under `catch_unwind` on the worker thread. A panic returns `INTERNAL_ERROR` with `crash_id`, writes `crash/<id>.json`, drops the in-memory `Program` and reloads it from snapshot and journal (AC-148).
@@ -2132,7 +2151,7 @@ ADR-0020 fixes the test tiers and the fixture policy. Truth files come from the 
 
 ### 13.1 Verus kernels
 
-All Verus code lives in `ghidorah-kernel` (ADR-0011). Each kernel is at most 300 lines and verifies in about 1 s. Verus runs with `--no-cheating`. Each kernel has at least one negative patch in `verify/negative/` that must fail with a verification error.
+All Verus code lives in `ghidorah-kernel` (ADR-0011). Each kernel is at most 300 lines and verifies in about 1 s. Verus runs with `--no-cheating`. Each kernel has at least one negative patch in `verify/negative/` that must fail with its expected verification error.
 
 | Kernel | File | Exec items | Proved properties | Tier-1 test (second evidence) |
 |---|---|---|---|---|
@@ -2179,6 +2198,8 @@ AC-006b checks that a function with a `cfg_attr` loop invariant and a `proof!{}`
 - The CI job `verus` runs `xtask verify` and then `git diff --exit-code verify/results.json`. The job fails when the new record differs from the checked-in record. The record has no time members, so a run gives the same bytes.
 - `tree_sha256` is the SHA-256 over the sorted `(path, bytes)` pairs of `crates/kernel/src/**` and `crates/spec/src/**`, plus the Verus argv string. So a change to a shared spec function, to the stub crate or to the flags makes the proof stale.
 - Test `ac_034_proof_freshness` computes the tree hash and compares it with `results.json`. A mismatch is a warning in plain `cargo test` and a failure under `GHIDORAH_REQUIRE_PROOFS=1`. `xtask ci` sets that variable for its child `cargo` process.
+- The live record check of `xtask ac` and of test `ac_018b_failed_is_empty` follows the same rule. A stale tree gives `skipped` and a warning on stderr. Under `GHIDORAH_REQUIRE_PROOFS=1`, it gives `fail`.
+- An evidence run (`xtask ac --run`) requires proofs, as its test items do. So a stale tree gives `fail` there.
 - Test `ac_035_no_proof_cheats` scans the kernel (AC-035a to AC-035c).
 - CLAUDE.md records the Verus commit, the z3 version and the source-build steps, because the Verus binary on the build host is in temporary storage.
 
@@ -2265,10 +2286,12 @@ Internal oracles that run in every `cargo test`: cross-view consistency, CFG inv
 ADR-0027 fixes the method:
 
 - `xtask cov` sets `RUSTFLAGS="-C instrument-coverage"` and an absolute `LLVM_PROFILE_FILE` with `%p-%m` in a separate `CARGO_TARGET_DIR`. It uses the same `RUSTFLAGS` for the test run and the `--no-run` object listing.
+- `xtask cov` removes `CARGO_ENCODED_RUSTFLAGS` from the environment of its child `cargo` process. That variable makes cargo ignore `RUSTFLAGS`.
 - Objects: every test binary from `cargo test --no-run --message-format=json`, plus the `ghidorah` binary, because CLI subprocess tests write their own profiles.
 - It merges with `llvm-profdata merge -sparse` and reports with `llvm-cov export --summary-only`.
 - Exclusions: `tests.rs` files, `crates/*/tests/`, and the dev crates.
 - The gate is line coverage per crate from the coverage table in `xtask/src/cov.rs` (AC-013). `xtask cov` reports region coverage but does not gate it. Stable Rust 1.97 has no branch coverage and no `#[coverage(off)]`, so region numbers include code that tests cannot reach without a cfg change.
+- The gate fails when the measurement is empty, or when the kernel or a core crate has no row or zero instrumented lines. The report lists such crates in `missing`.
 
 ### 13.10 Benchmarks
 
@@ -2281,7 +2304,11 @@ ADR-0026 fixes the std-only bench harness (`testkit::bench`):
 ### 13.11 Test tiers
 
 - Tier 1 is plain `cargo test --workspace`: hermetic, checked-in fixtures only, at most 120 s on 4 cores (AC-021), and at most 15 s per test (AC-224).
-- Tier 2 tests carry `#[ignore = "tier2"]`. `xtask ci` runs `cargo test --workspace -- --include-ignored` plus the other jobs: long fuzz runs, full T3, T2 determinism, the 50,000-function ELF, coverage, the hermetic run, proof freshness and benchmarks.
+- Tier-2 tests carry `#[ignore = "tier2"]`. They need gcc, objdump, clang or a long run, for example full T3, T2 determinism and the 50,000-function ELF.
+- The steps of `xtask ci` are `Step::ALL` in `xtask/src/ci.rs`: `fmt`, `clippy`, `doc`, `offline_build`, `tier1`, `tier2`, `test_times`, `test_hermetic` and `fix_commits`.
+- A run without `--steps` runs each step except `tier2`, and `--tier2` adds it. The step `tier2` runs `cargo test --workspace -- --include-ignored`.
+- The test steps `tier1`, `tier2` and `test_times` set `GHIDORAH_REQUIRE_PROOFS=1`. So a stale proof record fails them (Section 13.3).
+- `xtask fuzz` (long fuzz runs), `xtask bench` (benchmarks) and `xtask cov` (coverage) are separate commands. `ci.yml` runs each of them as a separate step.
 - `[profile.test]` sets `opt-level = 1` for the workspace. `[profile.dev.package]` and `[profile.test.package]` set `opt-level = 2` for `ghidorah-x86`, `ghidorah-ir`, `ghidorah-analysis` and `ghidorah-decomp`.
 - `xtask ci` records the time of each test and fails any tier-1 test above 15 s.
 - `.github/workflows/ci.yml` has the jobs `tier1`, `tier2` and `verus`. The `tier1` job also runs `cargo xtask ac` and `cargo xtask fixtures check`.
@@ -2982,11 +3009,14 @@ Rules for this section:
   - `cmd:<argv>`: an exact command that must exit 0 in tier 2.
   - `xtask:<subcommand>#<pointer> <op> <value>`: a value in the JSON output of an xtask command.
   - `record:<file>#<pointer>@sha256=<input>`: a checked-in record that must match the hash of its named input, for example `tree` (the kernel tree hash) or `host-bash`.
-- Record inputs: `tree` compares the `tree_sha256` member of the record with the tree hash of Section 13.3. `host-<name>` compares the `sha256` member of the object at the pointer with the SHA-256 of the host file at its `path` member. A host file that does not exist gives `skipped`. A different hash gives `fail`.
+- Record inputs: `tree` compares the `tree_sha256` member of the record with the tree hash of Section 13.3. `host-<name>` compares the `sha256` member of the object at the pointer with the SHA-256 of the host file at its `path` member.
+- A host file that does not exist, or a host file with a different hash, gives `skipped`. The record names the files of the recording host, so another host gives no verdict.
+- A stale tree gives `skipped` with a warning. Under a proof requirement (`GHIDORAH_REQUIRE_PROOFS=1` or an evidence run), it gives `fail` (Section 13.3).
 - Record claims: a `tree` item also needs the kernel row at the pointer with `status: verified`, `errors: 0` and `verified >= spec_items`. Each `negatives` row of that kernel needs `ok: true`.
-- A `host-<name>` item also needs `mismatches: 0` and `agree` equal to `insns`. A record that fails a claim gives `fail`, also with a matching hash.
+- A `host-<name>` item also needs `mismatches: 0` and `agree` equal to `insns`. A record that fails a claim gives `fail` on every host, also with a matching hash.
 - `xtask ac` writes `docs/ac-evidence.json` with rows `{ ac, tier, kind, status: pass | fail | recorded | skipped, commit }`. A run with a list of ACs replaces only the rows of those ACs.
 - `xtask ac` without `--run` reads the table and reports `failed`: one `{ ac, kind, tier }` item for each `fail` row. It checks each record item again, so a record row of the table does not count.
+- That check reads `GHIDORAH_REQUIRE_PROOFS` once. The tier-1 test `ac_018b_failed_is_empty` runs it, so it follows the warning rule of Section 13.3.
 - An `xtask:ac` item reads the table of the same run. The runner runs the other items first, writes the table, then runs the `xtask:ac` items.
 - Closes: the WP that closes the AC. "13a/25" means that the test starts green in WP-13a over the tools registered then, and closes in WP-25.
 - Needs: the other WPs whose code the evidence runs, beyond the closing WP and its listed dependencies. `xtask ac` fails when a Needs WP comes in a later pair, or in the same pair without the register rebase of Section 14.1 (AC-018c).
@@ -3022,7 +3052,7 @@ Rules for this section:
 | AC-010 | Clippy passes with `all`, `pedantic` and `nursery` denied, except the reviewed allowlist of ADR-0019. | `cmd:env CARGO_BUILD_WARNINGS=deny cargo clippy --workspace --all-targets` | 01 | - |
 | AC-011 | `cargo doc` passes with warnings and `missing_docs` denied. | `cmd:env RUSTDOCFLAGS=-Dwarnings cargo doc --workspace --no-deps` | 01 | - |
 | AC-012 | Non-test code has no `todo!`, `unimplemented!`, `dbg!`, `TODO`, `FIXME`, `XXX`, `unwrap()` or `expect()`. | `test:xtask::ac_012_no_stubs@T1` | 01 | - |
-| AC-013 | Line coverage meets the coverage table of `xtask/src/cov.rs`: 85% for the workspace, 90% for core crates and 95% for `kernel`. | `xtask:cov#/ok == true` | 01 | - |
+| AC-013 | Line coverage meets the coverage table of `xtask/src/cov.rs`: 85% for the workspace, 90% for core crates and 95% for `kernel`. The kernel and each core crate have instrumented lines. | `xtask:cov#/ok == true` | 01 | - |
 | AC-014 | Every non-table, non-test source file has at most 600 lines. | `test:xtask::ac_014_file_size@T1` | 01 | - |
 | AC-015a | Removed in revision 3 (line counts are information only, ADR-0018). | - | - | - |
 | AC-015b | Removed in revision 3 (line counts are information only, ADR-0018). | - | - | - |
@@ -3031,7 +3061,7 @@ Rules for this section:
 | AC-016 | `clippy.toml` disallows `HashMap`, `HashSet` and `RandomState`, and each exception has `expect` with a reason. | `test:xtask::ac_016_disallowed_types@T1` | 01 | - |
 | AC-017 | Pure core crates do not use `std::fs`, `std::net`, `std::process`, `std::env` or `SystemTime`. | `test:xtask::ac_017_layering@T1` | 01 | - |
 | AC-018a | `xtask ac` finds at least one evidence item for every MVP AC: every row that is not moved to stretch or removed, the rows of Sections 15.20 and 15.22 included. | `xtask:ac#/missing == []` | 28 | 27 |
-| AC-018b | Every T1 and T2 evidence item passes, and every record item matches its input hash. | `xtask:ac#/failed == []` | 28 | 27 |
+| AC-018b | Every T1 and T2 evidence item passes, and no record item gives `fail`. | `xtask:ac#/failed == []` | 28 | 27 |
 | AC-018c | `xtask ac` fails when an AC closes in a WP that comes before a WP of its Needs column. | `test:xtask::ac_018c_needs_order@T1` | 01 | - |
 | AC-019 | `ci.yml` has a tier-1 job and a tier-2 job and uses no action other than `actions/checkout` and `actions/cache`. | `test:xtask::ac_019_ci_workflow@T1` | 01 | - |
 | AC-020 | Test binaries pass with `PATH` reduced to the toolchain directory and an empty `HOME`. | `xtask:ci#/steps/test_hermetic/ok == true` | 27 | - |
