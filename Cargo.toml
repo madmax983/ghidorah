@@ -55,7 +55,6 @@ overflow-checks = true
 opt-level = 1
 
 # Hot crates use opt-level 2 in tests (ADR-0020).
-# Cargo warns about a spec that matches no package until the crate exists.
 [profile.dev.package.ghidorah-x86]
 opt-level = 2
 

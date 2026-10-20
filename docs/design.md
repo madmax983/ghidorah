@@ -812,16 +812,19 @@ The `MemoryMap` follows the Windows loader, not a strict reading of the specific
 - Headers: RVAs below `SizeOfHeaders` map to the same file offsets. The region `headers` has `READ`.
 - Each section header (40 bytes) gives one region:
   - `vsize` is `VirtualSize`. A `VirtualSize` of 0 means `SizeOfRawData`.
-  - `file_off` is `PointerToRawData` rounded down to a multiple of 0x200. So a value below 0x200 becomes 0.
-  - `file_size` is `min(SizeOfRawData, vsize)`, clamped to the bytes left in the file. Bytes in `[file_size, vsize)` read as zero. A section that starts or ends past EOF gives `E_OOB` and keeps its zero-filled part.
-  - Perms come from `IMAGE_SCN_MEM_READ` (0x40000000), `IMAGE_SCN_MEM_WRITE` (0x80000000) and `IMAGE_SCN_MEM_EXECUTE` (0x20000000). A section with `IMAGE_SCN_CNT_UNINITIALIZED_DATA` has no file bytes.
+  - The region starts at `ImageBase + VirtualAddress`. Its length is `vsize` rounded up to `SectionAlignment`. The region stops at the next section start and at `SizeOfImage`, but it is never shorter than `vsize`.
+  - `file_off` is `PointerToRawData`. When `FileAlignment` is 0x200 or more, `file_off` rounds down to a multiple of 0x200, so a value below 0x200 becomes 0. A low-alignment image (`FileAlignment` below 0x200) uses the value as it is (the `pefile` rule). So such an image maps flat: each RVA equals its file offset.
+  - `file_size` is `min(SizeOfRawData, vsize)`, clamped to the bytes left in the file. The bytes of the region after the file part read as zero. A section that starts or ends past EOF gives `E_OOB` and keeps its zero-filled part.
+  - Raw bytes map when `SizeOfRawData` is above 0. This rule also applies to a section with `IMAGE_SCN_CNT_UNINITIALIZED_DATA`, as in the Windows loader.
+  - Perms come from `IMAGE_SCN_MEM_READ` (0x40000000), `IMAGE_SCN_MEM_WRITE` (0x80000000) and `IMAGE_SCN_MEM_EXECUTE` (0x20000000).
 - Overlap: sections map in table order. A later section replaces the overlapped part of an earlier region, and each overlap gives `E_OVERLAP`. So the `IntervalMap` stays disjoint.
-- `sections` keeps every section header with its raw values. `segments` holds one segment per mapped region, because PE has no program headers.
+- `sections` keeps every section header with its raw values. The `va` range of a section has `vsize` bytes. `segments` holds one segment per mapped region, because PE has no program headers. A region and its segment can be longer than the `va` range of the section.
 - `rva_to_file` uses the same rules as reads. So every parser that reads by RVA sees the bytes that the loader maps.
 
 ### 4.11 PE32+ imports, delay imports and IAT names
 
 - Import descriptors (20 bytes) end at an all-zero entry. The loader ignores the directory size, as Windows does, and stops at the `dlls` limit.
+- Descriptors can share one lookup table, so the file size does not bound the import count. Each import of a load takes one unit of the import cap: file size / 16 + 32,768. When the cap is empty, the walk stops all descriptors with one `E_LIMIT`.
 - ILT and IAT entries are 8 bytes. Bit 63 set means import by ordinal (the low 16 bits). Else bits 0-30 are the RVA of a hint-name entry (`u16` hint, then the name).
 - A null ILT (`OriginalFirstThunk` 0) means "use the IAT". A pre-bound IAT holds VAs, so names come from the ILT when it exists.
 - Delay import descriptors are 32 bytes. `Attributes` bit 0 set means RVAs. Bit 0 clear (the old VC6 form) means VAs, and the loader subtracts `ImageBase`. Corrupt delay data gives a diagnostic, never a fatal error. Delay imports have `delay: true`.
@@ -875,7 +878,7 @@ The `MemoryMap` follows the Windows loader, not a strict reading of the specific
   - `pe_flags.exe`: `pe_main` linked again with `/guard:cf /integritycheck /highentropyva:no`, for the protections truth.
 - Truth (`fixtures/truth/pe/<name>.json`) comes from the C sources, the `.def` files and the link maps: function starts, imports, exports, the switch case count, parameter counts and protections.
 - Goldens (`tests/golden/loader/pe/`): `llvm-readobj -h --sections --coff-imports --coff-exports --coff-basereloc --coff-tls-directory --coff-debug-directory --unwind` and `llvm-objdump -d`.
-- `PeBuilder` (`crates/testkit/src/pe.rs`) writes minimal PE32+ files and malformed variants: `VirtualSize` 0, `PointerToRawData` below 0x200 and not aligned, RVAs inside the headers, overlapping sections, a section past EOF, `NumberOfRvaAndSizes` above 16, a null ILT, ordinal imports, VC6 delay descriptors, a huge `NumberOfNames`, forwarder cycles, `BlockSize` 0 and 7, CHAININFO entries and chain cycles, 257 TLS callbacks, and PE32 and ARM64 headers.
+- `PeBuilder` (`crates/testkit/src/pe.rs`) writes minimal PE32+ files and malformed variants: `VirtualSize` 0, `PointerToRawData` below 0x200 and not aligned, RVAs inside the headers, overlapping sections, a section past EOF, `NumberOfRvaAndSizes` above 16, a low-alignment image (`low_alignment`), `VirtualSize` slack before the next section (`vsize_slack`), raw bytes in a `CNT_UNINITIALIZED_DATA` section (`uninit_raw`), 256 descriptors that share one lookup table of 65,535 entries by name and by ordinal (`shared_ilt`, `shared_ilt_ordinal`), a null ILT, ordinal imports, VC6 delay descriptors, a huge `NumberOfNames`, forwarder cycles, `BlockSize` 0 and 7, CHAININFO entries and chain cycles, 257 TLS callbacks, and PE32 and ARM64 headers.
 - The `pe_load` fuzz target (Section 13.5) takes its seeds from the fixtures and the `PeBuilder` variants.
 
 ## 5 Decoders
@@ -1022,11 +1025,11 @@ flowchart TD
   N --> O[StackFrames 700]
   O --> P[CallingConvention 800]
   P --> Q[Syscalls 810]
-  Q --> S[Metrics 950]
-  S --> T[Gaps worklist 990]
 ```
 
 The numbers are priority bands (Ghidra style: FORMAT 100, BLOCK 200, DISASSEMBLY 300, CODE 400, FUNCTION 500, REFERENCE 600, DATA 700, FUNCTION_ID 800, DATA_TYPE_PROPAGATION 900). Lower numbers run first. `Overrides` (160) seeds agent functions, flow overrides, jump-table targets, indirect call targets and agent refs.
+
+Metrics, the gaps worklist and the language detection are derived views of the committed facts (Section 7.11). They have no band and no work state, so they are not in the pipeline.
 
 Format rules: `ImportStubs`, `FdeSeeds`, `MainDiscovery` and `Syscalls` do work only on ELF. `PdataSeeds` and `IatThunks` (WP-30) do work only on PE. An analyzer whose format does not match adds no fact.
 
@@ -1037,7 +1040,7 @@ Format rules: `ImportStubs`, `FdeSeeds`, `MainDiscovery` and `Syscalls` do work 
 - New facts emit events. A const event-to-trigger table re-queues the affected ranges for the analyzers that listen to the trigger. The run stops at a fixpoint (all pending sets empty) or when fuel runs out.
 - `AnalysisCtx` wraps an internal Tx with `source = Analysis` and a `Fuel` counter. Every insert function takes a required `Why { rule, premises }` argument, so no analyzer can add a fact without a reason (ADR-0023).
 - The scheduler writes into the committed set during the first analysis and into the shadow set during a re-analysis (Section 3.9). A re-analysis starts at the start band of the edit.
-- `analysis_run { until?: triage | full, max_steps? }` runs synchronously in fuel slices. It returns `{ state: complete | budget_stopped, steps_used, resume: bool }` (ADR-0016). `triage` stops after band 700. The default is `full`.
+- `analysis_run { until?: triage | full, max_steps? }` runs synchronously in fuel slices. It returns `{ state: complete | budget_stopped | stale, steps_used, resume: bool, analyzers, changed }`, as in Section 10.4 (ADR-0016). `triage` stops after band 700. The default is `full`.
 - `binary_load` runs `full` analysis by default. Its default `max_steps` (100,000,000) completes every T1 and T2 fixture (AC-209). A read that returns `partial: true` carries a hint that names `analysis_run`.
 - Key property: for random fixtures and random slice sizes `k`, repeated `run(k)` until complete gives the same `state_hash` as one `run(unlimited)` (AC-092). A second full run changes nothing (AC-093).
 
@@ -1157,7 +1160,7 @@ Seeds in confidence order. Each start keeps `start_reason`, a `Why` and a confid
 - `MainDiscovery` (ELF only): block-local evaluation (Section 6.6) gives the value of `rdi` at the call to `__libc_start_main` in `_start`. The target gets the name `main` (source `Analysis`) and `start_reason: Main`.
 - `Syscalls` (ELF only): block-local evaluation gives `rax` at each `Syscall` op. An embedded x86-64 table (about 370 entries from the Linux uapi numbers, recorded as facts) gives the name. Each site gets the pseudo-import `sys:<name>`, a ref and an annotation. Arguments come from `rdi rsi rdx r10 r8 r9`.
 - Call-site arguments (`xref_list { args: true }`) are derived data. `analysis::callargs` computes them on demand. Block-local evaluation gives the value of each argument register at the call. A value is an integer, a string (when it points to a string), a function pointer, an address or `unknown`.
-- `Metrics`: per function, blocks, instructions, cyclomatic complexity, callers, callees, string refs and calls to imports by capability category. Project coverage: functions analyzed, visited, named, typed and commented, plus a worklist of unresolved indirect jumps and calls, override conflicts and gap items.
+- `Metrics` (a derived view with no band): per function, blocks, instructions, cyclomatic complexity, callers, callees, string refs and calls to imports by capability category. Project coverage: functions analyzed, visited, named, typed and commented, plus a worklist of unresolved indirect jumps and calls, override conflicts and gap items.
 - `priority` (for `func_list { sort: "priority" }`) uses analysis facts only: in-degree, string refs, calls to imports in risky categories and size, with the address as the tie-break. Each completed analysis run freezes it (AC-157). `visited` is a live filter, not a priority input.
 - `ApiNames` (S17) is a stretch item. WP-29 replaces the former `Hashes` item (S23) with the similarity vectors of Section 7.13.
 
@@ -1988,7 +1991,7 @@ flowchart LR
   GATE --> LOG[eval/bless-log.jsonl]
 ```
 
-- Crate `ghidorah-eval` (dev-only). `cargo test -p ghidorah-eval` runs all gates. `xtask eval --json` writes the scorecard. `xtask eval --bless` changes baselines under the rules of Section 12.6.
+- Crate `ghidorah-eval` (dev-only). `cargo test -p ghidorah-eval` runs all gates. `xtask eval --json` writes the scorecard. `xtask eval --bless --reason TEXT` changes baselines under the rules of Section 12.6.
 - The runner calls the dispatcher in process. Five scenarios and the restart scenario also run over a spawned `ghidorah mcp` to cover the protocol path.
 
 ### 12.2 Questions and scenario files
@@ -2067,9 +2070,9 @@ ADR-0020 fixes the test tiers and the fixture policy. Truth files come from the 
 - `eval/thresholds.json` holds `{ floor, baseline, tolerance }` for each metric, `questions_sha256` and `intents_sha256`. WP-06 creates it with the floors and the two hashes. WP-26 adds the baselines.
 - Gate for a metric where higher is better: `value >= max(floor, baseline - tolerance)`. Gate for a cost metric: `value <= baseline x (1 + tolerance)`, with tolerance 0.10.
 - Only an ADR amendment lowers a floor. Floors: discoverability 0.70, context-reset recall 0.60, survey fact recall 0.60.
-- `xtask eval --bless` writes new baselines. It refuses to lower a floor. It appends `{ commit, metric, old, new, reason }` to `eval/bless-log.jsonl` for each change.
+- `xtask eval --bless --reason TEXT` writes new baselines. `--bless` without `--reason`, and `--reason` without `--bless`, give a usage error. The command refuses to lower a floor. It appends `{ commit, metric, old, new, reason }` to `eval/bless-log.jsonl` for each change.
 - `ac_196` fails when a cost baseline rises by more than 10% and the same commit has no bless-log line for it.
-- WP-26 records the first-run values with `xtask eval --bless`. If a first value is below its floor, M8 cannot close. The WP then improves descriptions, hints or tools, or writes an ADR amendment with a reason.
+- WP-26 records the first-run values with `xtask eval --bless --reason TEXT`. If a first value is below its floor, M8 cannot close. The WP then improves descriptions, hints or tools, or writes an ADR amendment with a reason.
 - `intents_sha256` is the SHA-256 of `eval/intents/heldout.jsonl`, and `ac_198b` asserts the match. `questions_sha256` is the SHA-256 of `eval/questions.jsonl`, and `ac_195` asserts the match. The dev half of the intents can change. The held-out half and the questions never change, except the one append of the `pe` group by WP-30 (Section 12.2).
 - WP-26 calibrates `chars_per_token` (default 3) once from 5 representative outputs with the API token counter. The thresholds file stores it.
 
@@ -2204,8 +2207,8 @@ Metamorphic relations (AC-189):
 | `clang --target=x86_64-pc-windows-msvc`, `rust-lld -flavor link` | PE fixture builds (Section 4.15) | `xtask fixtures build` |
 | Native `asm!` flag oracle (`ghidorah-oracle`) | semantic vectors `tests/golden/semantics/x86/*.jsonl` | `xtask oracle semantics`, each instruction form in a child process |
 | Leaf driver (`fixtures/src/leaf_driver.c` linked with each leaf object) | `tests/golden/semantics/leaf/*.jsonl` (inputs and outputs per leaf function) | `xtask fixtures build` |
-| gcc `-fsyntax-only` and recompile of leaf output | optional decompiler check | `xtask oracle decomp`, `{status: skipped}` without gcc |
-| `clang -fdump-record-layouts` | optional layout differential | `xtask oracle layout` |
+| AST value interpreter against the L0 interpreter on the `O0` and `O2nv` leaf functions | decompiler semantics (AC-101) | `cargo test`: `ac_101_expression_oracle` in `crates/decomp/tests/decomp/oracle.rs` |
+| gcc and clang compile and run a C program that prints the size, alignment and field offsets of each record | SysV layout differential (AC-112a) | tier-2 test `ac_112a_layout_oracle_gcc_clang` |
 | Host bash and libc | 100% boundary agreement (AC-066) | `xtask oracle bash`, result JSON in `verify/oracle-results.json` |
 
 Internal oracles that run in every `cargo test`: cross-view consistency, CFG invariants, exhaustive fusion, pagination conservation, undo and redo state hashes, crash consistency, two-run determinism, structurer trace equivalence and the expression oracle.
@@ -2760,7 +2763,7 @@ Revision 3 moved WP-16 to P8 and WP-20 to P10, so that WP-18 starts in P7, as so
 
 - Owns: `crates/eval/`, `eval/` except `questions.jsonl`, `intents/` and the first `thresholds.json` (WP-06), `xtask/src/eval.rs`.
 - Provides: the scenario runner with `$turn`, reset and restart turns, the argument-provenance lint, the repair robot and the mistake corpus, the hint-follower robot, discoverability on held-out intents (`tool_search` and raw descriptions), the three-process determinism compare, recall after edits, abstain checks, the scorecard, `xtask eval [--bless] [replay FILE]`, thresholds and the bless log, and at least 44 scenarios (decompile, similarity and PE scenarios included).
-- Touches after merge: `xtask/src/main.rs`, `eval/thresholds.json` (baselines through `xtask eval --bless`).
+- Touches after merge: `xtask/src/main.rs`, `eval/thresholds.json` (baselines through `xtask eval --bless --reason TEXT`).
 - Depends on: WP-21, WP-23, WP-25, WP-29, WP-30. The harness covers decompile, similarity and PE scenarios, so these WPs merge first.
 - Closes: AC-153b, AC-195, AC-196a, AC-196b, AC-197, AC-198a, AC-198b, AC-199, AC-200, AC-226, AC-227, AC-228, AC-229, AC-230.
 
@@ -3401,7 +3404,7 @@ These ACs are normal MVP ACs since revision 3 (Section 1.7). AC-018a counts them
 | AC-242 | A function with no decodable instruction, a one-block function and a raw blob with one function give no panic and a defined result: a zero vector gives `query.features: 0` and `matches: []`, and scope `binary` on the blob gives `matches: []`. | `test:analysis::ac_242_empty_and_tiny_functions@T1` | 29 | - |
 | AC-243 | A query set of 2,000 functions over the four T2 builds (vectors not cached) has a median time of at most the `perf/budget.json` value `similar_2k_ms` (5,000 ms) in the test profile. | `test:analysis::ac_243_similar_2k_budget@T2` | 29 | - |
 | AC-244 | For every PE fixture, the DOS, COFF and optional headers, the data directories and the section table equal the `llvm-readobj -h --sections` golden. | `test:loader::ac_244_pe_headers_golden@T1` | 30 | - |
-| AC-245 | Each `PeBuilder` mapping variant (`VirtualSize` 0, `PointerToRawData` below 0x200 and not aligned, RVAs inside the headers, overlapping sections, a section past EOF, `NumberOfRvaAndSizes` above 16) gives the regions, reads and diagnostics of Section 4.10. | `test:loader::ac_245_rva_mapping_variants@T1` | 30 | - |
+| AC-245 | Each `PeBuilder` mapping variant (`VirtualSize` 0, `PointerToRawData` below 0x200 and not aligned, RVAs inside the headers, overlapping sections, a section past EOF, `NumberOfRvaAndSizes` above 16, `low_alignment`, `vsize_slack`, `uninit_raw`) gives the regions, reads and diagnostics of Section 4.10. The `shared_ilt` and `shared_ilt_ordinal` variants stay in the import cap of Section 4.11 with one `E_LIMIT`. | `test:loader::ac_245_rva_mapping_variants@T1`, `test:loader::regress_pe_low_alignment_maps_flat@T1`, `test:loader::regress_pe_section_slack_and_uninit_raw@T1`, `test:loader::regress_pe_shared_ilt_import_cap@T1` | 30 | - |
 | AC-246 | Imports (by name with hint, by ordinal, null ILT), delay imports and exports (names, ordinals, forwarders) of every PE fixture equal the `llvm-readobj --coff-imports --coff-exports` goldens. | `test:loader::ac_246_imports_exports_golden@T1` | 30 | - |
 | AC-247 | Base relocations of every PE fixture equal the `llvm-readobj --coff-basereloc` golden, and a block with `BlockSize` 0 or 7 gives `E_LOOP` and stops the walk. | `test:loader::ac_247_basereloc_golden@T1` | 30 | - |
 | AC-248 | The `.pdata` function starts equal the `RUNTIME_FUNCTION` table of the `llvm-readobj --unwind` golden minus the CHAININFO fragments, and each entry that is not a fragment is a function with `start_reason: pdata`. | `test:analysis::ac_248_pdata_starts@T1` | 30 | - |
