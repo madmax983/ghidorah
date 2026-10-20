@@ -8,6 +8,7 @@
 //! | the slot of an `R_X86_64_RELATIVE`, RELR, `R_X86_64_64` or `R_X86_64_GLOB_DAT` relocation | `data` from the slot | `R_RELOC_PTR` |
 //! | an element of an init, fini or preinit array | `data` from the slot | `R_ADDR_TABLE` |
 //! | a run of 2 or more pointers in a data section of a file at a fixed address | `data` from each slot | `R_ADDR_TABLE` |
+//! | an entry of a relative table of 32-bit offsets, see [`reltable`] | `data` from the entry | `R_ADDR_TABLE` |
 //!
 //! Rules:
 //!
@@ -19,6 +20,8 @@
 //!   pointers have relocations, so the relocation rule is exact.
 //! - An address table skips each slot that holds the place of a relocation of any type.
 //! - The first relocation of a place in table order gives the slot.
+//! - An entry of a relative table is 4 bytes. It gets an `int` data definition. Its why-record
+//!   names the `lea` that gives the table start.
 //!
 //! A change of the references queues `Strings`, because a reference marks the string at its target.
 
@@ -41,6 +44,8 @@ use crate::sched::ALL;
 use crate::spec::{AnalyzerSpec, Grain, Opt, Step, Trigger};
 use crate::why::{Rule, Why};
 use crate::work::Work;
+
+pub mod reltable;
 
 /// The smallest immediate that can be an address.
 pub const MIN_IMM: u64 = 0x1_0000;
@@ -123,6 +128,10 @@ pub(crate) struct DataRefs {
     pub operands: BTreeMap<RefKey, Why>,
     /// The pointer slots by address.
     pub slots: BTreeMap<u64, Slot>,
+    /// The table start of each relative table read, by the address of its `lea`.
+    pub sites: BTreeMap<u64, u64>,
+    /// The entries of the relative tables by address.
+    pub entries: BTreeMap<u64, reltable::Entry>,
 }
 
 /// Gives the reference type of a memory access.
@@ -367,8 +376,41 @@ fn data_space(program: &Program) -> RangeSet {
     out
 }
 
-/// Runs one step over `ranges`: the operand references of the code units in the ranges and the
-/// pointer slots in the ranges.
+/// Puts the relative table sites of the code units in `ranges` in place of the old ones.
+/// Tells if they change.
+fn update_sites(data: &mut DataRefs, ranges: &RangeSet, fresh: BTreeMap<u64, u64>) -> bool {
+    let old: BTreeMap<u64, u64> = data
+        .sites
+        .iter()
+        .filter(|(at, _)| ranges.contains(**at))
+        .map(|(at, t)| (*at, *t))
+        .collect();
+    if old == fresh {
+        return false;
+    }
+    data.sites.retain(|at, _| !ranges.contains(*at));
+    data.sites.extend(fresh);
+    true
+}
+
+/// Finds the entries of the relative tables again. Adds the places of the changed entries to
+/// `moved`. Tells if the entries change.
+fn update_entries(program: &Program, data: &mut DataRefs, moved: &mut RangeSet) -> bool {
+    let fresh = reltable::entries(program, data);
+    if fresh == data.entries {
+        return false;
+    }
+    for at in data.entries.keys().chain(fresh.keys()) {
+        if let Some(r) = Range::with_len(*at, u64::from(reltable::ENTRY_SIZE)) {
+            moved.insert(r);
+        }
+    }
+    data.entries = fresh;
+    true
+}
+
+/// Runs one step over `ranges`: the operand references and the relative table sites of the
+/// code units in the ranges, the pointer slots in the ranges and all relative table entries.
 pub fn run(ctx: &mut AnalysisCtx<'_>, ranges: &RangeSet) -> Step {
     let program = ctx.program();
     if !program.meta().arch.is_x86_64() {
@@ -376,12 +418,16 @@ pub fn run(ctx: &mut AnalysisCtx<'_>, ranges: &RangeSet) -> Step {
     }
     let mut work = 1u64;
     let mut fresh = BTreeMap::new();
+    let mut fresh_sites = BTreeMap::new();
     for r in ranges.ranges() {
         for at in ctx.work.units.range(r.first..=r.last).map(|(at, _)| *at) {
             work = work.saturating_add(1);
             let Some(insn) = decode_at(program, at) else {
                 continue;
             };
+            if let Some(table) = reltable::table_of(program, &insn) {
+                fresh_sites.insert(at, table);
+            }
             for (op_index, to, kind) in operand_refs(program, &insn) {
                 let key = RefKey {
                     from: Address::ram(at),
@@ -405,6 +451,7 @@ pub fn run(ctx: &mut AnalysisCtx<'_>, ranges: &RangeSet) -> Step {
         data.operands.retain(|k, _| !ranges.contains(k.from.off));
         data.operands.extend(fresh);
     }
+    changed |= update_sites(data, ranges, fresh_sites);
     let mut moved = RangeSet::new();
     if !ranges.intersect(&data_space(program)).is_empty() {
         let all = slots(program);
@@ -431,6 +478,9 @@ pub fn run(ctx: &mut AnalysisCtx<'_>, ranges: &RangeSet) -> Step {
             changed = true;
         }
     }
+    let data = &mut ctx.work.data;
+    changed |= update_entries(program, data, &mut moved);
+    work = work.saturating_add(u64::try_from(data.entries.len()).unwrap_or(u64::MAX));
     if changed {
         ctx.touch();
         ctx.emit(Trigger::Data, moved);
@@ -449,8 +499,20 @@ fn ptr_type(program: &Program) -> TypeId {
         .unwrap_or_else(|| store.prim(Prim::ULong))
 }
 
+/// Gives the data row of the definition `def` at `at`.
+fn data_row(at: u64, def: DataDef) -> Value {
+    let addr = Address::ram(at);
+    let edit = Edit::SetDataDef {
+        at: addr,
+        def: Some(Origin::analysis().fact(def)),
+    };
+    let fact = edit_to_json(&edit).get("def").cloned().unwrap_or_default();
+    Value::object([("at", Value::from(addr.to_string())), ("def", fact)])
+}
+
 /// Adds the data references of `work` to the facts of a publish step. An operand reference
-/// needs a code unit of a function in `kept`. Gives the data rows of the slots.
+/// and a relative table entry need a code unit of a function in `kept`. Gives the data rows
+/// of the slots and the entries in address order.
 pub(crate) fn collect(
     program: &Program,
     work: &Work,
@@ -458,9 +520,9 @@ pub(crate) fn collect(
     refs: &mut Vec<Ref>,
     whys: &mut BTreeMap<FactKey, Why>,
 ) -> Vec<Value> {
+    let is_kept = |at: u64| work.units.get(&at).is_some_and(|u| kept.contains(&u.owner));
     for (key, why) in &work.data.operands {
-        let owner = work.units.get(&key.from.off).map(|u| u.owner);
-        if owner.is_some_and(|o| kept.contains(&o)) {
+        if is_kept(key.from.off) {
             refs.push(Ref {
                 key: *key,
                 primary: true,
@@ -468,23 +530,13 @@ pub(crate) fn collect(
             whys.insert(FactKey::Ref(*key), why.clone());
         }
     }
-    let origin = Origin::analysis();
-    let def = DataDef {
+    let slot_def = DataDef {
         ty: ptr_type(program),
         len: SLOT_SIZE,
     };
-    let mut rows = Vec::with_capacity(work.data.slots.len());
+    let mut rows = BTreeMap::new();
     for (at, slot) in &work.data.slots {
-        let addr = Address::ram(*at);
-        let edit = Edit::SetDataDef {
-            at: addr,
-            def: Some(origin.fact(def)),
-        };
-        let fact = edit_to_json(&edit).get("def").cloned().unwrap_or_default();
-        rows.push(Value::object([
-            ("at", Value::from(addr.to_string())),
-            ("def", fact),
-        ]));
+        rows.insert(*at, data_row(*at, slot_def));
         whys.insert(FactKey::Data(*at), slot.why.clone());
         let key = slot.key(*at);
         refs.push(Ref { key, primary: true });
@@ -493,5 +545,23 @@ pub(crate) fn collect(
             Why::new(slot.why.rule, vec![FactKey::Data(*at)]),
         );
     }
-    rows
+    let entry_def = DataDef {
+        ty: program.types().store().prim(Prim::Int),
+        len: reltable::ENTRY_SIZE,
+    };
+    for (at, entry) in &work.data.entries {
+        if !is_kept(entry.site) {
+            continue;
+        }
+        rows.insert(*at, data_row(*at, entry_def));
+        let site = vec![FactKey::CodeUnit(entry.site)];
+        whys.insert(FactKey::Data(*at), Why::new(Rule::AddrTable, site));
+        let key = entry.key(*at);
+        refs.push(Ref { key, primary: true });
+        whys.insert(
+            FactKey::Ref(key),
+            Why::new(Rule::AddrTable, vec![FactKey::Data(*at)]),
+        );
+    }
+    rows.into_values().collect()
 }
