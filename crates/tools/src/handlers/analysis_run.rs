@@ -8,6 +8,11 @@
 //! at the end of each slice. So `notifications/cancelled` stops the run at the next fuel
 //! checkpoint (AC-172). `binary_load` and the re-analysis of an edit use the same slices.
 //!
+//! The state is relative to the full analysis. A call with `until: "triage"` whose last slice
+//! does no work has done the triage bands: it gives `resume: false` and `next[0]`
+//! `analysis_run { until: "full" }`. Another stop before completion gives `resume: true`, and
+//! `next[0]` is the same call with the same `until`.
+//!
 //! [`Engine`] is the analysis engine of the shipped tools: one [`Scheduler`] per open binary.
 //! A session with no engine gets one at the first call. A binary with no scheduler gets one
 //! by its analysis state:
@@ -81,7 +86,11 @@ impl Sliced {
 pub const WHY_RESUME: &str = "The analysis has more work. Call analysis_run again to resume it.";
 
 /// Every fixed text of the handler that an agent reads.
-pub const TEXTS: &[&str] = &[WHY_RESUME];
+pub const TEXTS: &[&str] = &[WHY_RESUME, WHY_TRIAGE_DONE];
+
+/// The `why` of the `analysis_run` hint when the triage bands have no more work.
+pub const WHY_TRIAGE_DONE: &str =
+    "The triage bands have no more work. Call analysis_run with until full to run the other bands.";
 
 /// The analysis engine of the shipped tools: one scheduler per open binary.
 #[derive(Debug, Default)]
@@ -303,7 +312,13 @@ fn slice(
 }
 
 /// Gives the result object of a call.
-fn report(report: RunReport, used: u64, rows: &[AnalyzerRow], changed: Changed) -> Object {
+fn report(
+    report: RunReport,
+    used: u64,
+    resume: bool,
+    rows: &[AnalyzerRow],
+    changed: Changed,
+) -> Object {
     let rows = rows
         .iter()
         .map(|r| {
@@ -318,10 +333,7 @@ fn report(report: RunReport, used: u64, rows: &[AnalyzerRow], changed: Changed) 
     let mut out = Object::new();
     out.push("state", Value::from(report.state.as_str()));
     out.push("steps_used", int(used));
-    out.push(
-        "resume",
-        Value::Bool(report.state != AnalysisState::Complete),
-    );
+    out.push("resume", Value::Bool(resume));
     out.push("analyzers", Value::Array(rows));
     out.push(
         "changed",
@@ -350,14 +362,18 @@ fn run(session: &mut Session, args: &Args, ctx: &mut Ctx) -> Result<Payload, Too
     // A slice with no fuel gives the state. A dry run and a complete analysis stop there.
     let probe = slice(session, id, until, 0)?;
     let dry = args.globals().dry_run;
-    let (last, used) = if dry || probe.state == AnalysisState::Complete {
-        (probe, 0)
+    let (last, used, idle) = if dry || probe.state == AnalysisState::Complete {
+        (probe, 0, false)
     } else {
         let run = session
             .analyze_sliced(id, until, ctx)?
             .ok_or_else(|| ToolError::new(ErrorCode::InternalError))?;
-        (run.report(), run.steps_used)
+        (run.report(), run.steps_used, run.idle)
     };
+    // The state is relative to the full analysis. A triage run whose last slice did no work
+    // has no more work, although the bands after triage wait.
+    let triage_done = until == Until::Triage && idle && last.state != AnalysisState::Complete;
+    let resume = last.state != AnalysisState::Complete && !triage_done;
     let binary = session
         .binary(id)
         .ok_or_else(|| ToolError::new(ErrorCode::UnknownBinary))?;
@@ -369,13 +385,22 @@ fn run(session: &mut Session, args: &Args, ctx: &mut Ctx) -> Result<Payload, Too
         noop: binary.program.rev() == rev,
         diff: dry.then(|| Value::Array(Vec::new())),
     });
-    if last.state != AnalysisState::Complete {
+    let mut hint = Object::new();
+    hint.push("binary_id", Value::from(id.to_string()));
+    if triage_done {
+        hint.push("until", Value::from("full"));
         ctx.hint(Call::new(
             "analysis_run",
-            Value::object([("binary_id", Value::from(id.to_string()))]),
-            WHY_RESUME,
+            Value::Object(hint),
+            WHY_TRIAGE_DONE,
         ));
+    } else if resume {
+        // The resume hint keeps the bound of the call.
+        if until == Until::Triage {
+            hint.push("until", Value::from("triage"));
+        }
+        ctx.hint(Call::new("analysis_run", Value::Object(hint), WHY_RESUME));
     }
     let rows = session.analyzer_rows(id);
-    Ok(Payload::Object(report(last, used, &rows, changed)))
+    Ok(Payload::Object(report(last, used, resume, &rows, changed)))
 }

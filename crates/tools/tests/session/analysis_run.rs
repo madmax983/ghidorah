@@ -137,6 +137,49 @@ fn analysis_run_triage_and_an_installed_engine() {
 }
 
 #[test]
+fn regress_triage_done_resume_false() {
+    let (mut s, id) = fixture("hello.gcc-O2");
+    for round in 0..2 {
+        let envelope = call(&mut s, "analysis_run", r#"{"until":"triage"}"#);
+        let got = data(&envelope);
+        assert_eq!(text_at(got, "/state"), "budget_stopped", "{envelope}");
+        assert_eq!(
+            got.get("resume"),
+            Some(&Value::Bool(false)),
+            "the triage bands are done, so the same call has no more work: {envelope}"
+        );
+        if round == 1 {
+            assert_eq!(int(got, "/steps_used"), 0, "{envelope}");
+        }
+        assert_eq!(text_at(&envelope, "/next/0/tool"), "analysis_run");
+        assert_eq!(
+            text_at(&envelope, "/next/0/args/until"),
+            "full",
+            "{envelope}"
+        );
+        assert_eq!(text_at(&envelope, "/next/0/args/binary_id"), id);
+        assert_eq!(
+            text_at(&envelope, "/next/0/why"),
+            analysis_run::WHY_TRIAGE_DONE
+        );
+    }
+    // A fuel stop inside the triage bands keeps resume, and the hint keeps the bound.
+    let (mut s, _) = fixture("large.gcc-O2");
+    let stopped = call(
+        &mut s,
+        "analysis_run",
+        r#"{"until":"triage","max_steps":10}"#,
+    );
+    assert_eq!(data(&stopped).get("resume"), Some(&Value::Bool(true)));
+    assert_eq!(
+        text_at(&stopped, "/next/0/args/until"),
+        "triage",
+        "{stopped}"
+    );
+    assert_eq!(text_at(&stopped, "/next/0/why"), analysis_run::WHY_RESUME);
+}
+
+#[test]
 fn analysis_run_texts_are_ste() {
     let spec = &analysis_run::SPEC;
     let mut texts = vec![spec.summary, spec.description];

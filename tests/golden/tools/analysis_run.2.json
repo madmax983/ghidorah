@@ -12,7 +12,7 @@
   "data": {
     "state": "budget_stopped",
     "steps_used": 969,
-    "resume": true,
+    "resume": false,
     "analyzers": [
       {
         "name": "Entry",
@@ -164,9 +164,10 @@
     {
       "tool": "analysis_run",
       "args": {
-        "binary_id": "467a43b75d95c826"
+        "binary_id": "467a43b75d95c826",
+        "until": "full"
       },
-      "why": "The analysis has more work. Call analysis_run again to resume it."
+      "why": "The triage bands have no more work. Call analysis_run with until full to run the other bands."
     }
   ],
   "noop": false
