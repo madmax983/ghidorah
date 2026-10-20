@@ -13,6 +13,7 @@
 //! | `renames` | one `{ target, name, evidence }` per proposal, in item order: the shape of a `symbol_rename` item |
 //! | `corpus` | `{ binaries, functions }`: the open binaries and their functions |
 //! | `omitted` | `{ matches }`: the matches that the budget cut, from the end of the longest lists |
+//! | `stopped_by`, `deterministic` | `time` and `false` after a `max_ms` stop |
 //!
 //! Scores, `min_score` and weights are integers in thousandths. `limit` caps the matches of
 //! each item. It is not a page size, so the tool has no cursor.
@@ -24,16 +25,20 @@
 //!
 //! A fuel stop gives `BUDGET_EXCEEDED`, and `next[0]` sends the same call again. The vectors
 //! of the worker thread stay in its cache, so the second call continues. Before each target
-//! the call checks the cancel flag and the `max_ms` guard. A stop by either also gives
-//! `BUDGET_EXCEEDED` with the same `next[0]`. `details.stopped_by` is `fuel`, `cancel` or
-//! `time`. Eval mode turns the time guard off.
+//! the call checks the cancel flag and the `max_ms` guard. A cancel also gives
+//! `BUDGET_EXCEEDED` with the same `next[0]`. `details.stopped_by` is `fuel` or `cancel`.
+//!
+//! A `max_ms` stop follows design Section 10.11 rule 3. The result holds the items of the
+//! targets before the stop, `stopped_by: "time"`, `deterministic: false` and `W_TIME_STOP`.
+//! `next[0]` and the remedy of the warning send the same call again. Eval mode turns the time
+//! guard off.
 
 mod find;
 mod render;
 mod state;
 
 use ghidorah_analysis::similar::Scope;
-use ghidorah_base::ErrorCode;
+use ghidorah_base::{ErrorCode, WarningCode};
 use ghidorah_db::Program;
 use ghidorah_json::Value;
 
@@ -41,6 +46,7 @@ use super::func_sections::{self as fs, Namer};
 use crate::args::Args;
 use crate::budget::LARGE_MAX_CHARS;
 use crate::dispatch::{Ctx, Payload};
+use crate::envelope::Warning;
 use crate::errors::ToolError;
 use crate::hints::Call;
 use crate::outshape::{Field, OutputShape};
@@ -74,11 +80,14 @@ pub const WHY_RENAME: &str = "Apply the proposed names with their evidence in on
 /// The `why` of the repair call after a fuel stop.
 pub const WHY_RETRY: &str = "Send the call again. It continues with the vectors that it built.";
 
+/// The `why` of the call after a time stop.
+pub const WHY_TIME: &str = "Send the call again. It continues with the vectors that it built. A higher max_ms gives it more time.";
+
 /// The label of the transaction of the batch hint.
 pub const RENAME_LABEL: &str = "func_similar renames";
 
 /// Every fixed text of the handler that an agent reads.
-pub const TEXTS: &[&str] = &[WHY_BEST, WHY_RENAME, WHY_RETRY, RENAME_LABEL];
+pub const TEXTS: &[&str] = &[WHY_BEST, WHY_RENAME, WHY_RETRY, WHY_TIME, RENAME_LABEL];
 
 const ARGS: &[ArgSpec] = &[
     ArgSpec::new(
@@ -183,6 +192,8 @@ const FIELDS: &[Field] = &[
     Field::req("renames", OutputShape::List(&RENAME_SHAPE)),
     Field::req("corpus", OutputShape::Obj(CORPUS)),
     Field::opt("omitted", OutputShape::Obj(OMITTED)),
+    Field::opt("stopped_by", OutputShape::Str),
+    Field::opt("deterministic", OutputShape::Bool),
 ];
 
 /// `func_similar`.
@@ -236,7 +247,12 @@ fn run(session: &mut Session, args: &Args, ctx: &mut Ctx) -> Result<Payload, Too
             ))
     };
     let index = state::index(&programs, &mut ctx.fuel).map_err(|_| retry(find::Halt::Fuel))?;
-    let items = find::find(session, &index, bound, args, ctx, began).map_err(retry)?;
+    let mut items = Vec::new();
+    let timed_out = match find::find(session, &index, bound, args, ctx, began, &mut items) {
+        Ok(()) => false,
+        Err(find::Halt::Time) => true,
+        Err(halt) => return Err(retry(halt)),
+    };
     if !args.given("targets")
         && let Some(find::Item::Bad { error, .. }) = items.first()
     {
@@ -247,7 +263,19 @@ fn run(session: &mut Session, args: &Args, ctx: &mut Ctx) -> Result<Payload, Too
         index: &index,
         namer: Namer::new(),
     };
-    let out = render::render(&view, &items, ctx);
+    let mut out = render::render(&view, &items, ctx);
+    if timed_out {
+        // A time stop is not deterministic (design Section 10.11 rule 3). The same call
+        // continues with the vectors that it built.
+        out.push("stopped_by", Value::from(find::Halt::Time.name()));
+        out.push("deterministic", Value::Bool(false));
+        let resend = Call::new("func_similar", args.canonical().clone(), WHY_TIME);
+        ctx.warn(Warning {
+            remedy: Some(resend.clone()),
+            ..Warning::new(WarningCode::TimeStop)
+        });
+        ctx.hint(resend);
+    }
     render::hints(&view, bound, args, &items, ctx);
     view.namer.finish(ctx);
     Ok(Payload::Object(out))
