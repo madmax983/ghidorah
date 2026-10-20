@@ -86,7 +86,7 @@ const ARGS: &[ArgSpec] = &[
         "path",
         Role::Param,
         ArgKind::Str(MAX_PATH_CHARS),
-        "The path of the file. A relative path starts at the first root of the server.",
+        "The path of the file. A relative path starts at each root of the server in order. The first match is the file.",
     ),
     ArgSpec::new(
         "builtin",

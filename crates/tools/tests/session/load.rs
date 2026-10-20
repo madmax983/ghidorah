@@ -785,3 +785,17 @@ fn binary_required_gives_a_repair_call() {
     assert_eq!(text_at(&envelope, "/binary_id"), helpers, "{envelope}");
     assert_ne!(demo_id, helpers);
 }
+
+/// The schema doc of `path` gives the root rule of `roots.rs`: a relative path starts at each
+/// root in order, not only at the first root (known-01).
+#[test]
+fn regress_path_doc_names_each_root() {
+    let doc = handlers::load::SPEC
+        .arg("path")
+        .map(|a| a.doc)
+        .unwrap_or_default();
+    assert!(!doc.contains("first root"), "{doc}");
+    assert!(doc.contains("each root"), "{doc}");
+    let found = ghidorah_testkit::ste::check_agent_text(doc);
+    assert!(found.is_empty(), "{doc}: {found:?}");
+}
