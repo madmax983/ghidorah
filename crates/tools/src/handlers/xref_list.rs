@@ -21,7 +21,16 @@
 //! the site. `depth` above 1 adds `edges`: the call graph from the targets, with at most
 //! `max_nodes` functions.
 //!
-//! `basis: { complete, unresolved }` tells if an unresolved indirect call can add callers.
+//! Direction `from` reads the body of a function for `fn:`, `exp:` and a name of a function
+//! entry. It reads one instruction for hex text, `bb:`, `op:` and other names. For each name
+//! or address target, `resolved: [{ index, input, resolved_from: { rule, matched, scope } }]`
+//! tells which. The `scope` value is `function` or `insn`.
+//!
+//! `basis: { complete, unresolved }` tells if a gap can add references. A gap is an indirect
+//! call or jump with no target, by the rule of `fact_check`. Direction `from` reads the gaps
+//! of the instructions that it reads. Direction `to` reads the gaps of every function.
+//! `complete` is false when the analysis state is not `complete`.
+//!
 //! A bad target never fails the call. It goes to `errors: [{ input, index, error }]`.
 
 mod items;
@@ -33,6 +42,7 @@ use ghidorah_json::{Object, Value};
 use super::func_sections::{self as fs, Namer};
 use crate::args::Args;
 use crate::dispatch::{Ctx, ListPayload, Payload, Total};
+use crate::envelope::AnalysisState;
 use crate::errors::ToolError;
 use crate::outshape::{Field, OutputShape};
 use crate::resolve::Family;
@@ -126,6 +136,7 @@ const FIELDS: &[Field] = &[
     ),
     Field::opt("count", OutputShape::Int),
     Field::opt("edges", OutputShape::Any),
+    Field::opt("resolved", OutputShape::Any),
     Field::opt("basis", OutputShape::Any),
     Field::opt("errors", OutputShape::Any),
 ];
@@ -192,16 +203,24 @@ fn run(session: &mut Session, args: &Args, ctx: &mut Ctx) -> Result<Payload, Too
         let graph = CallGraph::build(p);
         extra.push("edges", sites::edges(&graph, &found.starts, to, depth, max));
     }
-    let open = sites::unresolved(p, (!to).then_some(found.bodies.as_slice()));
+    let read = (!to).then_some((found.bodies.as_slice(), found.sites.as_slice()));
+    let open = sites::gaps(p, read);
     let shown = open
         .iter()
         .take(MAX_UNRESOLVED)
         .map(|a| fs::addr(*a))
         .collect();
+    let analyzed = ctx
+        .frame
+        .analysis
+        .is_some_and(|a| a.state == AnalysisState::Complete);
+    if !to {
+        extra.push("resolved", Value::Array(found.resolved));
+    }
     extra.push(
         "basis",
         Value::object([
-            ("complete", Value::Bool(open.is_empty())),
+            ("complete", Value::Bool(analyzed && open.is_empty())),
             ("unresolved", Value::Array(shown)),
         ]),
     );

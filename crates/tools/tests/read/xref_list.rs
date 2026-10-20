@@ -323,3 +323,107 @@ fn xref_list_bad_target_goes_to_errors() {
         "the string target lists its references: {envelope}"
     );
 }
+
+/// Gives the `basis` of an `xref_list` result as `(complete, unresolved)`.
+fn basis_of(envelope: &Value) -> (bool, Vec<String>) {
+    let basis = data(envelope).get("basis").expect("basis");
+    let complete = basis.get("complete").and_then(Value::as_bool);
+    let unresolved = basis
+        .get("unresolved")
+        .and_then(Value::as_array)
+        .expect("basis.unresolved")
+        .iter()
+        .filter_map(Value::as_str)
+        .map(str::to_owned)
+        .collect();
+    (complete.expect("basis.complete"), unresolved)
+}
+
+/// Gives `resolved[index].resolved_from.scope` of an `xref_list` result.
+fn scope_of(envelope: &Value, index: usize) -> String {
+    data(envelope)
+        .get("resolved")
+        .and_then(Value::as_array)
+        .and_then(|l| l.get(index))
+        .and_then(|r| r.pointer("/resolved_from/scope"))
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_owned()
+}
+
+#[test]
+fn regress_xref_from_name_reads_body() {
+    let (mut session, _) = fixture("func_ptrs.gcc-O2");
+    let name = call(
+        &mut session,
+        "xref_list",
+        r#"{"targets":["run_op"],"direction":"from"}"#,
+    );
+    let to: BTreeSet<String> = items(&name).iter().map(|i| str_of(i, "to_name")).collect();
+    assert!(to.contains("ops"), "the data ref to ops: {name}");
+    assert_eq!(
+        basis_of(&name),
+        (false, vec!["0x1366".to_owned()]),
+        "the jmp [rdx+rax*8] at 0x1366 is a gap: {name}"
+    );
+    assert_eq!(scope_of(&name, 0), "function", "{name}");
+    let by_id = call(
+        &mut session,
+        "xref_list",
+        r#"{"targets":["fn:0x1350"],"direction":"from"}"#,
+    );
+    assert_eq!(items(&by_id), items(&name), "a name and fn: read one body");
+    assert_eq!(basis_of(&by_id), basis_of(&name));
+    let site = call(
+        &mut session,
+        "xref_list",
+        r#"{"targets":["0x1366"],"direction":"from"}"#,
+    );
+    assert_eq!(scope_of(&site, 0), "insn", "{site}");
+    assert_eq!(
+        basis_of(&site),
+        (false, vec!["0x1366".to_owned()]),
+        "{site}"
+    );
+    let entry = call(
+        &mut session,
+        "xref_list",
+        r#"{"targets":["0x1350"],"direction":"from"}"#,
+    );
+    assert_eq!(scope_of(&entry, 0), "insn", "{entry}");
+    assert!(items(&entry).is_empty(), "endbr64 has no refs: {entry}");
+    assert_eq!(basis_of(&entry), (true, Vec::new()), "{entry}");
+    let main = call(
+        &mut session,
+        "xref_list",
+        r#"{"targets":["main"],"direction":"from","kinds":["call"]}"#,
+    );
+    let calls = items(&main);
+    assert!(calls.len() >= 3, "main's calls: {main}");
+    assert!(
+        calls
+            .iter()
+            .all(|i| i.pointer("/from_func/name").and_then(Value::as_str) == Some("main")),
+        "{main}"
+    );
+    assert!(
+        calls.iter().any(|i| str_of(i, "to_name") == "qsort@plt"),
+        "{main}"
+    );
+}
+
+#[test]
+fn regress_xref_basis_open_without_analysis() {
+    let mut session = crate::support::session();
+    let load = call(
+        &mut session,
+        "binary_load",
+        r#"{"path":"fixtures/bin/hello.gcc-O0","analysis":"none"}"#,
+    );
+    data(&load);
+    let envelope = call(&mut session, "xref_list", r#"{"targets":["imp:puts"]}"#);
+    assert!(
+        !basis_of(&envelope).0,
+        "no analysis run, so the list can miss sites: {envelope}"
+    );
+}

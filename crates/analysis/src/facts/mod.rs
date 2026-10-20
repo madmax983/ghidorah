@@ -25,7 +25,7 @@ pub mod check;
 pub mod explain;
 pub mod outcome;
 pub mod relations;
-mod scope;
+pub mod scope;
 
 pub use check::Checker;
 pub use explain::{ExplainError, Node, explain, fact_name, key_of, key_text, source_of};

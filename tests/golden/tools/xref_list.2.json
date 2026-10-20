@@ -10,15 +10,135 @@
   },
   "partial": false,
   "data": {
-    "items": [],
+    "items": [
+      {
+        "from": "0x1091",
+        "from_func": {
+          "id": "fn:0x1080",
+          "name": "main"
+        },
+        "to": "0x11e0",
+        "to_name": "check_password",
+        "kind": "unconditional_call",
+        "op_index": 0,
+        "source": "analysis",
+        "args": [
+          {
+            "index": 0,
+            "reg": "rdi",
+            "value": {
+              "kind": "unknown"
+            }
+          }
+        ]
+      },
+      {
+        "from": "0x10a1",
+        "from_func": {
+          "id": "fn:0x1080",
+          "name": "main"
+        },
+        "to": "0x1060",
+        "to_name": "puts@plt",
+        "kind": "unconditional_call",
+        "op_index": 0,
+        "source": "analysis",
+        "args": [
+          {
+            "index": 0,
+            "reg": "rdi",
+            "name": "s",
+            "value": {
+              "kind": "str",
+              "id": "str:0x202d",
+              "text": {
+                "text": "Access denied",
+                "hex": "4163636573732064656e696564",
+                "len": 13,
+                "src": "binary"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "from": "0x10b7",
+        "from_func": {
+          "id": "fn:0x1080",
+          "name": "main"
+        },
+        "to": "0x1060",
+        "to_name": "puts@plt",
+        "kind": "unconditional_call",
+        "op_index": 0,
+        "source": "analysis",
+        "args": [
+          {
+            "index": 0,
+            "reg": "rdi",
+            "name": "s",
+            "value": {
+              "kind": "str",
+              "id": "str:0x201e",
+              "text": {
+                "text": "Access granted",
+                "hex": "416363657373206772616e746564",
+                "len": 14,
+                "src": "binary"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "from": "0x10c7",
+        "from_func": {
+          "id": "fn:0x1080",
+          "name": "main"
+        },
+        "to": "0x1060",
+        "to_name": "puts@plt",
+        "kind": "unconditional_call",
+        "op_index": 0,
+        "source": "analysis",
+        "args": [
+          {
+            "index": 0,
+            "reg": "rdi",
+            "name": "s",
+            "value": {
+              "kind": "str",
+              "id": "str:0x2004",
+              "text": {
+                "text": "usage: crackme <password>",
+                "hex": "75736167653a20637261636b6d65203c70617373776f72643e",
+                "len": 25,
+                "src": "binary"
+              }
+            }
+          }
+        ]
+      }
+    ],
+    "resolved": [
+      {
+        "index": 0,
+        "input": "main",
+        "resolved_from": {
+          "rule": "symbol",
+          "matched": "main",
+          "scope": "function"
+        }
+      }
+    ],
     "basis": {
       "complete": true,
       "unresolved": []
     }
   },
   "page": {
-    "returned": 0,
-    "total": 0,
+    "returned": 4,
+    "total": 4,
     "truncated": false
   }
 }

@@ -216,6 +216,22 @@ fn ac_205_call_targets_xref() {
         Some(&Value::Bool(false)),
         "the indirect call at 0x1014 is open: {before}"
     );
+    // The `jmp rax` tail jumps of the tm_clones helpers are gaps too. Give them targets first.
+    let open = data(&before)
+        .pointer("/basis/unresolved")
+        .and_then(Value::as_array)
+        .expect("basis.unresolved")
+        .to_vec();
+    assert!(open.contains(&Value::from("0x1014")), "{before}");
+    for site in open
+        .iter()
+        .filter_map(Value::as_str)
+        .filter(|s| *s != "0x1014")
+    {
+        let set =
+            format!(r#"{{"action":"set_call_targets","at":"{site}","targets":["fn:0x11c0"]}}"#);
+        data(&call(&mut s, "func_edit", &set));
+    }
     let set = r#"{"action":"set_call_targets","at":"0x1014","targets":["fn:0x11c0"]}"#;
     data(&call(&mut s, "func_edit", set));
     let after = call(&mut s, "xref_list", xrefs);
