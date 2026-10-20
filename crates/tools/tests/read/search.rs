@@ -1,7 +1,7 @@
 //! `search`: the loader listings, names, strings, bytes, notes, sets, jump tables and the
 //! page conservation of every list tool (AC-217, AC-135).
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use ghidorah_base::{BinaryId, SetName};
 use ghidorah_db::{Edit, Note, NoteKind, NoteSet, NoteStatus, SessionLabel, SetMembers, Source};
@@ -297,8 +297,41 @@ fn search_jumptables() {
     assert!(targets.len() >= 2, "{records:?}");
 }
 
-/// Checks that the pages of one list call give exactly `total` unique items in one order.
-fn conserve(session: &mut ghidorah_tools::Session, tool: &str, args: &Value, label: &str) {
+/// Checks that `paged` holds exactly `total` unique items in the order of `single`.
+///
+/// # Errors
+///
+/// Gives the first problem: a wrong count, a duplicate item or another order.
+fn conserved(paged: &[Value], single: &[Value], total: u64) -> Result<(), String> {
+    let count = u64::try_from(paged.len()).unwrap_or(u64::MAX);
+    if count != total {
+        return Err(format!("{count} paged items, total {total}"));
+    }
+    let unique: BTreeSet<String> = paged.iter().map(ghidorah_json::write).collect();
+    if unique.len() != paged.len() {
+        return Err("duplicate items".to_owned());
+    }
+    if total <= 1000 && paged != single {
+        return Err("the pages change the order".to_owned());
+    }
+    Ok(())
+}
+
+/// Checks that the pages of 7 items of one list call give exactly `total` unique items in one
+/// order. Gives the total.
+fn conserve(session: &mut ghidorah_tools::Session, tool: &str, args: &Value, label: &str) -> u64 {
+    conserve_by(session, tool, args, label, 7)
+}
+
+/// Checks that the pages of `page` items of one list call give exactly `total` unique items in
+/// one order. Gives the total.
+fn conserve_by(
+    session: &mut ghidorah_tools::Session,
+    tool: &str,
+    args: &Value,
+    label: &str,
+    page: u32,
+) -> u64 {
     let mut one = args.as_object().cloned().unwrap_or_default();
     one.push("limit", Value::from(1000));
     let single = call_value(session, tool, Value::Object(one));
@@ -306,26 +339,81 @@ fn conserve(session: &mut ghidorah_tools::Session, tool: &str, args: &Value, lab
         .pointer("/page/total")
         .and_then(Value::as_u64)
         .unwrap_or_else(|| panic!("{label}: {single}"));
-    let paged = all_items(session, tool, args, 7);
-    assert_eq!(
-        u64::try_from(paged.len()).expect("a count"),
-        total,
-        "{label}"
-    );
+    let paged = all_items(session, tool, args, page);
+    if let Err(problem) = conserved(&paged, &items(&single), total) {
+        panic!("{label}: {problem}");
+    }
     assert!(
         tool != "func_list" || total > 0,
         "{label}: the fixture has functions"
     );
-    let unique: BTreeSet<String> = paged.iter().map(ghidorah_json::write).collect();
-    assert_eq!(unique.len(), paged.len(), "{label}: duplicate items");
-    if total <= 1000 {
-        assert_eq!(paged, items(&single), "{label}: one order");
+    total
+}
+
+/// Makes comments, renames, notes and sets on the open binary, so that `history_list` and
+/// the note and set kinds of `search` have rows.
+fn make_rows(session: &mut ghidorah_tools::Session) {
+    let funcs = items(&call(session, "func_list", r#"{"limit":5}"#));
+    let ids: Vec<String> = funcs.iter().map(|f| str_of(f, "id")).collect();
+    assert!(ids.len() >= 3, "{funcs:?}");
+    for (i, id) in ids.iter().enumerate() {
+        let edits = [
+            (
+                "comment_set",
+                Value::object([
+                    ("target", Value::from(id.as_str())),
+                    ("kind", Value::from("plate")),
+                    ("text", Value::from(format!("First text {i}."))),
+                ]),
+            ),
+            (
+                "comment_set",
+                Value::object([
+                    ("target", Value::from(id.as_str())),
+                    ("kind", Value::from("plate")),
+                    ("text", Value::from(format!("Second text {i}."))),
+                ]),
+            ),
+            (
+                "symbol_rename",
+                Value::object([
+                    ("target", Value::from(id.as_str())),
+                    ("name", Value::from(format!("paged_{i}"))),
+                    ("force", Value::Bool(true)),
+                ]),
+            ),
+            (
+                "note_write",
+                Value::object([
+                    ("kind", Value::from("note")),
+                    ("text", Value::from(format!("Note {i}."))),
+                    ("at", Value::from(id.as_str())),
+                ]),
+            ),
+        ];
+        for (tool, args) in edits {
+            let envelope = call_value(session, tool, args);
+            assert_eq!(text_at(&envelope, "/error/code"), "", "{tool}: {envelope}");
+        }
+    }
+    for (name, members) in [("first", &ids[..2]), ("second", &ids[1..])] {
+        let members = members.iter().map(|m| Value::from(m.as_str())).collect();
+        let set = Value::object([
+            ("name", Value::from(name)),
+            ("members", Value::Array(members)),
+            ("op", Value::from("union")),
+        ]);
+        let args = Value::object([("kind", Value::from("set")), ("set", set)]);
+        let envelope = call_value(session, "note_write", args);
+        assert_eq!(text_at(&envelope, "/error/code"), "", "{envelope}");
     }
 }
 
 #[test]
 fn ac_135_pagination_conservation() {
     let mut checked = 0;
+    let mut xrefs = 0;
+    let mut with_items: BTreeMap<&str, usize> = BTreeMap::new();
     for name in truth_fixtures() {
         let (mut session, _) = fixture(name);
         conserve(&mut session, "func_list", &json("{}"), name);
@@ -336,17 +424,87 @@ fn ac_135_pagination_conservation() {
             name,
         );
         conserve(&mut session, "func_list", &json(r#"{"sort":"name"}"#), name);
-        for kind in ["name", "string", "import", "section", "symbol", "segment"] {
+        for kind in [
+            "name",
+            "string",
+            "import",
+            "section",
+            "symbol",
+            "segment",
+            "library",
+            "export",
+            "jumptable",
+        ] {
             let args = Value::object([("kind", Value::from(kind))]);
-            conserve(&mut session, "search", &args, &format!("{name} {kind}"));
+            let total = conserve(&mut session, "search", &args, &format!("{name} {kind}"));
+            *with_items.entry(kind).or_default() += usize::from(total > 0);
         }
         let args = json(r#"{"targets":["main","_start"],"direction":"from"}"#);
         let ok = call_value(&mut session, "xref_list", args.clone());
         if ok.get("ok") == Some(&Value::Bool(true)) {
             conserve(&mut session, "xref_list", &args, &format!("{name} xrefs"));
+            xrefs += 1;
         }
         checked += 1;
     }
     assert!(checked >= 60);
+    assert!(
+        xrefs >= 60,
+        "xref_list pages on {xrefs} of {checked} fixtures"
+    );
+    for (kind, count) in &with_items {
+        assert!(*count > 0, "no fixture has search items of the kind {kind}");
+    }
+
+    // history_list, the note and set kinds of search, and tool_search.
+    let (mut session, _) = fixture("hello.gcc-O2");
+    make_rows(&mut session);
+    let coalesced = conserve(
+        &mut session,
+        "history_list",
+        &json(r#"{"since_rev":0}"#),
+        "history",
+    );
+    let raw = conserve(
+        &mut session,
+        "history_list",
+        &json(r#"{"since_rev":0,"coalesce":false}"#),
+        "history raw",
+    );
+    assert!(coalesced >= 10, "{coalesced} coalesced rows");
+    assert!(
+        raw > coalesced,
+        "{raw} raw rows, {coalesced} coalesced rows"
+    );
+    for kind in ["note", "set"] {
+        let args = Value::object([("kind", Value::from(kind))]);
+        let total = conserve(&mut session, "search", &args, kind);
+        assert!(total >= 2, "{kind}: {total} items");
+    }
+    for args in [
+        r#"{"query":"function"}"#,
+        r#"{"query":"list","level":"names"}"#,
+    ] {
+        let total = conserve_by(&mut session, "tool_search", &json(args), args, 2);
+        assert!(
+            total >= 3,
+            "{args}: {total} items, so the pages are at least 2"
+        );
+    }
+
+    // A negative control: a page sequence that repeats or drops an item fails the check.
+    let single = all_items(&mut session, "func_list", &json("{}"), 1000);
+    assert!(single.len() >= 3);
+    let total = u64::try_from(single.len()).expect("a count");
+    assert_eq!(conserved(&single, &single, total), Ok(()));
+    let mut repeated = single.clone();
+    repeated[1] = repeated[0].clone();
+    assert!(conserved(&repeated, &single, total).is_err());
+    let mut dropped = single.clone();
+    dropped.remove(1);
+    assert!(conserved(&dropped, &single, total).is_err());
+    let mut swapped = single.clone();
+    swapped.swap(0, 1);
+    assert!(conserved(&swapped, &single, total).is_err());
     let _ = data;
 }
