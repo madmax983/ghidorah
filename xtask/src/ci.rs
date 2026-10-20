@@ -20,7 +20,9 @@ use crate::{Error, proc};
 pub use fixes::{
     FIX_PREFIX, LOG_FORMAT, fix_commit_count, fix_commits_without_tests, is_test_file,
 };
-pub use hermetic::{REMOVED_VARS, TestBinary, hermetic_env, run_hermetic, test_binaries};
+pub use hermetic::{
+    DATA_DIR, REMOVED_VARS, TestBinary, hermetic_env, run_binaries, run_hermetic, test_binaries,
+};
 
 /// The time cap of one tier-1 test in milliseconds (AC-224).
 pub const TEST_CAP_MS: u64 = 15_000;
