@@ -57,9 +57,7 @@ impl Budget {
             relocs_left: (file_len / 4)
                 .saturating_add(RELOC_SLACK)
                 .min(limits.relocations),
-            imports_left: (file_len / 16)
-                .checked_add(IMPORT_SLACK)
-                .unwrap_or(u64::MAX),
+            imports_left: (file_len / 16).saturating_add(IMPORT_SLACK),
             text_told: false,
             relocs_told: false,
             imports_told: false,
