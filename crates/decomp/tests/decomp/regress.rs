@@ -473,3 +473,19 @@ fn regress_noplt_got_call_names_import() {
         main.text()
     );
 }
+
+/// `greet` of the `-fno-plt` build ends with `jmp [rip+x]` through the GOT slot of
+/// `__printf_chk` at stack height 0. It is no thunk, so the jump stayed a `goto` that read no
+/// argument register (known-05). The finding names `puts`, but the slot is the one of
+/// `__printf_chk`: `greet` calls `printf`, which the build fortifies.
+#[test]
+fn regress_noplt_got_jump_is_tail_call() {
+    let greet = output_of("hello.gcc-O2-noplt", "greet");
+    let text = greet.text();
+    assert!(
+        text.contains("return __printf_chk(2, \"Hello, %s!\\n\", param_1);"),
+        "{text}"
+    );
+    assert!(!text.contains("goto"), "{text}");
+    assert_eq!(call_names(&greet), ["__printf_chk"], "{text}");
+}

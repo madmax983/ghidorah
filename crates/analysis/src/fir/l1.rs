@@ -3,7 +3,9 @@
 //! [`lift`] takes the L0 IR of a function. It makes the L1 form in three steps:
 //!
 //! 1. Each tail jump becomes a call in place: a `Jump` to an address outside the body, at the
-//!    end of a block with no successor. So the argument registers stay live at the jump.
+//!    end of a block with no successor. So the argument registers stay live at the jump. A
+//!    tail call of an import ([`crate::tailcall::import_jumps`]) becomes a call of its slot
+//!    load in the same way.
 //! 2. Braun SSA ([`ghidorah_ir::ssa::build`]) with the location sets of [`ssa_opts`].
 //! 3. The L1 passes in fixed order ([`ghidorah_ir::passes::run`]) with the given switches.
 //!
@@ -106,8 +108,9 @@ pub fn ssa_opts(conv: &CallConv) -> ssa::Opts {
     }
 }
 
-/// Rewrites each tail jump of `l0` into a call. Gives the arena and the jump addresses.
-fn rewrite_tail_jumps(l0: &FuncIr) -> (ghidorah_ir::Arena, BTreeSet<u64>) {
+/// Rewrites each tail jump of `l0` into a call. `imports` holds the addresses of the
+/// indirect jumps that call an import. Gives the arena and the jump addresses.
+fn rewrite_tail_jumps(l0: &FuncIr, imports: &BTreeSet<u64>) -> (ghidorah_ir::Arena, BTreeSet<u64>) {
     let mut arena = l0.arena.clone();
     let mut tails = BTreeSet::new();
     for (i, b) in l0.body.blocks.iter().enumerate() {
@@ -142,7 +145,8 @@ fn rewrite_tail_jumps(l0: &FuncIr) -> (ghidorah_ir::Arena, BTreeSet<u64>) {
             op.a.first()
                 .and_then(|a| a.as_k())
                 .is_some_and(|t| l0.arena.insn_index(t).is_none());
-        if op.opc == Opc::Jump && outside {
+        let import = op.opc == Opc::JumpInd && imports.contains(&span.addr);
+        if (op.opc == Opc::Jump && outside) || import {
             op.opc = Opc::Call;
             op.a = [op.a[0], Arg::Nil, Arg::Nil];
             tails.insert(span.addr);
@@ -165,13 +169,14 @@ pub fn lift(
     switches: &Switches,
     fuel: &mut Fuel,
 ) -> Result<L1Ir, L1Error> {
-    lift_with(l0, conv, &|_| None, switches, fuel)
+    lift_with(l0, conv, &|_| None, &BTreeSet::new(), switches, fuel)
 }
 
 /// Makes the L1 form like [`lift`], with the arity facts of the callees.
 ///
 /// `callee` gives the arity of the direct callee at an address. A call of a callee with an
-/// arity reads only its argument registers ([`callsite::uses`]).
+/// arity reads only its argument registers ([`callsite::uses`]). `imports` holds the
+/// addresses of the indirect jumps that are tail calls of an import.
 ///
 /// # Errors
 ///
@@ -180,10 +185,11 @@ pub fn lift_with(
     l0: FuncIr,
     conv: &CallConv,
     callee: &dyn Fn(u64) -> Option<callsite::Arity>,
+    imports: &BTreeSet<u64>,
     switches: &Switches,
     fuel: &mut Fuel,
 ) -> Result<L1Ir, L1Error> {
-    let (arena, tail_calls) = rewrite_tail_jumps(&l0);
+    let (arena, tail_calls) = rewrite_tail_jumps(&l0, imports);
     let calls = callsite::uses(&l0, &arena, conv, callee);
     let mut ssa = ssa::build_with(arena, l0.body.clone(), &ssa_opts(conv), &calls, fuel)?;
     for (&index, &from) in &l0.fused_from {
@@ -222,5 +228,13 @@ pub fn build(
         .into_iter()
         .filter_map(|t| Some((t, callsite::callee_arity(program, t, conv)?)))
         .collect();
-    lift_with(l0, conv, &|t| arity.get(&t).copied(), switches, fuel)
+    let imports = crate::tailcall::import_jumps(program, id, &l0);
+    lift_with(
+        l0,
+        conv,
+        &|t| arity.get(&t).copied(),
+        &imports,
+        switches,
+        fuel,
+    )
 }

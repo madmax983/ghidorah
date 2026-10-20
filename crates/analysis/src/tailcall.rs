@@ -21,18 +21,24 @@
 //!
 //! A tail call gives `T` the start reason `TailCall` with `R_TAILCALL`. A cold part loses its
 //! FDE start reason, so the descent of `F` takes its code as a part.
+//!
+//! [`import_jumps`] gives the tail calls of an import: an indirect jump at stack height 0
+//! through the slot of the import, as `jmp [rip+x]` of a `-fno-plt` build. A thunk has none,
+//! because its decompile passes its parameters on.
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use ghidorah_base::{Address, Fuel};
-use ghidorah_db::{FactKey, FlowKind, StartReason};
+use ghidorah_base::{Address, Fuel, FuncId};
+use ghidorah_db::{FactKey, FlowKind, Program, StartReason};
+use ghidorah_ir::Opc;
 use ghidorah_kernel::RangeSet;
 use ghidorah_x86::Mnem;
 
 use crate::cc::{conv_of, obeys};
 use crate::code::decode_at;
 use crate::ctx::{AnalysisCtx, UNIT_NORETURN_CALL};
-use crate::fir::Unit;
+use crate::fir::callsite::slot_load;
+use crate::fir::{FuncIr, Unit};
 use crate::irfacts::{func_key, work_ir, work_ir_at};
 use crate::registry::AnalyzerId;
 use crate::spec::{AnalyzerSpec, Grain, Step, Trigger};
@@ -373,3 +379,23 @@ pub fn run(ctx: &mut AnalysisCtx<'_>, ranges: &RangeSet) -> Step {
 
 /// The confidence of a `TailCall` start (design Section 7.3).
 pub const CONFIDENCE: u8 = 80;
+
+/// Gives the addresses of the tail calls of an import in `fir`, the IR of the function `id`
+/// (see the module doc).
+#[must_use]
+pub fn import_jumps(program: &Program, id: FuncId, fir: &FuncIr) -> BTreeSet<u64> {
+    if program.func(id).is_none_or(|f| f.func.flags.thunk) {
+        return BTreeSet::new();
+    }
+    let slots = crate::work::import_slots(program);
+    fir.arena
+        .ops()
+        .iter()
+        .filter(|op| op.opc == Opc::JumpInd)
+        .filter(|op| fir.frame.as_ref().and_then(|f| f.sp_at(op.id.addr)) == Some(0))
+        .filter(|op| {
+            slot_load(&fir.arena, op.a[0], op.id.addr).is_some_and(|s| slots.contains_key(&s))
+        })
+        .map(|op| op.id.addr)
+        .collect()
+}
