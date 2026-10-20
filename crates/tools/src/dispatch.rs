@@ -13,6 +13,7 @@
 //!
 //! The handler returns full data. It never trims its own output.
 
+mod fit;
 mod list;
 
 use std::collections::BTreeSet;
@@ -27,15 +28,12 @@ use ghidorah_json::{Object, Value};
 use crate::api::{Host, Progress, Request};
 use crate::args::{self, Args, Format, Globals};
 use crate::budget::Budget;
-use crate::content::result_chars;
 use crate::envelope::{Body, Envelope, Frame, Mutation, Warning};
 use crate::errors::{Candidate, ToolError, int};
-use crate::hints::{
-    Call, WHY_ANALYSIS, WHY_BINARY, WHY_BRIEF, WHY_FIRST_PAGE, WHY_REV, WHY_SCHEMA, WHY_SEARCH,
-    check, keep_valid,
-};
+use crate::hints::{Call, WHY_ANALYSIS, WHY_FIRST_PAGE, WHY_REV, check, keep_valid};
 use crate::registry::Registry;
 use crate::spec::{ArgKind, ToolSpec};
+use fit::{binary_repair, fail};
 
 /// One part of a sort key.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -245,6 +243,14 @@ impl Ctx {
     }
 }
 
+/// The frame facts at the start of a call, before the handler runs.
+struct Start {
+    /// The rev of the bound binary.
+    rev: u64,
+    /// The bound binary.
+    binary_id: Option<String>,
+}
+
 /// The parts of one call that the shaping steps share.
 struct Invocation<'a, S: Host> {
     registry: &'a Registry<S>,
@@ -253,6 +259,8 @@ struct Invocation<'a, S: Host> {
     args: &'a Args,
     /// `true` for a batch step: an object result that does not fit stays whole.
     whole: bool,
+    /// The frame facts before the handler ran.
+    start: Start,
 }
 
 /// Gives the call arguments with `key` set to `value`, or removed for `None`.
@@ -263,58 +271,6 @@ fn with_arg(args: &Value, key: &str, value: Option<Value>) -> Value {
         object.push(key, value);
     }
     Value::Object(object)
-}
-
-/// Adds the repair call of a `BINARY_REQUIRED` error that has `details.binary_id`: the same
-/// call with that `binary_id`. Other errors and errors with a repair call stay the same.
-fn binary_repair(tool: &str, args: &Value, error: ToolError) -> ToolError {
-    let id = error
-        .details
-        .as_ref()
-        .and_then(|details| details.get("binary_id"))
-        .cloned();
-    match id {
-        Some(id) if error.code == ErrorCode::BinaryRequired && error.next.is_empty() => {
-            let call = Call::new(tool, with_arg(args, "binary_id", Some(id)), WHY_BINARY);
-            error.next(call)
-        }
-        _ => error,
-    }
-}
-
-/// Gives the failure envelope of `error`, with helper calls for the codes of class H.
-fn failure<S: Host>(
-    registry: &Registry<S>,
-    host: &S,
-    frame: Frame,
-    tool: &str,
-    error: &ToolError,
-) -> Envelope {
-    let mut next = error.next.clone();
-    if next.is_empty() {
-        let helper = match error.code {
-            ErrorCode::MissingArgument => Some((
-                "tool_search",
-                Value::object([("name", Value::from(tool)), ("level", Value::from("full"))]),
-                WHY_SCHEMA,
-            )),
-            ErrorCode::UnknownTool => Some((
-                "tool_search",
-                Value::object([("query", Value::from(tool))]),
-                WHY_SEARCH,
-            )),
-            ErrorCode::NoBinaryOpen => {
-                Some(("session_brief", Value::Object(Object::new()), WHY_BRIEF))
-            }
-            _ => None,
-        };
-        next.extend(helper.map(|(name, args, why)| Call::new(name, args, why)));
-    }
-    Envelope {
-        frame,
-        body: Body::Err(error.to_json()),
-        next: keep_valid(registry, &|name| host.in_profile(name), next),
-    }
 }
 
 /// Gives the panic text of a panic payload.
@@ -346,21 +302,6 @@ pub(crate) struct StepRun {
     pub error: Option<ToolError>,
 }
 
-/// Gives the step result of the failure `error`.
-fn fail<S: Host>(
-    registry: &Registry<S>,
-    host: &S,
-    frame: Frame,
-    tool: &str,
-    error: ToolError,
-) -> StepRun {
-    StepRun {
-        envelope: failure(registry, host, frame, tool, &error),
-        fuel_used: 0,
-        error: Some(error),
-    }
-}
-
 /// Runs one request through `registry` on `host`.
 pub(crate) fn run<S: Host>(registry: &Registry<S>, host: &mut S, request: &Request) -> Envelope {
     run_with(registry, host, request, None).envelope
@@ -379,13 +320,25 @@ pub(crate) fn run_step<S: Host>(
     run_with(registry, host, request, Some(limits))
 }
 
-/// Runs one request through `registry` on `host`, with the limits of a batch step or none.
-fn run_with<S: Host>(
+/// A call that passed the steps before the handler.
+struct Opened<S: Host> {
+    /// The index of the tool in the registry.
+    index: usize,
+    /// The tool.
+    tool: &'static ToolSpec<S>,
+    /// The parsed arguments and their warnings.
+    parsed: args::Parsed,
+    /// The frame of the call.
+    frame: Frame,
+}
+
+/// Runs the steps before the handler: find the tool, check the profile, parse the arguments,
+/// open the frame and check `expected_rev`. A failed step gives its failure.
+fn open<S: Host>(
     registry: &Registry<S>,
     host: &mut S,
     request: &Request,
-    limits: Option<StepLimits>,
-) -> StepRun {
+) -> Result<Opened<S>, Box<StepRun>> {
     let bare = Frame {
         session: request.session.clone().unwrap_or_default(),
         ..Frame::default()
@@ -400,13 +353,13 @@ fn run_with<S: Host>(
         let error = ToolError::new(ErrorCode::UnknownTool)
             .var("tool", &request.tool)
             .candidates(candidates);
-        return fail(registry, host, bare, &request.tool, error);
+        return Err(Box::new(fail(registry, host, bare, &request.tool, error)));
     };
     if !host.in_profile(tool.name) {
         let error = ToolError::new(ErrorCode::ToolNotInProfile)
             .var("tool", tool.name)
             .detail("reason", Value::from("not_in_profile"));
-        return fail(registry, host, bare, tool.name, error);
+        return Err(Box::new(fail(registry, host, bare, tool.name, error)));
     }
     let coerce = |kind: &ArgKind, value: &Value| host.coerce(kind, value);
     let parsed = match args::parse(tool, &request.args, Some(&coerce)) {
@@ -416,7 +369,7 @@ fn run_with<S: Host>(
             let frame = host
                 .frame(tool, &Globals::default(), session)
                 .unwrap_or(bare);
-            return fail(registry, host, frame, tool.name, error);
+            return Err(Box::new(fail(registry, host, frame, tool.name, error)));
         }
     };
     let globals = parsed.args.globals();
@@ -424,7 +377,7 @@ fn run_with<S: Host>(
         Ok(frame) => frame,
         Err(error) => {
             let error = binary_repair(tool.name, parsed.args.canonical(), error);
-            return fail(registry, host, bare, tool.name, error);
+            return Err(Box::new(fail(registry, host, bare, tool.name, error)));
         }
     };
     if let (true, Some(expected)) = (tool.mutating, globals.expected_rev)
@@ -438,8 +391,33 @@ fn run_with<S: Host>(
         let error = ToolError::new(ErrorCode::Conflict)
             .detail("current_rev", int(frame.rev))
             .next(Call::new(tool.name, args, WHY_REV));
-        return fail(registry, host, frame, tool.name, error);
+        return Err(Box::new(fail(registry, host, frame, tool.name, error)));
     }
+    Ok(Opened {
+        index,
+        tool,
+        parsed,
+        frame,
+    })
+}
+
+/// Runs one request through `registry` on `host`, with the limits of a batch step or none.
+fn run_with<S: Host>(
+    registry: &Registry<S>,
+    host: &mut S,
+    request: &Request,
+    limits: Option<StepLimits>,
+) -> StepRun {
+    let Opened {
+        index,
+        tool,
+        parsed,
+        frame,
+    } = match open(registry, host, request) {
+        Ok(opened) => opened,
+        Err(failed) => return *failed,
+    };
+    let globals = parsed.args.globals();
     let max_chars = limits.map_or_else(
         || u64::from(globals.max_chars.unwrap_or(tool.max_chars)),
         |l| l.max_chars,
@@ -450,6 +428,10 @@ fn run_with<S: Host>(
             .max_steps
             .or_else(|| tool.fuel.map(|f| f.default))
             .map_or_else(Fuel::unlimited, Fuel::new),
+    };
+    let start = Start {
+        rev: frame.rev,
+        binary_id: frame.binary_id.clone(),
     };
     let mut ctx = Ctx::new(frame, fuel, Budget::new(max_chars, request.content));
     ctx.format = globals.format;
@@ -466,6 +448,7 @@ fn run_with<S: Host>(
         index,
         args: &parsed.args,
         whole: limits.is_some(),
+        start,
     };
     let fuel_used = ctx.fuel.used();
     let mut out = match result {
@@ -531,7 +514,7 @@ fn success<S: Host>(call: &Invocation<'_, S>, host: &S, mut ctx: Ctx, payload: P
                 },
                 next,
             };
-            fit_or_fail(call, host, &ctx, envelope)
+            fit::fit_or_fail(call, host, &ctx, envelope)
         }
         Payload::List(list) => match list::shape(call, host, &ctx, list, &next) {
             Ok(envelope) => StepRun {
@@ -541,35 +524,6 @@ fn success<S: Host>(call: &Invocation<'_, S>, host: &S, mut ctx: Ctx, payload: P
             },
             Err(error) => fail(call.registry, host, ctx.frame, call.tool.name, error),
         },
-    }
-}
-
-/// Gives `envelope` when it fits the budget, else an `OUTPUT_BUDGET_EXCEEDED` failure. A batch
-/// step keeps its whole envelope.
-fn fit_or_fail<S: Host>(
-    call: &Invocation<'_, S>,
-    host: &S,
-    ctx: &Ctx,
-    envelope: Envelope,
-) -> StepRun {
-    let size = result_chars(&envelope.to_json(), false, ctx.budget.mode);
-    if call.whole || size <= ctx.budget.limit() {
-        StepRun {
-            envelope,
-            fuel_used: 0,
-            error: None,
-        }
-    } else {
-        let error = ToolError::new(ErrorCode::OutputBudgetExceeded)
-            .detail("chars", int(size))
-            .detail("limit", int(ctx.budget.limit()));
-        fail(
-            call.registry,
-            host,
-            ctx.frame.clone(),
-            call.tool.name,
-            error,
-        )
     }
 }
 

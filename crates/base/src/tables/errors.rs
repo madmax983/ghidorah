@@ -307,8 +307,8 @@ pub(crate) const fn info(code: ErrorCode) -> CodeInfo {
             "OUTPUT_BUDGET_EXCEEDED",
             N,
             false,
-            "The result is larger than the output budget. An internal guard stopped the call. Report this error.",
-            "Send the call again with a higher max_chars.",
+            "The result is larger than the output budget. The call changed no fact, and an internal guard stopped it. Read details.chars and details.limit.",
+            "A committed edit never gives this error. Its result drops data members until it fits.",
         ),
         E::InternalError => row(
             code,

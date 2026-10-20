@@ -58,7 +58,7 @@ A tool failure gives one error object with one of these codes.
 | 34 | `PROJECT_LOCKED` | N | yes | Another writer holds the project lock. Only one writer can open a project. Open the project in read-only mode. | Read details.owner for the process that holds the lock. |
 | 35 | `JOURNAL_CORRUPT` | N | no | A journal line fails its checksum. The line is not at the end of the journal, so the server cannot skip it. Read details.line. | Restore the project directory from a backup. |
 | 36 | `READ_ONLY_PROJECT` | N | no | The project is open in read-only mode. A read-only project accepts no edits. Open the project again for writes. | Stop the other writer first. |
-| 37 | `OUTPUT_BUDGET_EXCEEDED` | N | no | The result is larger than the output budget. An internal guard stopped the call. Report this error. | Send the call again with a higher max_chars. |
+| 37 | `OUTPUT_BUDGET_EXCEEDED` | N | no | The result is larger than the output budget. The call changed no fact, and an internal guard stopped it. Read details.chars and details.limit. | A committed edit never gives this error. Its result drops data members until it fits. |
 | 38 | `INTERNAL_ERROR` | N | no | The tool failed with an internal error. The handler stopped on a fault. Report the crash_id. | The crash file holds the tool, the arguments and the rev. |
 | 39 | reserved | - | - | `IDEMPOTENCY_MISMATCH` waits for stretch item S19. | - |
 | 40 | `NO_BINARY_OPEN` | H | no | No binary is open. The call needs an open binary. Load a binary with binary_load. | Send next[0] to list the projects. |
