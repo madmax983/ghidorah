@@ -1,14 +1,19 @@
 //! The single-writer lock of a project (design Section 3.10, ADR-0022).
 //!
-//! A write open makes `project.lock` with `create_new`. The file holds
-//! `{"boot_id":..,"pid":..,"start_time":..}`. The start time is field 22 of `/proc/<pid>/stat`
-//! (clock ticks after the boot). The boot ID is `/proc/sys/kernel/random/boot_id`.
+//! The lock file holds `{"boot_id":..,"pid":..,"start_time":..}`. The start time is field 22
+//! of `/proc/<pid>/stat` (clock ticks after the boot). The boot ID is
+//! `/proc/sys/kernel/random/boot_id`.
+//!
+//! A write open writes its owner to a temporary file of its own and syncs it. Then
+//! [`Fs::link_new`] gives the file the name `project.lock`. The link fails when the lock
+//! exists. So a lock file always holds its owner, and two processes never both take a lock.
 //!
 //! | Lock file | Owner process | Result |
 //! |---|---|---|
 //! | absent | - | the open takes the lock |
 //! | present | alive: same boot ID, same start time | [`LockError::Held`]: `PROJECT_LOCKED` |
-//! | present | not alive, or the file does not parse | [`LockError::Stale`], or a new lock with `--break-lock` |
+//! | present | not alive | [`LockError::Stale`], or a new lock with `--break-lock` |
+//! | present, no owner that parses | unknown | [`LockError::Unknown`], or a new lock with `--break-lock` |
 //!
 //! A read-only open takes no lock. All file reads go through [`Fs`], so tests can give the
 //! process files of their own.
@@ -21,10 +26,13 @@ use std::path::{Path, PathBuf};
 
 use ghidorah_json::Value;
 
-use crate::fs::{Fs, FsError};
+use crate::fs::{Fs, FsError, create_temp};
 
 /// The file name of the lock in a project directory.
 pub const LOCK_FILE: &str = "project.lock";
+
+/// The start of the name of a temporary lock file.
+pub const LOCK_TMP: &str = "project.lock.tmp";
 
 /// The file of the boot ID.
 pub const BOOT_ID_FILE: &str = "/proc/sys/kernel/random/boot_id";
@@ -78,8 +86,11 @@ impl fmt::Display for LockInfo {
 pub enum LockError {
     /// A live process holds the lock.
     Held(LockInfo),
+    /// The lock file holds no owner that parses. An unknown process can hold it, so only
+    /// `--break-lock` replaces the lock.
+    Unknown,
     /// The owner of the lock is not alive. Only `--break-lock` replaces the lock.
-    Stale(Option<LockInfo>),
+    Stale(LockInfo),
     /// A file operation failed.
     Fs(FsError),
 }
@@ -88,10 +99,12 @@ impl fmt::Display for LockError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Held(owner) => write!(f, "The process {owner} holds the project lock."),
-            Self::Stale(Some(owner)) => {
+            Self::Unknown => f.write_str(
+                "The project lock has no owner that parses. Use --break-lock when no process uses the project.",
+            ),
+            Self::Stale(owner) => {
                 write!(f, "The project lock of {owner} is stale. Use --break-lock.")
             }
-            Self::Stale(None) => f.write_str("The project lock does not parse. Use --break-lock."),
             Self::Fs(e) => e.fmt(f),
         }
     }
@@ -149,9 +162,10 @@ pub fn is_alive(fs: &mut dyn Fs, owner: &LockInfo) -> bool {
 ///
 /// # Errors
 ///
-/// Returns [`LockError::Held`] when a live process holds the lock, and [`LockError::Stale`]
-/// for a lock of a process that is not alive when `break_lock` is `false`. A failed file
-/// operation gives [`LockError::Fs`].
+/// Returns [`LockError::Held`] when a live process holds the lock. When `break_lock` is
+/// `false`, a lock of a process that is not alive gives [`LockError::Stale`], and a lock with
+/// no owner that parses gives [`LockError::Unknown`]. A failed file operation gives
+/// [`LockError::Fs`].
 pub fn acquire(
     fs: &mut dyn Fs,
     dir: &Path,
@@ -159,29 +173,43 @@ pub fn acquire(
     break_lock: bool,
 ) -> Result<(), LockError> {
     let file = path(dir);
-    match fs.create_new(&file) {
-        Ok(()) => return write_owner(fs, &file, me),
-        Err(FsError::Exists(_)) => {}
+    if publish(fs, dir, &file, me)? {
+        return Ok(());
+    }
+    match read_owner(fs, &file) {
+        Some(owner) if is_alive(fs, &owner) => return Err(LockError::Held(owner)),
+        Some(owner) if !break_lock => return Err(LockError::Stale(owner)),
+        None if !break_lock => return Err(LockError::Unknown),
+        _ => {}
+    }
+    match fs.remove(&file) {
+        Ok(()) | Err(FsError::NotFound(_)) => {}
         Err(e) => return Err(e.into()),
     }
-    let owner = read_owner(fs, &file);
-    match owner {
-        Some(owner) if is_alive(fs, &owner) => Err(LockError::Held(owner)),
-        _ if !break_lock => Err(LockError::Stale(owner)),
-        _ => {
-            fs.remove(&file)?;
-            fs.create_new(&file)?;
-            write_owner(fs, &file, me)
-        }
+    if publish(fs, dir, &file, me)? {
+        return Ok(());
     }
+    // Another process took the lock after the remove.
+    Err(read_owner(fs, &file).map_or(LockError::Unknown, LockError::Held))
 }
 
-/// Writes the owner `me` into the new lock file and syncs it.
-fn write_owner(fs: &mut dyn Fs, file: &Path, me: &LockInfo) -> Result<(), LockError> {
+/// Writes the owner `me` to a new temporary file, syncs it and links it to the lock file.
+/// Gives `false` when the lock file exists. The temporary file goes in all cases.
+fn publish(fs: &mut dyn Fs, dir: &Path, file: &Path, me: &LockInfo) -> Result<bool, LockError> {
+    let tmp = create_temp(fs, &dir.join(LOCK_TMP))?;
     let text = ghidorah_json::write(&me.to_json());
-    fs.write_all(file, text.as_bytes())?;
-    fs.sync_file(file)?;
-    Ok(())
+    let linked = fs
+        .write_all(&tmp, text.as_bytes())
+        .and_then(|()| fs.sync_file(&tmp))
+        .and_then(|()| fs.link_new(&tmp, file));
+    // The lock file keeps its data after the remove of the second name. A failed remove
+    // leaves a file that no process reads.
+    let _ = fs.remove(&tmp);
+    match linked {
+        Ok(()) => Ok(true),
+        Err(FsError::Exists(_)) => Ok(false),
+        Err(e) => Err(e.into()),
+    }
 }
 
 /// Reads the owner of a lock file. A file that does not parse gives `None`.

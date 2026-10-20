@@ -15,7 +15,8 @@
 //! - `analysis_inputs_hash` is the inputs hash of the last analysis run, or `null`.
 //!
 //! A snapshot write is exactly this operation sequence (AC-120a): `create_new` of
-//! `snapshot.json.tmp`, `write_all`, `sync_file`, `rename` to `snapshot.json` and `sync_dir`.
+//! `snapshot.json.tmp.<pid>.<n>`, `write_all`, `sync_file`, `rename` to `snapshot.json` and
+//! `sync_dir`. The temporary file has a name of this process (see [`crate::fs`]).
 
 #[cfg(test)]
 mod tests;
@@ -43,7 +44,7 @@ pub const FORMAT_VERSION: u64 = 1;
 /// The file name of the snapshot.
 pub const SNAPSHOT_FILE: &str = "snapshot.json";
 
-/// The file name of the temporary snapshot.
+/// The start of the name of a temporary snapshot.
 pub const SNAPSHOT_TMP: &str = "snapshot.json.tmp";
 
 /// The member names of a snapshot.
@@ -262,8 +263,8 @@ pub fn decode(bytes: &[u8]) -> Result<Snapshot, SnapshotError> {
 
 /// Writes `text` as the snapshot of the project directory `dir`.
 ///
-/// The operations are `create_new` of the temporary file, `write_all`, `sync_file`, `rename`
-/// and `sync_dir`. A temporary file of an earlier crash goes first.
+/// The operations are `create_new` of a temporary file of this process, `write_all`,
+/// `sync_file`, `rename` and `sync_dir`. A temporary file of another process stays.
 ///
 /// # Errors
 ///

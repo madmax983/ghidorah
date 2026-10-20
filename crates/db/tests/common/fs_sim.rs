@@ -6,7 +6,7 @@
 //! - The durable view: what a crash keeps. A file keeps the data of its last `sync_file`. A
 //!   directory keeps the names of its last `sync_dir`. A new directory is durable at once.
 //!
-//! The log records each changing operation, for example `rename snapshot.json.tmp snapshot.json`.
+//! The log records each changing operation, for example `rename snapshot.json.tmp.7.0 snapshot.json`.
 //! [`SimFs::stop_after`] lets `k` more changing operations work. Each later operation fails
 //! with [`FsError::Stopped`]: the simulated crash. [`SimFs::crash_image`] gives a new file
 //! system with the durable view only.
@@ -20,7 +20,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use ghidorah_db::fs::{Fs, FsError};
+use ghidorah_db::fs::{EntryKind, Fs, FsError};
 
 /// One file.
 #[derive(Debug, Clone, Default)]
@@ -39,6 +39,7 @@ struct State {
     dirs: BTreeSet<PathBuf>,
     log: Vec<String>,
     budget: Option<usize>,
+    tear: bool,
 }
 
 impl State {
@@ -150,6 +151,12 @@ impl SimFs {
         self.state().budget = None;
     }
 
+    /// Makes the next `append` a short write: it adds the first half of its bytes and then
+    /// fails with an I/O error, as on a full disk.
+    pub fn tear_next_append(&self) {
+        self.state().tear = true;
+    }
+
     /// Gives the number of logged operations.
     #[must_use]
     pub fn ops(&self) -> usize {
@@ -208,7 +215,18 @@ impl Fs for SimFs {
     fn append(&mut self, path: &Path, bytes: &[u8]) -> Result<(), FsError> {
         let mut s = self.state();
         s.step(format!("append {}", short(path)))?;
-        s.node(path)?.data.extend_from_slice(bytes);
+        let tear = std::mem::take(&mut s.tear);
+        let node = s.node(path)?;
+        if tear {
+            let half = bytes.get(..bytes.len() / 2).unwrap_or_default();
+            node.data.extend_from_slice(half);
+            return Err(FsError::Io {
+                op: "append",
+                path: path.to_path_buf(),
+                message: "No space left on device (simulated)".to_owned(),
+            });
+        }
+        node.data.extend_from_slice(bytes);
         Ok(())
     }
 
@@ -216,6 +234,16 @@ impl Fs for SimFs {
         let mut s = self.state();
         s.step(format!("write_all {}", short(path)))?;
         s.node(path)?.data = bytes.to_vec();
+        Ok(())
+    }
+
+    fn truncate(&mut self, path: &Path, len: u64) -> Result<(), FsError> {
+        let mut s = self.state();
+        s.step(format!("truncate {} {len}", short(path)))?;
+        let node = s.node(path)?;
+        node.data
+            .resize(usize::try_from(len).unwrap_or(usize::MAX), 0);
+        node.durable = node.data.clone();
         Ok(())
     }
 
@@ -235,6 +263,21 @@ impl Fs for SimFs {
             .remove(from)
             .ok_or_else(|| FsError::NotFound(from.to_path_buf()))?;
         s.names.insert(to.to_path_buf(), id);
+        Ok(())
+    }
+
+    fn link_new(&mut self, src: &Path, dst: &Path) -> Result<(), FsError> {
+        let mut s = self.state();
+        s.step(format!("link_new {} {}", short(src), short(dst)))?;
+        if s.names.contains_key(dst) || s.dirs.contains(dst) {
+            return Err(FsError::Exists(dst.to_path_buf()));
+        }
+        s.parent_ok(dst)?;
+        let id = *s
+            .names
+            .get(src)
+            .ok_or_else(|| FsError::NotFound(src.to_path_buf()))?;
+        s.names.insert(dst.to_path_buf(), id);
         Ok(())
     }
 
@@ -299,6 +342,17 @@ impl Fs for SimFs {
     fn exists(&mut self, path: &Path) -> bool {
         let s = self.state();
         s.names.contains_key(path) || s.dirs.contains(path)
+    }
+
+    fn kind(&mut self, path: &Path) -> Option<EntryKind> {
+        let s = self.state();
+        if s.names.contains_key(path) {
+            Some(EntryKind::File)
+        } else if s.dirs.contains(path) {
+            Some(EntryKind::Dir)
+        } else {
+            None
+        }
     }
 
     fn boxed(&self) -> Box<dyn Fs> {

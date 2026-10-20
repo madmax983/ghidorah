@@ -2,9 +2,10 @@
 
 use std::path::Path;
 
-use super::{LockError, acquire, is_alive, process_info, release, stat_start_time};
+use super::{LOCK_FILE, LockError, acquire, is_alive, process_info, release, stat_start_time};
 use crate::fs::Fs;
-use crate::project::tests::{me, sim, stat_line};
+use crate::project::tests::{ROOT, create, input, me, opts, sim, stat_line};
+use crate::project::{Access, LoadSpec, PROJECT_FILE, Project, ProjectError, ProjectMeta};
 
 #[test]
 fn stat_start_time_reads_field_22() {
@@ -51,16 +52,100 @@ fn acquire_held_stale_and_break() {
     h.remove(Path::new("/proc/100/stat")).unwrap();
     assert_eq!(
         acquire(h.as_mut(), dir, &me(200), false),
-        Err(LockError::Stale(Some(me(100))))
+        Err(LockError::Stale(me(100)))
     );
     acquire(h.as_mut(), dir, &me(200), true).unwrap();
     release(h.as_mut(), dir, &me(200)).unwrap();
     assert!(fs.get(&dir.join("project.lock")).is_none());
-    // A lock file that does not parse is stale.
+    // An unknown process can hold a lock file that does not parse.
     h.create_new(&dir.join("project.lock")).unwrap();
     h.write_all(&dir.join("project.lock"), b"garbage").unwrap();
     assert_eq!(
         acquire(h.as_mut(), dir, &me(200), false),
-        Err(LockError::Stale(None))
+        Err(LockError::Unknown)
+    );
+    acquire(h.as_mut(), dir, &me(200), true).unwrap();
+    assert_eq!(
+        h.list(dir).unwrap(),
+        vec!["project.lock"],
+        "no temporary lock file stays"
+    );
+}
+
+#[test]
+fn lock_publish_writes_the_owner_before_the_name() {
+    let fs = sim(&[100]);
+    let dir = Path::new("/data/projects/p");
+    let mut h = fs.boxed();
+    h.create_dir_all(dir).unwrap();
+    let _ = fs.take_log();
+    acquire(h.as_mut(), dir, &me(100), false).unwrap();
+    let log = fs.take_log();
+    let tmp = log[0].strip_prefix("create_new ").unwrap();
+    assert!(tmp.starts_with("project.lock.tmp."), "{tmp}");
+    assert_eq!(
+        log,
+        vec![
+            format!("create_new {tmp}"),
+            format!("write_all {tmp}"),
+            format!("sync_file {tmp}"),
+            format!("link_new {tmp} project.lock"),
+            format!("remove {tmp}"),
+        ]
+    );
+    // A crash before the link takes no lock.
+    release(h.as_mut(), dir, &me(100)).unwrap();
+    fs.stop_after(3);
+    assert_eq!(
+        acquire(h.as_mut(), dir, &me(100), false),
+        Err(LockError::Fs(crate::fs::FsError::Stopped))
+    );
+    fs.resume();
+    assert!(fs.get(&dir.join(LOCK_FILE)).is_none());
+    let display = [
+        LockError::Held(me(100)).to_string(),
+        LockError::Unknown.to_string(),
+        LockError::Stale(me(100)).to_string(),
+    ];
+    assert!(
+        display.iter().all(|t| t.contains("project lock")),
+        "{display:?}"
+    );
+}
+
+#[test]
+fn regress_empty_lock_is_held_not_stale() {
+    let fs = sim(&[100, 200]);
+    let (project, program, dir) = create(&fs, 100);
+    drop(project);
+    let lock = dir.join(LOCK_FILE);
+    let write = opts(Access::Write { break_lock: false }, 200);
+    let unknown = ProjectError::Locked {
+        owner: None,
+        stale: false,
+    };
+    for text in [&b""[..], b"garbage", b"{\"pid\":1}"] {
+        let _ = fs.boxed().remove(&lock);
+        fs.seed(&lock, text);
+        let got = Project::open(fs.boxed(), &dir, &write).unwrap_err();
+        assert_eq!(got, unknown, "open with the lock {text:?}");
+        assert_eq!(
+            fs.get(&lock),
+            Some(text.to_vec()),
+            "the lock {text:?} stays"
+        );
+    }
+    // A directory with no project file and an empty lock: the create breaks no lock.
+    fs.boxed().remove(&dir.join(PROJECT_FILE)).unwrap();
+    let _ = fs.boxed().remove(&lock);
+    fs.seed(&lock, b"");
+    let (bytes, _) = input("hello.gcc-O2");
+    let meta = ProjectMeta::new(&program, "hello.gcc-O2", LoadSpec::Auto);
+    let got = Project::create(fs.boxed(), Path::new(ROOT), meta, &bytes, &program, &write);
+    assert_eq!(got.unwrap_err(), unknown, "create with an empty lock");
+    assert_eq!(fs.get(&lock), Some(Vec::new()), "the empty lock stays");
+    assert!(
+        fs.get(&dir.join(PROJECT_FILE)).is_none(),
+        "the create writes no project file"
     );
 }

@@ -17,8 +17,9 @@
 //! A bad line in the middle gives `JOURNAL_CORRUPT` with its line number.
 //!
 //! [`Project::append`] writes one line and syncs it. After every [`SNAPSHOT_EVERY`] lines it
-//! also writes a snapshot.
+//! also writes a snapshot. A failed append cuts the journal back (see the `append` module).
 
+mod append;
 mod disk;
 mod roots;
 
@@ -34,21 +35,21 @@ use ghidorah_loader::LoadOpts;
 
 use crate::fs::{Fs, FsError};
 use crate::history::History;
-use crate::journal::{JOURNAL_FILE, Line, RunLine};
+use crate::journal::RunLine;
 use crate::lock::{self, LockInfo};
 use crate::program::Program;
 use crate::replay::ReplayError;
-use crate::snapshot::{self, FORMAT_VERSION};
+use crate::snapshot::FORMAT_VERSION;
 
 pub use roots::{ProjectSummary, check_root, inside_git_tree, list};
 
 /// The file name of the project file.
 pub const PROJECT_FILE: &str = "project.json";
 
-/// The file name of the temporary project file.
+/// The start of the name of a temporary project file.
 pub const PROJECT_TMP: &str = "project.json.tmp";
 
-/// The file name of the temporary journal of a tail repair.
+/// The start of the name of a temporary journal of a tail repair.
 pub const JOURNAL_TMP: &str = "journal.jsonl.tmp";
 
 /// The file name of the ignore file.
@@ -327,6 +328,10 @@ pub struct Project {
     since_snapshot: u64,
     last_run: Option<RunLine>,
     engine: Value,
+    /// The length of the journal in bytes after the last good line.
+    journal_len: u64,
+    /// The first error of an append whose cut failed. The project then writes nothing.
+    failed: Option<FsError>,
 }
 
 impl fmt::Debug for Project {
@@ -356,12 +361,16 @@ impl Project {
     ///
     /// The steps are the directory, the lock, `.gitignore`, the input copy with mode 0444, an
     /// empty journal and the project file last. A directory without a project file is an
-    /// incomplete project, so the steps replace its files.
+    /// incomplete project, so the steps replace its files. The create breaks a stale lock
+    /// only with `--break-lock`. When a project file exists after the lock, the create
+    /// releases the lock and writes nothing. A symbolic link in place of a project directory or
+    /// a project file stops the create.
     ///
     /// # Errors
     ///
-    /// Returns [`ProjectError::Locked`] when a live process holds the lock, and
-    /// [`ProjectError::Fs`] for a failed file operation.
+    /// Returns [`ProjectError::Locked`] when another process holds the lock, and
+    /// [`ProjectError::Fs`] for a failed file operation. A project file that exists gives
+    /// [`FsError::Exists`], and a symbolic link gives [`FsError::WrongKind`].
     pub fn create(
         fs: Box<dyn Fs>,
         root: &Path,
@@ -375,12 +384,18 @@ impl Project {
         }
         let mut fs = fs;
         let dir = Self::dir_of(root, meta.binary_id);
+        let made = |dir: &Path| ProjectError::Fs(FsError::Exists(dir.join(PROJECT_FILE)));
         if Self::exists(fs.as_mut(), &dir) {
-            return Err(ProjectError::Fs(FsError::Exists(dir.join(PROJECT_FILE))));
+            return Err(made(&dir));
         }
-        fs.create_dir_all(&dir.join(BIN_DIR))?;
-        // A directory without a project file holds no facts, so its lock can go.
-        lock::acquire(fs.as_mut(), &dir, &opts.me, true).map_err(disk::lock_error)?;
+        disk::make_dirs(fs.as_mut(), &dir)?;
+        let break_lock = matches!(opts.access, Access::Write { break_lock: true });
+        lock::acquire(fs.as_mut(), &dir, &opts.me, break_lock).map_err(disk::lock_error)?;
+        if Self::exists(fs.as_mut(), &dir) {
+            // Another process made the project before this process took the lock.
+            lock::release(fs.as_mut(), &dir, &opts.me)?;
+            return Err(made(&dir));
+        }
         let mut project = Self {
             fs,
             dir,
@@ -391,8 +406,10 @@ impl Project {
             since_snapshot: 0,
             last_run: None,
             engine: opts.engine.clone(),
+            journal_len: 0,
+            failed: None,
         };
-        disk::write_new(&mut project, bytes)?;
+        project.journal_len = disk::write_new(&mut project, bytes)?;
         Ok(project)
     }
 
@@ -429,6 +446,8 @@ impl Project {
             since_snapshot: 0,
             last_run: None,
             engine: opts.engine.clone(),
+            journal_len: 0,
+            failed: None,
         };
         let loaded = project.load(&opts.limits)?;
         Ok(Opened {
@@ -441,7 +460,8 @@ impl Project {
     }
 
     /// Reads the state of the project again: the input copy, the snapshot and the journal. A
-    /// write open keeps its lock. A torn last line of a write open goes out of the journal.
+    /// write open keeps its lock. A torn last line of a write open goes out of the journal,
+    /// and a project that stopped after a failed cut can write again.
     ///
     /// # Errors
     ///
@@ -485,80 +505,6 @@ impl Project {
     /// Sets the analyzer versions of the analysis inputs hash.
     pub fn set_engine(&mut self, engine: Value) {
         self.engine = engine;
-    }
-
-    /// Appends one line to the journal and syncs it. After every [`SNAPSHOT_EVERY`] lines,
-    /// the call also writes a snapshot of `program`. Gives `true` when it wrote one.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`ProjectError::ReadOnly`] for a read-only project and [`ProjectError::Fs`]
-    /// for a failed write or sync.
-    pub fn append(&mut self, line: &Line, program: &Program) -> Result<bool, ProjectError> {
-        if self.read_only {
-            return Err(ProjectError::ReadOnly);
-        }
-        let mut text = crate::journal::encode(line);
-        text.push('\n');
-        let path = self.dir.join(JOURNAL_FILE);
-        self.fs.append(&path, text.as_bytes())?;
-        self.fs.sync_file(&path)?;
-        self.lines = self.lines.saturating_add(1);
-        self.since_snapshot = self.since_snapshot.saturating_add(1);
-        if let Line::Run(run) = line {
-            self.last_run = Some(*run);
-        }
-        if self.since_snapshot >= SNAPSHOT_EVERY {
-            self.snapshot(program)?;
-            return Ok(true);
-        }
-        Ok(false)
-    }
-
-    /// Writes a snapshot of `program` that covers all journal lines.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`ProjectError::ReadOnly`] for a read-only project and [`ProjectError::Fs`]
-    /// for a failed operation.
-    pub fn snapshot(&mut self, program: &Program) -> Result<(), ProjectError> {
-        if self.read_only {
-            return Err(ProjectError::ReadOnly);
-        }
-        let inputs = self.last_run.map(|run| run.inputs_hash);
-        let text = snapshot::encode(program, self.lines, inputs)
-            .map_err(|e| ProjectError::Program(e.to_string()))?;
-        snapshot::write(self.fs.as_mut(), &self.dir, &text)?;
-        self.since_snapshot = 0;
-        Ok(())
-    }
-
-    /// Writes the crash record `crash/<id>.json`. Gives its path relative to the project.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`ProjectError::ReadOnly`] for a read-only project and [`ProjectError::Fs`]
-    /// for a failed operation.
-    pub fn write_crash(&mut self, id: &str, record: &Value) -> Result<String, ProjectError> {
-        if self.read_only {
-            return Err(ProjectError::ReadOnly);
-        }
-        if id.is_empty() || id.len() > 64 || !id.bytes().all(|b| b.is_ascii_hexdigit()) {
-            return Err(ProjectError::BadMeta("the crash ID is not hex".to_owned()));
-        }
-        let dir = self.dir.join(CRASH_DIR);
-        self.fs.create_dir_all(&dir)?;
-        let name = format!("{id}.json");
-        let mut text = ghidorah_json::write_pretty(record);
-        text.push('\n');
-        crate::fs::replace_file(
-            self.fs.as_mut(),
-            &dir.join(&name),
-            &dir.join(format!("{id}.tmp")),
-            text.as_bytes(),
-        )?;
-        self.fs.sync_dir(&dir)?;
-        Ok(format!("{CRASH_DIR}/{name}"))
     }
 
     /// Removes the lock of this process. A second call does nothing.
