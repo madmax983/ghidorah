@@ -2,9 +2,13 @@
 //!
 //! Each type keeps its fields private. The constructors refuse a name that has no
 //! text form that parses back to the same ID.
+//!
+//! The name parts of symbols, imports, exports and sections use the module `quote`. A name
+//! part with a character that `BinText` escapes shows in the quoted form.
 
 use std::fmt;
 
+use super::quote::{Name, needs_quotes, unquote, whole_name};
 use super::{IdError, IdKind, MAX_NAME_LEN, all_digits, from_str_via_id, parse_dec_as};
 use crate::hex;
 
@@ -17,6 +21,7 @@ pub const MAX_SET_NAME: usize = 64;
 /// An exact symbol name. Text: `sym:` and the name, for example `sym:puts@GLIBC_2.2.5`.
 ///
 /// The name is not empty and has at most [`MAX_NAME_LEN`] bytes. It can hold any character.
+/// A name with a character that `BinText` escapes shows quoted, for example `sym:"\x1b[2J"`.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SymId(String);
 
@@ -39,11 +44,16 @@ impl SymId {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+
+    pub(crate) fn parse_body(body: &str) -> Result<Self, IdError> {
+        let name = whole_name(body).ok_or(IdError::bad(IdKind::Sym, "name"))?;
+        Self::new(&name)
+    }
 }
 
 impl fmt::Display for SymId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "sym:{}", self.0)
+        write!(f, "sym:{}", Name(&self.0))
     }
 }
 
@@ -61,7 +71,8 @@ enum ImportRepr {
 /// - PE by name: `imp:<dll>!<name>`. The DLL name is ASCII lower case.
 /// - PE by ordinal: `imp:<dll>!#<ordinal>`.
 ///
-/// The parser splits at the first `!`. Text before the first `!` is the DLL name.
+/// The parser splits at the first `!`. Text before the first `!` is the DLL name. A quoted
+/// DLL name or import name can hold `!`: the closing quote ends it.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ImportId(ImportRepr);
 
@@ -136,17 +147,34 @@ impl ImportId {
     }
 
     pub(crate) fn parse_body(body: &str) -> Result<Self, IdError> {
+        let bad = IdError::bad(IdKind::Import, "name");
+        if body.starts_with('"') {
+            let (first, rest) = unquote(body).ok_or(bad)?;
+            return match rest.strip_prefix('!') {
+                Some(item) => Self::pe_item(&first, item),
+                None if rest.is_empty() => Self::elf(&first),
+                None => Err(bad),
+            };
+        }
         match body.split_once('!') {
             None => Self::elf(body),
-            Some(("", name)) => Self::elf(name),
-            Some((dll, item)) => match item.strip_prefix('#') {
-                Some(digits) if all_digits(digits) => {
-                    let ordinal = parse_dec_as::<u16>(digits)
-                        .ok_or(IdError::bad(IdKind::Import, "ordinal"))?;
-                    Self::pe_by_ordinal(dll, ordinal)
-                }
-                _ => Self::pe_by_name(dll, item),
-            },
+            Some(("", name)) => Self::elf(&whole_name(name).ok_or(bad)?),
+            Some((dll, item)) => Self::pe_item(dll, item),
+        }
+    }
+
+    /// Parses the item after the `!` of a PE import: `#<ordinal>` or a name part.
+    fn pe_item(dll: &str, item: &str) -> Result<Self, IdError> {
+        match item.strip_prefix('#') {
+            Some(digits) if all_digits(digits) => {
+                let ordinal =
+                    parse_dec_as::<u16>(digits).ok_or(IdError::bad(IdKind::Import, "ordinal"))?;
+                Self::pe_by_ordinal(dll, ordinal)
+            }
+            _ => {
+                let name = whole_name(item).ok_or(IdError::bad(IdKind::Import, "name"))?;
+                Self::pe_by_name(dll, &name)
+            }
         }
     }
 }
@@ -154,10 +182,11 @@ impl ImportId {
 impl fmt::Display for ImportId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.0 {
+            ImportRepr::Elf(name) if needs_quotes(name) => write!(f, "imp:{}", Name(name)),
             ImportRepr::Elf(name) if name.contains('!') => write!(f, "imp:!{name}"),
             ImportRepr::Elf(name) => write!(f, "imp:{name}"),
-            ImportRepr::Named { dll, name } => write!(f, "imp:{dll}!{name}"),
-            ImportRepr::Ordinal { dll, ordinal } => write!(f, "imp:{dll}!#{ordinal}"),
+            ImportRepr::Named { dll, name } => write!(f, "imp:{}!{}", Name(dll), Name(name)),
+            ImportRepr::Ordinal { dll, ordinal } => write!(f, "imp:{}!#{ordinal}", Name(dll)),
         }
     }
 }
@@ -216,7 +245,7 @@ impl ExportId {
             Some(digits) if all_digits(digits) => parse_dec_as::<u32>(digits)
                 .map(Self::by_ordinal)
                 .ok_or(IdError::bad(IdKind::Export, "ordinal")),
-            _ => Self::by_name(body),
+            _ => Self::by_name(&whole_name(body).ok_or(IdError::bad(IdKind::Export, "name"))?),
         }
     }
 }
@@ -224,7 +253,7 @@ impl ExportId {
 impl fmt::Display for ExportId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.0 {
-            ExportItem::Name(name) => write!(f, "exp:{name}"),
+            ExportItem::Name(name) => write!(f, "exp:{}", Name(name)),
             ExportItem::Ordinal(n) => write!(f, "exp:#{n}"),
         }
     }
@@ -307,7 +336,8 @@ impl fmt::Display for SyscallId {
 
 /// A section: its index and its name. Text: `sec:<index>:<name>`, for example `sec:14:.text`.
 ///
-/// The name can be empty and can hold any character, `:` included.
+/// The name can be empty and can hold any character, `:` included. A name with a character
+/// that `BinText` escapes shows quoted, for example `sec:3:"\u{200b}"`.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SectionId {
     index: u16,
@@ -347,13 +377,14 @@ impl SectionId {
             .split_once(':')
             .ok_or(IdError::bad(IdKind::Section, "name"))?;
         let index = parse_dec_as::<u16>(index).ok_or(IdError::bad(IdKind::Section, "index"))?;
-        Self::new(index, name)
+        let name = whole_name(name).ok_or(IdError::bad(IdKind::Section, "name"))?;
+        Self::new(index, &name)
     }
 }
 
 impl fmt::Display for SectionId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "sec:{}:{}", self.index, self.name)
+        write!(f, "sec:{}:{}", self.index, Name(&self.name))
     }
 }
 
