@@ -45,3 +45,6 @@ Verified by: AC-125, AC-146a to AC-146d, AC-147
 - The list holds the fillers U+115F, U+1160, U+3164 and U+FFA0, and U+FFF0 to U+FFF8.
 - The list holds private use: U+E000 to U+F8FF and U+F0000 to U+10FFFF.
 - Reason: a run of tag characters can spell an instruction that a model reads but a human reviewer cannot see.
+- A relative `binary_load` path whose first parts are a root name starts at that root. Then the path starts at each root in order. The first file under a root wins.
+- For a relative path, `PATH_OUTSIDE_ROOT` and `FILE_UNREADABLE` give `details.roots` and `details.relative_to`, the root names in the order of the tries.
+- `binary_load` checks the file type before the open and again on the open file. The open does not wait for a FIFO writer. A special file gives `FILE_UNREADABLE`.
