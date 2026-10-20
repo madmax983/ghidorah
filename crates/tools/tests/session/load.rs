@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use ghidorah_base::{BinaryId, ErrorCode, Fuel};
 use ghidorah_json::{Object, Value};
 use ghidorah_tools::outshape::Fit;
-use ghidorah_tools::session::{AnalysisEngine, OpenBinary, RunReport, Until};
+use ghidorah_tools::session::{AnalysisEngine, OpenBinary, ProjectsConfig, RunReport, Until};
 use ghidorah_tools::{
     AnalysisState, Args, BinaryArg, Ctx, Payload, Registry, Roots, Session, ToolError, ToolSpec,
     handlers,
@@ -198,6 +198,68 @@ fn binary_load_runs_the_engine() {
         r#"{"path":"fixtures/bin/loops.gcc-O2","max_steps":3}"#,
     );
     assert_eq!(code(&envelope), "BUDGET_EXCEEDED", "{envelope}");
+}
+
+#[test]
+fn regress_stale_lock_repair_call() {
+    let dir = TempDir::new("stale_lock");
+    let mut c = config();
+    c.projects = Some(ProjectsConfig {
+        root: dir.0.clone(),
+        named: true,
+        break_lock: false,
+    });
+    {
+        let mut first = session_with(c.clone());
+        data(&call(
+            &mut first,
+            "binary_load",
+            r#"{"builtin":"demo","analysis":"none"}"#,
+        ));
+    }
+    // The owner of the lock is a process that does not exist: a stale lock.
+    let lock = dir.0.join(DEMO_ID).join("project.lock");
+    std::fs::write(
+        &lock,
+        r#"{"boot_id":"gone","pid":999999999,"start_time":1}"#,
+    )
+    .expect("a stale lock");
+    let mut s = session_with(c.clone());
+    let args = format!(r#"{{"binary_id":"{DEMO_ID}"}}"#);
+    let locked = call(&mut s, "binary_load", &args);
+    assert_eq!(code(&locked), "PROJECT_LOCKED", "{locked}");
+    assert_eq!(
+        locked.pointer("/error/details/stale"),
+        Some(&Value::Bool(true)),
+        "{locked}"
+    );
+    assert_eq!(text_at(&locked, "/next/0/tool"), "binary_load", "{locked}");
+    let repair = locked
+        .pointer("/next/0/args")
+        .cloned()
+        .expect("a repair call");
+    assert_eq!(text_at(&repair, "/binary_id"), DEMO_ID, "{locked}");
+    assert_eq!(
+        repair.get("break_lock"),
+        Some(&Value::Bool(true)),
+        "{locked}"
+    );
+    let opened = call_value(&mut s, "binary_load", repair);
+    assert_eq!(text_at(data(&opened), "/binary_id"), DEMO_ID);
+    // The flag holds for one call only, and a live owner keeps its lock.
+    let mut other = session_with(c);
+    let held = call(
+        &mut other,
+        "binary_load",
+        &format!(r#"{{"binary_id":"{DEMO_ID}","break_lock":true}}"#),
+    );
+    assert_eq!(code(&held), "PROJECT_LOCKED", "{held}");
+    assert_eq!(
+        held.pointer("/error/details/stale"),
+        Some(&Value::Bool(false)),
+        "{held}"
+    );
+    assert!(held.pointer("/next/0/args/break_lock").is_none(), "{held}");
 }
 
 #[test]

@@ -11,7 +11,7 @@ use ghidorah_cli::{Exit, Options, Streams};
 use ghidorah_json::Value;
 
 use crate::common::registry::TestHost;
-use crate::common::{SharedBuf, env, json};
+use crate::common::{SharedBuf, binary, env, json, root, tmp, wait_for};
 
 const INIT: &str = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"t","version":"1"}}}"#;
 
@@ -140,6 +140,61 @@ fn queued_cancel_gets_no_reply() {
     live.send(&ping(4));
     assert_eq!(live.next().get("id"), Some(&json("4")));
     assert!(live.finish().is_empty());
+}
+
+#[test]
+fn regress_broken_pipe_releases_lock() {
+    let dir = tmp("broken_pipe");
+    let projects = dir.join("projects");
+    let projects_text = projects.to_string_lossy().into_owned();
+    let workspace = root().to_string_lossy().into_owned();
+    let mut child = binary(&[
+        "mcp",
+        "--project-root",
+        &projects_text,
+        "--root",
+        &workspace,
+    ])
+    .spawn()
+    .expect("the server starts");
+    let mut input = child.stdin.take().expect("the stdin pipe");
+    let mut output = BufReader::new(child.stdout.take().expect("the stdout pipe"));
+    let mut send = |line: &str| {
+        input.write_all(line.as_bytes()).expect("the server reads");
+        input.write_all(b"\n").expect("the server reads");
+        input.flush().expect("the server reads");
+    };
+    let mut reply = String::new();
+    send(INIT);
+    output.read_line(&mut reply).expect("the initialize reply");
+    send(&call(
+        2,
+        "binary_load",
+        r#"{"builtin":"demo","analysis":"none"}"#,
+        None,
+    ));
+    reply.clear();
+    output.read_line(&mut reply).expect("the load reply");
+    assert!(reply.contains("\"isError\":false"), "{reply}");
+    // The client closes the stdout of the server. The next reply breaks the pipe.
+    drop(output);
+    send(&ping(3));
+    let status = wait_for(&mut child, 20);
+    drop(input);
+    assert_eq!(status.code(), Some(0), "a broken pipe exits with 0");
+    let project = projects.join("467a43b75d95c826");
+    assert!(
+        project.join("project.json").is_file(),
+        "the load made a project"
+    );
+    assert!(
+        !project.join("project.lock").exists(),
+        "the session releases the lock before the exit"
+    );
+    assert!(
+        project.join("snapshot.json").is_file(),
+        "the session writes the snapshot before the exit"
+    );
 }
 
 #[test]

@@ -110,9 +110,10 @@ impl Session {
         }
     }
 
-    /// Gives the open settings of a project of this session.
-    fn open_options(&self, read_only: bool) -> OpenOptions {
-        let break_lock = self.config.projects.as_ref().is_some_and(|p| p.break_lock);
+    /// Gives the open settings of a project of this session. `break_lock` replaces a stale
+    /// lock for this open only. `--break-lock` does it for every open.
+    fn open_options(&self, read_only: bool, break_lock: bool) -> OpenOptions {
+        let break_lock = break_lock || self.config.projects.as_ref().is_some_and(|p| p.break_lock);
         OpenOptions {
             access: if read_only {
                 Access::ReadOnly
@@ -135,7 +136,7 @@ impl Session {
     /// Opens a new binary of `bytes` with its project: the project of the binary on disk, or a
     /// new one. A session with no projects root keeps the binary in memory. A refused root also
     /// keeps it in memory, and the store keeps the reason. A read-only session opens a project
-    /// on disk, but it makes no new project.
+    /// on disk, but it makes no new project. `break_lock` replaces a stale lock for this call.
     ///
     /// # Errors
     ///
@@ -145,6 +146,7 @@ impl Session {
         binary: OpenBinary,
         bytes: &[u8],
         load: LoadSpec,
+        break_lock: bool,
     ) -> Result<(Admitted, Vec<Warning>), ToolError> {
         let root = match self.root_check() {
             Ok(Some(root)) => root,
@@ -164,7 +166,7 @@ impl Session {
         };
         if Project::exists(self.fs.as_mut(), &Project::dir_of(&root, binary.id)) {
             return self
-                .reopen(binary.id)?
+                .reopen_with(binary.id, break_lock)?
                 .ok_or_else(|| ToolError::new(ErrorCode::UnknownBinary));
         }
         if binary.read_only {
@@ -173,7 +175,7 @@ impl Session {
             return Ok((Admitted::Fresh, Vec::new()));
         }
         let meta = ProjectMeta::new(&binary.program, &binary.file_name, load);
-        let opts = self.open_options(false);
+        let opts = self.open_options(false, break_lock);
         let made = Project::create(self.fs.boxed(), &root, meta, bytes, &binary.program, &opts);
         let project = match made {
             Ok(project) => project,
@@ -181,7 +183,7 @@ impl Session {
             // opens like a project that was there first.
             Err(_) if Project::exists(self.fs.as_mut(), &Project::dir_of(&root, binary.id)) => {
                 return self
-                    .reopen(binary.id)?
+                    .reopen_with(binary.id, break_lock)?
                     .ok_or_else(|| ToolError::new(ErrorCode::UnknownBinary));
             }
             Err(error) => return Err(project_error(&error)),
@@ -205,6 +207,20 @@ impl Session {
         &mut self,
         id: BinaryId,
     ) -> Result<Option<(Admitted, Vec<Warning>)>, ToolError> {
+        self.reopen_with(id, false)
+    }
+
+    /// Opens the project of `id` like [`Session::reopen`]. `break_lock` replaces a stale lock
+    /// for this open only.
+    ///
+    /// # Errors
+    ///
+    /// Returns `PROJECT_LOCKED`, `JOURNAL_CORRUPT` or another project error.
+    pub(crate) fn reopen_with(
+        &mut self,
+        id: BinaryId,
+        break_lock: bool,
+    ) -> Result<Option<(Admitted, Vec<Warning>)>, ToolError> {
         let Some(root) = self.projects_root() else {
             return Ok(None);
         };
@@ -213,7 +229,7 @@ impl Session {
             return Ok(None);
         }
         let read_only = self.config.read_only;
-        let opts = self.open_options(read_only);
+        let opts = self.open_options(read_only, break_lock);
         let opened = Project::open(self.fs.boxed(), &dir, &opts).map_err(|e| project_error(&e))?;
         let status = opened.analysis;
         let analysis = status.last_run.map(|run| AnalysisInfo {

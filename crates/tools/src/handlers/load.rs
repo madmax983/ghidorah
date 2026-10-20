@@ -21,6 +21,10 @@
 //! A default projects root inside a git working tree keeps no project (ADR-0022). Then the
 //! result holds `persisted: false` and `persist_reason`, so the agent knows that its edits
 //! stay in memory only.
+//!
+//! A project lock of a process that is not alive gives `PROJECT_LOCKED` with `stale: true`.
+//! Then `next[0]` is the same call with `break_lock: true`. The flag holds for that call only,
+//! and the lock code replaces only a stale lock.
 
 use std::collections::BTreeMap;
 
@@ -57,8 +61,11 @@ pub const MAX_PATH_CHARS: usize = 4_096;
 /// The `why` of the `binary_survey` hint after a load.
 pub const WHY_SURVEY: &str = "Survey the binary that the call loaded.";
 
+/// The `why` of the repair call of a stale project lock.
+pub const WHY_BREAK_LOCK: &str = "The owner of the project lock is not alive. Send the call again with break_lock true to replace the lock.";
+
 /// Every fixed text of the handler that an agent reads.
-pub const TEXTS: &[&str] = &[WHY_SURVEY];
+pub const TEXTS: &[&str] = &[WHY_SURVEY, WHY_BREAK_LOCK];
 
 const ARGS: &[ArgSpec] = &[
     ArgSpec::new(
@@ -112,6 +119,13 @@ const ARGS: &[ArgSpec] = &[
         "How far the analysis runs after the load.",
     )
     .default_json("\"full\""),
+    ArgSpec::new(
+        "break_lock",
+        Role::Param,
+        ArgKind::Bool,
+        "Replace a stale project lock: a lock whose owner process is not alive. A live owner keeps its lock.",
+    )
+    .default_json("false"),
 ];
 
 const ANALYSIS: &[Field] = &[
@@ -387,6 +401,23 @@ fn report(binary: &OpenBinary, already: bool, steps_used: u64, refusal: Option<&
     out
 }
 
+/// Adds the repair call of a stale project lock to `error`: the same call with
+/// `break_lock: true`. Another error, or an error with a repair call, stays the same.
+fn lock_repair(error: ToolError, args: &Args) -> ToolError {
+    let stale = error.code == ErrorCode::ProjectLocked
+        && error.details.as_ref().and_then(|d| d.get("stale")) == Some(&Value::Bool(true));
+    if !stale || !error.next.is_empty() || args.bool("break_lock") == Some(true) {
+        return error;
+    }
+    let mut call = args.canonical().as_object().cloned().unwrap_or_default();
+    let _ = call.insert("break_lock", Value::Bool(true));
+    error.next(Call::new(
+        "binary_load",
+        Value::Object(call),
+        WHY_BREAK_LOCK,
+    ))
+}
+
 /// Runs the analysis that the call asks for after an open. Gives the fuel used.
 fn analyze_after(
     session: &mut Session,
@@ -421,7 +452,11 @@ fn open_by_id(
     if session.binary(id).is_some() {
         return finish(session, id, true, 0, ctx);
     }
-    let Some((admitted, warnings)) = session.reopen(id)? else {
+    let break_lock = args.bool("break_lock").unwrap_or(false);
+    let reopened = session
+        .reopen_with(id, break_lock)
+        .map_err(|e| lock_repair(e, args))?;
+    let Some((admitted, warnings)) = reopened else {
         return Err(session.unknown_binary_id(text));
     };
     ctx.warnings.extend(warnings);
@@ -494,7 +529,10 @@ fn run(session: &mut Session, args: &Args, ctx: &mut Ctx) -> Result<Payload, Too
         });
         return Ok(Payload::Object(report(&binary, false, 0, None)));
     }
-    let (admitted, warnings) = session.admit(binary, &bytes, load_spec(args)?)?;
+    let break_lock = args.bool("break_lock").unwrap_or(false);
+    let (admitted, warnings) = session
+        .admit(binary, &bytes, load_spec(args)?, break_lock)
+        .map_err(|e| lock_repair(e, args))?;
     ctx.warnings.extend(warnings);
     let steps = analyze_after(session, id, admitted, args, ctx)?;
     finish(session, id, false, steps, ctx)

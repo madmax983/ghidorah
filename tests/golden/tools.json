@@ -49,6 +49,9 @@
             "triage",
             "full"
           ]
+        },
+        "break_lock": {
+          "type": "boolean"
         }
       },
       "additionalProperties": false
