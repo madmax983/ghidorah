@@ -55,49 +55,96 @@ fn fused_pair_counts() -> (usize, usize) {
     counts
 }
 
-#[test]
-fn ac_068a_fusion_exhaustive_8bit() {
-    let mut checked = 0u64;
+/// Gives each fused `(op, cc)` pair with the kind of `b`: `true` for a constant `b`.
+fn fused_triples() -> Vec<(FlagOp, Cc, bool)> {
+    let mut out = Vec::new();
     for op in FlagOp::ALL {
         for cc in (0..16).filter_map(Cc::x86) {
             for const_b in [false, true] {
                 let probe = if const_b { Arg::k(7) } else { B };
-                if fuse(*op, cc, A, probe).is_none() {
-                    continue;
+                if fuse(*op, cc, A, probe).is_some() {
+                    out.push((*op, cc, const_b));
                 }
-                for a in 0..=0xffu64 {
-                    for b in 0..=0xffu64 {
-                        let b_arg = if const_b { Arg::k(b) } else { B };
-                        let (opc, x, y) = fuse(*op, cc, A, b_arg).expect("the pair fuses");
-                        assert!(opc.is_compare(), "{op:?} {}: {opc}", cc.name());
-                        let got = eval(opc, 8, 0, resolve(x, a, b), resolve(y, a, b), 0)
-                            .expect("a compare evaluates");
-                        for c in [0, 1] {
-                            let flags = x86_flags(*op, 8, a, b, c);
-                            let want = x86_cond(cc, flags);
-                            assert_eq!(
-                                got == 1,
-                                want,
-                                "{op:?} {} a={a:#x} b={b:#x} c={c}",
-                                cc.name()
-                            );
-                            let flipped = flags ^ undefined_mask(*op);
-                            assert_eq!(
-                                x86_cond(cc, flipped),
-                                want,
-                                "{op:?} {} reads an undefined flag",
-                                cc.name()
-                            );
-                            checked += 1;
-                        }
-                    }
-                }
+            }
+        }
+    }
+    out
+}
+
+/// Checks the fused compare of one pair at the width `w` against `x86_cond` for both
+/// carry inputs. Gives the count of checks.
+fn check_pair(op: FlagOp, cc: Cc, const_b: bool, width: u8, a: u64, b: u64) -> u64 {
+    let b_arg = if const_b { Arg::k(b) } else { B };
+    let (opc, lhs, rhs) = fuse(op, cc, A, b_arg).expect("the pair fuses");
+    assert!(opc.is_compare(), "{op:?} {}: {opc}", cc.name());
+    let (left, right) = (resolve(lhs, a, b), resolve(rhs, a, b));
+    let got = eval(opc, width, 0, left, right, 0).expect("a compare");
+    for carry in [0, 1] {
+        let flags = x86_flags(op, width, a, b, carry);
+        let want = x86_cond(cc, flags);
+        assert_eq!(
+            got == 1,
+            want,
+            "{op:?} {} w={width} const_b={const_b} a={a:#x} b={b:#x} c={carry}",
+            cc.name()
+        );
+        let flipped = flags ^ undefined_mask(op);
+        assert_eq!(
+            x86_cond(cc, flipped),
+            want,
+            "{op:?} {} reads an undefined flag",
+            cc.name()
+        );
+    }
+    2
+}
+
+/// Gives the edge values of the width `w`: 0, 1, 2, the sign bit and its neighbours, and
+/// the two largest values.
+fn edges(w: u8) -> [u64; 8] {
+    let max = u64::MAX >> (64 - u32::from(w));
+    let sign = 1u64 << (w - 1);
+    [0, 1, 2, sign - 1, sign, sign + 1, max - 1, max]
+}
+
+/// The random draws of each pair at each wide width.
+const WIDE_DRAWS: u64 = 2_000;
+
+#[test]
+fn ac_068a_fusion_exhaustive_8bit() {
+    let triples = fused_triples();
+    let mut checked = 0u64;
+    for &(op, cc, const_b) in &triples {
+        for a in 0..=0xffu64 {
+            for b in 0..=0xffu64 {
+                checked += check_pair(op, cc, const_b, 8, a, b);
             }
         }
     }
     // Sub 10, Logic 4, Neg 10, Dec 6 and Inc 2 pairs fuse. Add fuses 2 more with a constant.
     assert_eq!(fused_pair_counts(), (32, 34));
+    assert_eq!(triples.len(), 66);
     assert_eq!(checked, 66 * 65_536 * 2);
+    // The Add row, the constant 1 of Inc and the Neg and Dec reductions are glue outside K5.
+    // Random and edge inputs at 16, 32 and 64 bits check them at the width of the Flags op.
+    // The draws keep the high bits, so the compare must read only the low bits.
+    let mut rng = Xoshiro256ss::seed_from_u64(0x068a);
+    let mut draw = Gen::random(0x068a);
+    let mut wide = 0u64;
+    for w in [16u8, 32, 64] {
+        for &(op, cc, const_b) in &triples {
+            for a in edges(w) {
+                for b in edges(w) {
+                    wide += check_pair(op, cc, const_b, w, a, b);
+                }
+            }
+            for _ in 0..WIDE_DRAWS {
+                let (a, b) = (operand(&mut rng, &mut draw), operand(&mut rng, &mut draw));
+                wide += check_pair(op, cc, const_b, w, a, b);
+            }
+        }
+    }
+    assert_eq!(wide, 3 * 66 * (64 + WIDE_DRAWS) * 2);
 }
 
 #[test]
