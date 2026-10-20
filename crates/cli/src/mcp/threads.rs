@@ -2,7 +2,7 @@
 //!
 //! | Channel | From | To | Items |
 //! |---|---|---|---|
-//! | work | reader | worker | requests and the error replies of the reader, in input order, then a stop item at the end of stdin |
+//! | work | reader | worker | requests and the error replies of the reader, in input order, then a stop item at the end of stdin. The queue holds at most [`QUEUE`] items. |
 //! | out | worker | writer | reply and notification lines |
 //!
 //! The worker opens the backend, so the backend needs no `Send`. A broken pipe on stdout
@@ -13,7 +13,7 @@
 
 use std::io::{self, BufRead, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::mpsc::{self, Receiver, Sender, SyncSender};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -31,11 +31,23 @@ use crate::out::{self, Stop};
 use crate::record::Recorder;
 use crate::{Streams, VERSION, WORKER_STACK, catalog};
 
+#[cfg(test)]
+mod tests;
+
 /// The method of a cancel notification.
 const CANCELLED: &str = "notifications/cancelled";
 
 /// The longest wait for the worker after stdout fails.
 pub const STOP_WAIT: Duration = Duration::from_secs(5);
+
+/// The most work items that wait for the worker. A full queue makes the reader wait, so a
+/// flood of large lines cannot grow the memory without a limit.
+pub const QUEUE: usize = 64;
+
+/// Makes the work queue: a channel that holds at most [`QUEUE`] items.
+fn work_queue() -> (SyncSender<Work>, Receiver<Work>) {
+    mpsc::sync_channel(QUEUE)
+}
 
 /// One item of the work queue.
 enum Work {
@@ -117,7 +129,7 @@ enum WriterEnd {
 }
 
 /// Reads stdin lines and sends the work items in input order.
-fn read(stdin: Box<dyn BufRead + Send>, work: &Sender<Work>, cancels: &CancelMap, log: &Log) {
+fn read(stdin: Box<dyn BufRead + Send>, work: &SyncSender<Work>, cancels: &CancelMap, log: &Log) {
     let mut reader = LineReader::new(stdin, MAX_LINE);
     loop {
         let frame = match reader.next_frame() {
@@ -282,10 +294,17 @@ fn join_bounded(worker: thread::JoinHandle<()>, wait: Duration) -> bool {
 
 /// Stops the worker after stdout fails, and waits for it at most [`STOP_WAIT`].
 ///
-/// `stop` is a sender of the work queue. Its stop item wakes a worker that waits for work.
-fn stop_worker(worker: thread::JoinHandle<()>, running: &Running, stop: Sender<Work>, log: &Log) {
+/// `stop` is a sender of the work queue. Its stop item wakes a worker that waits for work. A
+/// full queue takes no stop item, but then the worker is busy, and it sees the stop mark
+/// before its next item.
+fn stop_worker(
+    worker: thread::JoinHandle<()>,
+    running: &Running,
+    stop: SyncSender<Work>,
+    log: &Log,
+) {
     running.stop();
-    let _ = stop.send(Work::Stop);
+    let _ = stop.try_send(Work::Stop);
     drop(stop);
     if !join_bounded(worker, STOP_WAIT) {
         log.line("The worker does not stop in 5 s. The server stops without it.");
@@ -310,7 +329,7 @@ pub fn serve<B: Backend>(options: Options, serve: &ServeOptions, streams: Stream
             return Exit::Usage;
         }
     };
-    let (work_tx, work_rx) = mpsc::channel();
+    let (work_tx, work_rx) = work_queue();
     let (out_tx, out_rx) = mpsc::channel();
     let (ready_tx, ready_rx) = mpsc::channel();
     let cancels = CancelMap::new();
