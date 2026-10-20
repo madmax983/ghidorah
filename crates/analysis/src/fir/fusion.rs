@@ -129,7 +129,7 @@ const ZF_SF_CODES: [u8; 4] = [4, 5, 8, 9];
 fn fused_compare(arena: &Arena, thunk: u32, cc: u8) -> Option<(Opc, u8, Arg, Arg)> {
     let t = arena.op(thunk)?;
     let op = t.flag_op()?;
-    if let Some((opc, x, y)) = fuse(op, Cc::x86(cc)?, t.a[0], t.a[1]) {
+    if let Some((opc, x, y)) = fuse(op, Cc::x86(cc)?, t.w, t.a[0], t.a[1]) {
         return Some((opc, t.w, x, y));
     }
     let r = match op {
@@ -139,7 +139,7 @@ fn fused_compare(arena: &Arena, thunk: u32, cc: u8) -> Option<(Opc, u8, Arg, Arg
         }
         _ => return None,
     };
-    if let Some((opc, x, y)) = fuse(FlagOp::X86Logic, Cc::x86(cc)?, r, r) {
+    if let Some((opc, x, y)) = fuse(FlagOp::X86Logic, Cc::x86(cc)?, t.w, r, r) {
         return Some((opc, t.w, x, y));
     }
     if !SIGN_CODES.contains(&cc) {

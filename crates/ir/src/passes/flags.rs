@@ -67,7 +67,8 @@ fn slot_of(ssa: &Ssa, cc: Cc, phi: Val, arg: Arg, anchor: Anchor) -> Option<Slot
             let op = thunk
                 .flag_op()
                 .filter(|_| matches!(thunk.w, 8 | 16 | 32 | 64))?;
-            let (opc, x, y) = fuse(op, cc, ssa.root(thunk.a[0]), ssa.root(thunk.a[1]))?;
+            let (lhs, rhs) = (ssa.root(thunk.a[0]), ssa.root(thunk.a[1]));
+            let (opc, x, y) = fuse(op, cc, thunk.w, lhs, rhs)?;
             Some(Slot::Compare {
                 anchor,
                 opc,

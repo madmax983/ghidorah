@@ -48,8 +48,8 @@ fn fused_pair_counts() -> (usize, usize) {
     let mut counts = (0, 0);
     for op in FlagOp::ALL {
         for cc in (0..16).filter_map(Cc::x86) {
-            counts.0 += usize::from(fuse(*op, cc, A, B).is_some());
-            counts.1 += usize::from(fuse(*op, cc, A, Arg::k(7)).is_some());
+            counts.0 += usize::from(fuse(*op, cc, 64, A, B).is_some());
+            counts.1 += usize::from(fuse(*op, cc, 64, A, Arg::k(7)).is_some());
         }
     }
     counts
@@ -62,7 +62,7 @@ fn fused_triples() -> Vec<(FlagOp, Cc, bool)> {
         for cc in (0..16).filter_map(Cc::x86) {
             for const_b in [false, true] {
                 let probe = if const_b { Arg::k(7) } else { B };
-                if fuse(*op, cc, A, probe).is_some() {
+                if fuse(*op, cc, 64, A, probe).is_some() {
                     out.push((*op, cc, const_b));
                 }
             }
@@ -75,7 +75,7 @@ fn fused_triples() -> Vec<(FlagOp, Cc, bool)> {
 /// carry inputs. Gives the count of checks.
 fn check_pair(op: FlagOp, cc: Cc, const_b: bool, width: u8, a: u64, b: u64) -> u64 {
     let b_arg = if const_b { Arg::k(b) } else { B };
-    let (opc, lhs, rhs) = fuse(op, cc, A, b_arg).expect("the pair fuses");
+    let (opc, lhs, rhs) = fuse(op, cc, width, A, b_arg).expect("the pair fuses");
     assert!(opc.is_compare(), "{op:?} {}: {opc}", cc.name());
     let (left, right) = (resolve(lhs, a, b), resolve(rhs, a, b));
     let got = eval(opc, width, 0, left, right, 0).expect("a compare");
@@ -150,31 +150,63 @@ fn ac_068a_fusion_exhaustive_8bit() {
 #[test]
 fn fuse_rows() {
     let code = |n| Cc::x86(n).expect("a valid code");
-    assert_eq!(fuse(FlagOp::X86Sub, code(4), A, B), Some((Opc::Eq, A, B)));
-    assert_eq!(fuse(FlagOp::X86Sub, code(7), A, B), Some((Opc::ULt, B, A)));
-    assert_eq!(fuse(FlagOp::X86Sub, code(13), A, B), Some((Opc::SLe, B, A)));
-    assert_eq!(fuse(FlagOp::X86Sub, code(8), A, B), None);
-    assert_eq!(fuse(FlagOp::X86Add, code(4), A, B), None);
     assert_eq!(
-        fuse(FlagOp::X86Add, code(5), A, Arg::k(1)),
+        fuse(FlagOp::X86Sub, code(4), 64, A, B),
+        Some((Opc::Eq, A, B))
+    );
+    assert_eq!(
+        fuse(FlagOp::X86Sub, code(7), 64, A, B),
+        Some((Opc::ULt, B, A))
+    );
+    assert_eq!(
+        fuse(FlagOp::X86Sub, code(13), 64, A, B),
+        Some((Opc::SLe, B, A))
+    );
+    assert_eq!(fuse(FlagOp::X86Sub, code(8), 64, A, B), None);
+    assert_eq!(fuse(FlagOp::X86Add, code(4), 64, A, B), None);
+    assert_eq!(
+        fuse(FlagOp::X86Add, code(5), 64, A, Arg::k(1)),
         Some((Opc::Ne, A, Arg::k(u64::MAX)))
     );
     assert_eq!(
-        fuse(FlagOp::X86Logic, code(6), A, B),
+        fuse(FlagOp::X86Logic, code(6), 64, A, B),
         Some((Opc::TestZ, A, B))
     );
     assert_eq!(
-        fuse(FlagOp::X86Neg, code(2), A, Arg::Nil),
+        fuse(FlagOp::X86Neg, code(2), 64, A, Arg::Nil),
         Some((Opc::ULt, Arg::k(0), A))
     );
     assert_eq!(
-        fuse(FlagOp::X86Dec, code(5), A, Arg::Nil),
+        fuse(FlagOp::X86Dec, code(5), 64, A, Arg::Nil),
         Some((Opc::Ne, A, Arg::k(1)))
     );
-    assert_eq!(fuse(FlagOp::X86Dec, code(2), A, Arg::Nil), None);
+    assert_eq!(fuse(FlagOp::X86Dec, code(2), 64, A, Arg::Nil), None);
     assert_eq!(
-        fuse(FlagOp::X86Inc, code(4), A, Arg::Nil),
+        fuse(FlagOp::X86Inc, code(4), 64, A, Arg::Nil),
         Some((Opc::Eq, A, Arg::k(u64::MAX)))
+    );
+    // The constant of the Add row is `-b` at the width of the Flags op.
+    for (w, minus_one) in [(8, 0xff), (16, 0xffff), (32, 0xffff_ffff), (64, u64::MAX)] {
+        assert_eq!(
+            fuse(FlagOp::X86Add, code(5), w, A, Arg::k(1)),
+            Some((Opc::Ne, A, Arg::k(minus_one))),
+            "w={w}"
+        );
+        assert_eq!(
+            fuse(FlagOp::X86Inc, code(4), w, A, Arg::Nil),
+            Some((Opc::Eq, A, Arg::k(minus_one))),
+            "w={w}"
+        );
+    }
+    assert_eq!(
+        fuse(FlagOp::X86Add, code(4), 16, A, Arg::k(0x1_0000_0005)),
+        Some((Opc::Eq, A, Arg::k(0xfffb))),
+        "the high bits of the constant go"
+    );
+    assert_eq!(
+        fuse(FlagOp::X86Add, code(5), 32, A, Arg::k(0x1_0000_0005)),
+        Some((Opc::Ne, A, Arg::k(0xffff_fffb))),
+        "the high bits of the constant go"
     );
     for op in [
         FlagOp::X86Adc,
@@ -183,7 +215,7 @@ fn fuse_rows() {
         FlagOp::Copy,
     ] {
         for cc in (0..16).filter_map(Cc::x86) {
-            assert_eq!(fuse(op, cc, A, B), None, "{op:?} {}", cc.name());
+            assert_eq!(fuse(op, cc, 64, A, B), None, "{op:?} {}", cc.name());
         }
     }
 }
