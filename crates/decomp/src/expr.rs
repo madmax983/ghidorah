@@ -287,6 +287,8 @@ pub struct Call {
     pub set: LocSet,
     /// The store of the return address that the call pushes. The call line shows it.
     pub push: Option<OpId>,
+    /// The immediates of an opaque instruction in operand order.
+    pub imm: Vec<u64>,
     /// The memory address of an `Intrinsic` with a memory effect.
     pub mem: Option<Expr>,
     /// The locations that the op writes and that a later statement reads.

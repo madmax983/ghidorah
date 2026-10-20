@@ -249,6 +249,7 @@ fn each_stop_reason() {
         defs: LocSet::EMPTY.with(Loc::RAX).expect("a register"),
         uses: LocSet::EMPTY,
         mem: MemEffect::None,
+        operands: Default::default(),
     };
     let rows: Vec<(StopReason, u16, Stop)> = vec![
         (

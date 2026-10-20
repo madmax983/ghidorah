@@ -270,12 +270,14 @@ fn local_effect_ops() {
         defs: [Loc::RAX, Loc::RCX, Loc::R11].into_iter().collect(),
         uses: [Loc::RAX, Loc::RDI].into_iter().collect(),
         mem: MemEffect::None,
+        operands: Default::default(),
     };
     let opaque = Effect {
         name: IntrinsicId(2),
         defs: LocSet::EMPTY,
         uses: LocSet::EMPTY,
         mem: MemEffect::Write { size: 8 },
+        operands: Default::default(),
     };
     let arena = program(|b| {
         b.begin(0x10, 4)?;

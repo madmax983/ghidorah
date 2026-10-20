@@ -28,7 +28,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use ghidorah_base::WarningCode;
-use ghidorah_ir::{Arena, Arg, InsnSpan, IntrinsicId, LocSet, Node, Op, OpId, Opc, Val};
+use ghidorah_ir::{
+    Arena, Arg, EffectOperand, InsnSpan, IntrinsicId, Loc, LocSet, Node, Op, OpId, Opc, Val,
+};
 
 use crate::Warning;
 use crate::expr::{Call, Callee, Expr, Stmt, VarIdx};
@@ -235,10 +237,16 @@ impl Ex<'_> {
         } else {
             LocSet::EMPTY
         };
-        let args = uses
+        let mut args: Vec<(Loc, Expr)> = uses
             .iter()
             .map(|&(loc, a)| (loc, self.arg(a, loc.width())))
             .collect();
+        let imm = match self.f.ssa.arena().effect(&op) {
+            Some(effect) if op.opc == Opc::Intrinsic => {
+                in_operand_order(&mut args, &effect.operands)
+            }
+            _ => Vec::new(),
+        };
         let mem = (op.opc == Opc::Intrinsic && op.a[1] != Arg::Nil).then(|| self.arg(op.a[1], 64));
         let rets = self
             .f
@@ -257,6 +265,7 @@ impl Ex<'_> {
             args,
             set,
             push,
+            imm,
             mem,
             rets,
             ret: None,
@@ -379,6 +388,7 @@ const fn forward(callee: u64, at: OpId) -> Call {
         args: Vec::new(),
         set: LocSet::EMPTY,
         push: None,
+        imm: Vec::new(),
         mem: None,
         rets: Vec::new(),
         ret: None,
@@ -386,6 +396,28 @@ const fn forward(callee: u64, at: OpId) -> Call {
         tail: true,
         at,
     }
+}
+
+/// Puts the register uses of an opaque instruction in the operand order of `operands`, the
+/// destination first. The other uses follow in location order. Gives the immediates in
+/// operand order.
+fn in_operand_order(args: &mut Vec<(Loc, Expr)>, operands: &[EffectOperand]) -> Vec<u64> {
+    let mut ordered: Vec<(Loc, Expr)> = Vec::with_capacity(args.len());
+    let mut imm = Vec::new();
+    for operand in operands {
+        match *operand {
+            EffectOperand::Loc(l) => {
+                if let Some(k) = args.iter().position(|(x, _)| *x == l) {
+                    ordered.push(args.remove(k));
+                }
+            }
+            EffectOperand::Imm(v) => imm.push(v),
+            EffectOperand::Mem | EffectOperand::None => {}
+        }
+    }
+    ordered.append(args);
+    *args = ordered;
+    imm
 }
 
 /// Tells if the instruction with these ops jumps to its own address: a `rep` loop.

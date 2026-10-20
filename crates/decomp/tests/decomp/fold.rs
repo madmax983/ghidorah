@@ -108,6 +108,7 @@ fn fold_stops_at_intrinsic_memory() {
         uses: LocSet::EMPTY,
         defs: LocSet::EMPTY,
         mem: MemEffect::Write { size: 8 },
+        operands: Default::default(),
     };
     b.begin(0x1004, 4).expect("in order");
     b.effect_op(Opc::Intrinsic, effect, Arg::k(0x2000))

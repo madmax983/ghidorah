@@ -250,6 +250,7 @@ fn warning_rows_sort_and_name_remedies() {
         args: Vec::new(),
         set: ghidorah_ir::LocSet::EMPTY,
         push: None,
+        imm: Vec::new(),
         mem: None,
         rets: Vec::new(),
         ret: None,

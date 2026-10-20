@@ -235,10 +235,16 @@ impl Printer<'_> {
                     .names
                     .name(*id)
                     .map_or_else(|| format!("intrinsic_{}", id.0), str::to_owned);
+                let imm: Vec<Expr> = c
+                    .imm
+                    .iter()
+                    .map(|&value| Expr::Const { value, w: 64 })
+                    .collect();
                 let mut inputs: Vec<&Expr> = c.args.iter().map(|(_, e)| e).collect();
                 if let Some(m) = &c.mem {
                     inputs.push(m);
                 }
+                inputs.extend(imm.iter());
                 self.helper(&name, &inputs, buf).0
             }
             Callee::Unimpl => "__unimpl()".to_owned(),

@@ -44,8 +44,8 @@ mod sse;
 use std::fmt;
 
 use ghidorah_ir::{
-    Arg, BuildError, Builder, Effect, FlagOp, IntrinsicId, IntrinsicNames, Loc, LocSet, MemEffect,
-    Opc,
+    Arg, BuildError, Builder, Effect, EffectOperand, FlagOp, IntrinsicId, IntrinsicNames, Loc,
+    LocSet, MAX_OPERANDS, MemEffect, Opc,
 };
 
 use crate::{Access, Flow, Insn, Mnem, Operand, Reg, RegClass, Seg};
@@ -310,6 +310,7 @@ fn syscall_effect() -> Effect {
         defs,
         uses,
         mem: MemEffect::None,
+        operands: [EffectOperand::None; MAX_OPERANDS],
     }
 }
 
@@ -453,7 +454,30 @@ pub fn effect(insn: &Insn) -> Effect {
         defs,
         uses,
         mem,
+        operands: operands(insn),
     }
+}
+
+/// Gives the explicit operands of `insn` in operand order: each register as its full-width
+/// location, the memory operand and each immediate, masked to its width.
+fn operands(insn: &Insn) -> [EffectOperand; MAX_OPERANDS] {
+    let mut out = [EffectOperand::None; MAX_OPERANDS];
+    let list = insn.ops().filter_map(|op| match op {
+        Operand::Reg { reg, .. } => loc(reg).map(EffectOperand::Loc),
+        Operand::Mem(_) => Some(EffectOperand::Mem),
+        Operand::Imm { value, width, .. } => {
+            let bits = u32::from(width).saturating_mul(8);
+            let mask = u64::MAX
+                .checked_shr(64u32.saturating_sub(bits))
+                .unwrap_or(0);
+            Some(EffectOperand::Imm(value.cast_unsigned() & mask))
+        }
+        Operand::Target { .. } | Operand::Opaque => None,
+    });
+    for (slot, op) in out.iter_mut().zip(list) {
+        *slot = op;
+    }
+    out
 }
 
 /// Gives the mnemonic that an [`IntrinsicId`] of this lifter names.

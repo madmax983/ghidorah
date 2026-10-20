@@ -105,6 +105,7 @@ fn expr_and_stmt_helpers() {
         args: vec![(Loc::RDI, var(6))],
         set: std::iter::once(Loc::RDI).collect(),
         push: None,
+        imm: Vec::new(),
         mem: Some(var(7)),
         rets: vec![(Loc::RAX, VarIdx(8))],
         ret: Some(Loc::RAX),
@@ -364,6 +365,7 @@ fn value_mode_stops() {
         uses: LocSet::EMPTY,
         defs: LocSet::EMPTY,
         mem: MemEffect::None,
+        operands: Default::default(),
     };
     let sys = stop_of(
         |b| b.effect_op(Opc::Syscall, effect, Arg::Nil).expect("sys"),

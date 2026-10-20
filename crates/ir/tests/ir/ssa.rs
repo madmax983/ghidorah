@@ -335,6 +335,7 @@ fn effects_read_and_write_their_locations() {
         uses: std::iter::once(Loc::RAX).collect(),
         defs: [Loc::RAX, Loc::Flags].into_iter().collect(),
         mem: MemEffect::None,
+        operands: Default::default(),
     };
     let arena = program(|b| {
         b.begin(0x5000, 2)?;

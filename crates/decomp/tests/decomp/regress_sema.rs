@@ -285,6 +285,7 @@ fn regress_void_signature_drops_result() {
         args: Vec::new(),
         set: LocSet::EMPTY,
         push: None,
+        imm: Vec::new(),
         mem: None,
         rets: vec![(Loc::RAX, VarIdx(0))],
         ret: None,
@@ -386,6 +387,60 @@ fn regress_call_push_is_not_a_store() {
         assert!(stores.is_empty(), "{fixture}: {stores:?}\n{t}");
         assert!(t.contains("(0x"), "{fixture}: the call of main stays: {t}");
     }
+}
+
+/// Gives the opaque instruction call of the view of `d` at `addr`.
+fn intrinsic_at(d: &ghidorah_decomp::Decomp, addr: u64) -> Call {
+    d.view
+        .nodes
+        .iter()
+        .flat_map(|n| &n.stmts)
+        .flat_map(|s| {
+            let mut found: Vec<Call> = Vec::new();
+            if let Stmt::Call(c) = s {
+                found.push(c.clone());
+            }
+            for e in s.exprs() {
+                for x in e.preorder() {
+                    if let ghidorah_decomp::Expr::Call(c) = x {
+                        found.push(c.as_ref().clone());
+                    }
+                }
+            }
+            found
+        })
+        .find(|c| c.at.addr == addr && matches!(c.callee, Callee::Intrinsic(_)))
+        .unwrap_or_else(|| panic!("no opaque instruction at {addr:#x}"))
+}
+
+/// Gives the register locations of the arguments of a call in order.
+fn arg_locs(c: &Call) -> Vec<Loc> {
+    c.args.iter().map(|(l, _)| *l).collect()
+}
+
+/// `pcmpgtd xmm10,xmm0` at 0x12aa computes `xmm10 > xmm0`, and `pandn xmm10,xmm7` at 0x12b4
+/// computes `~xmm10 & xmm7`. The uses of an opaque instruction were a set in register order,
+/// so the text gave `__pcmpgtd(xmm0, xmm10)`. `pshufd` lost its control byte (decomp-08).
+#[test]
+fn regress_intrinsic_operand_order() {
+    let xmm = |n| Loc::xmm(n).expect("an XMM register");
+    let p = program("loops.clang-O2");
+    let entry = entry_of(p, "grid_walk");
+    let d = ghidorah_decomp::decompile(p, fid(entry), &Opts::default(), &mut Fuel::unlimited())
+        .expect("the decompile");
+    let cmp = intrinsic_at(&d, 0x12aa);
+    assert_eq!(arg_locs(&cmp)[..2], [xmm(10), xmm(0)], "{cmp:?}");
+    let andn = intrinsic_at(&d, 0x12b4);
+    assert_eq!(arg_locs(&andn)[..2], [xmm(10), xmm(7)], "{andn:?}");
+    let shuffle = intrinsic_at(&d, 0x12be);
+    assert_eq!(arg_locs(&shuffle).first(), Some(&xmm(10)), "{shuffle:?}");
+    assert_eq!(shuffle.imm, [0xee]);
+    assert_eq!(intrinsic_at(&d, 0x12c9).imm, [0x55]);
+    let text = text("loops.clang-O2", "grid_walk");
+    assert!(
+        text.contains(", 0xee)") && text.contains(", 0x55)"),
+        "{text}"
+    );
 }
 
 /// `test rdx,rdx; je 12fc` at 0x12d2 of `decode` skips the loop when `n == 0`. So the loop

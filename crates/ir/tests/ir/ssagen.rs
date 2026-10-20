@@ -489,6 +489,7 @@ impl Gen<'_> {
                     uses: [Loc::RAX, Loc::RDX].into_iter().collect(),
                     defs: [Loc::RAX, Loc::RCX].into_iter().collect(),
                     mem: MemEffect::None,
+                    operands: Default::default(),
                 };
                 b.effect_op(Opc::Syscall, effect, NIL)?;
             }
@@ -498,6 +499,7 @@ impl Gen<'_> {
                     uses: std::iter::once(Loc::Reg(32)).collect(),
                     defs: [Loc::Reg(32), Loc::Flags].into_iter().collect(),
                     mem: MemEffect::Read { size: 16 },
+                    operands: Default::default(),
                 };
                 let addr = self.addr(b)?;
                 b.effect_op(Opc::Intrinsic, effect, addr)?;

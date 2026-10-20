@@ -42,7 +42,10 @@ pub use graph::{Cfg, DomTree, GraphError, Loop, Node, dominators, irreducible, l
 pub use interp::{Config, EvalError, FlatImage, Image, Interp, NoImage, Stop, StopReason, eval};
 pub use loc::{Loc, LocSet};
 pub use local::{LocalValue, Memory, NoMemory};
-pub use op::{Arg, Cc, Effect, FlagOp, Imm, IntrinsicId, MemEffect, Op, OpId, Opc, Val};
+pub use op::{
+    Arg, Cc, Effect, EffectOperand, FlagOp, Imm, IntrinsicId, MAX_OPERANDS, MemEffect, Op, OpId,
+    Opc, Val,
+};
 pub use passes::{Pass, PassRun, Report, Switches};
 pub use print::{IntrinsicNames, NoNames};
 pub use sem::{undefined_mask, x86_cond, x86_flags};
