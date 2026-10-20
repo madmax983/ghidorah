@@ -8,7 +8,6 @@ use std::fmt::Write as _;
 use ghidorah_base::{BinText, Caps};
 use ghidorah_ir::{Cc, FlagOp, Loc, OpId, Opc};
 
-use super::calls::call_ret;
 use super::{Buf, Printer, width_type};
 use crate::expr::{Callee, Expr, Stmt, VarIdx};
 use crate::lattice;
@@ -156,7 +155,7 @@ impl Printer<'_> {
                     }
                     return format!("return {text};");
                 }
-                match call_ret(c) {
+                match self.result_var(c) {
                     Some(v) => format!("{} = {text};", self.var(v)),
                     None => format!("{text};"),
                 }

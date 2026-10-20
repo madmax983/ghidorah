@@ -12,7 +12,7 @@
 //! | Op | Locations |
 //! |---|---|
 //! | `Ret` reads | the first integer return register |
-//! | A call reads | the integer and floating argument registers, and the varargs register |
+//! | A call reads | the integer and floating argument registers, the varargs register when the callee can take a variable argument list, and its stack arguments ([`callsite`]) |
 //! | A call writes | each general register that the callee does not keep, each XMM register and the flags |
 //! | A call pops | 8 bytes from `rsp` on return: the return address that the call pushes |
 //!
@@ -28,7 +28,7 @@ use ghidorah_ir::ssa::{self, Ssa, SsaError};
 use ghidorah_ir::{Arg, Loc, LocSet, Node, Opc};
 use ghidorah_types::CallConv;
 
-use super::{FirError, FuncIr, Opts};
+use super::{FirError, FuncIr, Opts, callsite};
 use crate::cc::{conv_of, loc_of};
 
 /// The L1 form of one function, with its L0 IR.
@@ -162,8 +162,27 @@ pub fn lift(
     switches: &Switches,
     fuel: &mut Fuel,
 ) -> Result<L1Ir, L1Error> {
+    lift_with(l0, conv, &|_| true, switches, fuel)
+}
+
+/// Makes the L1 form like [`lift`], with the varargs facts of the callees.
+///
+/// `variadic` tells if the direct callee at an address can take a variable argument list. A
+/// call of another callee does not read the varargs register ([`callsite::uses`]).
+///
+/// # Errors
+///
+/// Returns the errors of [`lift`].
+pub fn lift_with(
+    l0: FuncIr,
+    conv: &CallConv,
+    variadic: &dyn Fn(u64) -> bool,
+    switches: &Switches,
+    fuel: &mut Fuel,
+) -> Result<L1Ir, L1Error> {
     let (arena, tail_calls) = rewrite_tail_jumps(&l0);
-    let mut ssa = ssa::build(arena, l0.body.clone(), &ssa_opts(conv), fuel)?;
+    let calls = callsite::uses(&l0, conv, variadic);
+    let mut ssa = ssa::build_with(arena, l0.body.clone(), &ssa_opts(conv), &calls, fuel)?;
     let report = passes::run(&mut ssa, switches, fuel)?;
     Ok(L1Ir {
         l0,
@@ -186,5 +205,22 @@ pub fn build(
     fuel: &mut Fuel,
 ) -> Result<L1Ir, L1Error> {
     let l0 = super::build(program, id, opts, fuel)?;
-    lift(l0, conv_of(program), switches, fuel)
+    let targets: BTreeSet<u64> = l0
+        .arena
+        .ops()
+        .iter()
+        .filter(|op| op.opc == Opc::Call)
+        .filter_map(|op| op.a[0].as_k())
+        .collect();
+    let varargs: BTreeSet<u64> = targets
+        .into_iter()
+        .filter(|&t| callsite::callee_varargs(program, t))
+        .collect();
+    lift_with(
+        l0,
+        conv_of(program),
+        &|t| varargs.contains(&t),
+        switches,
+        fuel,
+    )
 }

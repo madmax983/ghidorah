@@ -27,7 +27,7 @@
     "flags": [],
     "caveats": [],
     "decomp": {
-      "text": "uint64_t main(uint64_t param_1, uint64_t param_2)\n{\n    if ((int32_t)param_1 <= 1) {\n        puts(\"usage: crackme <password>\");\n        v28 = 2;\n    } else {\n        v14 = check_password(*(uint64_t *)(param_2 + 8));\n        if ((uint32_t)v14 != 0) {\n            puts(\"Access granted\");\n            v28 = 0;\n        } else {\n            puts(\"Access denied\");\n            v28 = 1;\n        }\n    }\n    return v28;\n}\n",
+      "text": "uint64_t main(uint64_t param_1, uint64_t param_2)\n{\n    if ((int32_t)param_1 <= 1) {\n        puts(\"usage: crackme <password>\");\n        v27 = 2;\n    } else {\n        v13 = check_password(*(uint64_t *)(param_2 + 8));\n        if ((uint32_t)v13 != 0) {\n            puts(\"Access granted\");\n            v27 = 0;\n        } else {\n            puts(\"Access denied\");\n            v27 = 1;\n        }\n    }\n    return v27;\n}\n",
       "line_start": 1,
       "line_count": 17,
       "total_lines": 17,
@@ -183,14 +183,14 @@
         },
         {
           "id": "var:0x1080/reg:tmp@0x1091",
-          "name": "v14",
+          "name": "v13",
           "type": "uint64_t",
           "storage": "reg:tmp@0x1091",
           "source": "default"
         },
         {
           "id": "var:0x1080/reg:tmp@0x10ab",
-          "name": "v28",
+          "name": "v27",
           "type": "uint64_t",
           "storage": "reg:tmp@0x10ab",
           "source": "default"

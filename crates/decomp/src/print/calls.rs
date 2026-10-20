@@ -24,7 +24,7 @@ fn is_mangled(name: &str) -> bool {
 
 /// Gives the variable that gets the result of a call statement: the `rax` result, or the
 /// first result of an opaque instruction.
-pub(super) fn call_ret(c: &Call) -> Option<VarIdx> {
+fn call_ret(c: &Call) -> Option<VarIdx> {
     c.rets
         .iter()
         .find(|(l, _)| *l == Loc::RAX)
@@ -36,6 +36,18 @@ pub(super) fn call_ret(c: &Call) -> Option<VarIdx> {
 }
 
 impl Printer<'_> {
+    /// Gives the variable that gets the result of a call statement. A direct callee whose
+    /// signature has no return value gives `None`. Its `rax` holds no result. So a later read
+    /// of the variable reads a value with no def.
+    pub(super) fn result_var(&self, c: &Call) -> Option<VarIdx> {
+        if let Callee::Direct(t) = c.callee
+            && self.env.signature(t).is_some_and(|s| s.ret.is_none())
+        {
+            return None;
+        }
+        call_ret(c)
+    }
+
     /// Gives the printed name of the callee `t` and adds a mangled-name warning at `site`.
     fn callee_name(&mut self, t: u64, site: u64) -> String {
         match self.env.callee_name(t) {
@@ -75,21 +87,23 @@ impl Printer<'_> {
     }
 
     /// Gives the count of the argument registers that the caller sets: one more than the
-    /// last one that holds a new value.
-    fn set_count(&self, c: &Call, regs: &[Loc]) -> usize {
+    /// last one in the set of the call.
+    fn set_count(c: &Call, regs: &[Loc]) -> usize {
         regs.iter()
-            .rposition(|r| {
-                c.args
-                    .iter()
-                    .find(|(l, _)| l == r)
-                    .is_some_and(|(_, e)| !self.untouched(e, *r))
-            })
+            .rposition(|r| c.set.contains(*r))
             .map_or(0, |i| i.saturating_add(1))
     }
 
-    /// Gives the argument texts of a call. A tail call with no argument list passes the
-    /// parameters of the function on, so a missing register prints as `param_N`.
-    fn args(&mut self, c: &Call, regs: &[Loc], count: usize, buf: &mut Buf) -> String {
+    /// Gives the argument texts of a call: `count` registers, then at most `stack` stack
+    /// arguments. A tail call with no argument list passes the parameters of the function on,
+    /// so a missing register prints as `param_N`.
+    fn args(
+        &mut self,
+        c: &Call,
+        regs: &[Loc],
+        (count, stack): (usize, usize),
+        buf: &mut Buf,
+    ) -> String {
         let forward = c.tail && c.args.is_empty();
         let mut out = Vec::new();
         for (k, r) in regs.iter().take(count).enumerate() {
@@ -100,7 +114,35 @@ impl Printer<'_> {
             };
             out.push(text);
         }
+        if count >= regs.len() {
+            let slots = c
+                .args
+                .iter()
+                .filter(|(l, _)| matches!(l, Loc::Stack(_)))
+                .take(stack);
+            for (_, e) in slots {
+                out.push(self.expr(e, buf).0);
+            }
+        }
         out.join(", ")
+    }
+
+    /// Gives the count of the stack arguments of a call to print. A known count gives the
+    /// arguments after the registers. When the caller sets every argument register and the
+    /// count can be larger, the count is each stack argument of the call.
+    fn stack_count(c: &Call, regs: &[Loc], arity: Option<Arity>) -> usize {
+        let all = c
+            .args
+            .iter()
+            .filter(|(l, _)| matches!(l, Loc::Stack(_)))
+            .count();
+        let full = Self::set_count(c, regs) >= regs.len();
+        match arity {
+            Some(a) if !a.variadic => a.named.saturating_sub(regs.len()),
+            _ if full => all,
+            Some(a) => a.named.saturating_sub(regs.len()),
+            None => 0,
+        }
     }
 
     /// Gives the text of a system call: `sys_<name>(..)` for a known number, else
@@ -111,8 +153,8 @@ impl Printer<'_> {
             (&Loc::RAX, Expr::Const { value, .. }) => Some(*value),
             _ => None,
         });
-        let count = self.set_count(c, &regs);
-        let args = self.args(c, &regs, count, buf);
+        let count = Self::set_count(c, &regs);
+        let args = self.args(c, &regs, (count, 0), buf);
         if let Some(nr) = nr {
             let id = self
                 .env
@@ -148,17 +190,19 @@ impl Printer<'_> {
         match &c.callee {
             Callee::Direct(t) => {
                 let name = self.callee_name(*t, site);
-                let set = self.set_count(c, &regs);
-                let count = match self.arity(*t) {
+                let set = Self::set_count(c, &regs);
+                let arity = self.arity(*t);
+                let count = match arity {
                     Some(a) if a.variadic => a.named.max(set),
                     Some(a) => a.named,
                     None => set,
                 };
+                let stack = Self::stack_count(c, &regs, arity);
                 buf.calls.push(CallRow {
                     target: CallTarget::Addr(*t),
                     name: name.clone(),
                 });
-                let args = self.args(c, &regs, count, buf);
+                let args = self.args(c, &regs, (count, stack), buf);
                 format!("{name}({args})")
             }
             Callee::Indirect(target) => {
@@ -177,8 +221,9 @@ impl Printer<'_> {
                     });
                 }
                 let (t, p) = self.expr(target, buf);
-                let count = self.set_count(c, &regs);
-                let args = self.args(c, &regs, count, buf);
+                let count = Self::set_count(c, &regs);
+                let stack = Self::stack_count(c, &regs, None);
+                let args = self.args(c, &regs, (count, stack), buf);
                 format!("(*{})({args})", wrap(&t, p, UNARY, true))
             }
             Callee::Syscall => self.syscall_text(c, buf),

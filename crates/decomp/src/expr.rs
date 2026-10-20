@@ -20,7 +20,7 @@
 //! | `Return` | A return with the values of the return registers |
 //! | `Goto` | An unresolved indirect jump: `goto *(target);` |
 
-use ghidorah_ir::{IntrinsicId, Loc, OpId, Opc};
+use ghidorah_ir::{IntrinsicId, Loc, LocSet, OpId, Opc};
 
 /// The index of a variable in [`crate::View::vars`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -279,8 +279,12 @@ pub enum Callee {
 pub struct Call {
     /// The target.
     pub callee: Callee,
-    /// The values of the locations that the op reads, in location order.
+    /// The values of the locations that the op reads, in location order. The stack
+    /// arguments of a call are the `Stack` locations at the end.
     pub args: Vec<(Loc, Expr)>,
+    /// The argument registers that the caller sets for the call: a new value, or a write in
+    /// the block of the call. The register of an indirect target is not in the set.
+    pub set: LocSet,
     /// The memory address of an `Intrinsic` with a memory effect.
     pub mem: Option<Expr>,
     /// The locations that the op writes and that a later statement reads.

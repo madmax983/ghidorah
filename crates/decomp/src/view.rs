@@ -29,6 +29,7 @@ use crate::expr::{Expr, Stmt};
 use crate::shape::Shape;
 use crate::{ElideReason, Elided, Warning, fold, vars};
 
+mod args;
 mod assemble;
 pub(crate) mod facts;
 pub(crate) mod stmts;
@@ -254,6 +255,7 @@ pub fn build(
     let plan = fold::plan(&f, fold);
     let ex = Ex {
         f: &f,
+        l0: input.l0,
         plan: &plan,
         env,
         tails: input.tail_calls,

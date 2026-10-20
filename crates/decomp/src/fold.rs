@@ -14,11 +14,12 @@
 //! depth stays at most [`MAX_FOLD_DEPTH`], so each walk of an expression is short.
 //!
 //! A call whose one location def has one use in the same block can fold too: the call becomes
-//! an expression.
+//! an expression. A value with an effect (a load, a call or a division that can stop) does not
+//! fold into a stack argument of a call, because the printer can leave out that argument.
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use ghidorah_ir::{Arg, Op, Opc, Val};
+use ghidorah_ir::{Arg, Loc, Op, Opc, Val};
 
 use crate::view::facts::{Facts, Kind, Site, inputs};
 
@@ -165,6 +166,15 @@ fn walk_block(f: &Facts<'_>, list: &[u32], succs: usize, out: &mut Plan) {
                 _ => None,
             })
             .collect();
+        // A printer can leave out a stack argument of a call, so only a value with no
+        // effect folds into one.
+        let stack_vals: BTreeSet<Val> = f
+            .ssa
+            .uses_at(i)
+            .iter()
+            .filter(|(l, _)| matches!(l, Loc::Stack(_)))
+            .filter_map(|(_, a)| a.as_v())
+            .collect();
         let mut here = props(op);
         let mut depth = 1u32;
         let dropped = match op.opc {
@@ -173,7 +183,12 @@ fn walk_block(f: &Facts<'_>, list: &[u32], succs: usize, out: &mut Plan) {
             _ => false,
         };
         pending.retain(|r| {
-            if !dropped && used.contains(&r.val) && f.site.get(&r.val) == Some(&Site::Op(i)) {
+            let hidden = stack_vals.contains(&r.val) && r.props != Props::default();
+            if !dropped
+                && !hidden
+                && used.contains(&r.val)
+                && f.site.get(&r.val) == Some(&Site::Op(i))
+            {
                 here = here.union(r.props);
                 depth = depth.max(r.depth.saturating_add(1));
                 false

@@ -24,7 +24,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use ghidorah_base::WarningCode;
-use ghidorah_ir::{Arg, IntrinsicId, Node, Op, OpId, Opc, Val};
+use ghidorah_ir::{Arena, Arg, IntrinsicId, LocSet, Node, Op, OpId, Opc, Val};
 
 use crate::Warning;
 use crate::expr::{Call, Callee, Expr, Stmt, VarIdx};
@@ -40,7 +40,11 @@ pub(crate) enum Term {
     /// A branch: true goes to the block at `taken`.
     Branch { cond: Expr, taken: u64 },
     /// A branch whose false side runs `tail` (a return) in the same instruction.
-    BranchStop { cond: Expr, taken: u64, tail: Stmt },
+    BranchStop {
+        cond: Expr,
+        taken: u64,
+        tail: Box<Stmt>,
+    },
     /// An indirect jump with cases in the CFG.
     Switch { target: Expr },
 }
@@ -67,6 +71,8 @@ pub(crate) struct Raw {
 /// The expression builder of one view.
 pub(crate) struct Ex<'a> {
     pub(crate) f: &'a Facts<'a>,
+    /// The L0 arena: the `Put` ops that L1 turns into `Nop`.
+    pub(crate) l0: &'a Arena,
     pub(crate) plan: &'a Plan,
     pub(crate) env: &'a dyn Env,
     pub(crate) tails: &'a BTreeSet<u64>,
@@ -219,10 +225,13 @@ impl Ex<'_> {
             ),
             _ => Callee::Unimpl,
         };
-        let args = self
-            .f
-            .ssa
-            .uses_at(i)
+        let uses = self.f.ssa.uses_at(i);
+        let set = if matches!(op.opc, Opc::Call | Opc::CallInd | Opc::Syscall) {
+            self.set_args(i, &op, uses)
+        } else {
+            LocSet::EMPTY
+        };
+        let args = uses
             .iter()
             .map(|&(loc, a)| (loc, self.arg(a, loc.width())))
             .collect();
@@ -239,6 +248,7 @@ impl Ex<'_> {
         Call {
             callee,
             args,
+            set,
             mem,
             rets,
             ret: None,
@@ -332,6 +342,7 @@ const fn forward(callee: u64, at: OpId) -> Call {
     Call {
         callee: Callee::Direct(callee),
         args: Vec::new(),
+        set: LocSet::EMPTY,
         mem: None,
         rets: Vec::new(),
         ret: None,
@@ -407,7 +418,7 @@ pub(crate) fn block(ex: &Ex<'_>, b: Node) -> Raw {
                     Some(&(r, ret)) if ret.opc == Opc::Ret => Term::BranchStop {
                         cond,
                         taken,
-                        tail: ex.ret(tagged.get(r).map_or(0, |t| t.0), &ret),
+                        tail: Box::new(ex.ret(tagged.get(r).map_or(0, |t| t.0), &ret)),
                     },
                     _ => Term::Branch { cond, taken },
                 };

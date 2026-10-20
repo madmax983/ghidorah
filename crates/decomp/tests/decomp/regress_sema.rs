@@ -2,11 +2,12 @@
 //! the IR value with the meaning of the machine code.
 
 use ghidorah_base::Fuel;
-use ghidorah_decomp::{Cond, Exit, Opts, Stmt, Tree};
-use ghidorah_ir::{Loc, NoNames, Opc};
+use ghidorah_decomp::print::{self, PrintEnv, Signature};
+use ghidorah_decomp::{Call, Callee, Cond, Exit, Opts, Stmt, Tree, VarIdx};
+use ghidorah_ir::{Loc, LocSet, NoNames, Opc};
 
 use crate::fixtures::{entry_of, fid, program};
-use crate::out_print::{Spec, bin, decomp, k, op, param, text_of, un, v};
+use crate::out_print::{ENTRY, Spec, bin, decomp, k, op, param, temp, text_of, un, v};
 use crate::shapes::node;
 
 /// Gives the decompiled text of the function `name` of the fixture `fixture`.
@@ -140,8 +141,8 @@ fn regress_stack_pointer_after_call() {
     }
     assert!(seen[0].ends_with(" + 9"), "{t}");
     assert!(seen.iter().all(|a| *a == seen[0]), "{seen:?}\n{t}");
-    // gcc reloads the canary with `mov rax,[rsp+0x18]` after 4 calls. The buffer is at
-    // `rsp + 9`, so the reload base is the base of the buffer.
+    // gcc pops rbx with `pop rbx` at `[rsp+0x20]` after `add rsp,0x20`, and 5 calls run
+    // before. The buffer is at `rsp + 9`, so the pop reads the base of the buffer + 0x20.
     let g = text("xor_decode.gcc-O2", "main");
     let buffer = args_after(&g, "decode(")[0];
     let line = g
@@ -153,9 +154,163 @@ fn regress_stack_pointer_after_call() {
         .trim_start_matches(&format!("{buffer} = "))
         .trim_end_matches(" + 9;");
     assert!(
-        g.contains(&format!("*(uint64_t *)({base} + 0x18)")),
-        "the canary reload reads {base} + 0x18: {g}"
+        g.contains(&format!(" = {base} + 0x20;")) || g.contains(&format!("({base} + 0x20)")),
+        "the pop of rbx reads {base} + 0x20: {g}"
     );
+}
+
+/// Gives the top-level arguments of the call text `name(..)` in `line`.
+fn call_args<'t>(line: &'t str, name: &str) -> Vec<&'t str> {
+    let Some(start) = line.find(&format!("{name}(")) else {
+        return Vec::new();
+    };
+    let body = &line[start + name.len() + 1..];
+    let mut out = Vec::new();
+    let (mut depth, mut from, mut quoted) = (0i32, 0usize, false);
+    for (i, ch) in body.char_indices() {
+        match ch {
+            '"' => quoted = !quoted,
+            '(' if !quoted => depth += 1,
+            ')' if !quoted && depth == 0 => {
+                out.push(body[from..i].trim());
+                return out;
+            }
+            ')' if !quoted => depth -= 1,
+            ',' if !quoted && depth == 0 => {
+                out.push(body[from..i].trim());
+                from = i + 1;
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+/// `push r14` at 0x10ec puts the 7th argument of `__printf_chk` on the stack: the
+/// `grid_walk` result. The call took its arguments from registers only, so the text lost it
+/// (decomp-05).
+#[test]
+fn regress_stack_argument_of_call() {
+    let t = text("loops.gcc-O2", "main");
+    let line = t
+        .lines()
+        .find(|l| l.contains("__printf_chk("))
+        .unwrap_or_else(|| panic!("no __printf_chk call: {t}"));
+    let args = call_args(line, "__printf_chk");
+    assert_eq!(args.len(), 7, "{line}");
+    let last = args[6];
+    let grid = t
+        .lines()
+        .map(str::trim)
+        .find_map(|l| l.strip_suffix(" = grid_walk((uint64_t)(uint32_t)v13, 7);"))
+        .or_else(|| {
+            t.lines()
+                .map(str::trim)
+                .find(|l| l.contains("= grid_walk("))
+                .and_then(|l| l.split(" = ").next())
+        })
+        .unwrap_or_else(|| panic!("no grid_walk result: {t}"));
+    assert!(
+        t.contains(&format!("{last} = (uint64_t)(uint32_t){grid};")) || last.ends_with(grid),
+        "the 7th argument {last} is the grid_walk result {grid}: {t}"
+    );
+}
+
+/// `mov rdi,rbx; call rbp` passes the node to the visitor. The variable of `rdi` also holds
+/// the entry value of `rdi`, so the printer counted no argument. gcc -O0 sets `rdi` through
+/// a stack slot. It calls through `rdx`, so that register is not an argument (decomp-06).
+#[test]
+fn regress_indirect_call_arguments() {
+    for fixture in ["recursion.gcc-O2", "recursion.clang-O2", "recursion.gcc-O0"] {
+        let t = text(fixture, "walk");
+        assert!(t.contains("(*param_2)(param_1);"), "{fixture}: {t}");
+        assert!(t.starts_with("void walk("), "{fixture}: {t}");
+        assert!(!t.contains("return v"), "{fixture}: {t}");
+    }
+}
+
+/// A callee with no return value leaves no result in `rax`. `free_list` and `decode` return
+/// no value, and the text assigned their `rax` and read it (decomp-11).
+#[test]
+fn regress_void_callee_result() {
+    let main = text("struct_access.gcc-O2", "main");
+    let free = main
+        .lines()
+        .map(str::trim)
+        .find(|l| l.contains("free_list("))
+        .unwrap_or_else(|| panic!("{main}"));
+    assert!(free.starts_with("free_list("), "{main}");
+    assert!(main.contains("return 0;"), "{main}");
+    let main = text("xor_decode.gcc-O2", "main");
+    let decode = main
+        .lines()
+        .map(str::trim)
+        .find(|l| l.contains("decode("))
+        .unwrap_or_else(|| panic!("{main}"));
+    assert!(decode.starts_with("decode("), "{main}");
+}
+
+/// The facts of a hand-made function: the callee at 0x2000 returns no value.
+struct VoidCallee;
+
+impl ghidorah_decomp::Env for VoidCallee {
+    fn callee_name(&self, addr: u64) -> Option<String> {
+        (addr == 0x2000).then(|| "sink".to_owned())
+    }
+    fn is_noreturn(&self, _addr: u64) -> bool {
+        false
+    }
+    fn is_string(&self, _addr: u64) -> bool {
+        false
+    }
+}
+
+impl PrintEnv for VoidCallee {
+    fn signature(&self, addr: u64) -> Option<Signature> {
+        (addr == 0x2000).then(|| Signature {
+            params: Vec::new(),
+            names: Vec::new(),
+            ret: None,
+            variadic: false,
+        })
+    }
+}
+
+/// The printer drops the result of a call whose callee signature has no return value. A
+/// later read of the variable reads a value with no def (decomp-11).
+#[test]
+fn regress_void_signature_drops_result() {
+    let call = Call {
+        callee: Callee::Direct(0x2000),
+        args: Vec::new(),
+        set: LocSet::EMPTY,
+        mem: None,
+        rets: vec![(Loc::RAX, VarIdx(0))],
+        ret: None,
+        noreturn: false,
+        tail: false,
+        at: op(0, 0, 0),
+    };
+    let d = decomp(
+        vec![Spec::new(
+            Exit::Stop,
+            vec![
+                Stmt::Call(call),
+                Stmt::Return {
+                    uses: vec![(Loc::RAX, v(0, 64))],
+                    at: op(0, 1, 0),
+                },
+            ],
+        )],
+        vec![temp("rax", ENTRY, 64)],
+        Tree::Block(node(0)),
+    );
+    let lines: Vec<String> = print::print(&d, &VoidCallee, &NoNames, "f")
+        .lines
+        .into_iter()
+        .map(|l| l.text)
+        .collect();
+    assert_eq!(lines[2], "    sink();", "{lines:?}");
 }
 
 /// `test rdx,rdx; je 12fc` at 0x12d2 of `decode` skips the loop when `n == 0`. So the loop

@@ -101,6 +101,7 @@ const fn loc_width(w: u8) -> bool {
 struct Local<'a> {
     ssa: &'a mut Ssa,
     opts: &'a Opts,
+    calls: &'a BTreeMap<u32, Vec<Loc>>,
     reads: &'a mut Vec<Read>,
     block: Node,
     defs: BTreeMap<Loc, Arg>,
@@ -127,9 +128,18 @@ impl Local<'_> {
 
     /// Records the location uses and adds the location defs of a flow op.
     fn flow(&mut self, index: u32, op: &Op) -> Result<(), SsaError> {
-        let (uses, defs) = flow_sets(&self.ssa.arena, op, self.opts)?;
+        let (set, defs) = flow_sets(&self.ssa.arena, op, self.opts)?;
+        let uses: Vec<Loc> = match self.calls.get(&index) {
+            Some(own) if matches!(op.opc, Opc::Call | Opc::CallInd) => {
+                let mut own = own.clone();
+                own.sort_unstable();
+                own.dedup();
+                own
+            }
+            _ => set.iter().collect(),
+        };
         let mut list = Vec::new();
-        for loc in uses.iter() {
+        for loc in uses {
             let value = self.defs.get(&loc).copied().unwrap_or_else(|| {
                 self.reads.push(Read::Use {
                     op: index,
@@ -233,6 +243,7 @@ pub(super) fn build(
     arena: Arena,
     body: Body,
     opts: &Opts,
+    calls: &BTreeMap<u32, Vec<Loc>>,
     fuel: &mut Fuel,
 ) -> Result<Ssa, SsaError> {
     let (insn_block, op_block) = layout(&arena, &body)?;
@@ -257,6 +268,7 @@ pub(super) fn build(
         let mut local = Local {
             ssa: &mut ssa,
             opts,
+            calls,
             reads: &mut reads,
             block,
             defs: BTreeMap::new(),

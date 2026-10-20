@@ -35,6 +35,7 @@ use ghidorah_ir::ssa::{Block, Body};
 use ghidorah_ir::{Arena, Builder, Cfg, GraphError, InsnSpan, Memory, Node, OpId, Opc};
 use ghidorah_loader::Perms;
 
+pub mod callsite;
 mod fusion;
 pub mod l1;
 

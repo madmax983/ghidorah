@@ -133,7 +133,7 @@ enum BExit {
     /// A branch whose false side is the tail statement of the block.
     CondTail {
         t: Node,
-        tail: Stmt,
+        tail: Box<Stmt>,
     },
     Switch(Vec<Node>),
 }
@@ -175,7 +175,7 @@ fn block_exit(f: &Facts<'_>, raw: &mut Raw, succs: &[Node]) -> (BExit, NodeView)
                 view.cond = Some(cond);
                 BExit::CondTail { t, tail }
             } else {
-                view.stmts.push(tail);
+                view.stmts.push(*tail);
                 BExit::Stop
             }
         }
@@ -344,7 +344,7 @@ pub(crate) fn shape(f: &Facts<'_>, raws: &mut [Raw], assigned: &Assigned, entry:
                     pure: false,
                 };
                 let tail_view = NodeView {
-                    stmts: vec![tail],
+                    stmts: vec![*tail],
                     ..NodeView::default()
                 };
                 Exit::Cond {

@@ -523,5 +523,23 @@ pub(crate) const fn low_mask(w: u8) -> u64 {
 /// [`SsaError::SeqFull`] and [`SsaError::Full`] when the arena cannot take an op. Returns
 /// [`SsaError::OutOfFuel`] when the fuel runs out.
 pub fn build(arena: Arena, body: Body, opts: &Opts, fuel: &mut Fuel) -> Result<Ssa, SsaError> {
-    build::build(arena, body, opts, fuel)
+    build::build(arena, body, opts, &BTreeMap::new(), fuel)
+}
+
+/// Makes the L1 form of `arena` over `body` like [`build`], with a use list for each call.
+///
+/// Each call op of `calls` reads its own list of locations in place of [`Opts::call_uses`]. A
+/// list can hold stack slots, for example the stack arguments of the call.
+///
+/// # Errors
+///
+/// Returns the errors of [`build`].
+pub fn build_with(
+    arena: Arena,
+    body: Body,
+    opts: &Opts,
+    calls: &BTreeMap<u32, Vec<Loc>>,
+    fuel: &mut Fuel,
+) -> Result<Ssa, SsaError> {
+    build::build(arena, body, opts, calls, fuel)
 }
