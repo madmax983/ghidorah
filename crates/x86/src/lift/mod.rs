@@ -18,7 +18,9 @@
 //!   an `Insert` into `Get(reg)`. A read of a narrow register is `Trunc` or `Extract`.
 //! - A flag write is `Put(flags, Flags(op, a, b, c))`, the lazy thunk of design Section 6.2.
 //! - A memory operand gives its address from the base, the index, the displacement and the
-//!   `fs` or `gs` base. A RIP-relative operand gives a constant address.
+//!   `fs` or `gs` base. A RIP-relative operand gives a constant address, plus the `fs` or
+//!   `gs` base with a segment override. A `rip` base never reads a register. `lea` adds no
+//!   segment base.
 //! - A `rep` string instruction is a loop on its own address. It stops when `rcx` is 0.
 //! - The direction flag is 0, as the System V ABI requires at a call boundary.
 //! - A quotient that does not fit in its register gives its low bits. The hardware raises

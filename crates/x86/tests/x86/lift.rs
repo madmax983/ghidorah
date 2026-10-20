@@ -390,6 +390,50 @@ fn memory_operand_addresses() {
     assert_eq!(interp.loc(Loc::RAX), 1);
 }
 
+/// Tells if the IR reads `rax` with a `Get`.
+fn gets_rax(arena: &Arena) -> bool {
+    has(arena, |op| {
+        op.opc == Opc::Get && op.a[0] == Arg::L(Loc::RAX)
+    })
+}
+
+#[test]
+fn regress_segment_rip_relative_address() {
+    // mov rax, qword ptr gs:[rip+0x10] at 0x1000 reads at gs_base + 0x1018.
+    let arena = lifted("65 48 8b 05 10 00 00 00");
+    assert!(!gets_rax(&arena), "{:?}", arena.ops());
+    let image = FlatImage::new(0x10_1018, (1u8..=8).collect(), false);
+    let interp = run(
+        &arena,
+        &image,
+        &[(Loc::GS_BASE, 0x10_0000), (Loc::RAX, 0x2000)],
+    );
+    assert_eq!(
+        interp.loc(Loc::RAX),
+        u128::from(u64::from_le_bytes([1, 2, 3, 4, 5, 6, 7, 8]))
+    );
+    // lea rax, gs:[rip+0x10] does not add the segment base.
+    let arena = lifted("65 48 8d 05 10 00 00 00");
+    assert!(!gets_rax(&arena), "{:?}", arena.ops());
+    let empty = FlatImage::default();
+    let interp = run(
+        &arena,
+        &empty,
+        &[(Loc::GS_BASE, 0x10_0000), (Loc::RAX, 0x2000)],
+    );
+    assert_eq!(interp.loc(Loc::RAX), 0x1018);
+    // mov eax, dword ptr fs:[rip+0x10] at 0x1000 reads at fs_base + 0x1017.
+    let arena = lifted("64 8b 05 10 00 00 00");
+    assert!(!gets_rax(&arena), "{:?}", arena.ops());
+    let image = FlatImage::new(0x7000 + 0x1017, vec![0x44, 0x33, 0x22, 0x11], false);
+    let interp = run(
+        &arena,
+        &image,
+        &[(Loc::FS_BASE, 0x7000), (Loc::RAX, 0x2000)],
+    );
+    assert_eq!(interp.loc(Loc::RAX), 0x1122_3344);
+}
+
 #[test]
 fn divide_by_zero_stops() {
     let arena = lifted("f7 f1");
