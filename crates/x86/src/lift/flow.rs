@@ -5,7 +5,7 @@ use ghidorah_ir::{Arg, Cc, Loc, Opc};
 use super::Row;
 use super::ctx::{Cx, Fail, Res};
 use super::data::cc_of;
-use crate::Mnem;
+use crate::{Insn, Mnem, Operand, Seg};
 
 /// The condition code `e`.
 const CC_E: u8 = 4;
@@ -83,6 +83,22 @@ pub(super) fn branch(cx: &mut Cx<'_>, row: Row) -> Res<()> {
             Ok(cx.b.flow(Opc::CJump, c, Arg::k(t))?)
         }
     }
+}
+
+/// Tells if the `string` template supports an instruction: 64-bit addresses through `es` or
+/// `ds`, and a known direction. With `dir_unknown`, a `std` can be in effect, so the step
+/// can go backward and the template does not fit.
+pub(super) fn string_fits(insn: &Insn, dir_unknown: bool) -> bool {
+    !dir_unknown
+        && insn.ops().all(|op| match op {
+            Operand::Mem(m) => {
+                m.addr_width == 64
+                    && matches!(m.seg, Some(Seg::Es | Seg::Ds))
+                    && matches!(m.width_bytes, 1 | 2 | 4 | 8)
+            }
+            Operand::Reg { reg, .. } => super::ctx::reg_ok(reg, false),
+            _ => false,
+        })
 }
 
 /// Adds `n` to a pointer register.

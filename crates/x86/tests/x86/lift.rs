@@ -440,3 +440,49 @@ fn divide_by_zero_stops() {
     let stop = Interp::new(&arena, &NoImage, Config::default()).run(AT, &mut Fuel::new(100));
     assert_eq!(stop.reason, StopReason::DivZero);
 }
+
+/// Lifts the instructions of `bytes` from [`AT`] in one block context. Gives the arena and
+/// the lift kind of each instruction.
+fn lifted_block(bytes: &str) -> (Arena, Vec<LiftKind>) {
+    let code = hex(bytes);
+    let mut cx = lift::BlockLift::new();
+    let mut b = Builder::new();
+    let mut kinds = Vec::new();
+    let mut at = 0usize;
+    while at < code.len() {
+        let addr = AT + u64::try_from(at).expect("an offset");
+        let insn = dec(&code[at..], addr).expect("decode");
+        kinds.push(cx.kind(&insn));
+        cx.lift(&insn, &mut b).expect("the instruction lifts");
+        at += usize::from(insn.len());
+    }
+    (b.finish(), kinds)
+}
+
+/// Tells if a lift kind is the string template.
+fn is_string(kind: LiftKind) -> bool {
+    matches!(kind, LiftKind::Template(r) if r.template == Template::String)
+}
+
+#[test]
+fn regress_std_string_op_not_forward() {
+    // std; rep movsb; cld: the copy can run backward, so it lifts to an Intrinsic.
+    let (arena, kinds) = lifted_block("fd f3 a4 fc");
+    assert_eq!(kinds[1], LiftKind::Intrinsic);
+    let movs = arena.insn_ops(AT + 1);
+    assert!(movs.iter().any(|op| op.opc == Opc::Intrinsic), "{movs:?}");
+    assert!(
+        !movs
+            .iter()
+            .any(|op| op.opc == Opc::Add && op.a[1] == Arg::k(1)),
+        "{movs:?}"
+    );
+    // rep movsb alone, or after cld, uses the string template.
+    let alone = dec(&hex("f3 a4"), AT).expect("decode");
+    assert!(is_string(lift::kind(&alone)));
+    assert!(is_string(lifted_block("f3 a4").1[0]));
+    assert!(is_string(lifted_block("fd fc f3 a4").1[2]));
+    // The rule goes on through a conditional branch. A return starts a new block.
+    assert_eq!(lifted_block("fd 74 00 f3 a4").1[2], LiftKind::Intrinsic);
+    assert!(is_string(lifted_block("fd c3 f3 a4").1[2]));
+}

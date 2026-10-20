@@ -369,13 +369,17 @@ pub fn build_units(
         return Err(FirError::TooLarge);
     }
     let mut b = Builder::new();
+    // The block context keeps the direction flag rule of `std` and `cld`.
+    let mut lifter = ghidorah_x86::lift::BlockLift::new();
     let mut flows: BTreeMap<u64, Flow> = BTreeMap::new();
     for (at, u) in &units {
         fuel.tick()?;
         let insn = decode_at(program, *at)
             .filter(|i| i.len() == u.len)
             .ok_or(FirError::Decode(*at))?;
-        ghidorah_x86::lift(&insn, &mut b).map_err(|_| FirError::Lift(*at))?;
+        lifter
+            .lift(&insn, &mut b)
+            .map_err(|_| FirError::Lift(*at))?;
         flows.insert(
             *at,
             Flow {
