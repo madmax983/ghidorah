@@ -124,7 +124,8 @@ impl std::error::Error for FsError {}
 /// A path is absolute or relative to the current directory of the process. The persistence
 /// modules use the paths of one project directory and the process files under `/proc`.
 pub trait Fs: Send {
-    /// Makes a directory and its missing parents.
+    /// Makes a directory and its missing parents. [`RealFs`] gives each new directory the mode
+    /// 0700.
     ///
     /// # Errors
     ///
@@ -287,7 +288,12 @@ pub struct RealFs;
 
 impl Fs for RealFs {
     fn create_dir_all(&mut self, path: &Path) -> Result<(), FsError> {
-        std::fs::create_dir_all(path).map_err(|e| FsError::io("create_dir_all", path, &e))
+        let mut builder = std::fs::DirBuilder::new();
+        builder.recursive(true);
+        private_dirs(&mut builder);
+        builder
+            .create(path)
+            .map_err(|e| FsError::io("create_dir_all", path, &e))
     }
 
     fn create_new(&mut self, path: &Path) -> Result<(), FsError> {
@@ -435,6 +441,17 @@ fn same_file(a: &std::fs::Metadata, b: &std::fs::Metadata) -> bool {
 fn same_file(a: &std::fs::Metadata, _: &std::fs::Metadata) -> bool {
     a.is_file()
 }
+
+/// Gives each new directory the mode 0700: only the owner can read, write or search it.
+#[cfg(unix)]
+fn private_dirs(builder: &mut std::fs::DirBuilder) {
+    use std::os::unix::fs::DirBuilderExt;
+    builder.mode(0o700);
+}
+
+/// Keeps the default mode. Other systems have no mode bits.
+#[cfg(not(unix))]
+fn private_dirs(_: &mut std::fs::DirBuilder) {}
 
 /// Sets the permission bits to 0444.
 #[cfg(unix)]

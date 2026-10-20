@@ -7,6 +7,26 @@ use crate::project::tests::fs_sim::SimFs;
 
 #[cfg(unix)]
 #[test]
+fn regress_project_dir_mode_0700() {
+    use std::os::unix::fs::PermissionsExt;
+    let base = std::env::temp_dir().join(format!("ghidorah-fs-mode-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    std::fs::create_dir_all(&base).unwrap();
+    let before = std::fs::metadata(&base).unwrap().permissions().mode() & 0o777;
+    let mut fs = RealFs;
+    let project = base.join("projects").join("0011223344556677");
+    fs.create_dir_all(&project.join("bin")).unwrap();
+    for dir in [base.join("projects"), project.clone(), project.join("bin")] {
+        let mode = std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o700, "{}", dir.display());
+    }
+    let after = std::fs::metadata(&base).unwrap().permissions().mode() & 0o777;
+    assert_eq!(after, before, "a directory that exists keeps its mode");
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+#[cfg(unix)]
+#[test]
 fn real_fs_refuses_symbolic_links() {
     let dir = std::env::temp_dir().join(format!("ghidorah-fs-links-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
