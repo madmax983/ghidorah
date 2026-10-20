@@ -12,13 +12,13 @@
 //! A failed journal write reloads the durable state, so memory and disk agree. A handler panic
 //! writes a crash record and reloads the program from the snapshot and the journal (AC-148).
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use ghidorah_base::{BinaryId, ErrorCode};
 use ghidorah_db::project::{LoadSpec, check_root};
 use ghidorah_db::{
-    Commit, History, Line, MetaLine, Program, Project, ProjectError, RealFs, SessionLabel, Tx,
-    TxLine, UndoError, UndoOutcome, UndoRequest,
+    Commit, FsError, History, Line, MetaLine, Program, Project, ProjectError, RealFs, SessionLabel,
+    Tx, TxLine, UndoError, UndoOutcome, UndoRequest,
 };
 use ghidorah_json::Value;
 
@@ -45,9 +45,9 @@ impl ProjectsConfig {
     ///
     /// # Errors
     ///
-    /// Returns the reason, in STE, when the rule refuses the root.
+    /// Returns the reason, in STE, when the rule refuses the root. The reason names no path.
     pub fn check(&self) -> Result<(), String> {
-        check_root(&mut RealFs, &self.root, self.named).map_err(|e| e.to_string())
+        check_root(&mut RealFs, &self.root, self.named).map_err(|e| project_reason(&e, None))
     }
 }
 
@@ -130,8 +130,50 @@ impl Store {
     }
 }
 
-/// Gives the tool error of a project error.
-pub(crate) fn project_error(error: &ProjectError) -> ToolError {
+/// The reason of a default projects root inside a git working tree (ADR-0022). It names no
+/// path, because no output holds the projects root (design Section 10.11).
+const IN_GIT_TREE: &str = "The default projects root is inside a git working tree, so no project persists. Send --project-root DIR, or set XDG_DATA_HOME to a directory outside the git working tree.";
+
+/// Gives the reason of a project error in STE. The reason holds no absolute path (design
+/// Section 10.11). A file error names its path relative to the project directory `dir`, or
+/// no path when the file is not in `dir`.
+pub(crate) fn project_reason(error: &ProjectError, dir: Option<&Path>) -> String {
+    match error {
+        ProjectError::InsideGitTree(_) => IN_GIT_TREE.to_owned(),
+        ProjectError::Fs(e) => fs_reason(e, dir),
+        _ => error.to_string(),
+    }
+}
+
+/// Gives the reason of a file error with the path relative to the project directory `dir`.
+fn fs_reason(error: &FsError, dir: Option<&Path>) -> String {
+    // The relative path with a space before it, or an empty text.
+    let rel = |path: &Path| {
+        dir.and_then(|d| path.strip_prefix(d).ok())
+            .filter(|rel| !rel.as_os_str().is_empty())
+            .map(|rel| format!(" {}", rel.display()))
+            .unwrap_or_default()
+    };
+    match error {
+        FsError::NotFound(p) => format!("The project file{} does not exist.", rel(p)),
+        FsError::Exists(p) => format!("The project file{} exists already.", rel(p)),
+        FsError::Io { op, path, message } => {
+            format!(
+                "The operation {op} on the project file{} fails: {message}",
+                rel(path)
+            )
+        }
+        FsError::WrongKind(p) => format!(
+            "The project file{} is a symbolic link or an entry of the wrong kind.",
+            rel(p)
+        ),
+        FsError::Stopped => error.to_string(),
+    }
+}
+
+/// Gives the tool error of a project error. `dir` is the project directory, when it is
+/// known. The reason in the details names no absolute path.
+pub(crate) fn project_error(error: &ProjectError, dir: Option<&Path>) -> ToolError {
     let mut out = ToolError::new(error.code());
     match error {
         ProjectError::Locked { owner, stale } => {
@@ -150,7 +192,7 @@ pub(crate) fn project_error(error: &ProjectError) -> ToolError {
         | ProjectError::BadMeta(_)
         | ProjectError::Program(_)
         | ProjectError::InsideGitTree(_) => {
-            out = out.detail("reason", Value::from(error.to_string()));
+            out = out.detail("reason", Value::from(project_reason(error, dir)));
         }
         ProjectError::BadInput | ProjectError::Load(_) | ProjectError::ReadOnly => {}
     }
@@ -270,7 +312,7 @@ impl Session {
         if let Some(project) = store.project.as_mut().filter(|p| !p.is_read_only()) {
             project
                 .append(&Line::Meta(line.clone()), &binary.program)
-                .map_err(|e| project_error(&e))?;
+                .map_err(|e| project_error(&e, Some(project.dir())))?;
         }
         store.history.record_meta(line);
         Ok(())
@@ -284,8 +326,9 @@ impl Session {
         if let Some(project) = store.project.as_mut()
             && let Err(e) = project.append(&Line::Tx(Box::new(line.clone())), &binary.program)
         {
+            let error = project_error(&e, Some(project.dir()));
             let _ = self.reload(id);
-            return Err(project_error(&e));
+            return Err(error);
         }
         store.history.record(line);
         Ok(())
@@ -305,7 +348,9 @@ impl Session {
             return Ok(());
         };
         if let Some(project) = store.project.as_mut() {
-            let loaded = project.load(&limits).map_err(|e| project_error(&e))?;
+            let loaded = project
+                .load(&limits)
+                .map_err(|e| project_error(&e, Some(project.dir())))?;
             binary.program = loaded.program;
             store.history = loaded.history;
             return Ok(());
