@@ -7,6 +7,11 @@
     reason = "test helpers fail the test with a message or print a stale-record warning"
 )]
 
+/// The kernel table of `xtask verify`. The test and the command read one table.
+#[allow(dead_code, reason = "the tests use a part of the included xtask file")]
+#[path = "../../../../xtask/src/verify/kernels.rs"]
+mod kernels;
+
 use crate::support::json::Value;
 use crate::support::rustsrc::strip;
 use crate::support::{kernel_sources, proofs_required, results, root, tree};
@@ -106,6 +111,54 @@ fn ac_034_proof_freshness() {
     assert_eq!(hash.len(), 64, "the tree hash is 64 hex digits");
     assert!(hash.bytes().all(|b| b.is_ascii_hexdigit()));
     let _fresh = record_is_fresh();
+}
+
+#[test]
+fn proof_record_rows_hold() {
+    for kernel in kernels::KERNELS {
+        let row = record(&format!("/kernels/{}", kernel.name));
+        let get = |key: &str| row.get(key).and_then(Value::as_u64);
+        assert_eq!(
+            row.get("status").and_then(Value::as_str),
+            Some("verified"),
+            "{}",
+            kernel.name
+        );
+        assert_eq!(get("errors"), Some(0), "{}: no errors", kernel.name);
+        assert!(
+            get("verified") >= get("spec_items") && get("spec_items") > Some(0),
+            "{}: verified >= spec_items > 0",
+            kernel.name
+        );
+    }
+    let negatives = record("/negatives");
+    let negatives = negatives.as_array().expect("the record has negative rows");
+    let table: Vec<(&str, String, &str)> = kernels::KERNELS
+        .iter()
+        .flat_map(|k| k.negatives.iter().map(|n| (k.name, n.path(), n.kind)))
+        .collect();
+    assert_eq!(
+        negatives.len(),
+        table.len(),
+        "one row for each negative patch"
+    );
+    for (row, (kernel, patch, kind)) in negatives.iter().zip(&table) {
+        let text = |key: &str| row.get(key).and_then(Value::as_str);
+        assert_eq!(text("kernel"), Some(*kernel), "{patch}");
+        assert_eq!(text("patch"), Some(patch.as_str()));
+        assert_eq!(
+            text("error_kind"),
+            Some(*kind),
+            "{patch}: the expected error"
+        );
+        assert_eq!(
+            row.get("ok"),
+            Some(&Value::Bool(true)),
+            "{patch}: the run fails"
+        );
+        let verified = row.get("verified").and_then(Value::as_u64).unwrap_or(0);
+        assert!(verified >= 1, "{patch}: the run verifies an item");
+    }
 }
 
 /// The proof cheats of AC-035a.
