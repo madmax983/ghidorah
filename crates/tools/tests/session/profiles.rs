@@ -1,11 +1,15 @@
 //! Profiles, catalog sizes and the server instructions (AC-130a to AC-131c).
 
+use ghidorah_base::{ErrorCode, FixedClock};
 use ghidorah_json::{Value, write_pretty};
 use ghidorah_testkit::golden::{self, Header};
 use ghidorah_testkit::ste::check_agent_text;
 use ghidorah_tools::instructions::{self, LINES, MAX_CHARS};
 use ghidorah_tools::profiles::{MAX_FULL, MAX_FULL_CHARS, MAX_MINI, MAX_MINI_CHARS, parse_profile};
-use ghidorah_tools::{Host, Profile, ProfileSet, Registry, Session};
+use ghidorah_tools::spec::{ArgKind, ArgSpec, BinaryArg, Role};
+use ghidorah_tools::{
+    Args, Ctx, Host, Payload, Profile, ProfileSet, Registry, Session, ToolError, ToolSpec,
+};
 
 use crate::support::{call, code, config, demo, json, registry, root, session_with};
 
@@ -504,4 +508,106 @@ fn regress_full_schema_has_tool_defaults() {
         Some("/in"),
         "{undo}"
     );
+}
+
+/// The argument of the test tool: the number of an error code.
+const NUM: ArgSpec = ArgSpec::new(
+    "num",
+    Role::Param,
+    ArgKind::Int { min: 0, max: 1000 },
+    "The number of the error code.",
+);
+
+/// The test tool that fails with the error code `num`, in every profile.
+static RAISE: ToolSpec<Session> = ToolSpec {
+    title: "Raise an error",
+    summary: "Raise an error: a test tool.",
+    description: "Raise an error: a test tool.",
+    args: &[NUM],
+    binary: BinaryArg::None,
+    ..ToolSpec::base("test_raise", raise)
+};
+
+fn raise(_: &mut Session, args: &Args, _: &mut Ctx) -> Result<Payload, ToolError> {
+    let num = args.int("num").and_then(|n| u16::try_from(n).ok());
+    let code = num
+        .and_then(ErrorCode::from_num)
+        .unwrap_or(ErrorCode::InternalError);
+    Err(ToolError::new(code))
+}
+
+/// Makes a session of `registry` that runs `profile`.
+fn in_profile(registry: Registry<Session>, profile: Profile) -> Session {
+    let mut c = config();
+    c.profile = ProfileSet::new(profile, None);
+    Session::with_registry(registry, c, Box::new(FixedClock::new(0)))
+}
+
+/// Makes sure that each tool that the hint and the repair calls of `envelope` name is active
+/// in `profile`.
+fn assert_active_hint(envelope: &Value, profile: Profile) {
+    let reg = registry();
+    let set = ProfileSet::new(profile, None);
+    let hint = envelope
+        .pointer("/error/hint")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    assert!(!hint.is_empty(), "{}: {envelope}", profile.as_str());
+    for tool in tools_of(hint) {
+        assert!(
+            set.holds(&reg, tool),
+            "{}: the hint names {tool}: {envelope}",
+            profile.as_str()
+        );
+    }
+    for repair in envelope
+        .get("next")
+        .and_then(Value::as_array)
+        .unwrap_or_default()
+    {
+        let tool = repair
+            .get("tool")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        assert!(set.holds(&reg, tool), "{}: {envelope}", profile.as_str());
+    }
+}
+
+/// A hint names only tools of the active profile (r2-surface-04). Each code fails once in
+/// each shipped profile. The mini `CONFLICT` and the readonly `UNKNOWN_BINARY` also come from
+/// real calls.
+#[test]
+fn regress_plain_hint_names_active_tools() {
+    let mut tools: Vec<&'static ToolSpec<Session>> = registry().tools().to_vec();
+    tools.push(&RAISE);
+    let with_raise = Registry::new(Box::leak(tools.into_boxed_slice()));
+    for profile in Profile::ALL {
+        for error in ErrorCode::ALL {
+            let mut s = in_profile(with_raise, profile);
+            let args = format!(r#"{{"num":{}}}"#, error.info().num);
+            let envelope = call(&mut s, "test_raise", &args);
+            assert_eq!(code(&envelope), error.info().name, "{envelope}");
+            assert_active_hint(&envelope, profile);
+        }
+    }
+    // Mini: a stale expected_rev gives CONFLICT, and mini has no history_list.
+    let mut s = in_profile(registry(), Profile::Mini);
+    let load = call(&mut s, "binary_load", r#"{"builtin":"demo"}"#);
+    assert_eq!(code(&load), "", "{load}");
+    let rename = r#"{"target":"0x1090","name":"read_input"}"#;
+    assert_eq!(code(&call(&mut s, "symbol_rename", rename)), "");
+    let stale = r#"{"target":"0x1090","name":"read_line","expected_rev":0}"#;
+    let conflict = call(&mut s, "symbol_rename", stale);
+    assert_eq!(code(&conflict), "CONFLICT", "{conflict}");
+    assert_active_hint(&conflict, Profile::Mini);
+    let hint = conflict
+        .pointer("/error/hint")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    assert!(hint.contains("expected_rev"), "{conflict}");
+    // Readonly: an unknown binary_id gives UNKNOWN_BINARY, and readonly has no binary_load.
+    let mut s = in_profile(registry(), Profile::Readonly);
+    let unknown = call(&mut s, "func_list", r#"{"binary_id":"0123456789abcdef"}"#);
+    assert_eq!(code(&unknown), "UNKNOWN_BINARY", "{unknown}");
+    assert_active_hint(&unknown, Profile::Readonly);
 }

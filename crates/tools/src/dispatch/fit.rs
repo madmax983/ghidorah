@@ -192,6 +192,7 @@ pub(super) fn conflict(tool: &str, args: &Value, expected: u64, current: u64) ->
 
 /// Gives the failure envelope of `error`. A repair call that fails the hint check drops out.
 /// With no valid repair call, the codes of class H and `UNKNOWN_ARGUMENT` get a helper call.
+/// A hint sentence that names a registered tool outside the profile drops out too.
 pub(super) fn failure<S: Host>(
     registry: &Registry<S>,
     host: &S,
@@ -221,9 +222,10 @@ pub(super) fn failure<S: Host>(
         let calls = helper.map(|(name, args, why)| Call::new(name, args, why));
         next = keep_valid(registry, &in_profile, calls.into_iter().collect());
     }
+    let inactive = |word: &str| registry.get(word).is_some() && !in_profile(word);
     Envelope {
         frame,
-        body: Body::Err(error.to_json_with(!next.is_empty())),
+        body: Body::Err(error.to_json_in(!next.is_empty(), &inactive)),
         next,
     }
 }
