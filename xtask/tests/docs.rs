@@ -255,7 +255,7 @@ fn ac_018a_every_ac_has_evidence() {
     let text = "| AC-901 | Gate. | - | 28 | - |\n\
                 | AC-902 | Removed in revision 3 (x). | - | - | - |\n\
                 | AC-903 | Moved to stretch S1 (x). | - | - | - |\n\
-                | AC-904 | Gate. | `test:xtask::a@T1` | 28 | - |\n";
+                | AC-904 | Gate. | `test:xtask::ac_904_a@T1` | 28 | - |\n";
     let (rows, grammar) = ac::parse_rows(text);
     assert!(grammar.is_empty());
     assert_eq!(ac::missing(&rows), ["AC-901"]);

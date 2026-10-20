@@ -297,7 +297,7 @@ fn ac_rows_parse() {
 | AC | Statement | Evidence | Closes | Needs |
 |---|---|---|---|---|
 | AC-001a | One. | `test:xtask::ac_001a_x@T1` | 01 | - |
-| AC-002 | Two. | `test:tools::a@T1` (T1), `test:tools::b@T2` (all) | 13a/25 | 24 |
+| AC-002 | Two. | `test:tools::ac_002_a@T1` (T1), `test:tools::ac_002_b@T2` (all) | 13a/25 | 24 |
 | AC-063b | Moved to stretch S10 (`insn_fields`). | - | - | - |
 | AC-099 | No evidence. | - | 05 | - |
 | AC-100 | Bad. | `test:nope` | 05 | - |
@@ -320,6 +320,29 @@ fn ac_rows_parse() {
     let (rows, findings) = ac::parse_rows(&design);
     assert!(rows.len() >= 300, "{}", rows.len());
     assert!(findings.is_empty(), "{findings:?}");
+}
+
+/// A `test:` item names a test with an AC name, a fuzz name or a regression name (CLAUDE.md).
+#[test]
+fn regress_evidence_test_names() {
+    let text = "\
+| AC-001a | One. | `test:xtask::ac_001a_x@T1`, `test:xtask::ac_001_y@T2` | 01 | - |
+| AC-002 | Two. | `test:<crate>::fuzz_<target>@T1`, `test:x86::regress_z@T1` | 01 | - |
+| AC-003 | Bad. | `test:kernel::k1_reader_boundaries@T1` | 03 | - |
+| AC-004 | Bad. | `test:tools::ac_4_short@T1`, `test:tools::acx_001_y@T1` | 13a | - |
+";
+    let (rows, findings) = ac::parse_rows(text);
+    assert_eq!(rows.len(), 4);
+    let lines: Vec<usize> = findings.iter().map(|f| f.line).collect();
+    assert_eq!(lines, [3, 4, 4], "{findings:?}");
+    assert!(findings.iter().all(|f| f.rule == "AC-018a"), "{findings:?}");
+    assert!(
+        findings
+            .first()
+            .is_some_and(|f| f.detail.contains("k1_reader_boundaries")),
+        "{findings:?}"
+    );
+    assert_eq!(rows[2].evidence.len(), 1);
 }
 
 #[test]

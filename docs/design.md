@@ -2351,7 +2351,7 @@ Revision 3 moved WP-16 to P8 and WP-20 to P10, so that WP-18 starts in P7, as so
 | Row | Named tests |
 |---|---|
 | Happy | `ac_006a_spec_stub_identity`, `ac_036_rangeset_model`, `ac_038_reader_props` |
-| Boundary | `ac_029_range_boundary_table`, `k1_reader_boundaries` (empty buffer, `seek` to the end, `take(0)`, 10-byte ULEB), `ac_032_budget_fit_brute_force`, `ac_033_source_table_exhaustive` |
+| Boundary | `ac_029_range_boundary_table`, `ac_028_k1_reader_boundaries` (empty buffer, `seek` to the end, `take(0)`, 10-byte ULEB), `ac_032_budget_fit_brute_force`, `ac_033_source_table_exhaustive` |
 | Regression | `ac_006b_loop_invariant_builds`, `ac_034_proof_freshness`, `ac_035_no_proof_cheats` |
 
 #### WP-04 JSON
@@ -2484,7 +2484,7 @@ Revision 3 moved WP-16 to P8 and WP-20 to P10, so that WP-18 starts in P7, as so
 
 | Row | Named tests |
 |---|---|
-| Happy | `ac_068a_fusion_exhaustive_8bit`, `ac_074_dominators_model`, `k5_wide_random_against_u128` |
+| Happy | `ac_068a_fusion_exhaustive_8bit`, `ac_074_dominators_model`, `ac_031_k5_wide_random_against_u128` |
 | Boundary | `ac_075a_deep_cfg_small_stack`, `ac_076_interpreter_budgets`, `interp_u128_store_load` |
 | Regression | `ac_068b_pred_opc_all_widths`, `ac_067_size_budgets` |
 
@@ -2926,7 +2926,7 @@ Rules for this section:
 - Each AC is one testable statement. A lettered sub-AC (for example AC-129a) is a separate statement with its own test function.
 - Columns: AC, Statement, Evidence, Closes, Needs.
 - Evidence grammar (`xtask ac` parses it):
-  - `test:<crate>::<fn>@T1` or `@T2`: a cargo test function. `<crate>` is the crate directory name. Tier-2 tests carry `#[ignore = "tier2"]`.
+  - `test:<crate>::<fn>@T1` or `@T2`: a cargo test function. `<crate>` is the crate directory name. Tier-2 tests carry `#[ignore = "tier2"]`. `<fn>` starts with `ac_<nnn>`, `fuzz_` or `regress_`. A test item with a different name gives a grammar finding.
   - `cmd:<argv>`: an exact command that must exit 0 in tier 2.
   - `xtask:<subcommand>#<pointer> <op> <value>`: a value in the JSON output of an xtask command.
   - `record:<file>#<pointer>@sha256=<input>`: a checked-in record that must match the hash of its named input, for example `tree` (the kernel tree hash) or `host-bash`.
@@ -2999,10 +2999,10 @@ Rules for this section:
 
 | AC | Statement | Evidence | Closes | Needs |
 |---|---|---|---|---|
-| AC-028 | K1 Reader verifies with `--no-cheating`, its negative patch fails with a verification error, and its tier-1 test passes. | `record:verify/results.json#/kernels/K1@sha256=tree`, `test:kernel::k1_reader_boundaries@T1` | 03 | - |
+| AC-028 | K1 Reader verifies with `--no-cheating`, its negative patch fails with a verification error, and its tier-1 test passes. | `record:verify/results.json#/kernels/K1@sha256=tree`, `test:kernel::ac_028_k1_reader_boundaries@T1` | 03 | - |
 | AC-029 | K2 range math verifies, its negative patch fails with a verification error, and its boundary and model test passes. | `record:verify/results.json#/kernels/K2@sha256=tree`, `test:kernel::ac_029_range_boundary_table@T1` | 03 | - |
 | AC-030 | K3 RangeSet verifies, its negative patch fails with a verification error, and its model test passes. | `record:verify/results.json#/kernels/K3@sha256=tree`, `test:kernel::ac_036_rangeset_model@T1` | 03 | - |
-| AC-031 | K5 `fused_pred` and `eval_pred` verify for 3 ops and 4 widths, and the negative patch fails with a verification error. | `record:verify/results.json#/kernels/K5@sha256=tree`, `test:kernel::k5_wide_random_against_u128@T1`, `test:ir::ac_068b_pred_opc_all_widths@T1` | 12 | - |
+| AC-031 | K5 `fused_pred` and `eval_pred` verify for 3 ops and 4 widths, and the negative patch fails with a verification error. | `record:verify/results.json#/kernels/K5@sha256=tree`, `test:kernel::ac_031_k5_wide_random_against_u128@T1`, `test:ir::ac_068b_pred_opc_all_widths@T1` | 12 | - |
 | AC-032 | K6 budget fit verifies, its negative patch fails with a verification error, and its brute-force test passes. | `record:verify/results.json#/kernels/K6@sha256=tree`, `test:kernel::ac_032_budget_fit_brute_force@T1` | 03 | - |
 | AC-033 | K7 provenance order verifies, its negative patch fails with a verification error, and its exhaustive test passes. | `record:verify/results.json#/kernels/K7@sha256=tree`, `test:kernel::ac_033_source_table_exhaustive@T1` | 03 | - |
 | AC-034 | The tree hash of the kernel and spec sources plus the Verus argv equals `verify/results.json`. | `test:kernel::ac_034_proof_freshness@T1` | 03 | - |

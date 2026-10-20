@@ -8,6 +8,8 @@
 //! | cmd | `cmd:<argv>` |
 //! | xtask | `xtask:<subcommand>#<pointer> <op> <value>` |
 //! | record | `record:<file>#<pointer>@sha256=<input>` |
+//!
+//! The `<fn>` of a test item starts with `ac_<nnn>`, `fuzz_` or `regress_` (CLAUDE.md).
 
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -201,6 +203,21 @@ fn parse_test(rest: &str) -> Result<Evidence, String> {
     })
 }
 
+/// The name prefixes of a test that is evidence, other than `ac_<nnn>` (CLAUDE.md, TDD process).
+pub const TEST_PREFIXES: [&str; 2] = ["fuzz_", "regress_"];
+
+/// Tells if a test function name obeys the naming rule of an evidence test.
+///
+/// The name starts with `ac_` and 3 digits, or with a prefix of [`TEST_PREFIXES`].
+#[must_use]
+pub fn is_evidence_test_name(func: &str) -> bool {
+    let ac_name = func
+        .strip_prefix("ac_")
+        .and_then(|rest| rest.get(..3))
+        .is_some_and(|digits| digits.chars().all(|c| c.is_ascii_digit()));
+    ac_name || TEST_PREFIXES.iter().any(|p| func.starts_with(p))
+}
+
 fn parse_op(text: &str) -> Result<Op, String> {
     Ok(match text {
         "==" => Op::Eq,
@@ -298,7 +315,8 @@ fn is_ac_id(text: &str) -> bool {
 
 /// Parses every AC row of a design text.
 ///
-/// Gives the rows and one finding for each grammar error.
+/// Gives the rows and one finding for each grammar error. A test item with a bad name stays
+/// in its row, and it also gives a finding.
 #[must_use]
 pub fn parse_rows(text: &str) -> (Vec<AcRow>, Vec<Finding>) {
     let mut rows = Vec::new();
@@ -330,7 +348,19 @@ pub fn parse_rows(text: &str) -> (Vec<AcRow>, Vec<Finding>) {
         let mut items = Vec::new();
         for span in code_spans(evidence) {
             match parse_evidence(span) {
-                Ok(item) => items.push(item),
+                Ok(item) => {
+                    if let Evidence::Test { func, .. } = &item
+                        && !is_evidence_test_name(func)
+                    {
+                        found.push(Finding::new(
+                            "AC-018a",
+                            DESIGN_PATH,
+                            number,
+                            format!("{id}: the test `{func}` needs an `ac_<nnn>`, `fuzz_` or `regress_` name"),
+                        ));
+                    }
+                    items.push(item);
+                }
                 Err(message) => found.push(Finding::new(
                     "AC-018a",
                     DESIGN_PATH,

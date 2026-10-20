@@ -195,7 +195,7 @@ fn check_input(op: FuseOp, a: u64, b: u64, w: u32) -> Result<(), String> {
 }
 
 #[test]
-fn k5_wide_random_against_u128() {
+fn ac_031_k5_wide_random_against_u128() {
     check("k5_wide_random_against_u128", 20_000, |g| {
         let a = operand(g);
         let b = operand(g);
