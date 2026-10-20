@@ -326,9 +326,10 @@ fn edits_conflicts_and_dry_runs() {
             .and_then(Value::as_u64),
         Some(8)
     );
+    // The call with the current rev is a candidate, never next[0] (agent-protocol-17).
     assert_eq!(
         conflict
-            .pointer("/next/0/args/expected_rev")
+            .pointer("/error/candidates/0/value/expected_rev")
             .and_then(Value::as_u64),
         Some(8)
     );
@@ -622,7 +623,7 @@ fn regress_repairs_use_canonical_names() {
     let conflict = send(r#"{"sz":3,"expected_rev":1}"#);
     assert_eq!(code(&conflict), "CONFLICT");
     assert_eq!(
-        conflict.pointer("/next/0/args"),
+        conflict.pointer("/error/candidates/0/value"),
         Some(&json(r#"{"size":3,"expected_rev":7}"#))
     );
     let args = ghidorah_tools::args::parse(&ALIAS_LIST, &json(r#"{"sz":3}"#), None)

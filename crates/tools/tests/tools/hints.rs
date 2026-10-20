@@ -109,11 +109,18 @@ fn ac_143_executable_hints() {
         let envelope = run_on(&mut host, tool, args).to_json();
         let found = problems(&registry, &host, &envelope);
         assert!(found.is_empty(), "{tool} {args}: {found:?}");
-        if envelope.pointer("/next/0").is_some() {
+        // A CONFLICT keeps its resend as a candidate. Its next[0] is history_list, which the
+        // test registry does not hold.
+        let candidate = envelope.pointer("/error/candidates/0").is_some();
+        if envelope.pointer("/next/0").is_some() || candidate {
             with_next += 1;
         }
     }
-    assert_eq!(with_next, calls.len(), "every case has a repair or a hint");
+    assert_eq!(
+        with_next,
+        calls.len(),
+        "every case has a repair, a hint or a choice"
+    );
 
     let host = TestHost {
         analysis: Some(AnalysisInfo {

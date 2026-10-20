@@ -29,11 +29,11 @@ use crate::api::{Host, Progress, Request};
 use crate::args::{self, Args, Format, Globals};
 use crate::budget::Budget;
 use crate::envelope::{Body, Envelope, Frame, Mutation, Warning};
-use crate::errors::{Candidate, ToolError, int, not_in_profile};
-use crate::hints::{Call, WHY_ANALYSIS, WHY_FIRST_PAGE, WHY_REV, check, keep_valid};
+use crate::errors::{Candidate, ToolError, not_in_profile};
+use crate::hints::{Call, WHY_ANALYSIS, WHY_FIRST_PAGE, check, keep_valid};
 use crate::registry::Registry;
 use crate::spec::{ArgKind, ToolSpec};
-use fit::{binary_repair, fail, project_repair};
+use fit::{binary_repair, conflict, fail, project_repair};
 
 /// One part of a sort key.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -396,14 +396,7 @@ fn open<S: Host>(
     if let (true, Some(expected)) = (tool.mutating, globals.expected_rev)
         && expected != frame.rev
     {
-        let args = with_arg(
-            parsed.args.canonical(),
-            "expected_rev",
-            Some(int(frame.rev)),
-        );
-        let error = ToolError::new(ErrorCode::Conflict)
-            .detail("current_rev", int(frame.rev))
-            .next(Call::new(tool.name, args, WHY_REV));
+        let error = conflict(tool.name, parsed.args.canonical(), expected, frame.rev);
         return Err(Box::new(fail(registry, host, frame, tool.name, error)));
     }
     Ok(Opened {

@@ -18,9 +18,10 @@ use super::{Ctx, Invocation, StepRun, with_arg};
 use crate::api::Host;
 use crate::content::result_chars;
 use crate::envelope::{Body, Envelope, Frame};
-use crate::errors::{ToolError, int};
+use crate::errors::{Candidate, ToolError, int};
 use crate::hints::{
-    Call, MAX_NEXT, WHY_BINARY, WHY_BRIEF, WHY_HISTORY, WHY_SCHEMA, WHY_SEARCH, keep_valid,
+    Call, MAX_NEXT, WHY_BINARY, WHY_BRIEF, WHY_CONFLICT, WHY_HISTORY, WHY_SCHEMA, WHY_SEARCH,
+    keep_valid,
 };
 use crate::registry::Registry;
 use crate::session::{Session, WHY_REOPEN};
@@ -168,6 +169,25 @@ pub(super) fn binary_repair(tool: &str, args: &Value, error: ToolError) -> ToolE
         }
         _ => error,
     }
+}
+
+/// Gives the `CONFLICT` error of a call whose `expected_rev` differs from the current rev.
+///
+/// `next[0]` reads the history after `expected`. The call with the current rev is only a
+/// candidate, so a client that sends `next[0]` never writes over edits that it did not read.
+pub(super) fn conflict(tool: &str, args: &Value, expected: u64, current: u64) -> ToolError {
+    let resend = Candidate {
+        value: with_arg(args, "expected_rev", Some(int(current))),
+        label: format!("{tool} with expected_rev {current}"),
+        id: None,
+        addr: None,
+        kind: Some("call".to_owned()),
+    };
+    let since = Value::object([("since_rev", int(expected))]);
+    ToolError::new(ErrorCode::Conflict)
+        .detail("current_rev", int(current))
+        .candidates(vec![resend])
+        .next(Call::new("history_list", since, WHY_CONFLICT))
 }
 
 /// Gives the failure envelope of `error`, with helper calls for the codes of class H.

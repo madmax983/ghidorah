@@ -1,6 +1,8 @@
 //! Error objects, unknown arguments and selector rules (AC-134, AC-140, AC-142, AC-221).
 
-use ghidorah_base::{ErrorCode, WarningCode};
+use std::path::PathBuf;
+
+use ghidorah_base::{ErrorCode, FixedClock, WarningCode};
 use ghidorah_json::Value;
 use ghidorah_tools::args::parse_strict;
 use ghidorah_tools::errors::{ERROR_CAP, MAX_CANDIDATES, cut};
@@ -9,7 +11,9 @@ use ghidorah_tools::{
     dispatch_with,
 };
 
-use crate::common::{chars, code, json, run, run_on, text, walk};
+use ghidorah_tools::{Host, Roots, Session, SessionConfig};
+
+use crate::common::{chars, code, json, root, run, run_on, text, walk};
 use crate::test_registry::{ITEM_EDIT, TestHost, registry};
 
 /// The texts that no error or warning may hold (AC-142).
@@ -377,5 +381,69 @@ fn ac_142_no_debug_text() {
     assert_eq!(
         call.to_json().get("why").and_then(Value::as_str),
         Some("Read the item.")
+    );
+}
+
+/// An `expected_rev` that differs gives `CONFLICT` with a history read in `next[0]`. The call
+/// with the current rev is only a candidate, so a client that sends `next[0]` never writes
+/// over edits that it did not read.
+#[test]
+fn regress_conflict_next_reads_history() {
+    let roots = Roots::new(&root(), &[PathBuf::from(".")]).expect("the root is valid");
+    let mut s = Session::with_registry(
+        <Session as Host>::registry(),
+        SessionConfig::new(roots),
+        Box::new(FixedClock::new(0)),
+    );
+    let registry = s.active_registry();
+    let mut send = |tool: &str, args: &str| {
+        dispatch_with(&registry, &mut s, &Request::new(tool, json(args))).to_json()
+    };
+    assert_eq!(code(&send("binary_load", r#"{"builtin":"demo"}"#)), "");
+    for _ in 0..2 {
+        assert_eq!(
+            code(&send("note_write", r#"{"kind":"note","text":"x"}"#)),
+            ""
+        );
+    }
+    let args = r#"{"target":"0x1090","name":"read_input","expected_rev":1}"#;
+    let conflict = send("symbol_rename", args);
+    assert_eq!(code(&conflict), "CONFLICT", "{conflict}");
+    assert_eq!(
+        conflict.pointer("/error/details/current_rev"),
+        Some(&json("2"))
+    );
+    assert_eq!(
+        conflict.pointer("/next/0/tool").and_then(Value::as_str),
+        Some("history_list"),
+        "{conflict}"
+    );
+    assert_eq!(
+        conflict.pointer("/next/0/args"),
+        Some(&json(r#"{"since_rev":1}"#)),
+        "{conflict}"
+    );
+    let next = conflict.pointer("/next").and_then(Value::as_array);
+    let resend = next
+        .unwrap_or_default()
+        .iter()
+        .any(|c| c.get("tool").and_then(Value::as_str) == Some("symbol_rename"));
+    assert!(!resend, "the resend is not in next: {conflict}");
+    let value = conflict.pointer("/error/candidates/0/value");
+    let wants = [
+        ("target", r#""0x1090""#),
+        ("name", r#""read_input""#),
+        ("expected_rev", "2"),
+    ];
+    for (key, want) in wants {
+        assert_eq!(
+            value.and_then(|v| v.get(key)),
+            Some(&json(want)),
+            "{key}: {conflict}"
+        );
+    }
+    assert_eq!(
+        ErrorCode::Conflict.info().class,
+        ghidorah_base::RepairClass::Helper
     );
 }

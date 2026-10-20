@@ -33,7 +33,7 @@ const ERRORS: [(u16, &str, &str, bool); 41] = [
     (17, "FORMAT_MALFORMED", "N", false),
     (18, "CURSOR_INVALID", "R", false),
     (19, "CURSOR_STALE", "R", false),
-    (20, "CONFLICT", "R*", true),
+    (20, "CONFLICT", "H", true),
     (21, "BLOCKED_BY_HIGHER_PRIORITY_SOURCE", "N", false),
     (22, "BODY_OVERLAP", "N", false),
     (23, "NOT_IN_FUNCTION", "N", false),
