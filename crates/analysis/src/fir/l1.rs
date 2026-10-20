@@ -14,6 +14,7 @@
 //! | `Ret` reads | the first integer return register |
 //! | A call reads | the integer and floating argument registers, and the varargs register |
 //! | A call writes | each general register that the callee does not keep, each XMM register and the flags |
+//! | A call pops | 8 bytes from `rsp` on return: the return address that the call pushes |
 //!
 //! The result is derived data: the journal never holds it.
 
@@ -98,6 +99,7 @@ pub fn ssa_opts(conv: &CallConv) -> ssa::Opts {
         ret_uses,
         call_uses,
         call_defs,
+        call_pop: Some((Loc::RSP, 8)),
     }
 }
 

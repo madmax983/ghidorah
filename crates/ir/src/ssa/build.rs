@@ -157,7 +157,34 @@ impl Local<'_> {
         if !made.is_empty() {
             self.ssa.defs.insert(index, made);
         }
+        if matches!(op.opc, Opc::Call | Opc::CallInd)
+            && let Some((loc, count)) = self.opts.call_pop
+            && !defs.contains(loc)
+            && let Some(&before) = self.defs.get(&loc)
+        {
+            let after = self.popped(index, before, loc, count)?;
+            self.defs.insert(loc, after);
+        }
         Ok(())
+    }
+
+    /// Gives the value of `loc` after the callee of the call op `index` pops `count` bytes.
+    /// The value before the call is `before`. When `before` is `x - count`, the push of the
+    /// call, the value is `x`. Else a new `Add` after the call gives `before + count`.
+    fn popped(&mut self, index: u32, before: Arg, loc: Loc, count: u64) -> Result<Arg, SsaError> {
+        let w = loc.width();
+        if let Arg::V(v) = before
+            && let Some(push) = self.ssa.arena.def_of(v).and_then(|d| self.ssa.arena.op(d))
+            && push.opc == Opc::Sub
+            && push.w == w
+            && push.a[1].as_k() == Some(count)
+            && matches!(push.a[0], Arg::V(_))
+        {
+            return Ok(push.a[0]);
+        }
+        let a = [before, Arg::k(count), Arg::Nil];
+        let (_, out) = self.ssa.push_at(Anchor::After(index), Opc::Add, w, 0, a)?;
+        Ok(Arg::V(out.ok_or(SsaError::Full)?))
     }
 
     /// Runs the local step over the ops of the block.

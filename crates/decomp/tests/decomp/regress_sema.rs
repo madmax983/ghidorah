@@ -115,6 +115,49 @@ fn regress_zero_idiom_params() {
     assert!(grid.contains("return 0;"), "{grid}");
 }
 
+/// Gives the text between `start` and the next `)` after each place of `start` in `text`.
+fn args_after<'t>(text: &'t str, start: &str) -> Vec<&'t str> {
+    text.match_indices(start)
+        .filter_map(|(i, _)| {
+            let rest = text.get(i + start.len()..)?;
+            rest.split([')', ',']).next()
+        })
+        .collect()
+}
+
+/// `main` of xor_decode.clang-O2 passes `lea rdi,[rsp+0x9]` to `decode`, `puts` and
+/// `strlen`, and no instruction between the calls changes `rsp`. So the three arguments are
+/// one expression. L1 kept the stack pointer 8 bytes low after each call, so each later call
+/// got another pointer (decomp-04).
+#[test]
+fn regress_stack_pointer_after_call() {
+    let t = text("xor_decode.clang-O2", "main");
+    let mut seen: Vec<&str> = Vec::new();
+    for call in ["decode(", "puts(", "strlen("] {
+        let got = args_after(&t, call);
+        assert_eq!(got.len(), 1, "{call}: {t}");
+        seen.extend(got);
+    }
+    assert!(seen[0].ends_with(" + 9"), "{t}");
+    assert!(seen.iter().all(|a| *a == seen[0]), "{seen:?}\n{t}");
+    // gcc reloads the canary with `mov rax,[rsp+0x18]` after 4 calls. The buffer is at
+    // `rsp + 9`, so the reload base is the base of the buffer.
+    let g = text("xor_decode.gcc-O2", "main");
+    let buffer = args_after(&g, "decode(")[0];
+    let line = g
+        .lines()
+        .map(str::trim)
+        .find(|l| l.starts_with(&format!("{buffer} = ")) && l.ends_with(" + 9;"))
+        .unwrap_or_else(|| panic!("no def of {buffer}: {g}"));
+    let base = line
+        .trim_start_matches(&format!("{buffer} = "))
+        .trim_end_matches(" + 9;");
+    assert!(
+        g.contains(&format!("*(uint64_t *)({base} + 0x18)")),
+        "the canary reload reads {base} + 0x18: {g}"
+    );
+}
+
 /// `test rdx,rdx; je 12fc` at 0x12d2 of `decode` skips the loop when `n == 0`. So the loop
 /// runs under `param_3 != 0`. `test rdx,rdx; jne 1260` at 0x126b of `gcd` loops while the
 /// remainder is not 0, so the loop breaks on `== 0` (decomp-01).

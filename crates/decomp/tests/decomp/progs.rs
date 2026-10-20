@@ -52,6 +52,7 @@ pub fn pool_opts() -> SsaOpts {
         ret_uses: pool,
         call_uses: pool,
         call_defs: [Loc::RAX, Loc::RDX].into_iter().collect(),
+        call_pop: None,
     }
 }
 

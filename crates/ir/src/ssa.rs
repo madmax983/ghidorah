@@ -8,7 +8,7 @@
 //! |---|---|
 //! | `Get(loc)` | `Copy` of the value of `loc` at that point |
 //! | `Put(loc, x)` | `Nop`. The value `x` becomes the value of `loc`. |
-//! | `Ret`, `Call`, `CallInd` | The same op. [`Opts`] gives its location uses and defs. |
+//! | `Ret`, `Call`, `CallInd` | The same op. [`Opts`] gives its location uses and defs, and the pop of the return address after a call. |
 //! | `Syscall`, `Intrinsic` | The same op. Its [`Effect`](crate::Effect) gives its uses and defs. |
 //!
 //! The location uses of an op go to a side table ([`Ssa::uses_at`]). Each location def of an
@@ -77,6 +77,10 @@ pub struct Opts {
     pub call_uses: LocSet,
     /// The locations that a `Call` or `CallInd` writes.
     pub call_defs: LocSet,
+    /// The location that a `Call` or `CallInd` adds to on return, and the count: the callee
+    /// pops the return address that the call pushes. For x86-64 it is `rsp` and 8. A call
+    /// without a write of the location in its block keeps the location.
+    pub call_pop: Option<(Loc, u64)>,
 }
 
 impl Opts {
@@ -89,6 +93,7 @@ impl Opts {
             ret_uses: all,
             call_uses: all,
             call_defs: LocSet::EMPTY,
+            call_pop: None,
         }
     }
 }

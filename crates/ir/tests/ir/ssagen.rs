@@ -51,6 +51,7 @@ pub fn pool_opts() -> Opts {
         ret_uses: pool_set(),
         call_uses: pool_set(),
         call_defs: [Loc::RAX, Loc::RDX].into_iter().collect(),
+        call_pop: None,
     }
 }
 
