@@ -353,6 +353,7 @@ fn run(session: &mut Session, args: &Args, ctx: &mut Ctx) -> Result<Payload, Too
             limit: usize::try_from(limit).unwrap_or(usize::MAX),
             cursors: Cursors::default(),
             session,
+            binary: binary.id,
             frame: &frame,
             args,
             mode: ctx.budget.mode,

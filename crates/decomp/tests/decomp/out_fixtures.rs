@@ -522,6 +522,16 @@ fn ac_104b_cache_invalidation() {
     let (first, hit) = look(&p);
     assert!(!hit, "the first lookup misses");
     assert!(look(&p).1, "the second lookup hits");
+    let other = entry_of(&p, "frame_dummy");
+    commit(&mut p, |tx| Edit::SetName {
+        addr: Address::ram(other),
+        key: None,
+        kind: SymKind::Function,
+        primary: true,
+        name: Some(tx.fact("other_renamed".to_owned())),
+        evidence: Vec::new(),
+    });
+    assert!(look(&p).1, "the lookup after an unrelated rename hits");
     let var = first
         .vars
         .first()

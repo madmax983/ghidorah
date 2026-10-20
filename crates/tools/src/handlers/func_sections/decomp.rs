@@ -80,21 +80,6 @@ pub fn opts(args: &Args) -> DecompOpts {
     }
 }
 
-/// Gives the decompile of `func` with `opts`.
-///
-/// # Errors
-///
-/// Returns the text of the decompile error.
-pub fn output(
-    program: &Program,
-    func: FuncId,
-    opts: &Opts,
-    fuel: &mut Fuel,
-) -> Result<Output, String> {
-    ghidorah_decomp::render(program, func, opts, &ghidorah_x86::lift::Names, fuel)
-        .map_err(|e| e.to_string())
-}
-
 /// Gives a JSON integer of a `usize`.
 fn int(n: usize) -> Value {
     Value::from(u64::try_from(n).unwrap_or(u64::MAX))

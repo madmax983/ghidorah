@@ -1,7 +1,7 @@
 //! The render of one function of `func_get`: the header, the sections within their shares and
 //! the `omitted` and `budgets` members.
 
-use ghidorah_base::{ErrorCode, Fuel, FuncId};
+use ghidorah_base::{BinaryId, ErrorCode, Fuel, FuncId};
 use ghidorah_db::PartKind;
 use ghidorah_json::{Object, Value};
 
@@ -54,6 +54,8 @@ pub struct Job<'a> {
     pub cursors: Cursors,
     /// The session of the call.
     pub session: &'a Session,
+    /// The bound binary of the call.
+    pub binary: BinaryId,
     /// The frame of the call.
     pub frame: &'a Frame,
     /// The arguments of the call.
@@ -106,7 +108,10 @@ impl Job<'_> {
     ) -> (Result<Value, Value>, u64, u64) {
         let p = self.render.program;
         let entry = func.0.off;
-        let out = match fs::decomp_output(p, func, &self.decomp.opts, fuel) {
+        let out = match self
+            .session
+            .decompile(self.binary, func, &self.decomp.opts, fuel)
+        {
             Ok(out) => out,
             Err(text) => {
                 let value = Value::object([("error", Value::from(text))]);

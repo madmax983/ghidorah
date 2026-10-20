@@ -15,8 +15,8 @@ use ghidorah_ir::IntrinsicNames;
 
 use crate::{DecompError, Opts, Output};
 
-/// The default capacity of a cache.
-pub const DEFAULT_CAPACITY: usize = 256;
+/// The default capacity of a cache: 512 outputs (design Section 3.9).
+pub const DEFAULT_CAPACITY: usize = 512;
 
 /// The key of a cache entry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

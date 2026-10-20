@@ -2,7 +2,8 @@
 
 use std::path::PathBuf;
 
-use ghidorah_base::{FixedClock, Fuel};
+use ghidorah_base::{Address, BinaryId, FixedClock, Fuel};
+use ghidorah_db::{Edit, Source, SymKind};
 use ghidorah_decomp::Opts;
 use ghidorah_json::Value;
 use ghidorah_testkit::ste::check_agent_text;
@@ -12,8 +13,8 @@ use ghidorah_tools::{
 };
 
 use crate::support::{
-    call, call_value, chars, data, decomp, fixture, json, program, registry, root, session,
-    text_at, text_of,
+    call, call_value, chars, commit, data, decomp, entry_of, fixture, json, program, registry,
+    root, session, text_at, text_of,
 };
 
 #[test]
@@ -336,4 +337,68 @@ fn regress_plt_stub_decomp_tail_call() {
         "{remedy}"
     );
     assert_checked_call(&s, remedy);
+}
+
+/// Renames the function at `addr` of the open binary `id` to `name`.
+fn rename(s: &mut Session, id: BinaryId, addr: u64, name: &'static str) {
+    commit(s, id, |tx| Edit::SetName {
+        addr: Address::ram(addr),
+        key: None,
+        kind: SymKind::Function,
+        primary: true,
+        name: Some(tx.fact(name.to_owned())),
+        evidence: Vec::new(),
+    });
+}
+
+/// The second `func_get` decompile of one function reads the decompile cache of the session.
+/// An unrelated rename keeps the hit. A rename of the function or of a callee misses
+/// (maintainability-docs-02, tests-tdd-11).
+#[test]
+fn regress_func_get_decomp_cache_hits() {
+    let (agent, id) = fixture("hello.gcc-O0");
+    let binary = agent.binary(id).cloned().expect("the binary is open");
+    let mut config =
+        SessionConfig::new(Roots::new(&root(), &[PathBuf::from(".")]).expect("the root is valid"));
+    config.source = Source::User;
+    let mut s = Session::with_registry(registry(), config, Box::new(FixedClock::new(0)));
+    s.open(binary);
+    let p = program(&s, id);
+    let (run, finish, other) = (
+        entry_of(p, "run"),
+        entry_of(p, "finish"),
+        entry_of(p, "frame_dummy"),
+    );
+    let target = format!("fn:{run:#x}");
+    let look = |s: &mut Session| {
+        let text = text_of(&decomp(s, &target, "{}"));
+        let stats = s.decomp_stats(id);
+        (text, stats.hits, stats.misses)
+    };
+    let (first, hits, misses) = look(&mut s);
+    assert_eq!((hits, misses), (0, 1), "the first decompile misses");
+    let (again, hits, _) = look(&mut s);
+    assert_eq!(hits, 1, "the second decompile hits");
+    assert_eq!(again, first);
+    rename(&mut s, id, other, "other_renamed");
+    let (_, hits, _) = look(&mut s);
+    assert_eq!(hits, 2, "an unrelated rename keeps the hit");
+    rename(&mut s, id, run, "run_renamed");
+    let (text, hits, misses) = look(&mut s);
+    assert_eq!((hits, misses), (2, 2), "a rename of the function misses");
+    assert!(text.contains("run_renamed"), "{text}");
+    rename(&mut s, id, finish, "finish_renamed");
+    let (text, hits, misses) = look(&mut s);
+    assert_eq!((hits, misses), (2, 3), "a rename of a callee misses");
+    assert!(text.contains("finish_renamed"), "{text}");
+    let (_, hits, _) = look(&mut s);
+    assert_eq!(hits, 3, "the next decompile hits again");
+    let binary = s.binary(id).cloned().expect("the binary is open");
+    s.open(binary);
+    let (_, hits, misses) = look(&mut s);
+    assert_eq!(
+        (hits, misses),
+        (3, 4),
+        "a binary that opens again has a new cache"
+    );
 }

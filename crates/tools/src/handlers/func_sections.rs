@@ -30,7 +30,7 @@ use crate::handlers::func_get::remedy;
 
 pub use decomp::{
     DECOMP, DecompOpts, Remedies, WHY_DISASM, WHY_INSN, l1_rows, opts as decomp_opts,
-    output as decomp_output, value as decomp_value,
+    value as decomp_value,
 };
 pub use lists::{func_ref, jump_table, table_ids, type_text};
 pub use rows::{
