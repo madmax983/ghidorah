@@ -3,6 +3,7 @@
 //! | Members | Storage |
 //! |---|---|
 //! | the entry value of argument register `n` | `param:<n>` |
+//! | the entry value of floating register `n` of a positional convention, when the body reads no entry value of integer register `n` | `param:<n>` |
 //! | the entry value of a stack parameter slot | `param:<n>`, after the register parameters |
 //! | a value of the stack slot `k` | `stack:<k>` |
 //! | other values | `reg:<name>@<first def address>` |
@@ -45,20 +46,28 @@ fn slot_of(conv: &CallConv, loc: Loc) -> Option<u16> {
     u16::try_from(n).ok()
 }
 
-/// Gives the count of the parameter slots that the L1 body reads: one more than the highest
-/// slot of an entry value with a use. A call use counts.
-pub(crate) fn read_slots(f: &Facts<'_>, conv: Option<&CallConv>) -> u16 {
-    let Some(conv) = conv else {
-        return 0;
-    };
+/// Gives the locations whose entry values have a use in the L1 body. A call use counts.
+fn inputs_read(f: &Facts<'_>) -> BTreeSet<Loc> {
     f.start
         .iter()
         .filter_map(|&i| f.op(i).and_then(|o| o.out))
         .filter(|v| f.use_count(*v) > 0)
         .filter_map(|v| match f.kind_of(v) {
-            Kind::Input(loc) => slot_of(conv, loc),
+            Kind::Input(loc) => Some(loc),
             _ => None,
         })
+        .collect()
+}
+
+/// Gives the count of the parameter slots that the L1 body reads: one more than the highest
+/// slot of an entry value with a use.
+pub(crate) fn read_slots(f: &Facts<'_>, conv: Option<&CallConv>) -> u16 {
+    let Some(conv) = conv else {
+        return 0;
+    };
+    inputs_read(f)
+        .into_iter()
+        .filter_map(|loc| slot_of(conv, loc))
         .map(|n| n.saturating_add(1))
         .max()
         .unwrap_or(0)
@@ -70,6 +79,8 @@ pub(crate) struct Namer<'a> {
     home: &'a BTreeMap<Val, Loc>,
     vars: Vec<Var>,
     taken: BTreeSet<VarId>,
+    /// The locations whose entry values the L1 body reads.
+    read: BTreeSet<Loc>,
 }
 
 /// Gives the register name of a location: its lower-case letters and digits.
@@ -97,6 +108,7 @@ impl<'a> Namer<'a> {
             home,
             vars: Vec::new(),
             taken: BTreeSet::new(),
+            read: inputs_read(cx.f),
         }
     }
 
@@ -109,9 +121,21 @@ impl<'a> Namer<'a> {
         (n < count).then_some(n)
     }
 
-    /// Gives the parameter slot of an entry location in the calling convention.
+    /// Gives the parameter slot of an entry location in the calling convention. In a
+    /// positional convention, floating register n has slot n when the body reads no entry
+    /// value of integer register n.
     fn slot(&self, loc: Loc) -> Option<u16> {
-        slot_of(self.cx.conv?, loc)
+        let conv = self.cx.conv?;
+        if let Some(n) = slot_of(conv, loc) {
+            return Some(n);
+        }
+        let k = conv
+            .float_args
+            .iter()
+            .position(|r| loc_of(r) == Some(loc))
+            .filter(|_| conv.positional)?;
+        let int = conv.int_args.get(k).and_then(|r| loc_of(r))?;
+        (!self.read.contains(&int)).then(|| u16::try_from(k).ok())?
     }
 
     /// Gives a free register storage with the base name `name`.

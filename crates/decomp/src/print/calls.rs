@@ -3,6 +3,9 @@
 //! The argument count of a direct call comes from the signature or the Tier-0 prototype of
 //! the callee, then from the parameter recovery. Else it is the count of the argument
 //! registers that the caller sets.
+//!
+//! A slot of a positional convention prints its floating register when the caller sets only
+//! that register of the slot. Else it prints its integer register.
 
 use ghidorah_analysis::cc::loc_of;
 use ghidorah_base::WarningCode;
@@ -84,6 +87,22 @@ impl Printer<'_> {
             });
         self.arity.insert(t, found);
         found
+    }
+
+    /// Gives the argument register of each slot of the call `c` (see the module doc).
+    fn slot_regs(&self, c: &Call) -> Vec<Loc> {
+        let conv = self.env.conv();
+        let ints = conv.int_args.iter().filter_map(|n| loc_of(n));
+        if !conv.positional {
+            return ints.collect();
+        }
+        let floats: Vec<Loc> = conv.float_args.iter().filter_map(|n| loc_of(n)).collect();
+        ints.enumerate()
+            .map(|(k, int)| match floats.get(k) {
+                Some(&f) if !c.set.contains(int) && c.set.contains(f) => f,
+                _ => int,
+            })
+            .collect()
     }
 
     /// Gives the count of the argument registers that the caller sets: one more than the
@@ -183,13 +202,7 @@ impl Printer<'_> {
             buf.op(push);
         }
         let site = c.at.addr;
-        let regs: Vec<Loc> = self
-            .env
-            .conv()
-            .int_args
-            .iter()
-            .filter_map(|n| loc_of(n))
-            .collect();
+        let regs = self.slot_regs(c);
         match &c.callee {
             Callee::Direct(t) => {
                 let name = self.callee_name(*t, site);

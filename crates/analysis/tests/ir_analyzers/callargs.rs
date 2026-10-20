@@ -80,3 +80,15 @@ fn classify_kinds() {
         assert_eq!(v.kind(), kind);
     }
 }
+
+/// `m3(int a, double b, int c)` of `pe_cc.exe` has 3 positional slots: `rcx`, `xmm1` and
+/// `r8`. The argument count took the integer slots only, so the call lost `c`
+/// (r2-engine-02).
+#[test]
+fn regress_positional_call_arg_count() {
+    let p = cached("fixtures/bin/pe/pe_cc.exe");
+    let args = callargs::at(p, 0x1_4000_13c4, &mut Fuel::unlimited()).expect("the args");
+    assert_eq!(args.len(), 3, "{args:?}");
+    assert_eq!(args[0], ArgValue::Int(1));
+    assert_eq!(args[2], ArgValue::Int(3));
+}

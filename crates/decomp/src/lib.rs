@@ -285,11 +285,17 @@ impl Env for ProgramEnv<'_> {
             &mut Fuel::new(PARAM_FUEL),
         )
         .ok()?;
-        if p.stack == 0 {
-            return Some(p.int);
+        let conv = conv_of(self.0);
+        if p.stack > 0 {
+            let regs = u8::try_from(conv.int_args.len()).unwrap_or(u8::MAX);
+            return Some(regs.saturating_add(p.stack));
         }
-        let regs = u8::try_from(conv_of(self.0).int_args.len()).unwrap_or(u8::MAX);
-        Some(regs.saturating_add(p.stack))
+        // A positional slot is its position, so the count holds the floating slots too.
+        Some(if conv.positional {
+            p.int.saturating_add(p.float)
+        } else {
+            p.int
+        })
     }
 
     fn jumptable_unresolved(&self, site: u64) -> bool {

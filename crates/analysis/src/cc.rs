@@ -28,7 +28,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use ghidorah_base::{Address, Fuel, FuncId};
 use ghidorah_db::{Program, Types};
-use ghidorah_ir::{Arena, Arg, Loc, Node, Op, OpId, Opc, Val, local, rpo};
+use ghidorah_ir::{Arena, Arg, IntrinsicId, Loc, Node, Op, OpId, Opc, Val, local, rpo};
 use ghidorah_kernel::RangeSet;
 use ghidorah_loader::Format;
 use ghidorah_types::CallConv;
@@ -129,6 +129,13 @@ fn call_defs() -> BTreeSet<Loc> {
 /// register or from memory. Their only XMM use is the destination.
 const SCALAR_INTO: [Mnem; 2] = [Mnem::Cvtsi2ss, Mnem::Cvtsi2sd];
 
+/// Tells if the intrinsic `name` is a scalar conversion into an XMM register. Its only XMM
+/// use is its destination, whose other lanes it keeps.
+#[must_use]
+pub fn is_scalar_into(name: IntrinsicId) -> bool {
+    SCALAR_INTO.iter().any(|m| name.0 == *m as u16)
+}
+
 /// The live-in reads and the writes of one block. `free` holds each call and jump op with
 /// the argument registers that the block does not write before it.
 #[derive(Debug, Clone, Default)]
@@ -223,7 +230,7 @@ impl Uses<'_> {
             Opc::Syscall | Opc::Intrinsic => {
                 self.read(op.a[1]);
                 if let Some(e) = self.arena.effect(op) {
-                    let scalar = SCALAR_INTO.iter().any(|m| e.name.0 == *m as u16);
+                    let scalar = is_scalar_into(e.name);
                     for loc in e.uses.iter().filter(|l| l.is_gpr() || l.is_xmm()) {
                         // The conversion keeps the upper lanes of its destination, but it
                         // writes the lane of a parameter. So that use is no parameter read.

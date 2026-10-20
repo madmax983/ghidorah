@@ -387,3 +387,47 @@ fn regress_no_undefined_register_values() {
         .collect();
     assert!(bad.is_empty(), "{} reads:\n{}", bad.len(), bad.join("\n"));
 }
+
+/// Gives the count of the top-level arguments of the first call of `name` in `text`.
+fn arg_count(text: &str, name: &str) -> usize {
+    let start = text
+        .find(&format!("{name}("))
+        .unwrap_or_else(|| panic!("no call of {name}: {text}"));
+    let body = &text[start + name.len() + 1..];
+    let (mut depth, mut commas) = (0usize, 0usize);
+    for ch in body.chars() {
+        match ch {
+            '(' => depth += 1,
+            ')' if depth == 0 => return if body.starts_with(')') { 0 } else { commas + 1 },
+            ')' => depth -= 1,
+            ',' if depth == 0 => commas += 1,
+            _ => {}
+        }
+    }
+    commas + 1
+}
+
+/// A slot of the MS x64 convention is its position: `rcx` or `xmm0` is slot 0, up to `r9` or
+/// `xmm3`. `Env::param_count` gave the count of the integer slots only, and the namer named
+/// no floating slot. So `c` of `m3(int a, double b, int c)` read as a register value, and a
+/// caller passed 2 of the 3 arguments (r2-engine-02).
+#[test]
+fn regress_positional_param_slots() {
+    let fixture = "pe/pe_cc.exe";
+    let body = |text: &str| text.lines().skip(1).collect::<Vec<_>>().join("\n");
+    let m3 = text_at(fixture, 0x1_4000_1130);
+    let head = m3.lines().next().unwrap_or_default();
+    assert_eq!(head.matches("param_").count(), 3, "{m3}");
+    assert!(body(&m3).contains("param_3"), "r8 is param_3: {m3}");
+    let m4 = text_at(fixture, 0x1_4000_1150);
+    assert!(body(&m4).contains("param_4"), "r9 is param_4: {m4}");
+    let g2 = text_at(fixture, 0x1_4000_11c0);
+    assert!(body(&g2).contains("param_2"), "rdx is param_2: {g2}");
+    for text in [&m3, &m4, &g2] {
+        assert!(undefined_reads(text).is_empty(), "{text}");
+    }
+    let start = text_at(fixture, 0x1_4000_11e0);
+    assert_eq!(arg_count(&start, "FUN_140001130"), 3, "{start}");
+    assert_eq!(arg_count(&start, "FUN_140001150"), 4, "{start}");
+    assert_eq!(arg_count(&start, "FUN_1400011c0"), 2, "{start}");
+}

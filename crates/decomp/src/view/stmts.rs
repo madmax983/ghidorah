@@ -27,6 +27,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use ghidorah_analysis::cc::is_scalar_into;
 use ghidorah_analysis::jumptable::GuardInfo;
 use ghidorah_base::WarningCode;
 use ghidorah_ir::{
@@ -222,7 +223,14 @@ impl Ex<'_> {
         }
     }
 
-    /// Gives the call of the flow op `i`, with its used defs as results.
+    /// Tells if `a` is the entry value of a location.
+    fn is_entry(&self, a: Arg) -> bool {
+        matches!(self.f.ssa.root(a), Arg::V(v) if matches!(self.f.kind_of(v), Kind::Input(_)))
+    }
+
+    /// Gives the call of the flow op `i`, with its used defs as results. A scalar conversion
+    /// into an XMM register writes the scalar lane of its destination. No caller leaves a
+    /// value in the other lanes. So the entry value of the destination is no input.
     pub(crate) fn call(&self, i: u32) -> Call {
         let op = self.f.op(i).copied().unwrap_or(Op {
             id: OpId { addr: 0, seq: 0 },
@@ -254,8 +262,16 @@ impl Ex<'_> {
         } else {
             LocSet::EMPTY
         };
+        let scalar = op.opc == Opc::Intrinsic
+            && self
+                .f
+                .ssa
+                .arena()
+                .effect(&op)
+                .is_some_and(|e| is_scalar_into(e.name));
         let mut args: Vec<(Loc, Expr)> = uses
             .iter()
+            .filter(|&&(loc, a)| !(scalar && loc.is_xmm() && self.is_entry(a)))
             .map(|&(loc, a)| (loc, self.arg(a, loc.width())))
             .collect();
         let imm = match self.f.ssa.arena().effect(&op) {

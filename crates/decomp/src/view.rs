@@ -65,7 +65,8 @@ pub trait Env {
 
     /// Gives the count of the parameter slots of the function at `addr`: from its signature,
     /// its Tier-0 prototype or the parameter recovery. The stack parameters come after all
-    /// integer argument registers. The default knows no count.
+    /// integer argument registers. A positional convention counts its floating slots too.
+    /// The default knows no count.
     fn param_count(&self, addr: u64) -> Option<u8> {
         let _ = addr;
         None

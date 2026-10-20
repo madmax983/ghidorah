@@ -13,7 +13,8 @@
 //! | no value | `unknown` |
 //!
 //! The argument count comes from the parameters of the callee ([`crate::cc::params`]), or from
-//! the Tier-0 prototype of an import. A call with no known callee gives six arguments.
+//! the Tier-0 prototype of an import. A positional convention counts the floating slots too. A
+//! call with no known callee gives six arguments.
 
 use ghidorah_base::{Address, Fuel, FuncId, Limits};
 use ghidorah_db::{Encoding, Program, Types};
@@ -139,7 +140,14 @@ fn arg_count(program: &Program, target: Callee, fuel: &mut Fuel) -> usize {
     let count = match target {
         Callee::Func(t) => crate::cc::params(program, FuncId(Address::ram(t)), fuel)
             .ok()
-            .map(|(p, _)| p.int),
+            .map(|(p, _)| {
+                let positional = crate::cc::conv_of(program).positional;
+                if positional {
+                    p.int.saturating_add(p.float)
+                } else {
+                    p.int
+                }
+            }),
         Callee::Import(name) => {
             Types::prototype(&name).map(|p| u8::try_from(p.sig.params.len()).unwrap_or(u8::MAX))
         }
