@@ -58,7 +58,16 @@ pub fn rows(first: usize, lines: &[Line]) -> Vec<LineRow> {
         .collect()
 }
 
-/// The sorted and merged address ranges `[start, end)` of the lines and the elided ranges.
+/// Gives the last address of the range of `size` bytes at `start`. A range of 0 bytes gives
+/// `None`. The end is inclusive, so the clamp of a range that runs past the top of the
+/// address space keeps the byte at `u64::MAX`.
+fn last_of(start: u64, size: u64) -> Option<u64> {
+    let span = size.checked_sub(1)?;
+    Some(start.saturating_add(span))
+}
+
+/// The sorted and merged address ranges `[first, last]` of the lines and the elided ranges.
+/// The ends are inclusive, so a range can hold the byte at `u64::MAX`.
 struct Ranges(Vec<(u64, u64)>);
 
 impl Ranges {
@@ -66,19 +75,16 @@ impl Ranges {
         let mut all: Vec<(u64, u64)> = lines
             .iter()
             .filter_map(|l| l.span)
-            .map(|(s, n)| (s, s.saturating_add(n)))
-            .chain(
-                elided
-                    .iter()
-                    .map(|e| (e.start, e.start.saturating_add(e.size))),
-            )
-            .filter(|(s, e)| s < e)
+            .chain(elided.iter().map(|e| (e.start, e.size)))
+            .filter_map(|(s, n)| last_of(s, n).map(|last| (s, last)))
             .collect();
         all.sort_unstable();
         let mut merged: Vec<(u64, u64)> = Vec::with_capacity(all.len());
         for (s, e) in all {
             match merged.last_mut() {
-                Some(last) if s <= last.1 => last.1 = last.1.max(e),
+                Some(last) if last.1.checked_add(1).is_none_or(|next| s <= next) => {
+                    last.1 = last.1.max(e);
+                }
                 _ => merged.push((s, e)),
             }
         }
@@ -87,7 +93,7 @@ impl Ranges {
 
     fn holds(&self, addr: u64) -> bool {
         let i = self.0.partition_point(|r| r.0 <= addr);
-        i > 0 && self.0.get(i - 1).is_some_and(|r| addr < r.1)
+        i > 0 && self.0.get(i - 1).is_some_and(|r| addr <= r.1)
     }
 }
 
@@ -107,7 +113,8 @@ pub fn merge(mut elided: Vec<Elided>) -> Vec<Elided> {
     for e in elided {
         match out.last_mut() {
             Some(last)
-                if last.reason == e.reason && last.start.saturating_add(last.size) == e.start =>
+                if last.reason == e.reason
+                    && last.start.checked_add(last.size) == Some(e.start) =>
             {
                 last.size = last.size.saturating_add(e.size);
             }
