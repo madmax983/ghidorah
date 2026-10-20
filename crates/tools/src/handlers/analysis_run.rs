@@ -1,11 +1,12 @@
 //! `analysis_run`: run or resume the analysis with a fuel budget (design Section 10.4, tool 3).
 //!
-//! The handler runs the analysis engine of the session in fuel slices. A slice has
-//! [`SLICE_STEPS`] work units or a quarter of the units so far, whichever is more. So the
-//! publish steps of one call cost at most a log factor over one publish. After each slice the
-//! handler sends one progress report with the work units so far, so the progress value
-//! increases strictly (AC-173). It checks the cancel flag at the end of each slice. So
-//! `notifications/cancelled` stops the run at the next fuel checkpoint (AC-172).
+//! The handler runs the analysis engine of the session in fuel slices through
+//! [`Session::analyze_sliced`]. A slice has [`SLICE_STEPS`] work units or a quarter of the
+//! units so far, whichever is more. So the publish steps of one call cost at most a log factor
+//! over one publish. After each slice the session sends one progress report with the work
+//! units so far, so the progress value increases strictly (AC-173). It checks the cancel flag
+//! at the end of each slice. So `notifications/cancelled` stops the run at the next fuel
+//! checkpoint (AC-172). `binary_load` and the re-analysis of an edit use the same slices.
 //!
 //! [`Engine`] is the analysis engine of the shipped tools: one [`Scheduler`] per open binary.
 //! A session with no engine gets one at the first call. A binary with no scheduler gets one
@@ -24,7 +25,6 @@ use ghidorah_analysis::{ANALYZERS, AnalyzerRow, Changed, RunState, Scheduler, Un
 use ghidorah_base::{BinaryId, ErrorCode, Fuel};
 use ghidorah_json::{Object, Value};
 
-use crate::api::Progress;
 use crate::args::Args;
 use crate::dispatch::{Ctx, Payload};
 use crate::envelope::{AnalysisState, Mutation};
@@ -42,6 +42,40 @@ pub const MAX_STEPS: u64 = 1_000_000_000_000;
 
 /// The smallest fuel of one slice. The handler sends one progress report per slice.
 pub const SLICE_STEPS: u64 = 4_096;
+
+/// Why a run in fuel slices stopped before its end (design Section 2.4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SliceStop {
+    /// The client cancelled the request.
+    Cancel,
+    /// The `max_ms` guard of the call fired.
+    Time,
+}
+
+/// The report of a run in fuel slices: [`Session::analyze_sliced`] gives it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Sliced {
+    /// The state after the last slice.
+    pub state: AnalysisState,
+    /// The work units of all slices.
+    pub steps_used: u64,
+    /// The checkpoint that stopped the run before its end, or `None`.
+    pub stop: Option<SliceStop>,
+    /// `true` when the last slice did no work: no analyzer up to the bound of the run has
+    /// work.
+    pub idle: bool,
+}
+
+impl Sliced {
+    /// Gives the run report: the last state and the work units of all slices.
+    #[must_use]
+    pub const fn report(&self) -> RunReport {
+        RunReport {
+            state: self.state,
+            steps_used: self.steps_used,
+        }
+    }
+}
 
 /// The `why` of the `analysis_run` hint after a stop on the fuel budget.
 pub const WHY_RESUME: &str = "The analysis has more work. Call analysis_run again to resume it.";
@@ -313,26 +347,17 @@ fn run(session: &mut Session, args: &Args, ctx: &mut Ctx) -> Result<Payload, Too
     if !session.has_engine() {
         install(session);
     }
-    let mut last = slice(session, id, until, 0)?;
-    let mut used = 0u64;
+    // A slice with no fuel gives the state. A dry run and a complete analysis stop there.
+    let probe = slice(session, id, until, 0)?;
     let dry = args.globals().dry_run;
-    while !dry && last.state != AnalysisState::Complete && !ctx.cancelled() {
-        let steps = SLICE_STEPS.max(used / 4).min(ctx.fuel.remaining());
-        if steps == 0 {
-            break;
-        }
-        last = slice(session, id, until, steps)?;
-        let _ = ctx.fuel.take(last.steps_used.min(ctx.fuel.remaining()));
-        if last.steps_used == 0 {
-            break;
-        }
-        used = used.saturating_add(last.steps_used);
-        ctx.progress(Progress {
-            progress: used,
-            total: None,
-            message: format!("The analysis used {used} work units."),
-        });
-    }
+    let (last, used) = if dry || probe.state == AnalysisState::Complete {
+        (probe, 0)
+    } else {
+        let run = session
+            .analyze_sliced(id, until, ctx)?
+            .ok_or_else(|| ToolError::new(ErrorCode::InternalError))?;
+        (run.report(), run.steps_used)
+    };
     let binary = session
         .binary(id)
         .ok_or_else(|| ToolError::new(ErrorCode::UnknownBinary))?;

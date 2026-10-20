@@ -14,6 +14,11 @@
 //!
 //! A `tools/call` of a name outside the registry gives -32602 with
 //! `data: { code: "UNKNOWN_TOOL", candidates, next }`. A tool failure gives `isError: true`.
+//!
+//! A cancelled request gets no reply (AC-169e), with one exception: a call that committed
+//! before the cancel took effect. Its envelope has a `tx`, or `noop: false` from a tool other
+//! than `analysis_run`. MCP allows a reply after a cancel race, and the client needs the new
+//! rev, the transaction ID or the binary ID.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError, mpsc};
@@ -65,6 +70,19 @@ pub(crate) fn is_blank(line: &[u8]) -> bool {
     line.iter().all(u8::is_ascii_whitespace)
 }
 
+/// The tools whose only change is an analysis publish. A cancelled call of such a tool gets
+/// no reply (AC-172): the next envelope shows the new rev and the analysis state.
+const ANALYSIS_ONLY: &[&str] = &["analysis_run"];
+
+/// Tells if the envelope `json` of a successful call of `tool` committed: it has a
+/// transaction, or its edit members say that the state changed (`noop: false`). An analysis
+/// publish alone does not count.
+fn committed(tool: &str, json: &Value) -> bool {
+    let tx = json.get("tx").is_some_and(|t| !t.is_null());
+    let changed = json.get("noop") == Some(&Value::Bool(false)) && !ANALYSIS_ONLY.contains(&tool);
+    tx || changed
+}
+
 /// Gives the size report `{ chars, copies, est_tokens }` of a tool result.
 fn size_report(chars: u64, copies: u64) -> Value {
     Value::object([
@@ -114,7 +132,9 @@ impl<B: Backend> Server<B> {
     /// Answers one request.
     ///
     /// `emit` gets each progress notification while the tool runs. Gives the reply, or
-    /// `None` when the client cancelled the request.
+    /// `None` when the client cancelled the request. A cancelled call that committed still
+    /// gets its reply, and the recorder keeps it. So the client learns the new rev, the
+    /// transaction or the loaded binary.
     pub fn handle(
         &mut self,
         request: &Request,
@@ -126,8 +146,8 @@ impl<B: Backend> Server<B> {
             return None;
         }
         let start = self.clock.monotonic_ms();
-        let (reply, copies) = self.answer(request, cancel, emit);
-        if cancelled() {
+        let (reply, copies, committed) = self.answer(request, cancel, emit);
+        if cancelled() && !committed {
             return None;
         }
         let ms = self.clock.monotonic_ms().saturating_sub(start);
@@ -137,19 +157,24 @@ impl<B: Backend> Server<B> {
         Some(reply)
     }
 
-    /// Gives the reply of one request and the envelope copies in it.
+    /// Gives the reply of one request, the envelope copies in it, and `true` when the call
+    /// committed.
     fn answer(
         &mut self,
         request: &Request,
         cancel: &Arc<AtomicBool>,
         emit: &(dyn Fn(Value) + Sync),
-    ) -> (Value, u64) {
+    ) -> (Value, u64, bool) {
         let (era, method) =
             match era::decide(&mut self.era, &request.method, request.params.as_ref()) {
                 Ok(decision) => decision,
-                Err(r) => return (rpc::error(Some(&request.id), r.code, &r.message, r.data), 0),
+                Err(r) => {
+                    let reply = rpc::error(Some(&request.id), r.code, &r.message, r.data);
+                    return (reply, 0, false);
+                }
             };
         let mut copies = 0;
+        let mut committed = false;
         let result = match method {
             Method::Initialize(version) => {
                 era::initialize_result(version, &self.info, &self.backend.instructions())
@@ -158,23 +183,26 @@ impl<B: Backend> Server<B> {
             Method::Ping => Value::Object(Object::new()),
             Method::ToolsList => catalog::tools_list(&self.backend),
             Method::ToolsCall => match self.tools_call(request, cancel, emit) {
-                Ok(result) => {
+                Ok((result, done)) => {
                     copies = self.content.copies();
+                    committed = done;
                     result
                 }
-                Err(reply) => return (reply, 0),
+                Err(reply) => return (reply, 0, false),
             },
         };
-        (rpc::result(&request.id, era::finish(era, result)), copies)
+        let reply = rpc::result(&request.id, era::finish(era, result));
+        (reply, copies, committed)
     }
 
-    /// Runs one `tools/call`. Gives the tool result, or the error reply of a bad call.
+    /// Runs one `tools/call`. Gives the tool result and `true` when the call committed, or
+    /// the error reply of a bad call.
     fn tools_call(
         &mut self,
         request: &Request,
         cancel: &Arc<AtomicBool>,
         emit: &(dyn Fn(Value) + Sync),
-    ) -> Result<Value, Value> {
+    ) -> Result<(Value, bool), Value> {
         let invalid =
             |message: &str| rpc::error(Some(&request.id), rpc::INVALID_PARAMS, message, None);
         let params = request.params.as_ref();
@@ -246,7 +274,7 @@ impl<B: Backend> Server<B> {
         if let Some(object) = result.as_object_mut() {
             object.push("_meta", Value::object([(era::SIZE_KEY, size)]));
         }
-        Ok(result)
+        Ok((result, ok && committed(name, &json)))
     }
 
     /// Classifies and answers one line in order. Gives the output lines.

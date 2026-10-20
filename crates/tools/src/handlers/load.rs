@@ -14,9 +14,10 @@
 //! `binary_id` reads only the input copy of the project, with no root check.
 //!
 //! With an analysis engine in the session, the load then runs the analysis within
-//! `max_steps`. A project with a current analysis needs no run. A project with changed
-//! analysis inputs starts a re-analysis. Without an engine, the analysis state is `none`. A
-//! dry run loads the file and reports it, but opens nothing.
+//! `max_steps`, in fuel slices with one progress report per slice. A cancel stops the run at
+//! the next slice end, and the load stays. A project with a current analysis needs no run. A
+//! project with changed analysis inputs starts a re-analysis. Without an engine, the analysis
+//! state is `none`. A dry run loads the file and reports it, but opens nothing.
 //!
 //! A default projects root inside a git working tree keeps no project (ADR-0022). Then the
 //! result holds `persisted: false` and `persist_reason`, so the agent knows that its edits
@@ -431,12 +432,12 @@ fn analyze_after(
         Some("triage") => Until::Triage,
         _ => Until::Full,
     };
-    let report = match admitted {
-        Admitted::Fresh => session.analyze(id, until, &mut ctx.fuel)?,
+    let run = match admitted {
+        Admitted::Fresh => session.analyze_sliced(id, until, ctx)?,
         Admitted::Current => None,
-        Admitted::Stale(band) => session.reanalyze(id, band, &mut ctx.fuel)?,
+        Admitted::Stale(band) => session.reanalyze_sliced(id, band, ctx)?,
     };
-    Ok(report.map_or(0, |r| r.steps_used))
+    Ok(run.map_or(0, |r| r.steps_used))
 }
 
 /// Opens the binary `text` for a call with `binary_id`: an open binary, else its project.

@@ -356,7 +356,7 @@ fn finish(
             })
         }
         (Some(id), false) => {
-            let commit = session.batch_commit(id, &mut ctx.fuel)?;
+            let commit = session.batch_commit(id, ctx)?;
             Some(Mutation {
                 tx: commit.tx.map(|t| t.to_string()),
                 noop: commit.tx.is_none(),

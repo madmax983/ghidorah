@@ -198,6 +198,74 @@ fn regress_broken_pipe_releases_lock() {
 }
 
 #[test]
+fn regress_cancelled_commit_still_replies() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Arc, Mutex};
+
+    use ghidorah_base::FixedClock;
+    use ghidorah_cli::mcp::rpc::{self, Message};
+    use ghidorah_cli::mcp::server::Server;
+    use ghidorah_cli::record::Recorder;
+    use ghidorah_cli::shipped::Shipped;
+    use ghidorah_cli::{Backend, record};
+    use ghidorah_tools::ContentMode;
+
+    let request = |line: &str| match rpc::classify(line.as_bytes()) {
+        Ok(Message::Request(r)) => r,
+        other => panic!("not a request: {other:?}"),
+    };
+    let mut options = Options::new(&env("cancel_commit"), "mcp-1");
+    options.roots = vec![root()];
+    let backend = <Shipped as Backend>::open(&options).expect("the backend opens");
+    let records = SharedBuf::default();
+    let mut server = Server::new(backend, ContentMode::Plain, Box::new(FixedClock::new(0)))
+        .with_recorder(Recorder::new(Box::new(records.clone())));
+    let no = Arc::new(AtomicBool::new(false));
+    assert!(server.handle(&request(INIT), &no, &|_| {}).is_some());
+    // The client cancels at the first progress notification of the load.
+    let flag = Arc::new(AtomicBool::new(false));
+    let seen = Mutex::new(0usize);
+    let emit = |_: Value| {
+        flag.store(true, Ordering::Relaxed);
+        *seen.lock().expect("the lock") += 1;
+    };
+    let load = call(
+        2,
+        "binary_load",
+        r#"{"path":"fixtures/bin/large.gcc-O2"}"#,
+        Some("p2"),
+    );
+    let reply = server.handle(&request(&load), &flag, &emit);
+    assert!(
+        *seen.lock().expect("the lock") > 0,
+        "the load sends progress"
+    );
+    let reply = reply.expect("a cancelled load that opened a binary still replies");
+    let envelope = reply.get("result").expect("a result");
+    assert_eq!(envelope.get("ok"), Some(&Value::Bool(true)), "{envelope}");
+    assert_eq!(
+        envelope.get("noop"),
+        Some(&Value::Bool(false)),
+        "{envelope}"
+    );
+    assert_eq!(
+        envelope
+            .pointer("/data/analysis/state")
+            .and_then(Value::as_str),
+        Some("budget_stopped"),
+        "the cancel stops the analysis: {envelope}"
+    );
+    let entries = record::parse(&records.text()).expect("the record parses");
+    assert!(
+        entries
+            .iter()
+            .any(|e| e.request.get("id") == Some(&json("2"))),
+        "the recorder keeps the call: {}",
+        records.text()
+    );
+}
+
+#[test]
 fn cancel_map_sets_and_drops_flags() {
     let map = CancelMap::new();
     let id = RequestId::Int(7);

@@ -1,19 +1,23 @@
 //! `binary_load`, the path roots and the binding rules (AC-147, AC-213).
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::sync::mpsc;
 
-use ghidorah_base::{BinaryId, ErrorCode, Fuel};
+use ghidorah_base::{BinaryId, Clock, ErrorCode, Fuel};
 use ghidorah_json::{Object, Value};
+use ghidorah_tools::handlers::analysis_run::SLICE_STEPS;
 use ghidorah_tools::outshape::Fit;
 use ghidorah_tools::session::{AnalysisEngine, OpenBinary, ProjectsConfig, RunReport, Until};
 use ghidorah_tools::{
-    AnalysisState, Args, BinaryArg, Ctx, Payload, Registry, Roots, Session, ToolError, ToolSpec,
-    handlers,
+    AnalysisState, Args, BinaryArg, Ctx, Payload, Registry, Request, Roots, Session, ToolError,
+    ToolSpec, dispatch_with, handlers,
 };
 
 use crate::support::{
-    DEMO_ID, WP13B, call, call_value, code, config, data, demo, json, load, session, session_with,
-    text_at,
+    DEMO_ID, WP13B, call, call_value, code, config, data, demo, json, load, registry, session,
+    session_with, text_at,
 };
 
 /// A temporary directory that the test removes at the end.
@@ -130,8 +134,9 @@ fn binary_load_demo() {
     assert_eq!(data(&envelope).get("read_only"), Some(&Value::Bool(true)));
 }
 
-/// A test engine: it reports a fixed state and the steps it used.
-struct TestEngine(AnalysisState);
+/// A test engine: the first run uses its steps and reports a fixed state. A later run finds
+/// no work, so a load in fuel slices stops after the first slice.
+struct TestEngine(AnalysisState, bool);
 
 impl AnalysisEngine for TestEngine {
     fn run(
@@ -140,10 +145,15 @@ impl AnalysisEngine for TestEngine {
         until: Until,
         fuel: &mut Fuel,
     ) -> Result<RunReport, ToolError> {
-        let steps = if until == Until::Full { 42 } else { 7 };
+        let steps = match (self.1, until) {
+            (true, _) => 0,
+            (false, Until::Full) => 42,
+            (false, Until::Triage) => 7,
+        };
         fuel.take(steps)
             .map_err(|_| ToolError::new(ErrorCode::BudgetExceeded))?;
         assert!(!binary.file_name.is_empty());
+        self.1 = true;
         Ok(RunReport {
             state: self.0,
             steps_used: steps,
@@ -154,7 +164,7 @@ impl AnalysisEngine for TestEngine {
 #[test]
 fn binary_load_runs_the_engine() {
     let mut s = session();
-    s.set_engine(Box::new(TestEngine(AnalysisState::Complete)));
+    s.set_engine(Box::new(TestEngine(AnalysisState::Complete, false)));
     let envelope = call(&mut s, "binary_load", r#"{"builtin":"demo"}"#);
     let got = data(&envelope);
     assert_eq!(text_at(got, "/analysis/state"), "complete");
@@ -166,7 +176,7 @@ fn binary_load_runs_the_engine() {
     assert_eq!(envelope.get("partial"), Some(&Value::Bool(false)));
 
     let mut s = session();
-    s.set_engine(Box::new(TestEngine(AnalysisState::BudgetStopped)));
+    s.set_engine(Box::new(TestEngine(AnalysisState::BudgetStopped, false)));
     let envelope = call(
         &mut s,
         "binary_load",
@@ -185,7 +195,7 @@ fn binary_load_runs_the_engine() {
     assert_eq!(later.get("partial"), Some(&Value::Bool(true)), "{later}");
 
     let mut s = session();
-    s.set_engine(Box::new(TestEngine(AnalysisState::Complete)));
+    s.set_engine(Box::new(TestEngine(AnalysisState::Complete, false)));
     let envelope = call(
         &mut s,
         "binary_load",
@@ -198,6 +208,85 @@ fn binary_load_runs_the_engine() {
         r#"{"path":"fixtures/bin/loops.gcc-O2","max_steps":3}"#,
     );
     assert_eq!(code(&envelope), "BUDGET_EXCEEDED", "{envelope}");
+}
+
+/// The fixture of the slice tests: its analysis needs many fuel slices.
+const LARGE: &str = "fixtures/bin/large.gcc-O2";
+
+/// Makes a session of the test registry with the shipped engine and the clock `clock`.
+fn engine_session(eval_mode: bool, clock: Box<dyn Clock + Send>) -> Session {
+    let mut c = config();
+    c.run.eval_mode = eval_mode;
+    let mut s = Session::with_registry(registry(), c, clock);
+    handlers::analysis_run::install(&mut s);
+    s
+}
+
+/// Runs `binary_load` with `args` in a request that `edit` changes.
+fn load_with(s: &mut Session, args: &str, edit: impl FnOnce(&mut Request)) -> Value {
+    let registry = s.active_registry();
+    let mut request = Request::new("binary_load", json(args));
+    edit(&mut request);
+    dispatch_with(&registry, s, &request).to_json()
+}
+
+/// Gives the work units of the analysis of a `binary_load` result.
+fn steps_of(envelope: &Value) -> u64 {
+    data(envelope)
+        .pointer("/analysis/steps_used")
+        .and_then(Value::as_u64)
+        .unwrap_or(0)
+}
+
+#[test]
+fn regress_binary_load_stops_on_cancel() {
+    let mut s = engine_session(false, Box::new(ghidorah_base::FixedClock::new(0)));
+    let args = format!(r#"{{"path":"{LARGE}"}}"#);
+    let envelope = load_with(&mut s, &args, |r| {
+        r.cancel = Some(Arc::new(AtomicBool::new(true)));
+    });
+    assert_eq!(
+        text_at(data(&envelope), "/analysis/state"),
+        "budget_stopped",
+        "the cancel stops the analysis at the first fuel checkpoint: {envelope}"
+    );
+    let used = steps_of(&envelope);
+    assert!(used > 0 && used < 2 * SLICE_STEPS, "one slice: {used}");
+    assert_eq!(
+        envelope.get("noop"),
+        Some(&Value::Bool(false)),
+        "the load stays"
+    );
+}
+
+#[test]
+fn regress_binary_load_sends_progress() {
+    for (path, many) in [("crates/tools/data/demo.elf", false), (LARGE, true)] {
+        let mut s = engine_session(false, Box::new(ghidorah_base::FixedClock::new(0)));
+        let (sender, reports) = mpsc::channel();
+        let args = format!(r#"{{"path":"{path}"}}"#);
+        let envelope = load_with(&mut s, &args, |r| r.progress = Some(sender));
+        assert_eq!(text_at(data(&envelope), "/analysis/state"), "complete");
+        let used = steps_of(&envelope);
+        let values: Vec<u64> = reports.try_iter().map(|p| p.progress).collect();
+        assert_eq!(values.last(), Some(&used), "{path}: {values:?}");
+        assert!(values.windows(2).all(|w| w[0] < w[1]), "{values:?}");
+        let mut before = 0;
+        for (i, v) in values.iter().enumerate() {
+            if i + 1 < values.len() {
+                assert!(
+                    v - before >= SLICE_STEPS,
+                    "a slice uses its fuel: {values:?}"
+                );
+            }
+            before = *v;
+        }
+        if many {
+            assert!(values.len() >= 3, "one report per slice: {values:?}");
+        } else {
+            assert_eq!(values.len(), 1, "one slice: {values:?}");
+        }
+    }
 }
 
 #[test]

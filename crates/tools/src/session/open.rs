@@ -8,6 +8,9 @@
 //! | [`Session::reload`] | the program loads again from the project or the checkpoint |
 //! | [`Session::close`] | a snapshot, and the lock goes |
 //!
+//! [`Session::analyze_sliced`] and [`Session::reanalyze_sliced`] run the engine in fuel
+//! slices with a progress report and a cancel check per slice.
+//!
 //! An analysis run that commits gives one marker line per new revision. A complete run also
 //! writes a snapshot, so a reopen needs no new run. A reopen compares the analysis inputs hash
 //! of the last run with the hash of the program. A difference makes the state `stale`, and a
@@ -22,10 +25,12 @@ use ghidorah_db::{Line, Project, ProjectError, ProjectSummary, RunLine, RunState
 use ghidorah_json::{Object, Value};
 
 use super::store::project_error;
-use super::{OpenBinary, RunReport, Session, Store};
-use crate::dispatch::Crash;
+use super::{OpenBinary, RunReport, Session, Store, Until};
+use crate::api::Progress;
+use crate::dispatch::{Crash, Ctx};
 use crate::envelope::{AnalysisInfo, AnalysisState, Warning};
 use crate::errors::ToolError;
+use crate::handlers::analysis_run::{SLICE_STEPS, SliceStop, Sliced};
 
 /// The start band of a full re-analysis (design Section 3.9).
 pub const FULL_BAND: u16 = 100;
@@ -323,6 +328,110 @@ impl Session {
         let report = engine.reanalyze(binary, band, fuel)?;
         self.finish_run(id, before, report)?;
         Ok(Some(report))
+    }
+
+    /// Runs the analysis of the open binary `id` until `until` in the fuel slices of the call
+    /// `ctx` (design Section 2.4). Gives `None` when the session has no engine or no such
+    /// binary.
+    ///
+    /// A slice has [`SLICE_STEPS`] work units or a quarter of the units so far, whichever is
+    /// more. Each slice with work sends one progress report. After each slice the run stops
+    /// when the analysis is complete, the slice did no work, the fuel is empty, or the client
+    /// cancelled the request.
+    ///
+    /// # Errors
+    ///
+    /// Returns the error of the engine.
+    pub fn analyze_sliced(
+        &mut self,
+        id: BinaryId,
+        until: Until,
+        ctx: &mut Ctx,
+    ) -> Result<Option<Sliced>, ToolError> {
+        self.sliced(id, None, until, ctx)
+    }
+
+    /// Runs the re-analysis of the open binary `id` from the start band `band` with the
+    /// checkpoints of [`Session::analyze_sliced`]. With no engine, the analysis state becomes
+    /// `stale`.
+    ///
+    /// # Errors
+    ///
+    /// Returns the error of the engine.
+    pub fn reanalyze_sliced(
+        &mut self,
+        id: BinaryId,
+        band: u16,
+        ctx: &mut Ctx,
+    ) -> Result<Option<Sliced>, ToolError> {
+        self.sliced(id, Some(band), Until::Full, ctx)
+    }
+
+    /// Starts the re-analysis after an analysis-affecting commit like [`Session::after_edit`],
+    /// with the checkpoints of [`Session::analyze_sliced`].
+    ///
+    /// # Errors
+    ///
+    /// Returns the error of the engine.
+    pub fn after_edit_sliced(
+        &mut self,
+        id: BinaryId,
+        band: Option<u16>,
+        ctx: &mut Ctx,
+    ) -> Result<Option<RunReport>, ToolError> {
+        let Some(band) = band else {
+            return Ok(None);
+        };
+        if self.batch_band(id, band) {
+            return Ok(None);
+        }
+        Ok(self.reanalyze_sliced(id, band, ctx)?.map(|s| s.report()))
+    }
+
+    /// Runs the slices of [`Session::analyze_sliced`]. A start band makes the first slice a
+    /// re-analysis. The next slices resume the run of the engine.
+    fn sliced(
+        &mut self,
+        id: BinaryId,
+        band: Option<u16>,
+        until: Until,
+        ctx: &mut Ctx,
+    ) -> Result<Option<Sliced>, ToolError> {
+        let mut out: Option<Sliced> = None;
+        loop {
+            let used = out.map_or(0, |s| s.steps_used);
+            let mut fuel = Fuel::new(SLICE_STEPS.max(used / 4).min(ctx.fuel.remaining()));
+            let report = match (out, band) {
+                (None, Some(band)) => self.reanalyze(id, band, &mut fuel)?,
+                _ => self.analyze(id, until, &mut fuel)?,
+            };
+            let Some(report) = report else {
+                return Ok(out);
+            };
+            let _ = ctx.fuel.take(report.steps_used.min(ctx.fuel.remaining()));
+            let total = used.saturating_add(report.steps_used);
+            let mut run = Sliced {
+                state: report.state,
+                steps_used: total,
+                stop: None,
+                idle: report.steps_used == 0,
+            };
+            if !run.idle {
+                ctx.progress(Progress {
+                    progress: total,
+                    total: None,
+                    message: format!("The analysis used {total} work units."),
+                });
+            }
+            let done = run.state == AnalysisState::Complete || run.idle;
+            if !done && ctx.cancelled() {
+                run.stop = Some(SliceStop::Cancel);
+            }
+            out = Some(run);
+            if done || run.stop.is_some() || ctx.fuel.remaining() == 0 {
+                return Ok(out);
+            }
+        }
     }
 
     /// Records the analysis commits of a run: one marker line per new revision, and a snapshot
