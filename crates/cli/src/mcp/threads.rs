@@ -3,7 +3,11 @@
 //! | Channel | From | To | Items |
 //! |---|---|---|---|
 //! | work | reader | worker | requests and the error replies of the reader, in input order, then a stop item at the end of stdin. The queue holds at most [`QUEUE`] items. |
-//! | out | worker | writer | reply and notification lines |
+//! | out | worker, reader | writer | reply and notification lines. The reader sends only the replies that do not fit in the work queue. |
+//!
+//! The reader never waits for room in the work queue, so it reads each cancel notification
+//! at once (AC-172). A request that finds the queue full gets a -32603 reply ([`QUEUE_FULL`])
+//! through the out channel at once, and the reader removes its cancel registration.
 //!
 //! The worker opens the backend, so the backend needs no `Send`. A broken pipe on stdout
 //! stops the worker: the running request gets its cancel flag, and the worker takes no next
@@ -13,7 +17,7 @@
 
 use std::io::{self, BufRead, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, Receiver, Sender, SyncSender};
+use std::sync::mpsc::{self, Receiver, Sender, SyncSender, TrySendError};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -40,13 +44,17 @@ const CANCELLED: &str = "notifications/cancelled";
 /// The longest wait for the worker after stdout fails.
 pub const STOP_WAIT: Duration = Duration::from_secs(5);
 
-/// The most work items that wait for the worker. A full queue makes the reader wait, so a
+/// The most work items that wait for the worker. A full queue refuses the next request, so a
 /// flood of large lines cannot grow the memory without a limit.
 pub const QUEUE: usize = 64;
 
-/// Makes the work queue: a channel that holds at most [`QUEUE`] items.
-fn work_queue() -> (SyncSender<Work>, Receiver<Work>) {
-    mpsc::sync_channel(QUEUE)
+/// The message of the -32603 reply to a request that finds the work queue full.
+pub const QUEUE_FULL: &str = "The work queue is full. Send the request again later.";
+
+/// Makes the work queue: a channel that holds at most `size` items. The server uses
+/// [`QUEUE`].
+fn work_queue(size: usize) -> (SyncSender<Work>, Receiver<Work>) {
+    mpsc::sync_channel(size)
 }
 
 /// One item of the work queue.
@@ -120,6 +128,38 @@ impl Log {
     }
 }
 
+/// The out channel of the reader. The worker closes it at its end, also after a fault. So the
+/// writer does not wait for the end of stdin after the worker stops.
+#[derive(Clone)]
+struct ReaderOut(Arc<Mutex<Option<Sender<String>>>>);
+
+impl ReaderOut {
+    fn new(out: Sender<String>) -> Self {
+        Self(Arc::new(Mutex::new(Some(out))))
+    }
+
+    /// Sends `line` to the writer. Gives `false` after the end of the worker or the writer.
+    fn send(&self, line: String) -> bool {
+        let out = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        out.as_ref().is_some_and(|out| out.send(line).is_ok())
+    }
+
+    /// Drops the sender of the reader.
+    fn close(&self) {
+        let sender = self.0.lock().unwrap_or_else(PoisonError::into_inner).take();
+        drop(sender);
+    }
+}
+
+/// Closes the out channel of the reader when the worker thread ends.
+struct CloseOnDrop(ReaderOut);
+
+impl Drop for CloseOnDrop {
+    fn drop(&mut self) {
+        self.0.close();
+    }
+}
+
 /// How the writer thread ends.
 enum WriterEnd {
     /// The out channel closed.
@@ -128,8 +168,40 @@ enum WriterEnd {
     Stopped(Stop),
 }
 
-/// Reads stdin lines and sends the work items in input order.
-fn read(stdin: Box<dyn BufRead + Send>, work: &SyncSender<Work>, cancels: &CancelMap, log: &Log) {
+/// The channels and the shared state of the reader.
+struct Inlet<'a> {
+    work: &'a SyncSender<Work>,
+    out: &'a ReaderOut,
+    cancels: &'a CancelMap,
+    log: &'a Log,
+}
+
+/// Puts `item` in the work queue with no wait. When the queue is full, a request gets the
+/// [`QUEUE_FULL`] reply, and an error reply goes to the writer at once. Only a stop item waits
+/// for room. Gives `false` after the end of the worker or the writer.
+fn enqueue(item: Work, inlet: &Inlet<'_>) -> bool {
+    let line = match inlet.work.try_send(item) {
+        Ok(()) => return true,
+        Err(TrySendError::Disconnected(_)) => return false,
+        Err(TrySendError::Full(stop @ Work::Stop)) => return inlet.work.send(stop).is_ok(),
+        Err(TrySendError::Full(Work::Reply(line))) => line,
+        Err(TrySendError::Full(Work::Request(request, flag))) => {
+            // Only the map and `flag` hold a new flag. A flag with more holders is also the
+            // flag of a request in flight with the same ID, so its registration stays.
+            if Arc::strong_count(&flag) == 2 {
+                inlet.cancels.finish(&request.id);
+            }
+            let reply = rpc::error(Some(&request.id), rpc::INTERNAL_ERROR, QUEUE_FULL, None);
+            ghidorah_json::write(&reply)
+        }
+    };
+    inlet.out.send(line)
+}
+
+/// Reads stdin lines and sends the work items in input order. Before the end of stdin, the
+/// reader never waits for room in the work queue.
+fn read(stdin: Box<dyn BufRead + Send>, inlet: &Inlet<'_>) {
+    let Inlet { cancels, log, .. } = *inlet;
     let mut reader = LineReader::new(stdin, MAX_LINE);
     loop {
         let frame = match reader.next_frame() {
@@ -165,13 +237,14 @@ fn read(stdin: Box<dyn BufRead + Send>, work: &SyncSender<Work>, cancels: &Cance
             },
         };
         if let Some(item) = item
-            && work.send(item).is_err()
+            && !enqueue(item, inlet)
         {
             return;
         }
     }
-    // The worker answers the items before this one, then it stops.
-    let _ = work.send(Work::Stop);
+    // The worker answers the items before this one, then it stops. No line comes after the
+    // end of stdin, so the stop item can wait for room.
+    let _ = enqueue(Work::Stop, inlet);
 }
 
 /// The channels and the shared state of the worker.
@@ -234,25 +307,40 @@ fn write(mut stdout: Box<dyn Write + Send>, lines: &Receiver<String>) -> WriterE
     WriterEnd::Done
 }
 
+/// The channels of the worker thread.
+struct WorkerChannels {
+    /// The work queue.
+    items: Receiver<Work>,
+    /// The out channel of the worker.
+    out: Sender<String>,
+    /// The result of the backend open.
+    ready: Sender<Result<usize, OpenError>>,
+    /// The out channel of the reader. The end of the worker thread closes it.
+    reader_out: ReaderOut,
+}
+
 /// Opens the backend on the worker thread, reports the result, then answers the work items.
 fn start_worker<B: Backend>(
     options: Options,
     content: ghidorah_tools::ContentMode,
     recorder: Option<Recorder>,
-    channels: (
-        Receiver<Work>,
-        Sender<String>,
-        Sender<Result<usize, OpenError>>,
-    ),
+    channels: WorkerChannels,
     cancels: CancelMap,
     running: Running,
     log: Log,
 ) -> io::Result<thread::JoinHandle<()>> {
-    let (items, out, ready) = channels;
+    let WorkerChannels {
+        items,
+        out,
+        ready,
+        reader_out,
+    } = channels;
     thread::Builder::new()
         .name("ghidorah-worker".to_owned())
         .stack_size(WORKER_STACK)
         .spawn(move || {
+            // The out channel closes when the worker and the reader both drop their senders.
+            let _close = CloseOnDrop(reader_out);
             let backend = match B::open(&options) {
                 Ok(backend) => backend,
                 Err(error) => {
@@ -329,13 +417,19 @@ pub fn serve<B: Backend>(options: Options, serve: &ServeOptions, streams: Stream
             return Exit::Usage;
         }
     };
-    let (work_tx, work_rx) = work_queue();
+    let (work_tx, work_rx) = work_queue(QUEUE);
     let (out_tx, out_rx) = mpsc::channel();
     let (ready_tx, ready_rx) = mpsc::channel();
+    let reader_out = ReaderOut::new(out_tx.clone());
     let cancels = CancelMap::new();
     let running = Running::default();
     let stop_tx = work_tx.clone();
-    let channels = (work_rx, out_tx, ready_tx);
+    let channels = WorkerChannels {
+        items: work_rx,
+        out: out_tx,
+        ready: ready_tx,
+        reader_out: reader_out.clone(),
+    };
     let Ok(worker) = start_worker::<B>(
         options,
         serve.content,
@@ -365,7 +459,15 @@ pub fn serve<B: Backend>(options: Options, serve: &ServeOptions, streams: Stream
     let reader_log = log.clone();
     let reader = thread::Builder::new()
         .name("ghidorah-reader".to_owned())
-        .spawn(move || read(stdin, &work_tx, &cancels, &reader_log));
+        .spawn(move || {
+            let inlet = Inlet {
+                work: &work_tx,
+                out: &reader_out,
+                cancels: &cancels,
+                log: &reader_log,
+            };
+            read(stdin, &inlet);
+        });
     let writer = thread::Builder::new()
         .name("ghidorah-writer".to_owned())
         .spawn(move || write(stdout, &out_rx));
