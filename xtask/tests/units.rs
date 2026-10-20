@@ -222,7 +222,11 @@ fn cov_scope_and_summary() {
             .and_then(Value::as_u64),
         Some(9500)
     );
-    assert_eq!(report.get("ok"), Some(&Value::Bool(true)));
+    assert_eq!(report.pointer("/crates/json/ok"), Some(&Value::Bool(true)));
+    // The export has no other gated crate, so the gate fails.
+    assert_eq!(report.get("ok"), Some(&Value::Bool(false)));
+    let missing = report.get("missing").and_then(Value::as_array);
+    assert_eq!(missing.map(<[Value]>::len), Some(cov::CORE.len()));
 }
 
 #[test]

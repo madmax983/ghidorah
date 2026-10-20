@@ -428,24 +428,92 @@ fn ac_013_coverage_gate() {
     assert_eq!(cov::min_percent("json"), Some(90));
     assert_eq!(cov::min_percent("decomp"), Some(90));
     assert_eq!(cov::min_percent("base"), None);
+    // One crate changes. Each other gated crate has 100 of 100 lines.
     let one = |dir: &str, lines: u64, covered: u64| {
+        let mut coverage = gated_coverage();
         let counts = Counts {
             lines,
             covered,
             ..Counts::default()
         };
-        Coverage {
-            crates: std::iter::once((dir.to_owned(), counts)).collect(),
-        }
+        coverage.crates.insert(dir.to_owned(), counts);
+        coverage
     };
-    let ok = |c: &Coverage| cov::gate(c).get("ok").and_then(Value::as_bool);
-    assert_eq!(ok(&Coverage::default()), Some(true));
-    assert_eq!(ok(&one("kernel", 100, 95)), Some(true));
-    assert_eq!(ok(&one("kernel", 100, 94)), Some(false));
-    assert_eq!(ok(&one("json", 100, 90)), Some(true));
-    assert_eq!(ok(&one("json", 100, 89)), Some(false));
-    assert_eq!(ok(&one("base", 100, 85)), Some(true));
-    assert_eq!(ok(&one("base", 100, 84)), Some(false));
+    assert_eq!(cov_ok(&Coverage::default()), Some(false));
+    assert_eq!(cov_ok(&one("kernel", 100, 95)), Some(true));
+    assert_eq!(cov_ok(&one("kernel", 100, 94)), Some(false));
+    assert_eq!(cov_ok(&one("json", 100, 90)), Some(true));
+    assert_eq!(cov_ok(&one("json", 100, 89)), Some(false));
+    // The workspace line: 900 gated lines plus 5,100 lines of `base` give 6,000 lines.
+    assert_eq!(cov_ok(&one("base", 5_100, 4_200)), Some(true));
+    assert_eq!(cov_ok(&one("base", 5_100, 4_199)), Some(false));
+}
+
+/// Gives a coverage with each gated crate (the kernel and each core crate) at 100 of 100 lines.
+fn gated_coverage() -> Coverage {
+    let full = Counts {
+        lines: 100,
+        covered: 100,
+        ..Counts::default()
+    };
+    Coverage {
+        crates: std::iter::once("kernel")
+            .chain(cov::CORE.iter().copied())
+            .map(|dir| (dir.to_owned(), full))
+            .collect(),
+    }
+}
+
+fn cov_ok(coverage: &Coverage) -> Option<bool> {
+    cov::gate(coverage).get("ok").and_then(Value::as_bool)
+}
+
+#[test]
+fn regress_cov_empty_measurement_fails() {
+    assert_eq!(cov_ok(&gated_coverage()), Some(true));
+    // No profile gives no rows.
+    assert_eq!(cov_ok(&Coverage::default()), Some(false));
+    // Rows with zero instrumented lines are no measurement.
+    let mut zero = gated_coverage();
+    for counts in zero.crates.values_mut() {
+        *counts = Counts::default();
+    }
+    assert_eq!(cov_ok(&zero), Some(false));
+    // The coverage build removes `CARGO_ENCODED_RUSTFLAGS`, so its `RUSTFLAGS` apply.
+    let dir = std::path::Path::new("/w");
+    let cmd = cov::instrumented(dir, &dir.join("target/cov"), &dir.join("p"), &["test"]);
+    let env = |key: &str| {
+        cmd.get_envs()
+            .find(|(k, _)| *k == key)
+            .map(|(_, v)| v.map(|v| v.to_string_lossy().into_owned()))
+    };
+    assert_eq!(env("CARGO_ENCODED_RUSTFLAGS"), Some(None));
+    assert_eq!(
+        env("RUSTFLAGS"),
+        Some(Some("-C instrument-coverage".to_owned()))
+    );
+}
+
+#[test]
+fn regress_cov_missing_core_crate_fails() {
+    for dir in std::iter::once("kernel").chain(cov::CORE.iter().copied()) {
+        let mut absent = gated_coverage();
+        absent.crates.remove(dir);
+        let report = cov::gate(&absent);
+        assert_eq!(report.get("ok"), Some(&Value::Bool(false)), "{dir}");
+        assert_eq!(
+            report.get("missing"),
+            Some(&Value::Array(vec![Value::from(dir)])),
+            "{dir}"
+        );
+        let mut empty = gated_coverage();
+        empty.crates.insert(dir.to_owned(), Counts::default());
+        assert_eq!(cov_ok(&empty), Some(false), "{dir}");
+    }
+    // A crate outside the core list has only the workspace line.
+    let mut other = gated_coverage();
+    other.crates.insert("base".to_owned(), Counts::default());
+    assert_eq!(cov_ok(&other), Some(true));
 }
 
 #[test]
