@@ -27,9 +27,9 @@
     },
     "ab-understand-03": {
       "calls": 2,
-      "chars": 3035,
-      "peak": 2389,
-      "est_tokens": 1012
+      "chars": 3049,
+      "peak": 2403,
+      "est_tokens": 1017
     },
     "abstain-01": {
       "calls": 2,
@@ -69,9 +69,9 @@
     },
     "annotate-03": {
       "calls": 5,
-      "chars": 2670,
+      "chars": 2688,
       "peak": 1079,
-      "est_tokens": 890
+      "est_tokens": 896
     },
     "annotate-04": {
       "calls": 4,
@@ -81,9 +81,9 @@
     },
     "annotate-05": {
       "calls": 5,
-      "chars": 2906,
+      "chars": 2924,
       "peak": 1312,
-      "est_tokens": 969
+      "est_tokens": 975
     },
     "decompile-01": {
       "calls": 2,
@@ -171,9 +171,9 @@
     },
     "recover-02": {
       "calls": 3,
-      "chars": 2328,
-      "peak": 1002,
-      "est_tokens": 776
+      "chars": 2511,
+      "peak": 1185,
+      "est_tokens": 837
     },
     "recover-03": {
       "calls": 3,
@@ -195,13 +195,13 @@
     },
     "similar-01": {
       "calls": 3,
-      "chars": 5705,
-      "peak": 4409,
-      "est_tokens": 1902
+      "chars": 5711,
+      "peak": 4411,
+      "est_tokens": 1904
     },
     "similar-02": {
       "calls": 3,
-      "chars": 2293,
+      "chars": 2295,
       "peak": 993,
       "est_tokens": 765
     },
@@ -249,9 +249,9 @@
     },
     "understand-03": {
       "calls": 3,
-      "chars": 4056,
-      "peak": 2146,
-      "est_tokens": 1352
+      "chars": 4070,
+      "peak": 2160,
+      "est_tokens": 1357
     },
     "understand-04": {
       "calls": 2,
