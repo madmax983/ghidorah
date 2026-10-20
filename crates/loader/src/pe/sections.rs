@@ -4,12 +4,15 @@
 //! |---|---|
 //! | headers | RVAs below `SizeOfHeaders` map to the same file offsets, region `headers` with `READ` |
 //! | `vsize` | `VirtualSize`; 0 means `SizeOfRawData`; 0 for both maps nothing |
+//! | region | `vsize` rounded up to `SectionAlignment`, cut at the next section start and at `SizeOfImage`, never below `vsize` |
 //! | `file_off` | `PointerToRawData`, rounded down to a multiple of 0x200 when `FileAlignment` is at least 0x200 (the `pefile` rule) |
-//! | `file_size` | `min(SizeOfRawData, vsize)`, 0 for `CNT_UNINITIALIZED_DATA`, cut at the end of the file |
+//! | `file_size` | `min(SizeOfRawData, vsize)`, cut at the end of the file; `CNT_UNINITIALIZED_DATA` does not change it |
+//! | zero tail | the bytes of the region after the file part read as zero |
 //! | overlap | a later section replaces the overlapped part of an earlier region, with `E_OVERLAP` |
 //!
 //! Each [`Section`] keeps the raw header values: `size` is `VirtualSize`, `entsize` is
-//! `SizeOfRawData`, `file_off` is `PointerToRawData` and `flags` is `Characteristics`.
+//! `SizeOfRawData`, `file_off` is `PointerToRawData` and `flags` is `Characteristics`. The
+//! range `va` of a section is `vsize` bytes. Its region and its segment can be longer.
 
 use std::sync::Arc;
 
@@ -25,8 +28,6 @@ use crate::memmap::{MemoryMap, Perms, Region, RegionSource};
 /// The size of one section header.
 const SHDR_SIZE: u64 = 40;
 
-/// `IMAGE_SCN_CNT_UNINITIALIZED_DATA`.
-pub(crate) const SCN_UNINITIALIZED: u64 = 0x80;
 /// `IMAGE_SCN_MEM_EXECUTE`.
 pub(crate) const SCN_EXECUTE: u64 = 0x2000_0000;
 /// `IMAGE_SCN_MEM_READ`.
@@ -142,16 +143,40 @@ fn one(raw: &[u8], i: usize, base: u64, diags: &mut Diags) -> Section {
     }
 }
 
+/// Gives `v` rounded up to a multiple of `align`, or `v` for an alignment of 0 or an overflow.
+fn align_up(v: u64, align: u64) -> u64 {
+    v.checked_next_multiple_of(align).unwrap_or(v)
+}
+
+/// Gives the range of the region of a section: `vsize` rounded up to `SectionAlignment`,
+/// cut at `limit`. The range is never shorter than `va`.
+fn span(va: Range, h: &Headers, limit: Option<u64>) -> Range {
+    let mem = u64::try_from(va.len()).unwrap_or(u64::MAX);
+    let aligned = align_up(mem, u64::from(h.section_alignment));
+    let mut end = va.first.saturating_add(aligned);
+    if let Some(l) = limit {
+        end = end.min(l);
+    }
+    let last = end.saturating_sub(1).max(va.last);
+    Range::new(va.first, last).unwrap_or(va)
+}
+
 /// Gives the region of a section, and adds `E_OOB` when its file part leaves the file.
-fn region(s: &Section, h: &Headers, len: u64, diags: &mut Diags) -> Option<Region> {
+///
+/// `limit` is the first address after the region: the next section start or the end of the
+/// image.
+fn region(
+    s: &Section,
+    h: &Headers,
+    limit: Option<u64>,
+    len: u64,
+    diags: &mut Diags,
+) -> Option<Region> {
     let va = s.va?;
     let mem = u64::try_from(va.len()).unwrap_or(u64::MAX);
     let file_off = raw_offset(s.file_off, u64::from(h.file_alignment));
-    let file_size = if s.flags & SCN_UNINITIALIZED != 0 {
-        0
-    } else {
-        s.entsize.min(mem)
-    };
+    // The Windows loader maps the raw bytes whatever `CNT_UNINITIALIZED_DATA` says.
+    let file_size = s.entsize.min(mem);
     let end = file_off.checked_add(file_size);
     if file_size > 0 && end.is_none_or(|e| e > len) {
         diags.push(
@@ -166,7 +191,7 @@ fn region(s: &Section, h: &Headers, len: u64, diags: &mut Diags) -> Option<Regio
     }
     Some(Region {
         name: s.name.as_str().unwrap_or("section").to_owned(),
-        va,
+        va: span(va, h, limit),
         file_off,
         file_size,
         perms: perms(s.flags),
@@ -224,8 +249,22 @@ pub(crate) fn map(
                 .need(u64::from(h.header_size)),
         );
     }
+    let mut starts: Vec<u64> = sections
+        .iter()
+        .filter_map(|s| s.va.map(|v| v.first))
+        .collect();
+    starts.sort_unstable();
+    let image_end = h.image_base.checked_add(u64::from(h.size_of_image));
     for s in sections {
-        let Some(r) = region(s, h, len, diags) else {
+        let next = s.va.and_then(|v| {
+            let at = starts.partition_point(|x| *x <= v.first);
+            starts.get(at).copied()
+        });
+        let limit = match (next, image_end) {
+            (Some(n), Some(e)) => Some(n.min(e)),
+            (n, e) => n.or(e),
+        };
+        let Some(r) = region(s, h, limit, len, diags) else {
             continue;
         };
         let index = u32::try_from(segments.len()).unwrap_or(u32::MAX);

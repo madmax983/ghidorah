@@ -174,6 +174,20 @@ fn mapping_variants() -> Vec<(&'static str, PeBuilder)> {
         ("pe32plus_arm64", base().machine(0xaa64)),
         ("mz_no_pe", base().no_pe_signature()),
         ("low_alignment", low_alignment()),
+        (
+            "vsize_slack",
+            PeBuilder::exe()
+                .entry(0x1000)
+                .section(Section::code(".text", 0x1000, &code()).vsize(0x10))
+                .section(Section::data(".data", 0x2000, &[0x11; 0x40])),
+        ),
+        (
+            "uninit_raw",
+            base().section(
+                Section::with(".bss", 0x3000, &[0x48, 0x31, 0xc0, 0xc3], super::SCN_BSS)
+                    .vsize(0x200),
+            ),
+        ),
     ]
 }
 
