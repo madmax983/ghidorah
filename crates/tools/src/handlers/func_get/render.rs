@@ -5,7 +5,7 @@ use ghidorah_base::{BinaryId, ErrorCode, Fuel, FuncId};
 use ghidorah_db::PartKind;
 use ghidorah_json::{Object, Value};
 
-use super::{MIN_SHARE, remedy};
+use super::{MIN_SHARE, remedy, split};
 use crate::args::Args;
 use crate::budget::section_weight;
 use crate::content::{self, ContentMode};
@@ -235,7 +235,7 @@ fn row_section(
             let (rows, more) = match rows {
                 Ok(ir) => {
                     head.push("lift_ver", Value::from(ir.lift_ver));
-                    if ir.intrinsic {
+                    if ir.intrinsic && !marks.intrinsic.contains(&entry) {
                         marks.intrinsic.push(entry);
                     }
                     (ir.rows, ir.more)
@@ -334,14 +334,6 @@ fn header(
     Ok(out)
 }
 
-/// The budget record of one section: its weight, share, need and use.
-struct Spent {
-    section: &'static str,
-    share: u64,
-    need: u64,
-    used: u64,
-}
-
 /// What one function render gives besides its value.
 #[derive(Default)]
 pub struct Marks {
@@ -349,6 +341,8 @@ pub struct Marks {
     pub visited: Vec<FuncId>,
     /// The entries of the functions whose IR holds an `Intrinsic`.
     pub intrinsic: Vec<u64>,
+    /// The functions whose `decomp` section goes to `omitted`.
+    pub decomp_omitted: Vec<FuncId>,
 }
 
 /// Gives the most rows of `rows` whose section fits `share`, with the value and its cost.
@@ -444,40 +438,23 @@ pub fn one(
             job.mode,
         ))
         .saturating_sub(entry_cost.saturating_mul(count));
-    let mut free = u128::from(total);
-    let mut left: u128 = job
-        .include
-        .iter()
-        .map(|s| u128::from(section_weight(s)))
-        .sum();
+    let sections = {
+        let mut render =
+            |name: &'static str, share: u64| render_section(job, name, func, share, fuel, marks);
+        split::split(total, job.include, MIN_SHARE, &mut render)
+    };
     let mut omitted = Object::new();
-    let mut spent = Vec::new();
-    for name in job.include {
-        let weight = u128::from(section_weight(name));
-        let share = u64::try_from(free.saturating_mul(weight) / left.max(1)).unwrap_or(u64::MAX);
-        left = left.saturating_sub(weight);
-        if share < MIN_SHARE {
-            omitted.push(*name, Value::Null);
-            spent.push(Spent {
-                section: name,
-                share,
-                need: 0,
-                used: 0,
-            });
-            continue;
+    for s in &sections {
+        match &s.value {
+            Ok(v) => out.push(s.name, v.clone()),
+            Err(entry) => omitted.push(s.name, entry.clone()),
         }
-        let (value, need, used) = render_section(job, name, func, share, fuel, marks);
-        match value {
-            Ok(v) => out.push(*name, v),
-            Err(entry) => omitted.push(*name, entry),
-        }
-        free = free.saturating_sub(u128::from(used));
-        spent.push(Spent {
-            section: name,
-            share,
-            need,
-            used,
-        });
+    }
+    if sections
+        .iter()
+        .any(|s| s.name == "decomp" && s.value.is_err())
+    {
+        marks.decomp_omitted.push(func);
     }
     if job
         .include
@@ -490,12 +467,12 @@ pub fn one(
         out.push("omitted", Value::Object(omitted));
     }
     if job.detailed {
-        let rows = spent
+        let rows = sections
             .iter()
             .map(|s| {
                 Value::object([
-                    ("section", Value::from(s.section)),
-                    ("weight", Value::from(section_weight(s.section))),
+                    ("section", Value::from(s.name)),
+                    ("weight", Value::from(section_weight(s.name))),
                     ("share", Value::from(s.share)),
                     ("need", Value::from(s.need)),
                     ("used", Value::from(s.used)),

@@ -26,7 +26,7 @@ use ghidorah_base::{Caps, FuncId};
 use ghidorah_db::Program;
 use ghidorah_json::Value;
 
-use crate::handlers::func_get::remedy;
+use crate::handlers::func_get::{remedy, split};
 
 pub use decomp::{
     DECOMP, DecompOpts, Remedies, WHY_DISASM, WHY_INSN, l1_rows, opts as decomp_opts,
@@ -52,6 +52,7 @@ pub const TEXTS: &[&str] = &[
     remedy::WHY_CALL_TARGETS,
     remedy::WHY_JUMPTABLE,
     remedy::WHY_NORETURN,
+    split::WHY_DECOMP,
 ];
 
 /// The parts of one function render that every section shares.

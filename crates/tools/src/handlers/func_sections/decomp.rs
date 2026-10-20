@@ -9,14 +9,15 @@
 //!
 //! `decomp_opts.lines` gives the first line and the most lines of the window. The default
 //! window is the first 150 lines. A window that does not fit its share keeps the lines that
-//! fit and gets a `next_cursor`. `line_map`, `calls` and `strings` hold only the rows of the
-//! window. Send `next_cursor` in `cursors.decomp` for the next window.
+//! fit and gets a `next_cursor`. `line_map`, `elided`, `vars`, `calls` and `strings` hold only
+//! the rows of the window (see [`Window`]). Send `next_cursor` in `cursors.decomp` for the
+//! next window.
 
 use ghidorah_base::{Address, Caps, Fuel, FuncId, StringId};
 use ghidorah_db::Program;
 use ghidorah_decomp::print::CallTarget;
 use ghidorah_decomp::window::DEFAULT_LINES;
-use ghidorah_decomp::{Opts, Output, Passes, Remedy, WarningRow};
+use ghidorah_decomp::{Opts, Output, Passes, Remedy, WarningRow, Window};
 use ghidorah_json::{Object, Value};
 
 use super::IrRows;
@@ -137,12 +138,13 @@ fn warning(w: &WarningRow, ctx: &Remedies<'_>) -> Value {
     Value::Object(out)
 }
 
-/// Gives the members of an output that every window shares: the elided ranges, the
-/// variables, the metrics and the warnings.
-fn shared(out: &Output, ctx: &Remedies<'_>) -> Vec<(&'static str, Value)> {
-    let elided = out
-        .elided
-        .iter()
+/// Gives the members of the window `w` after its line map. They are the elided ranges and the
+/// variables of the window, then the metrics and the warnings.
+fn shared(w: &Window<'_>, ctx: &Remedies<'_>) -> Vec<(&'static str, Value)> {
+    let out = w.output;
+    let elided = w
+        .elided()
+        .into_iter()
         .map(|e| {
             Value::object([
                 ("start", hex(e.start)),
@@ -151,9 +153,9 @@ fn shared(out: &Output, ctx: &Remedies<'_>) -> Vec<(&'static str, Value)> {
             ])
         })
         .collect();
-    let vars = out
-        .vars
-        .iter()
+    let vars = w
+        .vars()
+        .into_iter()
         .map(|v| {
             Value::object([
                 ("id", Value::from(v.id.to_string())),
@@ -227,7 +229,7 @@ pub fn value(
         })
         .collect();
     o.push("line_map", Value::Array(rows));
-    let mut members = shared(out, remedies).into_iter();
+    let mut members = shared(&w, remedies).into_iter();
     if let Some((name, elided)) = members.next() {
         o.push(name, elided);
     }
