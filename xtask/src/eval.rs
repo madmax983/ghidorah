@@ -8,11 +8,11 @@
 //! | `cargo xtask eval replay FILE` | Sends the requests of a call record to `ghidorah mcp` and compares the replies (AC-201). |
 //!
 //! The replay ignores the `ms` member of each record line, because only the reply counts. The
-//! server runs with `GHIDORAH_FIXED_TIME=0`.
+//! server runs with `GHIDORAH_FIXED_TIME=0` and a new projects root in the temp directory.
 
 use std::io::Write as _;
-use std::path::Path;
-use std::process::Stdio;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 
 use crate::Error;
 use crate::json::{self, Value};
@@ -120,26 +120,71 @@ pub fn diffs(records: &[(u64, Value, Value)], replies: &[Value]) -> Vec<u64> {
         .collect()
 }
 
-/// Replays the call record `file` on a new `ghidorah mcp` and compares the replies.
+/// Gives the `ghidorah mcp` command of a replay in the workspace `root`.
 ///
-/// # Errors
-///
-/// Returns [`Error::Io`] when the record does not read, [`Error::Data`] for a bad line and
-/// [`Error::Command`] when the server does not start.
-pub fn replay(root: &Path, file: &Path) -> Result<Value, Error> {
-    let text =
-        std::fs::read_to_string(root.join(file)).map_err(|e| Error::io(root.join(file), e))?;
-    let entries = records(&text)?;
+/// The server keeps its projects in `projects`, so a replay writes nothing to the default
+/// projects root under `HOME`.
+#[must_use]
+pub fn replay_command(root: &Path, projects: &Path) -> Command {
     let mut cmd = proc::cargo_cmd(&["run", "-q", "-p", "ghidorah", "--", "mcp", "--root", "."]);
-    cmd.current_dir(root)
+    cmd.arg("--project-root")
+        .arg(projects)
+        .current_dir(root)
         .env("GHIDORAH_FIXED_TIME", "0")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
+    cmd
+}
+
+/// Makes a new empty projects root for one replay under the system temp directory.
+///
+/// # Errors
+///
+/// Returns [`Error::Io`] when the function cannot remove or make the directory.
+fn replay_projects() -> Result<PathBuf, Error> {
+    let dir = std::env::temp_dir().join(format!("ghidorah-replay-{}", std::process::id()));
+    match std::fs::remove_dir_all(&dir) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(Error::io(dir, e)),
+    }
+    std::fs::create_dir_all(&dir).map_err(|e| Error::io(&dir, e))?;
+    Ok(dir)
+}
+
+/// Replays the call record `file` on a new `ghidorah mcp` and compares the replies.
+///
+/// The server keeps its projects in a new temp directory, and the replay removes it at the end.
+///
+/// # Errors
+///
+/// Returns [`Error::Io`] when the record does not read, or when the function cannot make the
+/// projects root. Returns [`Error::Data`] for a bad line and [`Error::Command`] when the server
+/// does not start.
+pub fn replay(root: &Path, file: &Path) -> Result<Value, Error> {
+    let text =
+        std::fs::read_to_string(root.join(file)).map_err(|e| Error::io(root.join(file), e))?;
+    let entries = records(&text)?;
+    let projects = replay_projects()?;
+    let report = replay_in(root, &entries, &projects);
+    let removed = std::fs::remove_dir_all(&projects).map_err(|e| Error::io(&projects, e));
+    let report = report?;
+    removed?;
+    Ok(report)
+}
+
+/// Replays `entries` on a new `ghidorah mcp` with the projects root `projects`.
+fn replay_in(
+    root: &Path,
+    entries: &[(u64, Value, Value)],
+    projects: &Path,
+) -> Result<Value, Error> {
+    let mut cmd = replay_command(root, projects);
     let argv = proc::describe(&cmd);
     let mut child = cmd.spawn().map_err(|e| proc::start_error(&argv, &e))?;
     if let Some(mut stdin) = child.stdin.take() {
-        for (_, request, _) in &entries {
+        for (_, request, _) in entries {
             writeln!(stdin, "{}", json::write(request))
                 .map_err(|e| proc::start_error(&argv, &e))?;
         }
@@ -152,7 +197,7 @@ pub fn replay(root: &Path, file: &Path) -> Result<Value, Error> {
         .filter_map(|l| json::parse(l).ok())
         .filter(|v| v.get("id").is_some())
         .collect();
-    let differ = diffs(&entries, &replies);
+    let differ = diffs(entries, &replies);
     Ok(Value::object([
         ("ok", Value::from(differ.is_empty())),
         ("entries", Value::from(entries.len())),

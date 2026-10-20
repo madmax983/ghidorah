@@ -5,6 +5,10 @@
 //! `pending.bin`, and after the case it deletes the file. An abort, a stack
 //! overflow or a hang leaves the file, so the next run can replay it.
 //!
+//! Only a long run writes `pending.bin` into the configured pending directory.
+//! A tier-1 run writes it into a new directory under the system temp directory,
+//! so two runs in one checkout do not share the file.
+//!
 //! Each case returns the deepest stage that it reached. The report counts the
 //! cases per stage. A panic hook counts every panic in the test binary, also
 //! the panics that a target catches. Put each fuzz target in its own test binary.
@@ -73,7 +77,11 @@ pub struct Config {
     pub max_len: usize,
     /// The stack size of the case thread.
     pub stack_size: usize,
-    /// The directory of `pending.bin`. `None` writes no pending file.
+    /// The pending directory: `tests/regress/<target>` of the target. `None` writes no pending
+    /// file.
+    ///
+    /// A long run ([`SEED_ENV`] set) writes `pending.bin` and the failing inputs here. Another
+    /// run writes `pending.bin` into a temp directory and removes that directory at the end.
     pub pending_dir: Option<PathBuf>,
     /// The stage names, from the first stage to the deepest stage.
     pub stages: Vec<String>,
@@ -374,7 +382,10 @@ where
 
 /// Runs the cases of `config` against `target`.
 ///
-/// Each case takes a corpus input (or an empty input) and mutates it.
+/// Each case takes a corpus input (or an empty input) and mutates it. A long run writes
+/// `pending.bin` into the configured pending directory. Another run writes it into
+/// `ghidorah-fuzz-<pid>-<run>/<target>` under the system temp directory. It removes that
+/// directory at the end.
 ///
 /// # Errors
 ///
@@ -385,13 +396,75 @@ where
 {
     install_panic_counter();
     let batch = env_batch();
-    let pending = match &config.pending_dir {
-        Some(dir) => {
-            std::fs::create_dir_all(dir).map_err(|e| io_error(dir, &e))?;
-            Some(dir.join(PENDING_FILE))
-        }
-        None => None,
+    let Some(dir) = &config.pending_dir else {
+        return run_cases(config, corpus, &target, batch, None);
     };
+    if batch.is_some() {
+        std::fs::create_dir_all(dir).map_err(|e| io_error(dir, &e))?;
+        return run_cases(
+            config,
+            corpus,
+            &target,
+            batch,
+            Some(&dir.join(PENDING_FILE)),
+        );
+    }
+    let scratch = scratch_dir();
+    let own = scratch.join(file_part(&config.target));
+    std::fs::create_dir_all(&own).map_err(|e| io_error(&own, &e))?;
+    let report = run_cases(
+        config,
+        corpus,
+        &target,
+        batch,
+        Some(&own.join(PENDING_FILE)),
+    );
+    let removed = std::fs::remove_dir_all(&scratch).map_err(|e| io_error(&scratch, &e));
+    let report = report?;
+    removed?;
+    Ok(report)
+}
+
+/// The number of tier-1 runs of this process that use a temp pending directory.
+static SCRATCH_RUNS: AtomicU64 = AtomicU64::new(0);
+
+/// Gives a new temp directory for one tier-1 run: `ghidorah-fuzz-<pid>-<run>`.
+fn scratch_dir() -> PathBuf {
+    let run = SCRATCH_RUNS.fetch_add(1, Ordering::Relaxed);
+    std::env::temp_dir().join(format!("ghidorah-fuzz-{}-{run}", std::process::id()))
+}
+
+/// Gives a target name as one safe path part: other characters than ASCII letters, digits, `_`
+/// and `-` become `_`.
+fn file_part(target: &str) -> String {
+    let part: String = target
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    if part.is_empty() {
+        "target".to_string()
+    } else {
+        part
+    }
+}
+
+/// Runs the cases of `config` with the pending file `pending`.
+fn run_cases<F>(
+    config: &Config,
+    corpus: &[Vec<u8>],
+    target: &F,
+    batch: Option<u64>,
+    pending: Option<&Path>,
+) -> Result<Report, FuzzError>
+where
+    F: Fn(&[u8]) -> Outcome + Sync,
+{
     in_thread(&config.target, config.stack_size, || {
         let mut rng = Xoshiro256ss::seed_from_u64(batch_seed(config.seed, batch));
         let mut report = Report {
@@ -409,16 +482,16 @@ where
             };
             let input = mutate(&mut rng, seed, config.max_len);
             run_case(
-                pending.as_deref(),
+                pending,
                 case,
                 &input,
-                &target,
+                target,
                 &mut report,
                 config.max_crashes,
             )?;
         }
         if let (Some(_), Some(dir)) = (batch, config.pending_dir.as_deref()) {
-            save_crashes(dir, &report, &target)?;
+            save_crashes(dir, &report, target)?;
         }
         Ok(report)
     })

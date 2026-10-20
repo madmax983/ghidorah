@@ -9,6 +9,7 @@ pub mod transcript;
 use std::io::{self, Read, Write};
 use std::path::PathBuf;
 use std::process::{Child, Command, ExitStatus, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -128,12 +129,31 @@ pub fn run<B: Backend>(args: &[&str], stdin: &str) -> Output {
     run_in::<B>(args, stdin, &env("run"))
 }
 
+/// Gives a new empty `HOME` for one spawned binary under the cargo temp directory.
+///
+/// So a spawn without `--project-root` never writes to the real `HOME`.
+pub fn spawn_home() -> PathBuf {
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let n = NEXT.fetch_add(1, Ordering::Relaxed);
+    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+        .join("cli-home")
+        .join(format!("{}-{n}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("the spawn HOME exists");
+    dir
+}
+
 /// Gives a command of the `ghidorah` binary with `args`, a fixed time and piped streams.
+///
+/// `HOME` and `XDG_DATA_HOME` are in a new directory of [`spawn_home`].
 pub fn binary(args: &[&str]) -> Command {
+    let home = spawn_home();
     let mut command = Command::new(env!("CARGO_BIN_EXE_ghidorah"));
     command
         .args(args)
         .env("GHIDORAH_FIXED_TIME", FIXED_TIME.to_string())
+        .env("XDG_DATA_HOME", home.join(".local/share"))
+        .env("HOME", home)
         .env_remove("GHIDORAH_EVAL")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

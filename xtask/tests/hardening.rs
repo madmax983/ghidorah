@@ -34,7 +34,11 @@ fn tmp(name: &str) -> PathBuf {
 fn ac_020_hermetic_env() {
     assert_eq!(Step::parse("test_hermetic"), Some(Step::TestHermetic));
     assert!(Step::DEFAULT.contains(&Step::TestHermetic));
-    let env = ci::hermetic_env(Path::new("/tc/bin"), Path::new("/empty/home"));
+    let env = ci::hermetic_env(
+        Path::new("/tc/bin"),
+        Path::new("/empty/home"),
+        Path::new("/empty/cargo"),
+    );
     let get = |key: &str| {
         env.iter()
             .find(|(k, _)| k == key)
@@ -43,11 +47,17 @@ fn ac_020_hermetic_env() {
     };
     assert_eq!(get("PATH"), Some("/tc/bin".into()));
     assert_eq!(get("HOME"), Some("/empty/home".into()));
+    assert_eq!(
+        get("XDG_DATA_HOME"),
+        Some("/empty/home/.local/share".into())
+    );
+    assert_eq!(get("CARGO_HOME"), Some("/empty/cargo".into()));
+    assert!(!ci::REMOVED_VARS.contains(&"CARGO_HOME"));
     for var in [
-        "XDG_DATA_HOME",
         "XDG_CONFIG_HOME",
         "XDG_CACHE_HOME",
-        "CARGO_HOME",
+        "CARGO",
+        "RUSTUP_TOOLCHAIN",
     ] {
         assert!(ci::REMOVED_VARS.contains(&var), "{var} is removed");
         assert_eq!(get(var), None, "{var} is removed");
@@ -82,6 +92,86 @@ fn hermetic_test_binaries() {
             ),
         ]
     );
+}
+
+/// Tells if `path` or one of its parent directories holds `.git`.
+fn in_git_tree(path: &Path) -> bool {
+    path.ancestors().any(|dir| dir.join(".git").exists())
+}
+
+/// Writes the shell script `name` with `body` into `dir` and gives it as a test binary.
+fn script(dir: &Path, name: &str, body: &str) -> ci::TestBinary {
+    use std::os::unix::fs::PermissionsExt as _;
+    let exe = dir.join(name);
+    std::fs::write(&exe, format!("#!/bin/sh\n{body}\n")).expect("the script is written");
+    std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755))
+        .expect("the script is executable");
+    ci::TestBinary {
+        exe,
+        dir: dir.to_path_buf(),
+    }
+}
+
+/// The HOME of the hermetic run is outside every git work tree, so the default projects root
+/// of a spawned `ghidorah` is valid there. The step fails when a binary writes under HOME.
+#[test]
+fn regress_hermetic_home_outside_git_tree() {
+    let dir = tmp("hermetic_home");
+    let seen = dir.join("seen.txt");
+    // The reduced PATH has no `mkdir`, so the scripts use shell built-ins only.
+    let probe = script(
+        &dir,
+        "probe.sh",
+        &format!(
+            "echo \"$HOME $XDG_DATA_HOME $CARGO_HOME\" > '{}'",
+            seen.display()
+        ),
+    );
+    let leak = script(&dir, "leak.sh", ": > \"$HOME/leak\"");
+    // A write to CARGO_HOME is the cache of `cargo`, so the step accepts it.
+    let cargo = script(&dir, "cargo.sh", ": > \"$CARGO_HOME/cache\"");
+    let toolchain = Path::new("/no/toolchain/bin");
+
+    let run = ci::run_binaries(&[probe.clone(), cargo], toolchain).expect("the run starts");
+    assert_eq!(run.binaries, 2);
+    assert!(run.failed.is_empty(), "{:?}", run.failed);
+    let text = std::fs::read_to_string(&seen).expect("the probe runs");
+    let [home, data, cargo_home]: [&str; 3] = text
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .try_into()
+        .expect("HOME, XDG_DATA_HOME and CARGO_HOME");
+    let home = Path::new(home);
+    assert!(home.starts_with(std::env::temp_dir()), "{}", home.display());
+    assert!(!in_git_tree(home), "{} is in a git tree", home.display());
+    assert!(Path::new(data).starts_with(home), "{data}");
+    assert!(!Path::new(cargo_home).starts_with(home), "{cargo_home}");
+    assert!(!home.exists(), "the step removes its empty HOME");
+
+    let run = ci::run_binaries(&[leak, probe], toolchain).expect("the run starts");
+    let names: Vec<&str> = run.failed.iter().map(|(name, _)| name.as_str()).collect();
+    assert_eq!(names, ["leak.sh"], "{:?}", run.failed);
+    assert!(run.failed[0].1.contains("leak"), "{:?}", run.failed);
+}
+
+/// `xtask eval replay` gives the server a project root, so a replay writes nothing under HOME.
+#[test]
+fn regress_eval_replay_names_project_root() {
+    let projects = tmp("eval_replay_projects");
+    let cmd = xtask::eval::replay_command(&workspace::root(), &projects);
+    let args: Vec<String> = cmd
+        .get_args()
+        .map(|a| a.to_string_lossy().into_owned())
+        .collect();
+    let at = args
+        .iter()
+        .position(|a| a == "--project-root")
+        .expect("the replay names a project root");
+    assert_eq!(
+        args.get(at + 1).map(String::as_str),
+        Some(projects.to_string_lossy().as_ref())
+    );
+    assert!(args.iter().any(|a| a == "mcp"), "{args:?}");
 }
 
 #[test]
@@ -131,8 +221,9 @@ fn ac_234_fix_commits_change_tests() {
         ("crates/db/src/edit/tests.rs", true),
         ("crates/db/src/edit/tests/funcs.rs", true),
         ("xtask/tests/gates.rs", true),
-        ("tests/golden/tools.json", true),
-        ("tests/regress/calc/0a1b2c3d.bin", true),
+        ("tests/golden/tools.json", false),
+        ("tests/regress/calc/0a1b2c3d.bin", false),
+        ("crates/cli/tests/data/x.json", false),
         ("crates/json/src/parse.rs", false),
         ("docs/design.md", false),
         ("crates/testkit/src/tests_helper.rs", false),
@@ -164,6 +255,28 @@ crates/json/src/write.rs
         ]
     );
     assert_eq!(ci::LOG_FORMAT, "@@%h %s");
+}
+
+/// A golden or a data file under `tests` is not a test: a fix needs a `.rs` test change.
+#[test]
+fn regress_fix_commit_needs_rs_test() {
+    let log = "\
+@@ffff666 fix: the loader reads the flags
+crates/loader/src/elf.rs
+tests/golden/loader/x.readelf.txt
+
+@@abab777 fix: the loader reads the notes
+crates/loader/src/elf.rs
+crates/loader/tests/elf.rs
+tests/golden/loader/x.readelf.txt
+";
+    assert_eq!(
+        ci::fix_commits_without_tests(log),
+        vec!["ffff666 fix: the loader reads the flags".to_owned()]
+    );
+    assert!(!ci::is_test_file("tests/golden/loader/x.readelf.txt"));
+    assert!(!ci::is_test_file("crates/x/tests.rs.orig"));
+    assert!(ci::is_test_file("crates/x/src/tests.rs"));
 }
 
 /// The fuzz targets of design Section 13.5 in the order of the text.
