@@ -489,3 +489,15 @@ fn regress_noplt_got_jump_is_tail_call() {
     assert!(!text.contains("goto"), "{text}");
     assert_eq!(call_names(&greet), ["__printf_chk"], "{text}");
 }
+
+/// `_start` calls `__libc_start_main` through its GOT slot after `and rsp, -16`. The push of
+/// the return address can alias the slot, so the load did not fold into the call. The call
+/// names the import, so the load stayed as an assignment that no line reads (known-04).
+#[test]
+fn regress_import_call_slot_load_has_no_statement() {
+    for fixture in ["hello.gcc-O2", "hello.gcc-O2-noplt"] {
+        let text = output_of(fixture, "_start").text();
+        assert!(text.contains("__libc_start_main("), "{text}");
+        assert!(dead_assigns(&text).is_empty(), "{text}");
+    }
+}

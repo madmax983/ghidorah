@@ -15,6 +15,7 @@
 //! | `Ret` | a stop |
 //!
 //! A call through an import slot, `Call(Load(slot))` in one instruction, calls the import.
+//! The load of the slot gets no statement: the call line shows it.
 //!
 //! The store of the return address of a `call` gets no statement: the call line shows it. An
 //! example is the push of a call after `and rsp, -16` in `_start`, where the stack offset is
@@ -40,7 +41,7 @@ use crate::Warning;
 use crate::expr::{Call, Callee, Expr, Stmt, VarIdx};
 use crate::fold::Plan;
 use crate::view::Env;
-use crate::view::facts::{Facts, Kind};
+use crate::view::facts::{Facts, Kind, Site};
 
 /// The terminator of a block.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -323,6 +324,19 @@ impl Ex<'_> {
         self.env.import_at_slot(op.a[0].as_k()?)
     }
 
+    /// Tells if the value of the load `op` is only the target of a call through an import
+    /// slot. The call line shows the load, so the load has no statement of its own.
+    fn loads_slot_target(&self, op: &Op) -> bool {
+        let Some(Site::Op(i)) = op.out.and_then(|v| self.f.site.get(&v)) else {
+            return false;
+        };
+        self.f.op(*i).is_some_and(|call| {
+            matches!(call.opc, Opc::Call | Opc::CallInd)
+                && call.a[0] == op.out.map_or(Arg::Nil, Arg::V)
+                && self.slot_target(call.a[0], call.id.addr).is_some()
+        })
+    }
+
     /// Gives the call target of the indirect jump of a thunk through an import slot. Another
     /// function with such a jump at stack height 0 has a call in L1 in its place.
     fn import_jump(&self, target: Arg, addr: u64) -> Option<u64> {
@@ -353,6 +367,7 @@ impl Ex<'_> {
         match op.opc {
             Opc::Phi | Opc::Nop | Opc::Get | Opc::Jump | Opc::CJump | Opc::JumpInd => None,
             Opc::Store if self.return_push(op) => None,
+            Opc::Load if self.loads_slot_target(op) => None,
             Opc::Store => Some(Stmt::Store {
                 w: op.w,
                 addr: self.arg(op.a[0], 64),
