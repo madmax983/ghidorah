@@ -38,11 +38,16 @@ fn ac_145_partial_flag() {
         "budget_stopped",
         "{load}"
     );
+    // Every read succeeds under partial analysis, so the checks below run for each read.
+    let mut failed = Vec::new();
+    let mut checked = 0;
     for (tool, args) in READS {
         let envelope = call(&mut session, tool, args);
         if envelope.get("ok") != Some(&Value::Bool(true)) {
+            failed.push(format!("{tool} {args}: {}", code(&envelope)));
             continue;
         }
+        checked += 1;
         assert_eq!(
             envelope.get("partial"),
             Some(&Value::Bool(true)),
@@ -62,6 +67,11 @@ fn ac_145_partial_flag() {
             "{tool}"
         );
     }
+    assert!(
+        failed.is_empty(),
+        "reads fail under partial analysis: {failed:?}"
+    );
+    assert_eq!(checked, READS.len());
     let main = call(&mut session, "func_get", r#"{"target":"_start"}"#);
     assert_eq!(text_at(&main, "/data/name"), "_start", "{main}");
     let survey = call(&mut session, "binary_survey", r#"{"include":["identity"]}"#);
