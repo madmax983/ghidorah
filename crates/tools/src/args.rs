@@ -5,7 +5,7 @@
 //!
 //! | Input | Result |
 //! |---|---|
-//! | A key outside the schema | `UNKNOWN_ARGUMENT`. `next[0]` renames or removes the key. |
+//! | A key outside the schema | `UNKNOWN_ARGUMENT`. `next[0]` renames or removes the key. A rename to a list argument puts a single value in an array. |
 //! | An alias of an argument | The canonical name and `W_COERCED` |
 //! | A value of the wrong type or range | `INVALID_ARGUMENT` with `details.expected` |
 //! | A value above its cap | `LIMIT_EXCEEDED`. `next[0]` clamps the value. |

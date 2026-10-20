@@ -191,7 +191,8 @@ pub(super) fn repair_in_batch(
 }
 
 /// Gives the batch error of a step argument error: the field path below
-/// `/steps/N/args`, and a repair call on the batch.
+/// `/steps/N/args`, and a repair call on the batch. `MISSING_ARGUMENT`, and an
+/// `UNKNOWN_ARGUMENT` whose direct repair fails the strict parser, get `tool_search`.
 fn step_error(
     error: ToolError,
     raw: &Value,
@@ -203,12 +204,12 @@ fn step_error(
     let path = format!("/steps/{step}/args{inner}");
     let mut out = error;
     out.field_path = Some(path);
-    let repair = out
-        .next
-        .first()
-        .and_then(|c| repair_in_batch(raw, step, tool, refs, c));
+    let direct = out.next.first();
+    let parses = direct.is_some_and(|c| crate::args::parse_strict(tool, &c.args).is_ok());
+    let repair = direct.and_then(|c| repair_in_batch(raw, step, tool, refs, c));
     out.next.clear();
-    if out.code == ErrorCode::MissingArgument {
+    let unknown = out.code == ErrorCode::UnknownArgument && !parses;
+    if out.code == ErrorCode::MissingArgument || unknown {
         let args = Value::object([
             ("name", Value::from(tool.name)),
             ("level", Value::from("full")),

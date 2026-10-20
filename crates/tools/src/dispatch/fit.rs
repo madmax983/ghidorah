@@ -190,7 +190,8 @@ pub(super) fn conflict(tool: &str, args: &Value, expected: u64, current: u64) ->
         .next(Call::new("history_list", since, WHY_CONFLICT))
 }
 
-/// Gives the failure envelope of `error`, with helper calls for the codes of class H.
+/// Gives the failure envelope of `error`. A repair call that fails the hint check drops out.
+/// With no valid repair call, the codes of class H and `UNKNOWN_ARGUMENT` get a helper call.
 pub(super) fn failure<S: Host>(
     registry: &Registry<S>,
     host: &S,
@@ -198,10 +199,11 @@ pub(super) fn failure<S: Host>(
     tool: &str,
     error: &ToolError,
 ) -> Envelope {
-    let mut next = error.next.clone();
+    let in_profile = |name: &str| host.in_profile(name);
+    let mut next = keep_valid(registry, &in_profile, error.next.clone());
     if next.is_empty() {
         let helper = match error.code {
-            ErrorCode::MissingArgument => Some((
+            ErrorCode::MissingArgument | ErrorCode::UnknownArgument => Some((
                 "tool_search",
                 Value::object([("name", Value::from(tool)), ("level", Value::from("full"))]),
                 WHY_SCHEMA,
@@ -216,9 +218,9 @@ pub(super) fn failure<S: Host>(
             }
             _ => None,
         };
-        next.extend(helper.map(|(name, args, why)| Call::new(name, args, why)));
+        let calls = helper.map(|(name, args, why)| Call::new(name, args, why));
+        next = keep_valid(registry, &in_profile, calls.into_iter().collect());
     }
-    let next = keep_valid(registry, &|name| host.in_profile(name), next);
     Envelope {
         frame,
         body: Body::Err(error.to_json_with(!next.is_empty())),

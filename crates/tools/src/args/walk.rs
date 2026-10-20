@@ -157,10 +157,26 @@ pub(super) fn fix_object(
         };
         if let Some(spec) = spec {
             taken.insert(spec.name);
-            out.push(spec.name, fix_value(spec, value, aliases));
+            let value = if key == spec.name {
+                fix_value(spec, value, aliases)
+            } else {
+                fix_value(spec, &wrap_for(spec, value), aliases)
+            };
+            out.push(spec.name, value);
         }
     }
     out
+}
+
+/// Gives `value` in an array when `spec` is a list and `value` is not an array. A rename from
+/// a singular name to its list name, for example `target` to `targets`, uses it.
+fn wrap_for(spec: &ArgSpec, value: &Value) -> Value {
+    let list = matches!(spec.kind, ArgKind::AddrList(_) | ArgKind::List(..));
+    if list && !matches!(value, Value::Array(_)) {
+        Value::Array(vec![value.clone()])
+    } else {
+        value.clone()
+    }
 }
 
 fn fix_value(spec: &ArgSpec, value: &Value, aliases: bool) -> Value {

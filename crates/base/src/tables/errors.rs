@@ -44,8 +44,8 @@ pub(crate) const fn info(code: ErrorCode) -> CodeInfo {
             "UNKNOWN_ARGUMENT",
             R,
             false,
-            "The argument {field} is not in the schema of the tool. The tool accepts only the arguments of its schema. Send next[0], which renames or removes the argument.",
-            "The candidates hold the closest argument names.",
+            "The argument {field} is not in the schema of the tool. The tool accepts only the arguments of its schema. Rename or remove the argument.",
+            "Send next[0]. It renames or removes the argument, or it gets the schema of the tool.",
         )
         .with_plain("The schema of the tool in tools/list holds the argument names."),
         E::MissingArgument => row(

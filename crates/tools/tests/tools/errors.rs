@@ -447,3 +447,67 @@ fn regress_conflict_next_reads_history() {
         ghidorah_base::RepairClass::Helper
     );
 }
+
+/// The `UNKNOWN_ARGUMENT` repair wraps a scalar for a list argument. A repair that still fails
+/// the strict parser gives the `tool_search` helper call (agent-protocol-06).
+#[test]
+fn regress_unknown_argument_repair_wraps_list() {
+    let roots = Roots::new(&root(), &[PathBuf::from(".")]).expect("the root is valid");
+    let mut s = Session::with_registry(
+        <Session as Host>::registry(),
+        SessionConfig::new(roots),
+        Box::new(FixedClock::new(0)),
+    );
+    let registry = s.active_registry();
+    let mut send = |tool: &str, args: &str| {
+        dispatch_with(&registry, &mut s, &Request::new(tool, json(args))).to_json()
+    };
+    assert_eq!(code(&send("binary_load", r#"{"builtin":"demo"}"#)), "");
+    let wrapped = send("xref_list", r#"{"target":"main"}"#);
+    assert_eq!(code(&wrapped), "UNKNOWN_ARGUMENT", "{wrapped}");
+    assert_eq!(
+        wrapped.pointer("/next/0/tool").and_then(Value::as_str),
+        Some("xref_list"),
+        "{wrapped}"
+    );
+    let args = wrapped
+        .pointer("/next/0/args")
+        .cloned()
+        .expect("repair args");
+    assert_eq!(args, json(r#"{"targets":["main"]}"#), "{wrapped}");
+    let again = send("xref_list", &text(&args));
+    assert_eq!(code(&again), "", "{again}");
+
+    let helper = send("func_get", r#"{"func":"main"}"#);
+    assert_eq!(code(&helper), "UNKNOWN_ARGUMENT", "{helper}");
+    assert_eq!(
+        helper.pointer("/next/0/tool").and_then(Value::as_str),
+        Some("tool_search"),
+        "{helper}"
+    );
+    assert_eq!(
+        helper.pointer("/next/0/args"),
+        Some(&json(r#"{"name":"func_get","level":"full"}"#)),
+        "{helper}"
+    );
+    let step = r#"{"steps":[{"id":"a","tool":"func_get","args":{"func":"main"}}]}"#;
+    let batch = send("batch_run", step);
+    assert_eq!(code(&batch), "UNKNOWN_ARGUMENT", "{batch}");
+    assert_eq!(
+        batch.pointer("/next/0/args"),
+        Some(&json(r#"{"name":"func_get","level":"full"}"#)),
+        "{batch}"
+    );
+    for envelope in [&wrapped, &helper] {
+        let message = envelope
+            .pointer("/error/message")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        assert!(!message.contains("next[0]"), "{envelope}");
+        let hint = envelope
+            .pointer("/error/hint")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        assert!(hint.contains("next[0]"), "{envelope}");
+    }
+}
