@@ -4,6 +4,7 @@
 use std::collections::BTreeSet;
 
 use ghidorah_base::{Address, FuncId, RegVar, Storage, VarId};
+use ghidorah_db::CommentKind;
 use ghidorah_decomp::print::{self, CallTarget, LineKind};
 use ghidorah_decomp::shape::{NodeKind, ShapeNode};
 use ghidorah_decomp::{
@@ -632,4 +633,81 @@ fn a_continue_keeps_the_while_loop() {
         "{texts:?}"
     );
     assert!(!texts.iter().any(|t| t.contains("for (")), "{texts:?}");
+}
+
+/// The comments of a hand-made function: a PRE, an EOL and a POST comment at the top address.
+struct TopComments;
+
+impl ghidorah_decomp::Env for TopComments {
+    fn callee_name(&self, _addr: u64) -> Option<String> {
+        None
+    }
+    fn is_noreturn(&self, _addr: u64) -> bool {
+        false
+    }
+    fn is_string(&self, _addr: u64) -> bool {
+        false
+    }
+}
+
+impl print::PrintEnv for TopComments {
+    fn comments(&self, _entry: u64) -> Vec<(u64, CommentKind, String)> {
+        vec![
+            (u64::MAX, CommentKind::Pre, "pre top".to_owned()),
+            (u64::MAX, CommentKind::Post, "post top".to_owned()),
+            (u64::MAX, CommentKind::Eol, "eol top".to_owned()),
+        ]
+    }
+}
+
+/// The last instruction of the address space is 1 byte at `u64::MAX`. Its line holds that
+/// byte. The old range of a line saturated at `u64::MAX`, so the comments of the top
+/// address went before the last line `}` (known-03).
+#[test]
+fn regress_comment_at_top_address() {
+    let top = OpId {
+        addr: u64::MAX,
+        seq: 0,
+    };
+    let mut d = decomp(
+        vec![
+            Spec::new(
+                Exit::Stop,
+                vec![Stmt::Return {
+                    uses: Vec::new(),
+                    at: op(0, 0, 0),
+                }],
+            ),
+            Spec::new(Exit::Fall(node(0)), vec![assign(1, k(5, 64), top)]),
+        ],
+        vec![param(0, 64), temp("rax", 0x1000, 64)],
+        Tree::Seq(vec![Tree::Block(node(1)), Tree::Block(node(0))]),
+    );
+    for unit in &mut d.view.insns {
+        if unit.0 == u64::MAX {
+            unit.1 = 1;
+        }
+    }
+    let printed = print::print(&d, &TopComments, &NoNames, "f");
+    let texts: Vec<&str> = printed.lines.iter().map(|l| l.text.as_str()).collect();
+    assert_eq!(
+        texts,
+        [
+            "void f(void)",
+            "{",
+            "    // pre top",
+            "    v1 = 5; // eol top",
+            "    // post top",
+            "    return;",
+            "}",
+        ],
+        "{texts:?}"
+    );
+    let line = printed
+        .lines
+        .iter()
+        .find(|l| l.text.starts_with("    v1 = 5;"))
+        .expect("the line of the top address");
+    assert_eq!(line.span, Some((u64::MAX, 1)));
+    assert_eq!(line.comment, Some(CommentKind::Eol));
 }
