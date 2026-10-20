@@ -8,8 +8,9 @@
 //! | worker | Owns the backend. It runs the requests in arrival order through [`server::Server`], with a 64 MiB stack. |
 //! | writer | The only writer of stdout. It writes one line and flushes. |
 //!
-//! The reader sends each error reply through the worker queue, so the output order is the
-//! input order. A broken pipe on stdout ends the server with exit code 0.
+//! While the work queue has room, the reader sends each error reply through it, so the output
+//! order is the input order. When the queue is full, the reader sends the reply to the writer
+//! at once. A broken pipe on stdout ends the server with exit code 0.
 //! [`era`] holds every rule of the two protocol eras.
 
 pub mod cancel;
