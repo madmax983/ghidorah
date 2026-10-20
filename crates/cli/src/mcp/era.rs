@@ -13,7 +13,8 @@
 //!    A missing modern key then gives -32602 with the missing key names.
 //! 5. Another version in that key gives -32022 with `{ supported, requested }`.
 //! 6. A request without the version key uses the legacy era after `initialize`.
-//!    Before `initialize` it gives -32602 with the missing key names.
+//!    Before `initialize` it gives -32602 with the missing key names. A `ping` is the
+//!    exception: it gets `{}` in every state and starts no era.
 //! 7. `ping` exists only in the legacy era. A modern `ping` gives -32601.
 //!
 //! A modern result carries `resultType: "complete"`. A legacy result does not.
@@ -194,7 +195,8 @@ pub fn decide(
                 ])),
             });
         }
-        None if state.legacy.is_some() => Era::Legacy,
+        // A ping needs no handshake: the MCP lifecycle allows it before initialize.
+        None if state.legacy.is_some() || call == Method::Ping => Era::Legacy,
         None => return Err(missing(meta)),
     };
     if era == Era::Modern && call == Method::Ping {

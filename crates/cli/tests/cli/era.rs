@@ -144,9 +144,12 @@ fn ac_169c_era_errors() {
             r#"{"supported":["2026-07-28","2025-11-25","2025-06-18"],"requested":"2025-03-26"}"#
         ))
     );
-    for index in 3..5 {
-        assert_eq!(code(&replies(&steps, index)[0]), Some(rpc::INVALID_PARAMS));
-    }
+    assert_eq!(code(&replies(&steps, 3)[0]), Some(rpc::INVALID_PARAMS));
+    assert_eq!(
+        replies(&steps, 4)[0].get("result"),
+        Some(&json("{}")),
+        "a ping needs no handshake"
+    );
 }
 
 #[test]
@@ -178,6 +181,28 @@ fn ac_169d_framing() {
 }
 
 #[test]
+fn regress_ping_before_initialize() {
+    let mut state = EraState::default();
+    assert_eq!(
+        era::decide(&mut state, "ping", None),
+        Ok((era::Era::Legacy, Method::Ping)),
+        "a ping needs no handshake"
+    );
+    assert_eq!(state.legacy(), None, "a ping starts no era");
+    let mut s = server();
+    let lines = s.handle_line(br#"{"jsonrpc":"2.0","id":1,"method":"ping"}"#);
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    assert_eq!(
+        json(&lines[0]).get("result"),
+        Some(&json("{}")),
+        "{lines:?}"
+    );
+    // Other methods still need initialize or the modern keys.
+    let lines = s.handle_line(br#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#);
+    assert_eq!(code(&json(&lines[0])), Some(rpc::INVALID_PARAMS));
+}
+
+#[test]
 fn decide_follows_the_rule_order() {
     let modern = json(&format!(
         r#"{{"_meta":{{"{}":"2026-07-28","{}":{{}}}}}}"#,
@@ -190,7 +215,7 @@ fn decide_follows_the_rule_order() {
         Ok((era::Era::Modern, Method::ToolsList))
     );
     assert_eq!(state.legacy(), None);
-    let rejected = era::decide(&mut state, "ping", None).expect_err("no handshake yet");
+    let rejected = era::decide(&mut state, "tools/list", None).expect_err("no handshake yet");
     assert_eq!(rejected.code, rpc::INVALID_PARAMS);
     let init = json(r#"{"protocolVersion":"2025-06-18"}"#);
     assert_eq!(
