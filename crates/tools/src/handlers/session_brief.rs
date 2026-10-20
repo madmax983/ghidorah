@@ -5,6 +5,9 @@
 //! | none | `{ projects: [{ binary_id, file_name, rev, last_session, last_rev, open }] }`: at most 20 projects of the projects root, newest rev first. `next[0]` is `binary_load { binary_id }` for the first project (AC-212). |
 //! | one or more | the brief of the bound binary, else of the most recent binary |
 //!
+//! A default projects root inside a git working tree keeps no project (ADR-0022). Then the
+//! brief and each row of a binary in memory hold `persisted: false` and `persist_reason`.
+//!
 //! The brief of a binary:
 //!
 //! | Member | Content |
@@ -36,7 +39,7 @@ use crate::dispatch::{Ctx, Payload};
 use crate::errors::ToolError;
 use crate::hints::Call;
 use crate::outshape::{Field, OutputShape};
-use crate::session::{Session, session_label};
+use crate::session::{Session, Store, session_label};
 use crate::spec::{BinaryArg, Example, Profile, ToolSpec};
 use parts::Facts;
 
@@ -82,6 +85,8 @@ const BINARY: &[Field] = &[
     Field::req("file_name", OutputShape::Str),
     Field::req("rev", OutputShape::Int),
     Field::req("read_only", OutputShape::Bool),
+    Field::opt("persisted", OutputShape::Bool),
+    Field::opt("persist_reason", OutputShape::Str),
     Field::req("analysis", OutputShape::Nullable(&OutputShape::Str)),
 ];
 const BINARY_SHAPE: OutputShape = OutputShape::Obj(BINARY);
@@ -151,6 +156,8 @@ const PROJECT: &[Field] = &[
 const PROJECT_SHAPE: OutputShape = OutputShape::Obj(PROJECT);
 const FIELDS: &[Field] = &[
     Field::opt("projects", OutputShape::List(&PROJECT_SHAPE)),
+    Field::opt("persisted", OutputShape::Bool),
+    Field::opt("persist_reason", OutputShape::Str),
     Field::opt("binary_id", OutputShape::Str),
     Field::opt("binaries", OutputShape::List(&BINARY_SHAPE)),
     Field::opt("progress", OutputShape::Obj(PROGRESS)),
@@ -200,9 +207,11 @@ fn fit(
     }
 }
 
-/// Gives the brief with zero open binaries: the projects on disk, newest rev first.
+/// Gives the brief with zero open binaries: the projects on disk, newest rev first. A refused
+/// projects root adds `persisted: false` and `persist_reason`.
 fn projects(session: &mut Session, ctx: &mut Ctx) -> Object {
     let all = session.projects();
+    let refusal = session.persist_refusal().map(|r| safe(&r));
     let rows: Vec<Value> = all
         .iter()
         .take(MAX_PROJECTS)
@@ -245,6 +254,10 @@ fn projects(session: &mut Session, ctx: &mut Ctx) -> Object {
                 "projects",
                 Value::Array(rows.iter().take(cap).cloned().collect()),
             );
+            if let Some(reason) = &refusal {
+                out.push("persisted", Value::Bool(false));
+                out.push("persist_reason", Value::from(reason.as_str()));
+            }
             out.push("truncated", Value::Bool(longer || cut));
             out
         },
@@ -304,7 +317,10 @@ fn run(session: &mut Session, _args: &Args, ctx: &mut Ctx) -> Result<Payload, To
         return Ok(Payload::Object(projects(session, ctx)));
     };
     let label = session_label(&ctx.frame.session)?;
-    let rows: Vec<Value> = session.binaries().map(parts::binary_row).collect();
+    let rows: Vec<Value> = session
+        .binaries()
+        .map(|b| parts::binary_row(b, session.store(b.id).and_then(Store::persist_reason)))
+        .collect();
     let (facts, rev) = {
         let binary = session
             .binary(id)

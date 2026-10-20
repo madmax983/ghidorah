@@ -180,3 +180,82 @@ fn default_root_in_a_git_tree_keeps_no_project() {
     load_demo(&mut s);
     assert!(root.join(DEMO_ID).join("project.json").is_file());
 }
+
+#[test]
+fn regress_git_tree_root_reports_not_persisted() {
+    use ghidorah_base::FixedClock;
+    use ghidorah_tools::{Host, Session};
+
+    let dir = tmp("git_tree_reason");
+    std::fs::create_dir_all(dir.join(".git")).expect("a git directory");
+    let root: PathBuf = dir.join("projects");
+    let mut cfg = config();
+    cfg.projects = Some(ProjectsConfig {
+        root: root.clone(),
+        named: false,
+        break_lock: false,
+    });
+    let mut s = Session::with_registry(
+        <Session as Host>::registry(),
+        cfg,
+        Box::new(FixedClock::new(0)),
+    );
+    // With no open binary, the brief tells why no project persists.
+    let empty = call(&mut s, "session_brief", "{}");
+    assert_eq!(
+        data(&empty).get("persisted"),
+        Some(&Value::Bool(false)),
+        "{empty}"
+    );
+    let reason = data(&empty)
+        .get("persist_reason")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
+    assert!(reason.contains("git working tree"), "{empty}");
+    let load = call(
+        &mut s,
+        "binary_load",
+        r#"{"builtin":"demo","analysis":"none"}"#,
+    );
+    let got = data(&load);
+    assert_eq!(got.get("persisted"), Some(&Value::Bool(false)), "{load}");
+    assert_eq!(
+        got.get("persist_reason").and_then(Value::as_str),
+        Some(reason.as_str()),
+        "{load}"
+    );
+    assert!(!root.join(DEMO_ID).exists(), "no project inside a git tree");
+    let brief = call(&mut s, "session_brief", "{}");
+    let row = data(&brief)
+        .pointer("/binaries/0")
+        .cloned()
+        .unwrap_or_default();
+    assert_eq!(row.get("persisted"), Some(&Value::Bool(false)), "{brief}");
+    assert_eq!(
+        row.get("persist_reason").and_then(Value::as_str),
+        Some(reason.as_str()),
+        "{brief}"
+    );
+    // A root that keeps projects gives no persisted member.
+    let mut named = session_with(config_in(&root));
+    let load = call(
+        &mut named,
+        "binary_load",
+        r#"{"builtin":"demo","analysis":"none"}"#,
+    );
+    assert!(data(&load).get("persisted").is_none(), "{load}");
+    // A bad project file gives its reason in the error details.
+    drop(named);
+    std::fs::write(root.join(DEMO_ID).join("project.json"), "{}").expect("a bad project file");
+    let mut bad = session_with(config_in(&root));
+    let error = call(&mut bad, "binary_load", &demo_args());
+    assert_eq!(code(&error), "INTERNAL_ERROR", "{error}");
+    assert!(
+        error
+            .pointer("/error/details/reason")
+            .and_then(Value::as_str)
+            .is_some_and(|r| r.starts_with("The project file is bad")),
+        "{error}"
+    );
+}

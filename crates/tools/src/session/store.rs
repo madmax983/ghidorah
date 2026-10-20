@@ -15,9 +15,10 @@
 use std::path::PathBuf;
 
 use ghidorah_base::{BinaryId, ErrorCode};
+use ghidorah_db::project::check_root;
 use ghidorah_db::{
-    Commit, History, Line, MetaLine, Program, Project, ProjectError, SessionLabel, Tx, TxLine,
-    UndoError, UndoOutcome, UndoRequest,
+    Commit, History, Line, MetaLine, Program, Project, ProjectError, RealFs, SessionLabel, Tx,
+    TxLine, UndoError, UndoOutcome, UndoRequest,
 };
 use ghidorah_json::Value;
 
@@ -37,6 +38,18 @@ pub struct ProjectsConfig {
     pub break_lock: bool,
 }
 
+impl ProjectsConfig {
+    /// Checks the root by the rule of ADR-0022 on the real file system: a default root must be
+    /// outside every git working tree. The check makes no directory.
+    ///
+    /// # Errors
+    ///
+    /// Returns the reason, in STE, when the rule refuses the root.
+    pub fn check(&self) -> Result<(), String> {
+        check_root(&mut RealFs, &self.root, self.named).map_err(|e| e.to_string())
+    }
+}
+
 /// The history and the project of one open binary.
 #[derive(Debug)]
 pub struct Store {
@@ -45,6 +58,8 @@ pub struct Store {
     pub(super) checkpoint: Option<Box<Program>>,
     pub(super) checkpoint_lines: usize,
     pub(super) batch: Option<Box<BatchTx>>,
+    /// The reason why the binary has no project: the refusal of the projects root.
+    pub(super) refusal: Option<String>,
 }
 
 impl Store {
@@ -58,6 +73,7 @@ impl Store {
             checkpoint: Some(Box::new(program.clone())),
             checkpoint_lines: 0,
             batch: None,
+            refusal: None,
         }
     }
 
@@ -70,6 +86,7 @@ impl Store {
             checkpoint: None,
             checkpoint_lines: 0,
             batch: None,
+            refusal: None,
         }
     }
 
@@ -83,6 +100,13 @@ impl Store {
     #[must_use]
     pub const fn project(&self) -> Option<&Project> {
         self.project.as_ref()
+    }
+
+    /// Gives the reason why the binary has no project on disk, or `None`. Only a refused
+    /// projects root gives a reason (ADR-0022).
+    #[must_use]
+    pub fn persist_reason(&self) -> Option<&str> {
+        self.refusal.as_deref()
     }
 
     /// Puts a copy of `program` in place of the checkpoint of a store in memory.
@@ -110,7 +134,13 @@ pub(crate) fn project_error(error: &ProjectError) -> ToolError {
         ProjectError::Replay(e) => {
             out = out.detail("line", Value::from(e.line));
         }
-        _ => {}
+        ProjectError::Fs(_)
+        | ProjectError::BadMeta(_)
+        | ProjectError::Program(_)
+        | ProjectError::InsideGitTree(_) => {
+            out = out.detail("reason", Value::from(error.to_string()));
+        }
+        ProjectError::BadInput | ProjectError::Load(_) | ProjectError::ReadOnly => {}
     }
     out
 }

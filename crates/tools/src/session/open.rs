@@ -18,7 +18,7 @@ use std::path::PathBuf;
 use ghidorah_base::{BinaryId, ErrorCode, Fuel, Rev, TxId, WarningCode};
 use ghidorah_db::project::{Access, LoadSpec, OpenOptions, ProjectMeta, check_root};
 use ghidorah_db::snapshot::{inputs_hash, result_hash};
-use ghidorah_db::{Line, Project, ProjectSummary, RunLine, RunState};
+use ghidorah_db::{Line, Project, ProjectError, ProjectSummary, RunLine, RunState};
 use ghidorah_json::{Object, Value};
 
 use super::store::project_error;
@@ -65,14 +65,33 @@ impl Session {
         self.fs = fs;
     }
 
+    /// Checks the projects root of the session. Gives `None` for a session with no projects
+    /// root, else the root.
+    ///
+    /// # Errors
+    ///
+    /// Returns the refusal of a default root inside a git working tree (ADR-0022).
+    fn root_check(&mut self) -> Result<Option<PathBuf>, ProjectError> {
+        let Some(cfg) = self.config.projects.as_ref() else {
+            return Ok(None);
+        };
+        let (root, named) = (cfg.root.clone(), cfg.named);
+        check_root(self.fs.as_mut(), &root, named)?;
+        Ok(Some(root))
+    }
+
     /// Gives the projects root when the session keeps projects there, else `None`.
     ///
     /// A default root inside a git working tree keeps no projects (ADR-0022).
     pub(crate) fn projects_root(&mut self) -> Option<PathBuf> {
-        let cfg = self.config.projects.as_ref()?;
-        let (root, named) = (cfg.root.clone(), cfg.named);
-        check_root(self.fs.as_mut(), &root, named).ok()?;
-        Some(root)
+        self.root_check().ok().flatten()
+    }
+
+    /// Gives the reason why the session keeps its binaries in memory only: the text of the
+    /// refusal of its projects root. Gives `None` when the root keeps projects, or when the
+    /// session has no projects root.
+    pub fn persist_refusal(&mut self) -> Option<String> {
+        self.root_check().err().map(|e| e.to_string())
     }
 
     /// Gives the projects on disk, newest revision first.
@@ -114,8 +133,9 @@ impl Session {
     }
 
     /// Opens a new binary of `bytes` with its project: the project of the binary on disk, or a
-    /// new one. A session with no projects root keeps the binary in memory. A read-only session
-    /// opens a project on disk, but it makes no new project.
+    /// new one. A session with no projects root keeps the binary in memory. A refused root also
+    /// keeps it in memory, and the store keeps the reason. A read-only session opens a project
+    /// on disk, but it makes no new project.
     ///
     /// # Errors
     ///
@@ -126,9 +146,21 @@ impl Session {
         bytes: &[u8],
         load: LoadSpec,
     ) -> Result<(Admitted, Vec<Warning>), ToolError> {
-        let Some(root) = self.projects_root() else {
-            self.open(binary);
-            return Ok((Admitted::Fresh, Vec::new()));
+        let root = match self.root_check() {
+            Ok(Some(root)) => root,
+            Ok(None) => {
+                self.open(binary);
+                return Ok((Admitted::Fresh, Vec::new()));
+            }
+            Err(refusal) => {
+                // The binary stays in memory, and the store keeps the reason for the agent.
+                let id = binary.id;
+                self.open(binary);
+                if let Some(store) = self.stores.get_mut(&id) {
+                    store.refusal = Some(refusal.to_string());
+                }
+                return Ok((Admitted::Fresh, Vec::new()));
+            }
         };
         if Project::exists(self.fs.as_mut(), &Project::dir_of(&root, binary.id)) {
             return self

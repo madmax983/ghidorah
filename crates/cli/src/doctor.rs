@@ -7,7 +7,7 @@
 //! |---|---|
 //! | `registry_lint` | The registry lint finds nothing. |
 //! | `examples` | Each registry example runs with no `INTERNAL_ERROR`, and each result fits 60,000 characters in each content mode. The check gives the sizes. |
-//! | `project_dir` | A probe file in the projects root writes and syncs. |
+//! | `project_dir` | The projects root obeys the root rule of ADR-0022, and a probe file in it writes and syncs. |
 //! | `era` | The era rules answer both handshakes and `server/discover`. |
 //!
 //! The exit code is 0 when all checks pass, else 1. Output holds no absolute path.
@@ -21,6 +21,7 @@ use ghidorah_json::{Limits, Object, Value};
 use ghidorah_tools::budget::HARD_MAX_CHARS;
 use ghidorah_tools::content::result_chars;
 use ghidorah_tools::registry::lint;
+use ghidorah_tools::session::ProjectsConfig;
 use ghidorah_tools::{ContentMode, Request, dispatch};
 
 use crate::Streams;
@@ -38,6 +39,10 @@ pub const PROBE: &str = ".ghidorah-doctor-probe";
 
 /// The error code of a handler panic.
 const INTERNAL: &str = "INTERNAL_ERROR";
+
+/// The reason of a default projects root inside a git working tree (ADR-0022). It names no
+/// path, because the report holds no absolute path.
+const IN_GIT_TREE: &str = "The default projects root is inside a git working tree, so no project persists. Send --project-root DIR, or set XDG_DATA_HOME to a directory outside the git working tree.";
 
 fn check(name: &str, ok: bool, extra: Vec<(&str, Value)>) -> Value {
     let mut out = Object::new();
@@ -177,6 +182,19 @@ fn project_dir(options: &Options) -> Value {
             )],
         );
     };
+    let rule = ProjectsConfig {
+        root: root.clone(),
+        named: options.project_root_named,
+        break_lock: false,
+    };
+    // The root rule comes before the probe, so a refused root gets no directory.
+    if rule.check().is_err() {
+        return check(
+            "project_dir",
+            false,
+            vec![("reason", Value::from(IN_GIT_TREE))],
+        );
+    }
     match probe(root) {
         Ok(()) => check("project_dir", true, Vec::new()),
         Err(error) => check(
@@ -247,6 +265,7 @@ pub fn doctor<B: Backend>(args: &DoctorArgs, env: &Env, streams: &mut Streams) -
     let mut options = Options::new(env, SESSION);
     if let Some(root) = &args.project_root {
         options.project_root = Some(env.cwd.join(root));
+        options.project_root_named = true;
     }
     let report = report::<B>(&options);
     let ok = report.get("ok") == Some(&Value::Bool(true));

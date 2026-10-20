@@ -101,3 +101,30 @@ fn doctor_fails_without_a_projects_root() {
         Some(&Value::Bool(false))
     );
 }
+
+#[test]
+fn regress_doctor_refuses_root_in_git_tree() {
+    let mut env = env("doctor_git_home");
+    let home = env.cwd.join("home");
+    let _ = std::fs::remove_dir_all(&home);
+    std::fs::create_dir_all(home.join(".git")).expect("a git directory");
+    env.home = Some(home.clone());
+    env.xdg_data_home = None;
+    let output = run_in::<TestHost>(&["doctor"], "", &env);
+    assert_eq!(output.code, 1, "{}", output.stdout);
+    let report = json(&output.stdout);
+    let dir = check(&report, "project_dir");
+    assert_eq!(dir.get("ok"), Some(&Value::Bool(false)), "{report}");
+    assert!(
+        dir.get("reason")
+            .and_then(Value::as_str)
+            .is_some_and(|r| r.contains("git working tree")),
+        "{report}"
+    );
+    assert!(
+        !home.join(".local").exists(),
+        "the doctor makes no directory"
+    );
+    let home_text = home.to_string_lossy().into_owned();
+    assert!(!output.stdout.contains(&home_text), "no absolute path");
+}

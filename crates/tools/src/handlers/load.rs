@@ -17,6 +17,10 @@
 //! `max_steps`. A project with a current analysis needs no run. A project with changed
 //! analysis inputs starts a re-analysis. Without an engine, the analysis state is `none`. A
 //! dry run loads the file and reports it, but opens nothing.
+//!
+//! A default projects root inside a git working tree keeps no project (ADR-0022). Then the
+//! result holds `persisted: false` and `persist_reason`, so the agent knows that its edits
+//! stay in memory only.
 
 use std::collections::BTreeMap;
 
@@ -27,6 +31,7 @@ use ghidorah_loader::{
     self as loader, Detected, Diagnostic, EntryKind, Kind, LoadError, LoadOpts, probe,
 };
 
+use super::func_sections::safe;
 use crate::args::Args;
 use crate::demo::builtin;
 use crate::dispatch::{Ctx, Payload};
@@ -34,7 +39,7 @@ use crate::envelope::{Mutation, Warning};
 use crate::errors::ToolError;
 use crate::hints::Call;
 use crate::outshape::{Field, OutputShape};
-use crate::session::{Admitted, OpenBinary, Session, Until};
+use crate::session::{Admitted, OpenBinary, Session, Store, Until};
 use crate::spec::{
     Annotations, ArgKind, ArgSpec, BinaryArg, Example, FuelSpec, Group, GroupRule, Profile, Role,
     ToolSpec,
@@ -133,6 +138,8 @@ const FIELDS: &[Field] = &[
     Field::req("size", OutputShape::Int),
     Field::req("already_loaded", OutputShape::Bool),
     Field::req("read_only", OutputShape::Bool),
+    Field::opt("persisted", OutputShape::Bool),
+    Field::opt("persist_reason", OutputShape::Str),
     Field::req("analysis", OutputShape::Obj(ANALYSIS)),
     Field::req("diagnostics", OutputShape::Obj(DIAGNOSTICS)),
 ];
@@ -316,8 +323,9 @@ fn make_program(session: &Session, args: &Args, bytes: &[u8]) -> Result<Program,
     Program::from_binary(binary, mem, &limits).map_err(|_| ToolError::new(ErrorCode::InternalError))
 }
 
-/// Gives the result object of a binary.
-fn report(binary: &OpenBinary, already: bool, steps_used: u64) -> Object {
+/// Gives the result object of a binary. `refusal` is the reason why the binary has no
+/// project on disk: then the object holds `persisted: false` and `persist_reason`.
+fn report(binary: &OpenBinary, already: bool, steps_used: u64, refusal: Option<&str>) -> Object {
     let program = &binary.program;
     let meta = program.meta();
     let kind = match meta.kind {
@@ -355,6 +363,10 @@ fn report(binary: &OpenBinary, already: bool, steps_used: u64) -> Object {
     out.push("size", Value::from(meta.file_size));
     out.push("already_loaded", Value::Bool(already));
     out.push("read_only", Value::Bool(binary.read_only));
+    if let Some(reason) = refusal {
+        out.push("persisted", Value::Bool(false));
+        out.push("persist_reason", Value::from(safe(reason)));
+    }
     out.push(
         "analysis",
         Value::object([
@@ -450,7 +462,10 @@ fn finish(
         Value::object([("binary_id", Value::from(id.to_string()))]),
         WHY_SURVEY,
     ));
-    Ok(Payload::Object(report(binary, already, steps_used)))
+    let refusal = session.store(id).and_then(Store::persist_reason);
+    Ok(Payload::Object(report(
+        binary, already, steps_used, refusal,
+    )))
 }
 
 fn run(session: &mut Session, args: &Args, ctx: &mut Ctx) -> Result<Payload, ToolError> {
@@ -477,7 +492,7 @@ fn run(session: &mut Session, args: &Args, ctx: &mut Ctx) -> Result<Payload, Too
             noop: true,
             diff: Some(Value::Array(Vec::new())),
         });
-        return Ok(Payload::Object(report(&binary, false, 0)));
+        return Ok(Payload::Object(report(&binary, false, 0, None)));
     }
     let (admitted, warnings) = session.admit(binary, &bytes, load_spec(args)?)?;
     ctx.warnings.extend(warnings);
