@@ -12,12 +12,14 @@
 use std::fmt;
 use std::ops::{Deref, DerefMut};
 
-use ghidorah_base::ErrorCode;
 use ghidorah_base::catalog::render;
+use ghidorah_base::{ErrorCode, Fuel, did_you_mean};
 use ghidorah_json::{Number, Object, Value};
 
 use crate::content::chars;
-use crate::hints::Call;
+use crate::hints::{Call, WHY_ALTERNATIVE};
+use crate::registry::Registry;
+use crate::spec::Profile;
 
 /// The largest error object in characters.
 pub const ERROR_CAP: u64 = 10_000;
@@ -315,4 +317,58 @@ pub(crate) fn count(value: usize) -> Value {
 #[must_use]
 pub fn cut(text: &str, max: usize) -> String {
     text.chars().take(max).collect()
+}
+
+/// The fuel of the did-you-mean scan of a tool name.
+const DYM_FUEL: u64 = 100_000;
+
+/// Gives the name of the active tool set for a hint, for example `the mini profile`.
+///
+/// `in_profile` tells if the active set holds a tool. A set that matches no profile of the
+/// registry, for example a `--tools` list, gives `a --tools list`.
+pub(crate) fn profile_label<S: 'static>(
+    registry: &Registry<S>,
+    in_profile: &dyn Fn(&str) -> bool,
+) -> String {
+    Profile::ALL
+        .into_iter()
+        .find(|p| {
+            registry
+                .tools()
+                .iter()
+                .all(|t| in_profile(t.name) == t.profiles.contains(p))
+        })
+        .map_or_else(
+            || "a --tools list".to_owned(),
+            |p| format!("the {} profile", p.as_str()),
+        )
+}
+
+/// Gives the `TOOL_NOT_IN_PROFILE` error of `tool` with the reason `not_in_profile`.
+///
+/// The hint names the active tool set. The candidates are the active tools with close names.
+/// The repair call searches the active tools for the name. The pipeline drops it when the
+/// profile has no `tool_search`.
+pub(crate) fn not_in_profile<S: 'static>(
+    registry: &Registry<S>,
+    in_profile: &dyn Fn(&str) -> bool,
+    tool: &str,
+) -> ToolError {
+    let names: Vec<&str> = registry
+        .names()
+        .into_iter()
+        .filter(|name| in_profile(name))
+        .collect();
+    let mut fuel = Fuel::new(DYM_FUEL);
+    let candidates = did_you_mean(tool, names.iter().copied(), &mut fuel)
+        .into_iter()
+        .map(|s| Candidate::text(&s.name, "tool"))
+        .collect();
+    let query = Value::object([("query", Value::from(tool))]);
+    ToolError::new(ErrorCode::ToolNotInProfile)
+        .var("tool", tool)
+        .var("profile", &profile_label(registry, in_profile))
+        .detail("reason", Value::from("not_in_profile"))
+        .candidates(candidates)
+        .next(Call::new("tool_search", query, WHY_ALTERNATIVE))
 }

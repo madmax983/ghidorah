@@ -72,9 +72,9 @@ pub(crate) const fn info(code: ErrorCode) -> CodeInfo {
             H,
             false,
             "The tool {tool} is not available here. The tool is outside the active profile, or the batch step is destructive. Read details.reason.",
-            "For a destructive step, send next[0] as a direct call.",
+            "Send next[0]. For not_in_profile, the server runs {profile}. Start it again with --profile full or a wider --tools list.",
         )
-        .with_plain("Start the server again with --profile full or a wider --tools list."),
+        .with_plain("The server runs {profile}. Start it again with --profile full or a wider --tools list."),
         E::AddressInvalid => row(
             code,
             "ADDRESS_INVALID",

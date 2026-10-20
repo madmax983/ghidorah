@@ -29,7 +29,7 @@ use crate::api::{Host, Progress, Request};
 use crate::args::{self, Args, Format, Globals};
 use crate::budget::Budget;
 use crate::envelope::{Body, Envelope, Frame, Mutation, Warning};
-use crate::errors::{Candidate, ToolError, int};
+use crate::errors::{Candidate, ToolError, int, not_in_profile};
 use crate::hints::{Call, WHY_ANALYSIS, WHY_FIRST_PAGE, WHY_REV, check, keep_valid};
 use crate::registry::Registry;
 use crate::spec::{ArgKind, ToolSpec};
@@ -356,10 +356,12 @@ fn open<S: Host>(
         return Err(Box::new(fail(registry, host, bare, &request.tool, error)));
     };
     if !host.in_profile(tool.name) {
-        let error = ToolError::new(ErrorCode::ToolNotInProfile)
-            .var("tool", tool.name)
-            .detail("reason", Value::from("not_in_profile"));
-        return Err(Box::new(fail(registry, host, bare, tool.name, error)));
+        let error = not_in_profile(registry, &|name| host.in_profile(name), tool.name);
+        let session = request.session.as_deref();
+        let frame = host
+            .frame(tool, &Globals::default(), session)
+            .unwrap_or(bare);
+        return Err(Box::new(fail(registry, host, frame, tool.name, error)));
     }
     let coerce = |kind: &ArgKind, value: &Value| host.coerce(kind, value);
     let parsed = match args::parse(tool, &request.args, Some(&coerce)) {
@@ -378,7 +380,12 @@ fn open<S: Host>(
         Err(error) => {
             let error = binary_repair(tool.name, parsed.args.canonical(), error);
             let error = project_repair(host, error);
-            return Err(Box::new(fail(registry, host, bare, tool.name, error)));
+            // The frame has no binary, but it keeps the session label of the call.
+            let named = Frame {
+                session: globals.session.clone().unwrap_or(bare.session),
+                ..Frame::default()
+            };
+            return Err(Box::new(fail(registry, host, named, tool.name, error)));
         }
     };
     if let (true, Some(expected)) = (tool.mutating, globals.expected_rev)

@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use ghidorah_json::Value;
 use ghidorah_tools::session::ProjectsConfig;
-use ghidorah_tools::{Profile, ProfileSet, Session};
+use ghidorah_tools::{Host, Profile, ProfileSet, Session};
 
 use crate::support::{call, code, config, fixture, load, session_with, text_at};
 
@@ -94,4 +94,62 @@ fn regress_hint_matches_payload() {
     assert_eq!(text_at(&open, "/next/0/tool"), "binary_load", "{open}");
     assert_eq!(text_at(&open, "/next/0/args/binary_id"), id, "{open}");
     assert_hint_matches(&open);
+}
+
+/// A failed call reports the real frame: the rev, the binary and the session label.
+#[test]
+fn regress_failed_call_frame_is_real() {
+    let mut s = session_in(ProfileSet::new(Profile::Mini, None), None);
+    let id = load(&mut s, "fixtures/bin/hello.gcc-O0");
+    let note = call(&mut s, "note_write", r#"{"kind":"note","text":"x"}"#);
+    assert_eq!(note.get("ok"), Some(&Value::Bool(true)), "{note}");
+    let rev = note.get("rev").and_then(Value::as_u64);
+    let args = r#"{"target":"main","kind":"eol","text":"x"}"#;
+    let outside = call(&mut s, "comment_set", args);
+    assert_eq!(code(&outside), "TOOL_NOT_IN_PROFILE", "{outside}");
+    assert_eq!(outside.get("rev").and_then(Value::as_u64), rev, "{outside}");
+    assert_eq!(text_at(&outside, "/binary_id"), id, "{outside}");
+    assert_eq!(text_at(&outside, "/session"), "cli", "{outside}");
+    let hint = text_at(&outside, "/error/hint");
+    assert!(
+        hint.contains("mini") && hint.contains("--profile full"),
+        "{outside}"
+    );
+    assert!(!hint.contains("destructive"), "{outside}");
+    assert_eq!(
+        text_at(&outside, "/next/0/tool"),
+        "tool_search",
+        "{outside}"
+    );
+    assert_eq!(text_at(&outside, "/next/0/args/query"), "comment_set");
+    let closest = call(&mut s, "func_edit", "{}");
+    assert_eq!(code(&closest), "TOOL_NOT_IN_PROFILE", "{closest}");
+    let values: Vec<String> = closest
+        .pointer("/error/candidates")
+        .and_then(Value::as_array)
+        .unwrap_or_default()
+        .iter()
+        .map(|c| text_at(c, "/value"))
+        .collect();
+    assert!(values.iter().any(|v| v == "func_get"), "{closest}");
+    assert!(values.iter().all(|v| s.in_profile(v)), "{closest}");
+    let mut empty = session_in(ProfileSet::default(), None);
+    let open = call(&mut empty, "func_list", r#"{"session":"agent-7"}"#);
+    assert_eq!(code(&open), "NO_BINARY_OPEN", "{open}");
+    assert_eq!(text_at(&open, "/session"), "agent-7", "{open}");
+    let (mut s, _) = fixture("hello.gcc-O0");
+    let note = call(
+        &mut s,
+        "note_write",
+        r#"{"kind":"note","text":"x","session":"agent-7"}"#,
+    );
+    assert_eq!(text_at(&note, "/session"), "agent-7", "{note}");
+    let undo = call(&mut s, "history_undo", r#"{"session":"*"}"#);
+    assert_eq!(undo.get("ok"), Some(&Value::Bool(true)), "{undo}");
+    assert_eq!(text_at(&undo, "/session"), "cli", "{undo}");
+    assert_eq!(
+        text_at(&undo, "/data/undone/0/session"),
+        "agent-7",
+        "{undo}"
+    );
 }

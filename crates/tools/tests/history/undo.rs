@@ -78,7 +78,8 @@ fn scopes_conflicts_and_dry_runs() {
         .and_then(Value::as_array)
         .map(<[Value]>::len);
     assert_eq!(undone, Some(2), "{wide}");
-    assert_eq!(wide.get("session").and_then(Value::as_str), Some("*"));
+    // The envelope names the label that commits the undo, not the scope.
+    assert_eq!(wide.get("session").and_then(Value::as_str), Some("mcp-1"));
     assert_eq!(
         code(&call(&mut s, "history_undo", r#"{"tx":"note:1"}"#)),
         "INVALID_ARGUMENT"

@@ -171,6 +171,8 @@ fn run(session: &mut Session, args: &Args, ctx: &mut Ctx) -> Result<Payload, Too
     } else {
         ctx.frame.session.clone()
     };
+    // The envelope names the label that commits, not the scope `*`.
+    ctx.frame.session.clone_from(&label);
     let tx = match args.str("tx") {
         Some(text) => Some(text.parse::<TxId>().map_err(|_| {
             ToolError::new(ErrorCode::InvalidArgument)
