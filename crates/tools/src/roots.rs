@@ -2,15 +2,18 @@
 //!
 //! The server reads a file only under its configured roots. The check has these steps:
 //!
-//! 1. A relative path starts at the first root.
+//! 1. An absolute path is the only candidate. A relative path whose first parts are the name
+//!    of a root starts at that root, without the name. Then the relative path starts at each
+//!    root in order. The first candidate that passes steps 2 and 3 is the file.
 //! 2. The lexical form of the path, with `.` and `..` resolved, must stay under a root.
 //! 3. `canonicalize` resolves the symlinks. The canonical path must also stay under a root.
 //! 4. The path must name a regular file of at most the size limit. The type check runs before
 //!    the open and again on the open file. The open never waits for the writer of a FIFO.
 //!
-//! A path that leaves the roots gives `PATH_OUTSIDE_ROOT` with `details.roots`. The error
-//! never shows an absolute path: each root shows its relative name. A file that does not exist
-//! or does not read gives `FILE_UNREADABLE`.
+//! A path whose candidates all leave the roots gives `PATH_OUTSIDE_ROOT` with `details.roots`.
+//! The error never shows an absolute path: each root shows its relative name. A file that does
+//! not exist or does not read gives `FILE_UNREADABLE`. For a relative path, the two errors
+//! also give `details.roots` and `details.relative_to`: the root names in the order of the tries.
 
 use std::fmt;
 use std::io::Read;
@@ -150,30 +153,81 @@ impl Roots {
         ToolError::new(ErrorCode::PathOutsideRoot).detail("roots", self.names())
     }
 
+    /// Gives the error `code` of a relative path with the roots in the order of the tries.
+    fn relative_error(&self, code: ErrorCode, tried: &[usize]) -> ToolError {
+        let names = tried
+            .iter()
+            .filter_map(|i| self.roots.get(*i))
+            .map(|r| Value::from(r.name.as_str()))
+            .collect();
+        ToolError::new(code)
+            .detail("roots", self.names())
+            .detail("relative_to", Value::Array(names))
+    }
+
+    /// Gives the candidates of the relative path `raw`, each with the index of its root.
+    ///
+    /// The roots whose names start `raw` come first, without the name. Then `raw` starts at
+    /// each root in order. The list has at most two candidates for each root.
+    fn relative_candidates(&self, raw: &Path) -> Vec<(usize, PathBuf)> {
+        let named = self.roots.iter().enumerate().filter_map(|(i, r)| {
+            raw.strip_prefix(&r.name)
+                .ok()
+                .map(|rest| (i, r.path.join(rest)))
+        });
+        let plain = self
+            .roots
+            .iter()
+            .enumerate()
+            .map(|(i, r)| (i, r.path.join(raw)));
+        named.chain(plain).collect()
+    }
+
+    /// Tries one candidate path with steps 2 and 3 of the module docs.
+    fn try_path(&self, joined: &Path) -> Try {
+        if !self.holds(&lexical(joined)) {
+            return Try::Outside;
+        }
+        match std::fs::canonicalize(joined) {
+            Ok(canonical) if self.holds(&canonical) => Try::Found(canonical),
+            Ok(_) => Try::Outside,
+            Err(_) => Try::Missing,
+        }
+    }
+
     /// Gives the canonical path of `path` when the path stays under a root.
     ///
     /// # Errors
     ///
-    /// Returns `PATH_OUTSIDE_ROOT` when the path leaves the roots and `FILE_UNREADABLE` when
-    /// `canonicalize` fails.
+    /// Returns `PATH_OUTSIDE_ROOT` when each candidate leaves the roots. Returns
+    /// `FILE_UNREADABLE` when no candidate under a root exists.
     pub fn check(&self, path: &str) -> Result<PathBuf, ToolError> {
-        let first = self.roots.first().ok_or_else(|| self.outside())?;
         let raw = Path::new(path);
-        let joined = if raw.is_absolute() {
-            raw.to_path_buf()
+        if raw.is_absolute() {
+            return match self.try_path(raw) {
+                Try::Found(canonical) => Ok(canonical),
+                Try::Missing => Err(ToolError::new(ErrorCode::FileUnreadable)),
+                Try::Outside => Err(self.outside()),
+            };
+        }
+        let mut tried: Vec<usize> = Vec::new();
+        let mut missing = false;
+        for (index, joined) in self.relative_candidates(raw) {
+            if !tried.contains(&index) {
+                tried.push(index);
+            }
+            match self.try_path(&joined) {
+                Try::Found(canonical) => return Ok(canonical),
+                Try::Missing => missing = true,
+                Try::Outside => {}
+            }
+        }
+        let code = if missing {
+            ErrorCode::FileUnreadable
         } else {
-            first.path.join(raw)
+            ErrorCode::PathOutsideRoot
         };
-        if !self.holds(&lexical(&joined)) {
-            return Err(self.outside());
-        }
-        let canonical = std::fs::canonicalize(&joined)
-            .map_err(|_| ToolError::new(ErrorCode::FileUnreadable))?;
-        if self.holds(&canonical) {
-            Ok(canonical)
-        } else {
-            Err(self.outside())
-        }
+        Err(self.relative_error(code, &tried))
     }
 
     /// Reads the file at `path` with the checks of the module docs.
@@ -217,6 +271,16 @@ impl Roots {
             .unwrap_or_default();
         Ok(ReadFile { file_name, bytes })
     }
+}
+
+/// The result of one candidate path.
+enum Try {
+    /// The canonical path exists and stays under a root.
+    Found(PathBuf),
+    /// The path stays under a root, but `canonicalize` fails.
+    Missing,
+    /// The lexical or the canonical path leaves the roots.
+    Outside,
 }
 
 /// The `O_NONBLOCK` flag of `open` on Linux and Android, for most CPU types.
