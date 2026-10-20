@@ -268,3 +268,41 @@ fn symbol_name_longer_than_limit_is_cut() {
         binary.diagnostics
     );
 }
+
+/// A 100-byte ELF64 file with one section header at offset 64. Section 0 is cut after 36
+/// bytes, and the low half of its `sh_size` is 0x1234.
+fn cut_shdr0() -> Vec<u8> {
+    let mut out = vec![0x7f, b'E', b'L', b'F', 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    out.extend_from_slice(&3u16.to_le_bytes());
+    out.extend_from_slice(&62u16.to_le_bytes());
+    out.extend_from_slice(&1u32.to_le_bytes());
+    out.extend_from_slice(&0u64.to_le_bytes());
+    out.extend_from_slice(&0u64.to_le_bytes());
+    out.extend_from_slice(&64u64.to_le_bytes());
+    out.extend_from_slice(&0u32.to_le_bytes());
+    for v in [64u16, 56, 0, 64, 1, 0xffff] {
+        out.extend_from_slice(&v.to_le_bytes());
+    }
+    out.resize(96, 0);
+    out.extend_from_slice(&[0x34, 0x12, 0x00, 0x00]);
+    out
+}
+
+#[test]
+fn regress_elf_cut_shdr0_no_bogus_shstrndx() {
+    let bytes = cut_shdr0();
+    assert_eq!(bytes.len(), 100);
+    let (b, _) = load_ok(&bytes);
+    let bogus: Vec<_> = b
+        .diagnostics
+        .iter()
+        .filter(|d| d.path == "elf.ehdr.e_shstrndx")
+        .collect();
+    assert!(bogus.is_empty(), "{:?}", b.diagnostics);
+    assert!(
+        b.diagnostics.iter().any(|d| d.path == "elf.shdr[0]"),
+        "the cut section 0 has its own diagnostic: {:?}",
+        b.diagnostics
+    );
+    assert!(b.sections.is_empty(), "a cut section 0 means no table");
+}
