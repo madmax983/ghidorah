@@ -244,4 +244,56 @@ fn survey_hints_name_priority_and_main() {
             .iter()
             .all(|s| s.pointer("/text/src").and_then(Value::as_str) == Some("binary"))
     );
+    assert!(
+        d.pointer("/strings/unreferenced").is_none(),
+        "referenced strings give no unreferenced count: {survey}"
+    );
+}
+
+#[test]
+fn regress_survey_hints_unreferenced_strings() {
+    // The blob holds a .text with one ret and a .rodata with five strings. No code refers to
+    // them.
+    let mut session = crate::support::session();
+    let load = call(
+        &mut session,
+        "binary_load",
+        r#"{"path":"tests/data/raw/strings_only.bin"}"#,
+    );
+    data(&load);
+    let survey = call(&mut session, "binary_survey", "{}");
+    let strings = data(&survey).get("strings").expect("the strings section");
+    assert_eq!(
+        strings.get("total").and_then(Value::as_u64),
+        Some(0),
+        "{survey}"
+    );
+    assert_eq!(
+        strings.get("unreferenced").and_then(Value::as_u64),
+        Some(5),
+        "{survey}"
+    );
+    let next = strings
+        .get("next")
+        .expect("the strings section names a search");
+    assert_eq!(str_of(next, "tool"), "search", "{next}");
+    assert_eq!(
+        next.get("args"),
+        Some(&crate::support::json(
+            r#"{"kind":"string","include_unreferenced":true}"#
+        )),
+        "{next}"
+    );
+    let call_next = Call::new("search", next.get("args").cloned().unwrap_or_default(), "");
+    assert!(check(&registry(), &|_| true, &call_next).is_ok(), "{next}");
+    let found = call_value(
+        &mut session,
+        "search",
+        next.get("args").cloned().unwrap_or_default(),
+    );
+    let items = data(&found)
+        .get("items")
+        .and_then(Value::as_array)
+        .expect("items");
+    assert_eq!(items.len(), 5, "{found}");
 }
