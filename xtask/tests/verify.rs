@@ -18,9 +18,19 @@ fn root() -> PathBuf {
 
 /// A Verus JSON report with the given counts, in the form of Verus commit ffc9d20.
 fn report(verified: u64, errors: u64) -> String {
+    report_with(verified, errors, &[])
+}
+
+/// A Verus JSON report with the given counts and one `func-details` entry for each name.
+fn report_with(verified: u64, errors: u64, functions: &[String]) -> String {
     let success = errors == 0;
+    let details = functions
+        .iter()
+        .map(|name| format!(r#""{name}":{{"obligation_proof_notes":[],"failed_proof_notes":[]}}"#))
+        .collect::<Vec<_>>()
+        .join(",");
     format!(
-        r#"{{"func-details":{{}},"verification-results":{{"encountered-error":{e},"encountered-vir-error":false,"success":{success},"verified":{verified},"errors":{errors},"is-verifying-entire-crate":false}},"verus":{{"profile":"release","version":"0.2026.10.16.ffc9d20","platform":{{"os":"linux","arch":"x86_64"}},"toolchain":"1.98.1-x86_64-unknown-linux-gnu (overridden by environment variable RUSTUP_TOOLCHAIN)","commit":"ffc9d20fee64da92cb037be195b467dd321ae4e3"}}}}"#,
+        r#"{{"func-details":{{{details}}},"verification-results":{{"encountered-error":{e},"encountered-vir-error":false,"success":{success},"verified":{verified},"errors":{errors},"is-verifying-entire-crate":false}},"verus":{{"profile":"release","version":"0.2026.10.16.ffc9d20","platform":{{"os":"linux","arch":"x86_64"}},"toolchain":"1.98.1-x86_64-unknown-linux-gnu (overridden by environment variable RUSTUP_TOOLCHAIN)","commit":"ffc9d20fee64da92cb037be195b467dd321ae4e3"}}}}"#,
         e = !success
     )
 }
@@ -238,6 +248,19 @@ fn verify_parses_verus_output() {
     assert!(verify::parse_counts("").is_err());
     assert!(verify::parse_counts(r#"{"verus":{}}"#).is_err());
 
+    let names = vec!["lib::source::may_overwrite".to_owned()];
+    assert_eq!(
+        verify::parse_functions(&report_with(1, 0, &names)),
+        Some(names)
+    );
+    let failed = r#"{"func-details":{"lib::a::f":{"failed_proof_notes":["x"]},"lib::a::g":{}}}"#;
+    assert_eq!(
+        verify::parse_functions(failed),
+        Some(vec!["lib::a::g".to_owned()]),
+        "a function with a failed proof note does not count"
+    );
+    assert_eq!(verify::parse_functions(module_run), None);
+
     let tools = verify::parse_tools(&report(1, 0), "Z3 version 4.16.0 - 64 bit\n");
     assert_eq!(tools.verus_commit, "ffc9d20");
     assert_eq!(tools.toolchain, "1.98.1");
@@ -292,6 +315,40 @@ fn three() {}
 ";
     assert_eq!(verify::spec_items(text), 2);
     assert_eq!(verify::spec_items(""), 0);
+    assert_eq!(verify::spec_functions(text), ["one", "three"]);
+    let method = "impl R {\n    #[verus_spec(r => ensures r@[0] == 1)]\n    #[expect(clippy::x, reason = \"fn y\")]\n    pub const fn get(&self) -> u8 { 1 }\n}\n";
+    assert_eq!(verify::spec_functions(method), ["get"]);
+    assert_eq!(
+        verify::spec_functions("#[verus_spec(r => ensures true)]\npub struct S;\n"),
+        Vec::<String>::new(),
+        "a spec item without a function gives no name"
+    );
+}
+
+#[test]
+fn verify_finds_unproved_functions() {
+    let spec = vec!["new".to_owned(), "new".to_owned(), "cstr".to_owned()];
+    let proved = vec![
+        "lib::reader::Reader::new".to_owned(),
+        "lib::reader::Other::new".to_owned(),
+        "lib::reader::Reader::cstr".to_owned(),
+        "lib::range::Range::new".to_owned(),
+    ];
+    assert_eq!(
+        verify::unproved("reader", &spec, &proved),
+        Vec::<String>::new()
+    );
+    let one_new = &proved[1..];
+    assert_eq!(verify::unproved("reader", &spec, one_new), ["new"]);
+    assert_eq!(
+        verify::unproved("range", &spec, &proved),
+        ["new", "cstr"],
+        "a name counts only in the module of the kernel"
+    );
+    assert_eq!(
+        verify::unproved("rangeset", &["new".to_owned()], &proved),
+        ["new"]
+    );
 }
 
 #[test]
@@ -419,13 +476,81 @@ fn fake_verus(dir: &Path, good: &str, bad: &str) -> PathBuf {
     path
 }
 
+/// Gives the `func-details` name of each spec function of each kernel under `root`.
+fn kernel_functions(root: &Path) -> Vec<String> {
+    let mut names = Vec::new();
+    for kernel in KERNELS {
+        let mut files = vec![root.join(kernel.file())];
+        if let Ok(entries) = std::fs::read_dir(root.join(kernel.dir())) {
+            files.extend(entries.map(|e| e.expect("the directory entry is readable").path()));
+        }
+        for file in files {
+            let text = std::fs::read_to_string(&file).expect("the kernel file is readable");
+            for name in verify::spec_functions(&text) {
+                names.push(format!("lib::{}::Item::{name}", kernel.module));
+            }
+        }
+    }
+    names
+}
+
+#[cfg(unix)]
+#[test]
+fn regress_verify_requires_each_spec_function() {
+    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("verify_fake_external");
+    let _ = std::fs::remove_dir_all(&dir);
+    copy_inputs(&dir);
+    let all = kernel_functions(&dir);
+    let hidden = "lib::flags::Item::eval_pred";
+    let some: Vec<String> = all.iter().filter(|n| *n != hidden).cloned().collect();
+    assert_eq!(some.len() + 1, all.len(), "the kernels have {hidden}");
+    // `#[verus_verify(external)]` removes a function from the Verus output, not from the count.
+    let verus = fake_verus(&dir, &report_with(500, 0, &some), &report(2, 1));
+    let settings = Settings {
+        verus: Some(verus),
+        z3: None,
+        optional: false,
+    };
+    let out = verify::run_with(&dir, &settings).expect("the run gives a report");
+    assert_eq!(out.get("ok").and_then(Value::as_bool), Some(false), "{out}");
+    assert_eq!(status_of(&out, "K5"), Some("failed"), "{out}");
+    assert_eq!(status_of(&out, "K1"), Some("verified"), "{out}");
+    assert_eq!(
+        out.pointer("/kernels/K5/unproved"),
+        Some(&Value::Array(vec![Value::from("eval_pred")])),
+        "{out}"
+    );
+    // A run without `func-details` proves no function.
+    let verus = fake_verus(
+        &dir,
+        &report(500, 0).replace("\"func-details\":{},", ""),
+        "",
+    );
+    let settings = Settings {
+        verus: Some(verus),
+        ..settings
+    };
+    let out = verify::run_with(&dir, &settings).expect("the run gives a report");
+    assert_eq!(status_of(&out, "K7"), Some("failed"), "{out}");
+}
+
+/// Gives the status of the kernel `name` in a report.
+fn status_of<'a>(out: &'a Value, name: &str) -> Option<&'a str> {
+    out.pointer(&format!("/kernels/{name}/status"))
+        .and_then(Value::as_str)
+}
+
 #[cfg(unix)]
 #[test]
 fn verify_run_with_a_fake_verus() {
     let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("verify_fake_run");
     let _ = std::fs::remove_dir_all(&dir);
     copy_inputs(&dir);
-    let verus = fake_verus(&dir, &report(500, 0), &report(2, 1));
+    let verus = fake_verus(
+        &dir,
+        &report_with(500, 0, &kernel_functions(&dir)),
+        &report(2, 1),
+    );
     let settings = Settings {
         verus: Some(verus),
         z3: None,

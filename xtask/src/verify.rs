@@ -2,7 +2,10 @@
 //!
 //! The command finds Verus in `VERUS`, else as `verus` on `PATH`. `VERUS_Z3_PATH` names z3.
 //! For each kernel of [`KERNELS`], it runs Verus with `--verify-module <module>`.
-//! Then it applies the negative patch of each kernel to a copy of the kernel and runs Verus again.
+//! A kernel gets the status `verified` only when Verus gives no error and lists each
+//! `#[verus_spec]` function.
+//!
+//! Then the command applies the negative patch of each kernel to a copy of the kernel and runs Verus again.
 //! A negative run must fail with a verification error and at least one verified item.
 //! The command writes [`RESULTS_PATH`] and prints the same object with `ok` and `status`.
 //!
@@ -225,6 +228,95 @@ pub fn error_kind(stderr: &str) -> Option<&'static str> {
 pub fn spec_items(text: &str) -> u64 {
     let count = rustsrc::strip(text).matches("#[verus_spec(").count();
     u64::try_from(count).unwrap_or(u64::MAX)
+}
+
+/// Gives the text after the attribute at the start of `code`, or `None` without a closing `]`.
+fn after_attribute(code: &str) -> Option<&str> {
+    let mut depth = 0usize;
+    for (i, c) in code.char_indices() {
+        match c {
+            '[' => depth = depth.saturating_add(1),
+            ']' => {
+                depth = depth.checked_sub(1)?;
+                if depth == 0 {
+                    return code.get(i.saturating_add(1)..);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Gives the name of the function that a text before its body declares, or `None`.
+fn fn_name(signature: &str) -> Option<String> {
+    let head = signature.split(['{', ';']).next().unwrap_or_default();
+    let words: Vec<&str> = head
+        .split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+        .filter(|w| !w.is_empty())
+        .collect();
+    let at = words.iter().position(|w| *w == "fn")?;
+    words.get(at.saturating_add(1)).map(|w| (*w).to_owned())
+}
+
+/// Gives the function name of each `#[verus_spec(..)]` item in a source text, in source order.
+///
+/// Comments and strings do not count. A spec item without a function gives no name.
+#[must_use]
+pub fn spec_functions(text: &str) -> Vec<String> {
+    let code = rustsrc::strip(text);
+    code.match_indices("#[verus_spec(")
+        .filter_map(|(at, _)| {
+            let attribute = code.get(at.saturating_add(1)..)?;
+            fn_name(after_attribute(attribute)?)
+        })
+        .collect()
+}
+
+/// Gives the names of the `func-details` object of the JSON output of `verus --output-json`.
+///
+/// Verus lists each function that it verifies. It does not list an `external` function.
+/// A name with a failed proof note does not count. Output without the object gives `None`.
+#[must_use]
+pub fn parse_functions(stdout: &str) -> Option<Vec<String>> {
+    let value = verus_json(stdout)?;
+    let details = value.get("func-details")?.as_object()?;
+    let failed = |detail: &Value| {
+        detail
+            .get("failed_proof_notes")
+            .and_then(Value::as_array)
+            .is_some_and(|notes| !notes.is_empty())
+    };
+    Some(
+        details
+            .iter()
+            .filter(|(_, detail)| !failed(detail))
+            .map(|(name, _)| name.clone())
+            .collect(),
+    )
+}
+
+/// Gives each spec function of a kernel that has no entry in the Verus output.
+///
+/// An entry `<crate>::<module>::..::<name>` proves one function `name` of the kernel `module`.
+/// Two spec functions with one name need two entries. The result keeps the order of `spec`.
+#[must_use]
+pub fn unproved(module: &str, spec: &[String], proved: &[String]) -> Vec<String> {
+    let mut left: Vec<&str> = proved
+        .iter()
+        .filter(|name| name.split("::").nth(1) == Some(module))
+        .filter_map(|name| name.rsplit("::").next())
+        .collect();
+    let mut missing = Vec::new();
+    for name in spec {
+        match left.iter().position(|have| *have == name) {
+            Some(at) => {
+                left.swap_remove(at);
+            }
+            None => missing.push(name.clone()),
+        }
+    }
+    missing
 }
 
 /// Finds `name` in the directories of a `PATH` value.

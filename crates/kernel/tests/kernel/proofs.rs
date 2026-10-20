@@ -108,26 +108,79 @@ fn ac_034_proof_freshness() {
     let _fresh = record_is_fresh();
 }
 
+/// The proof cheats of AC-035a.
+///
+/// `--no-cheating` rejects only `assume`, `admit`, `external_body` and `assume_specification`.
+/// Verus does not verify an `external` item, so the scan also rejects it.
+/// Only the bare `#[verus_verify]` is correct. Any argument of `verus_verify` is a cheat.
+const CHEATS: &[&str] = &[
+    "assume(",
+    "admit(",
+    "external_body",
+    "assume_specification",
+    "external_fn",
+    "external_type_specification",
+    "external",
+    "verifier::",
+    "verifier(",
+    "verus_verify(",
+];
+
+/// Gives the byte offset and the text of each proof cheat in a source text.
+///
+/// A cheat in a comment or a string does not count. A cheat inside a longer word does not count.
+fn cheat_hits(text: &str) -> Vec<(usize, &'static str)> {
+    let code = strip(text);
+    let mut hits = Vec::new();
+    for cheat in CHEATS {
+        for (i, _) in code.match_indices(cheat) {
+            let before = code.get(..i).and_then(|h| h.chars().next_back());
+            let in_word = before.is_some_and(|c| c.is_ascii_alphanumeric() || c == '_');
+            if !in_word {
+                hits.push((i, *cheat));
+            }
+        }
+    }
+    hits.sort_unstable();
+    hits
+}
+
 #[test]
 fn ac_035a_no_assume() {
     let sources = kernel_sources();
     assert!(!sources.is_empty(), "the kernel has source files");
-    let cheats = [
-        "assume(",
-        "admit(",
-        "external_body",
-        "assume_specification",
-        "external_fn",
-    ];
     for (path, text) in &sources {
-        let code = strip(text);
-        for cheat in cheats {
-            for (i, _) in code.match_indices(cheat) {
-                let before = code.get(..i).and_then(|h| h.chars().next_back());
-                let in_word = before.is_some_and(|c| c.is_ascii_alphanumeric() || c == '_');
-                assert!(in_word, "{path}: the kernel has `{cheat}` at byte {i}");
-            }
-        }
+        let hits = cheat_hits(text);
+        assert!(
+            hits.is_empty(),
+            "{path}: the kernel has proof cheats {hits:?}"
+        );
+    }
+}
+
+#[test]
+fn regress_cheat_scan_catches_external() {
+    let hidden = "#[verus_verify(external)]\npub fn f() -> u8 { 1 }\n";
+    assert!(
+        !cheat_hits(hidden).is_empty(),
+        "`#[verus_verify(external)]` makes Verus skip the function"
+    );
+    for text in [
+        "#[verus_verify(external_type_specification)]\npub struct S;\n",
+        "#[verifier::external]\nfn f() {}\n",
+        "#[verifier(external)]\nfn f() {}\n",
+        "#[cfg_attr(verus_only, verus_verify(external))]\nfn f() {}\n",
+        "#[verus_verify(rlimit(10))]\nfn f() {}\n",
+    ] {
+        assert!(!cheat_hits(text).is_empty(), "{text}");
+    }
+    for text in [
+        "#[verus_verify]\nimpl S {}\n",
+        "// #[verus_verify(external)] in a comment\nfn f() {}\n",
+        "fn f() -> &'static str { \"verifier::external\" }\n",
+        "fn no_external_body_here() {}\n",
+    ] {
+        assert_eq!(cheat_hits(text), Vec::new(), "{text}");
     }
 }
 

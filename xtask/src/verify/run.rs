@@ -38,24 +38,23 @@ fn z3_version(z3: Option<&Path>) -> String {
         .unwrap_or_default()
 }
 
-/// Counts the spec items of the kernel files: the module file and its submodule directory.
-fn kernel_spec_items(root: &Path, kernel: &Kernel) -> Result<u64, Error> {
-    let file = root.join(kernel.file());
-    let text = std::fs::read_to_string(&file).map_err(|e| Error::io(&file, e))?;
-    let mut count = super::spec_items(&text);
+/// Gives the texts of the kernel files: the module file and the files of its submodule directory.
+fn kernel_texts(root: &Path, kernel: &Kernel) -> Result<Vec<String>, Error> {
+    let mut files = vec![root.join(kernel.file())];
     let dir = root.join(kernel.dir());
     if dir.is_dir() {
-        let mut files = Vec::new();
-        list_files(&dir, 0, &mut files)?;
-        for path in files
-            .iter()
-            .filter(|p| p.extension().is_some_and(|x| x == "rs"))
-        {
-            let text = std::fs::read_to_string(path).map_err(|e| Error::io(path, e))?;
-            count = count.saturating_add(super::spec_items(&text));
-        }
+        let mut found = Vec::new();
+        list_files(&dir, 0, &mut found)?;
+        files.extend(
+            found
+                .into_iter()
+                .filter(|p| p.extension().is_some_and(|x| x == "rs")),
+        );
     }
-    Ok(count)
+    files
+        .iter()
+        .map(|path| std::fs::read_to_string(path).map_err(|e| Error::io(path, e)))
+        .collect()
 }
 
 /// Adds each file under `dir` to `out`.
@@ -101,9 +100,22 @@ fn prove(
 ) -> Result<(Value, Tools), Error> {
     let out = verus_run(verus, z3, root, kernel.module)?;
     let counts = super::parse_counts(&out.stdout).unwrap_or_default();
-    let spec_items = kernel_spec_items(root, kernel)?;
-    let verified =
-        counts.success && counts.errors == 0 && spec_items > 0 && counts.verified >= spec_items;
+    let texts = kernel_texts(root, kernel)?;
+    let spec_items = texts
+        .iter()
+        .fold(0u64, |n, text| n.saturating_add(super::spec_items(text)));
+    let spec: Vec<String> = texts
+        .iter()
+        .flat_map(|t| super::spec_functions(t))
+        .collect();
+    // Each spec function needs its own entry. So an `external` function cannot hide in the count.
+    let proved = super::parse_functions(&out.stdout).unwrap_or_default();
+    let unproved = super::unproved(kernel.module, &spec, &proved);
+    let verified = counts.success
+        && counts.errors == 0
+        && spec_items > 0
+        && counts.verified >= spec_items
+        && unproved.is_empty();
     let mut row = vec![
         ("name", Value::from(kernel.name)),
         ("file", Value::from(kernel.file())),
@@ -118,6 +130,10 @@ fn prove(
     ];
     if !verified {
         row.push(("error", Value::from(proc::tail(&out.stderr, 20))));
+        row.push((
+            "unproved",
+            Value::Array(unproved.into_iter().map(Value::from).collect()),
+        ));
     }
     Ok((Value::object(row), super::parse_tools(&out.stdout, z3_text)))
 }

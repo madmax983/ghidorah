@@ -16,7 +16,10 @@ This directory holds the proof record of `ghidorah-kernel` (design Sections 13.1
 5. Commit `results.json` with the kernel change.
 
 The command runs Verus one time for each kernel with `--verify-module <module>`.
-Then it applies each negative patch to a copy of the kernel in `target/xtask-verify/` and runs Verus again.
+A kernel gets the status `verified` only when Verus gives no error and lists each `#[verus_spec]` function of the kernel in `func-details`.
+Verus does not list an `external` function, so such a function makes the kernel fail.
+
+Then the command applies each negative patch to a copy of the kernel in `target/xtask-verify/` and runs Verus again.
 A negative run must give `postcondition not satisfied`, `assertion failed` or `precondition not satisfied`.
 It must also verify at least one item. A compile error does not count.
 
