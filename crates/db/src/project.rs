@@ -12,7 +12,8 @@
 //! ```
 //!
 //! [`Project::open`] follows the open flow of Section 3.10: lock, `project.json`, the input
-//! hash, the snapshot, replay, the torn tail and the analysis inputs hash. A torn last line
+//! hash, the snapshot, replay, the torn tail and the analysis inputs hash. After the lock, a
+//! write open removes the temporary files of dead processes. A torn last line
 //! goes out of the journal with a new journal file in a write open (`W_JOURNAL_TAIL_DISCARDED`).
 //! A bad line in the middle gives `JOURNAL_CORRUPT` with its line number.
 //!
@@ -36,10 +37,10 @@ use ghidorah_loader::LoadOpts;
 use crate::fs::{Fs, FsError};
 use crate::history::History;
 use crate::journal::RunLine;
-use crate::lock::{self, LockInfo};
+use crate::lock::{self, LOCK_TMP, LockInfo};
 use crate::program::Program;
 use crate::replay::ReplayError;
-use crate::snapshot::FORMAT_VERSION;
+use crate::snapshot::{FORMAT_VERSION, SNAPSHOT_TMP};
 
 pub use roots::{ProjectSummary, check_root, inside_git_tree, list};
 
@@ -317,6 +318,30 @@ impl From<FsError> for ProjectError {
     }
 }
 
+/// Removes the temporary files of dead processes from the project directory `dir` and its
+/// `bin` directory. The caller holds the lock.
+///
+/// The step does nothing when the process files do not give the lock owner `me`. So a system
+/// with no readable process files keeps all temporary files.
+fn remove_dead_temps(fs: &mut dyn Fs, dir: &Path, meta: &ProjectMeta, me: &LockInfo) {
+    if !lock::is_alive(fs, me) {
+        return;
+    }
+    // The disk module writes `<name>.tmp` as the base of `.gitignore` and the input copy.
+    let ignore = format!("{GITIGNORE_FILE}.tmp");
+    let bases = [
+        PROJECT_TMP,
+        JOURNAL_TMP,
+        SNAPSHOT_TMP,
+        LOCK_TMP,
+        ignore.as_str(),
+    ];
+    let _ = crate::fs::remove_dead_temps(fs, dir, &bases, lock::pid_dead);
+    let input = format!("{}.tmp", hex::encode(&meta.sha256));
+    let bin = dir.join(BIN_DIR);
+    let _ = crate::fs::remove_dead_temps(fs, &bin, &[input.as_str()], lock::pid_dead);
+}
+
 /// One project directory.
 pub struct Project {
     fs: Box<dyn Fs>,
@@ -396,6 +421,7 @@ impl Project {
             lock::release(fs.as_mut(), &dir, &opts.me)?;
             return Err(made(&dir));
         }
+        remove_dead_temps(fs.as_mut(), &dir, &meta, &opts.me);
         let mut project = Self {
             fs,
             dir,
@@ -432,6 +458,7 @@ impl Project {
         let owner = match opts.access {
             Access::Write { break_lock } => {
                 lock::acquire(fs.as_mut(), dir, &opts.me, break_lock).map_err(disk::lock_error)?;
+                remove_dead_temps(fs.as_mut(), dir, &meta, &opts.me);
                 Some(opts.me.clone())
             }
             Access::ReadOnly => None,

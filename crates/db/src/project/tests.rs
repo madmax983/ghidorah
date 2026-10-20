@@ -898,3 +898,106 @@ fn project_meta_roundtrip_and_errors() {
     );
     assert!(missing.is_err());
 }
+
+/// Makes the project of `hello.gcc-O2` for the process `pid` with `--break-lock`.
+fn create_breaking(fs: &SimFs, pid: u32) -> Result<(Project, Program), ProjectError> {
+    let (bytes, program) = input("hello.gcc-O2");
+    let meta = ProjectMeta::new(&program, "hello.gcc-O2", LoadSpec::Auto);
+    let options = opts(Access::Write { break_lock: true }, pid);
+    let project = Project::create(
+        fs.boxed(),
+        Path::new(ROOT),
+        meta,
+        &bytes,
+        &program,
+        &options,
+    )?;
+    Ok((project, program))
+}
+
+/// Gives the names of the temporary files of the process `pid` in `dir`.
+fn temps_of(fs: &SimFs, dir: &Path, pid: u32) -> Vec<String> {
+    let mark = format!(".tmp.{pid}.");
+    let names = fs.boxed().list(dir).unwrap_or_default();
+    names.into_iter().filter(|n| n.contains(&mark)).collect()
+}
+
+#[test]
+fn regress_stale_temp_removed_on_open() {
+    // A writer that dies, a live process and the process of the next open. No ID is the ID
+    // of the test process.
+    let me = std::process::id();
+    let pids: Vec<u32> = (7..).filter(|p| *p != me).take(3).collect();
+    let (dead, live, next) = (pids[0], pids[1], pids[2]);
+    let fs = sim(&[live, next]);
+    let (_, program) = input("hello.gcc-O2");
+    let sha = ghidorah_base::hex::encode(&program.meta().sha256);
+    let dir = Project::dir_of(Path::new(ROOT), program.meta().binary_id);
+    let bin = dir.join(super::BIN_DIR);
+    // Crashes between create_temp and rename: the input copy, then the project file.
+    fs.crash_after(&format!("create_new {sha}.tmp."));
+    assert!(create_breaking(&fs, dead).is_err());
+    fs.resume();
+    fs.crash_after("create_new project.json.tmp.");
+    assert!(create_breaking(&fs, dead).is_err());
+    fs.resume();
+    // A complete project, then a crash between create_temp and rename of the snapshot.
+    let (mut project, program) = create_breaking(&fs, dead).unwrap();
+    fs.crash_after("create_new snapshot.json.tmp.");
+    assert!(project.snapshot(&program).is_err());
+    drop(project);
+    fs.resume();
+    // The test process stays alive, so its temporary files get the ID of the dead writer.
+    let mut raw = fs.boxed();
+    let mut moved = Vec::new();
+    for d in [&dir, &bin] {
+        for name in temps_of(&fs, d, me) {
+            let to = name.replacen(&format!(".tmp.{me}."), &format!(".tmp.{dead}."), 1);
+            raw.rename(&d.join(&name), &d.join(&to)).unwrap();
+            moved.push(to);
+        }
+    }
+    assert_eq!(moved.len(), 3, "one temporary file per crash: {moved:?}");
+    let stale = [
+        format!("project.lock.tmp.{dead}.40"),
+        format!("journal.jsonl.tmp.{dead}.41"),
+        format!(".gitignore.tmp.{dead}.42"),
+    ];
+    // The files of live processes and the names of another shape stay.
+    let keep = [
+        format!("snapshot.json.tmp.{live}.0"),
+        format!("project.json.tmp.{me}.99"),
+        "snapshot.json.tmp.99999999999999999999.1".to_owned(),
+        "snapshot.json.tmp.5.99999999999999999999".to_owned(),
+        "snapshot.json.tmp.+5.0".to_owned(),
+        "snapshot.json.tmp.05.0".to_owned(),
+        "snapshot.json.tmp.5".to_owned(),
+        "snapshot.json.tmp.5.".to_owned(),
+        "snapshot.json.tmp..0".to_owned(),
+        "snapshot.json.tmp.5.0.1".to_owned(),
+        "snapshot.json.tmp.5.0x".to_owned(),
+        "notes.json.tmp.5.0".to_owned(),
+    ];
+    for name in stale.iter().chain(&keep) {
+        fs.seed(&dir.join(name), b"x");
+    }
+    let live_bin = format!("{sha}.tmp.{live}.1");
+    fs.seed(&bin.join(&live_bin), b"x");
+    let opened = reopen(&fs, &dir, &opts(Access::Write { break_lock: true }, next)).unwrap();
+    let mut left = temps_of(&fs, &dir, dead);
+    left.extend(temps_of(&fs, &bin, dead));
+    assert_eq!(
+        left,
+        Vec::<String>::new(),
+        "no file of the dead writer stays"
+    );
+    let names = fs.boxed().list(&dir).unwrap();
+    for name in &keep {
+        assert!(names.contains(name), "{name} stays: {names:?}");
+    }
+    assert!(
+        fs.get(&bin.join(&live_bin)).is_some(),
+        "the input copy of a live process stays"
+    );
+    drop(opened);
+}

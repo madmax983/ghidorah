@@ -21,8 +21,9 @@
 //! path. A commit is [`Fs::append`] and then [`Fs::sync_file`].
 //!
 //! A temporary file has a name of this process: `<base>.<pid>.<n>`. `n` counts up in the
-//! process. So two processes never use the same temporary file, and no process removes the
-//! temporary file of another process.
+//! process. So two processes never use the same temporary file. A process that stops between
+//! the create and the rename leaves its temporary file. A write open removes these files with
+//! [`remove_dead_temps`]. It keeps the temporary files of live processes.
 //!
 //! [`RealFs`] never writes through a symbolic link. `create_new`, `append`, `write_all` and
 //! `truncate` give [`FsError::WrongKind`] for a path that is not a regular file.
@@ -39,6 +40,13 @@ static TMP_SEQ: AtomicU64 = AtomicU64::new(0);
 
 /// The maximum number of names that [`create_temp`] tries.
 const TMP_TRIES: usize = 64;
+
+/// The maximum number of directory entries that [`remove_dead_temps`] reads.
+const SWEEP_MAX: usize = 4_096;
+
+/// The maximum number of digits of a number in a temporary file name: the digits of
+/// `u64::MAX`.
+const MAX_DIGITS: usize = 20;
 
 /// The error of a file-system operation.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -280,6 +288,61 @@ pub(crate) fn replace_file(
         let _ = fs.remove(&own);
     }
     done
+}
+
+/// Reads a decimal number of a temporary file name: 1 to [`MAX_DIGITS`] ASCII digits with no
+/// leading zero. Gives `None` for another text or for a value above `u64::MAX`.
+fn decimal(text: &str) -> Option<u64> {
+    if text.is_empty() || text.len() > MAX_DIGITS || (text.len() > 1 && text.starts_with('0')) {
+        return None;
+    }
+    let mut value: u64 = 0;
+    for byte in text.bytes() {
+        let digit = byte.checked_sub(b'0').filter(|d| *d <= 9)?;
+        value = value.checked_mul(10)?.checked_add(u64::from(digit))?;
+    }
+    Some(value)
+}
+
+/// Gives the process ID of `name` when it is a temporary file name of `base`:
+/// `<base>.<pid>.<n>`. Gives `None` for a name of another shape.
+pub(crate) fn temp_pid(name: &str, base: &str) -> Option<u32> {
+    let rest = name.strip_prefix(base)?.strip_prefix('.')?;
+    let (pid, n) = rest.split_once('.')?;
+    decimal(n)?;
+    u32::try_from(decimal(pid)?).ok()
+}
+
+/// Removes the temporary files of dead processes from the directory `dir`.
+///
+/// An entry goes when it is a file, its name is `<base>.<pid>.<n>` with a `base` of `bases`,
+/// and `dead` gives `true` for `pid`. The temporary files of this process stay. The step reads
+/// at most [`SWEEP_MAX`] entries. A failed list or remove leaves the files. Gives the number
+/// of removed files.
+pub(crate) fn remove_dead_temps(
+    fs: &mut dyn Fs,
+    dir: &Path,
+    bases: &[&str],
+    dead: fn(&mut dyn Fs, u32) -> bool,
+) -> usize {
+    let Ok(names) = fs.list(dir) else {
+        return 0;
+    };
+    let me = std::process::id();
+    let mut removed: usize = 0;
+    for name in names.iter().take(SWEEP_MAX) {
+        let Some(pid) = bases.iter().find_map(|base| temp_pid(name, base)) else {
+            continue;
+        };
+        let path = dir.join(name);
+        if pid == me || fs.kind(&path) != Some(EntryKind::File) || !dead(fs, pid) {
+            continue;
+        }
+        if fs.remove(&path).is_ok() {
+            removed = removed.saturating_add(1);
+        }
+    }
+    removed
 }
 
 /// The file system of the operating system.

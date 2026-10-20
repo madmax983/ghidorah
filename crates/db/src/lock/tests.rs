@@ -2,7 +2,9 @@
 
 use std::path::Path;
 
-use super::{LOCK_FILE, LockError, acquire, is_alive, process_info, release, stat_start_time};
+use super::{
+    LOCK_FILE, LockError, acquire, is_alive, pid_dead, process_info, release, stat_start_time,
+};
 use crate::fs::Fs;
 use crate::project::tests::{ROOT, create, input, me, opts, sim, stat_line};
 use crate::project::{Access, LoadSpec, PROJECT_FILE, Project, ProjectError, ProjectMeta};
@@ -28,6 +30,12 @@ fn liveness_needs_the_same_start_and_boot() {
     restarted.start_time += 1;
     assert!(!is_alive(h.as_mut(), &restarted));
     assert!(!is_alive(h.as_mut(), &me(300)));
+    // Only a missing stat file makes a process ID dead. A failed read keeps it alive.
+    assert!(!pid_dead(h.as_mut(), 100));
+    assert!(pid_dead(h.as_mut(), 300));
+    fs.stop_after(0);
+    assert!(!pid_dead(h.as_mut(), 300));
+    fs.resume();
 }
 
 #[test]
