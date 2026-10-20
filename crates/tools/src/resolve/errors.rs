@@ -1,18 +1,24 @@
 //! The errors of the resolver and their candidates (design Section 10.5).
 //!
-//! Candidate labels and values carry addresses and the input text of the agent. A label never
-//! holds binary text.
+//! Candidate labels and values carry addresses, IDs, binary names and the input text of the
+//! agent. A hostile binary name starts with `"` or holds a character that `BinText` escapes.
+//! Its candidate value is an ID or an address, and its label is the escaped name (AC-146a).
+//! So no candidate holds a raw control or bidi character from the binary.
 
 use std::collections::BTreeSet;
 
 use ghidorah_base::addr_expr::{AddrExprError, Readings};
-use ghidorah_base::{Address, ErrorCode, Fuel, FuncId, IdError, IdKind, did_you_mean, hex};
+use ghidorah_base::bintext::escapes;
+use ghidorah_base::{
+    Address, ErrorCode, Fuel, FuncId, IdError, IdKind, SectionId, SymId, did_you_mean, hex,
+};
 use ghidorah_db::Program;
 use ghidorah_json::Value;
 
 use super::Site;
 use super::table::{Family, accepted};
 use crate::errors::{Candidate, ToolError};
+use crate::handlers::func_sections::safe;
 use crate::hints::{Call, WHY_HEX};
 
 /// The fuel of one did-you-mean scan (Section 10.5).
@@ -152,19 +158,32 @@ pub(super) fn base_ambiguous(
     )
 }
 
+/// Tells if the binary name `name` is hostile: it starts with `"` or holds a character that
+/// `BinText` escapes. A candidate never shows such a name raw.
+fn hostile(name: &str) -> bool {
+    name.starts_with('"') || name.chars().any(escapes)
+}
+
 /// Gives `AMBIGUOUS_NAME` for a symbol name with the addresses `addrs` in address order.
+///
+/// The value of each candidate is `<name>@<addr>`. For a hostile name, the value is the
+/// address, and the label is the escaped name.
 pub(super) fn ambiguous(
     program: &Program,
     name: &str,
     addrs: &[Address],
     site: &Site<'_>,
 ) -> ToolError {
+    let shown = hostile(name).then(|| safe(name));
     let candidates = addrs
         .iter()
         .map(|addr| {
             let func = program.func(FuncId(*addr)).is_some();
             let kind = if func { "function" } else { "symbol" };
-            let mut c = Candidate::text(&format!("{name}@{addr}"), &format!("{kind} at {addr}"));
+            let mut c = match &shown {
+                Some(label) => Candidate::text(&addr.to_string(), label),
+                None => Candidate::text(&format!("{name}@{addr}"), &format!("{kind} at {addr}")),
+            };
             c.id = func.then(|| FuncId(*addr).to_string());
             c.addr = Some(addr.to_string());
             c.kind = Some(kind.to_owned());
@@ -195,17 +214,73 @@ pub(super) fn ambiguous_ids(ids: Vec<(String, Address)>, site: &Site<'_>) -> Too
     )
 }
 
+/// The texts of one did-you-mean scan of `NOT_FOUND`.
+///
+/// A list of IDs gives each ID text as a candidate value. The binary names of [`names`] give
+/// each hostile name as its ID.
+pub(super) trait Pool<'a> {
+    /// Gives the texts in a fixed order, and the program of binary names.
+    fn parts(self) -> (Vec<&'a str>, Option<&'a Program>);
+}
+
+impl<'a, I: Iterator<Item = &'a str>> Pool<'a> for I {
+    fn parts(self) -> (Vec<&'a str>, Option<&'a Program>) {
+        (self.collect(), None)
+    }
+}
+
+/// The names that a name input can match: symbol names of both layers and section names, in
+/// name order.
+pub(super) struct Names<'a> {
+    program: &'a Program,
+    set: BTreeSet<&'a str>,
+}
+
+impl<'a> Pool<'a> for Names<'a> {
+    fn parts(self) -> (Vec<&'a str>, Option<&'a Program>) {
+        (self.set.into_iter().collect(), Some(self.program))
+    }
+}
+
+/// Gives the candidate of the hostile binary name `name`. The value is the `sym:` ID of a
+/// symbol, else the `sec:` ID of the first section with this name. The label is the escaped
+/// name. A name with no such ID gives `None`.
+fn escaped(program: &Program, name: &str) -> Option<Candidate> {
+    let (id, kind) = if program.addrs_named(name).is_empty() {
+        let id = program
+            .binary()
+            .sections
+            .iter()
+            .filter(|s| s.name.as_str() == Some(name))
+            .find_map(|s| SectionId::new(u16::try_from(s.index).ok()?, name).ok())?;
+        (id.to_string(), "section")
+    } else {
+        (SymId::new(name).ok()?.to_string(), "symbol")
+    };
+    let mut c = Candidate::text(&id, &safe(name));
+    c.id = Some(id);
+    c.kind = Some(kind.to_owned());
+    Some(c)
+}
+
 /// Gives `NOT_FOUND` of `kind` with the did-you-mean candidates of `query` among `names`.
+///
+/// The value of each candidate is the matched text. A hostile binary name of [`names`] gives
+/// its ID instead, with the escaped name as the label.
 pub(super) fn not_found<'a>(
     kind: &str,
     query: &str,
-    names: impl IntoIterator<Item = &'a str>,
+    names: impl Pool<'a>,
     site: &Site<'_>,
 ) -> ToolError {
+    let (texts, program) = names.parts();
     let mut fuel = Fuel::new(DYM_FUEL);
-    let candidates = did_you_mean(query, names, &mut fuel)
+    let candidates = did_you_mean(query, texts, &mut fuel)
         .into_iter()
-        .map(|s| Candidate::text(&s.name, kind))
+        .filter_map(|s| match program.filter(|_| hostile(&s.name)) {
+            Some(p) => escaped(p, &s.name),
+            None => Some(Candidate::text(&s.name, kind)),
+        })
         .collect();
     at(
         site,
@@ -218,18 +293,18 @@ pub(super) fn not_found<'a>(
 
 /// Gives the names that a name input can match: symbol names of both layers and section
 /// names, in name order.
-pub(super) fn names(program: &Program) -> BTreeSet<&str> {
-    let mut out: BTreeSet<&str> = program.base().symbols().names().map(|(n, _)| n).collect();
-    out.extend(program.analysis().symbols().names().map(|(n, _)| n));
-    out.extend(
+pub(super) fn names(program: &Program) -> Names<'_> {
+    let mut set: BTreeSet<&str> = program.base().symbols().names().map(|(n, _)| n).collect();
+    set.extend(program.analysis().symbols().names().map(|(n, _)| n));
+    set.extend(
         program
             .binary()
             .sections
             .iter()
             .filter_map(|s| s.name.as_str()),
     );
-    out.retain(|n| !n.is_empty());
-    out
+    set.retain(|n| !n.is_empty());
+    Names { program, set }
 }
 
 /// Gives `ADDRESS_UNMAPPED` with the nearest mapped addresses below and above `addr`.

@@ -2,7 +2,9 @@
 
 use ghidorah_json::Value;
 
-use crate::support::{call, call_value, code, data, demo, fixture, items, str_of, text_at};
+use crate::support::{
+    all_items, call, call_value, code, data, demo, fixture, items, json, str_of, text_at,
+};
 
 #[test]
 fn addr_info_fields() {
@@ -186,4 +188,44 @@ fn regress_list_item_syntax_error_is_per_item() {
         errors[0].pointer("/error/code").and_then(Value::as_str),
         Some("INVALID_ARGUMENT")
     );
+}
+
+/// A section name escapes once. The soft hyphen (U+00AD) of `.x<U+00AD>y` shows as `\u{ad}`
+/// with one backslash in `search`, `addr_info` and `binary_survey` (r2-surface-05). The note
+/// owner name of `binary_survey` escapes once too.
+#[test]
+fn regress_section_name_escaped_once() {
+    let mut session = crate::search::hostile("regress_section_name_escaped_once");
+    let want = r".x\u{ad}y";
+    let listed = all_items(&mut session, "search", &json(r#"{"kind":"section"}"#), 50);
+    let hit = listed
+        .iter()
+        .find(|i| str_of(i, "text") == want)
+        .unwrap_or_else(|| panic!("search shows {want}: {listed:?}"));
+    let addr = str_of(hit, "addr");
+    let args = Value::object([("target", Value::from(addr.as_str()))]);
+    let info = call_value(&mut session, "addr_info", args);
+    assert_eq!(text_at(data(&info), "/section/name"), want, "{info}");
+    let survey = call(
+        &mut session,
+        "binary_survey",
+        r#"{"include":["sections","notes"]}"#,
+    );
+    let rows = data(&survey)
+        .pointer("/sections/items")
+        .and_then(Value::as_array)
+        .map(<[Value]>::to_vec)
+        .unwrap_or_default();
+    let row = rows
+        .iter()
+        .find(|s| str_of(s, "start") == addr)
+        .unwrap_or_else(|| panic!("binary_survey lists {addr}: {survey}"));
+    assert_eq!(str_of(row, "name"), want, "{survey}");
+    let notes = data(&survey)
+        .pointer("/notes/items")
+        .and_then(Value::as_array)
+        .map(<[Value]>::to_vec)
+        .unwrap_or_default();
+    let names: Vec<String> = notes.iter().map(|n| str_of(n, "name")).collect();
+    assert!(names.iter().any(|n| n == r"a\\b"), "{survey}");
 }

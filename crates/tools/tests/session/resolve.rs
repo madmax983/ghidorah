@@ -1,16 +1,21 @@
 //! The address resolver: the rule order, the errors and the target table (AC-138, AC-215).
 
-use ghidorah_base::{Address, BinaryId, FuncId};
+use std::path::PathBuf;
+
+use ghidorah_base::bintext::escapes;
+use ghidorah_base::{Address, BinaryId, ErrorCode, FuncId};
 use ghidorah_db::Program;
 use ghidorah_json::Value;
+use ghidorah_testkit::elf::{ElfBuilder, Loc, Section, Symbol};
 use ghidorah_tools::resolve::{
     Family, Named, Resolved, Rule, Site, Target, accepted, address, function, resolve, target,
     value_of,
 };
-use ghidorah_tools::{Call, Session};
+use ghidorah_tools::{Call, Roots, Session, SessionConfig};
 
 use crate::support::{
-    DEMO_ID, DEMO_MAIN, add_function, call_value, code, data, demo, fixture, json, text_at,
+    DEMO_ID, DEMO_MAIN, add_function, call_value, code, data, demo, fixture, json, session_with,
+    text_at,
 };
 
 /// The names of the `adversarial_names` fixture with their symbol addresses (gcc -O2).
@@ -132,6 +137,98 @@ fn ac_215_adversarial_names() {
         resolve_str(p, "FUN_00001060").map(|r| r.rule).ok(),
         Some(Rule::DefaultName)
     );
+}
+
+/// Gives the addresses of a candidate value: its one address, or the addresses of the
+/// candidates of its `AMBIGUOUS_NAME`.
+fn targets(p: &Program, value: &str) -> Vec<Address> {
+    let at = |text: &str| {
+        let resolved = resolve_str(p, text).unwrap_or_else(|e| panic!("{text}: {e}"));
+        value_of(p, &resolved).expect("an address")
+    };
+    match resolve_str(p, value) {
+        Ok(_) => vec![at(value)],
+        Err(e) if e.code == ErrorCode::AmbiguousName => e
+            .candidates
+            .iter()
+            .map(|c| at(c.value.as_str().unwrap_or_default()))
+            .collect(),
+        Err(e) => panic!("{value:?}: {e}"),
+    }
+}
+
+/// The `NOT_FOUND` and `AMBIGUOUS_NAME` candidates of a hostile binary name hold escaped text.
+/// Each candidate value resolves to a matching item (AC-146a, r2-surface-03).
+#[test]
+fn regress_hostile_candidates_escape_and_resolve() {
+    let evil = "\x1b[2J\u{202e}evil";
+    let hidden = "\u{200b}hidden";
+    let at = |off| Loc::section(".text", off);
+    let b = ElfBuilder::exec()
+        .section(Section::code(".text", &[0xc3; 4]))
+        .section(Section::rodata(hidden, &[1, 2, 3, 4]))
+        .symbol(Symbol::func("main", at(0), 1))
+        .symbol(Symbol::func(evil, at(1), 1))
+        .symbol(Symbol::func(evil, at(2), 1).local())
+        .entry(Loc::symbol("main"));
+    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("session_hostile_candidates");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("the temp directory exists");
+    std::fs::write(dir.join("input.elf"), b.build()).expect("the file writes");
+    let roots = Roots::new(&dir, &[PathBuf::from(".")]).expect("the root is valid");
+    let mut s = session_with(SessionConfig::new(roots));
+    let load = call_value(
+        &mut s,
+        "binary_load",
+        Value::object([("path", Value::from("input.elf"))]),
+    );
+    let id = text_at(&load, "/data/binary_id");
+    let p = program(&s, &id);
+    let evil_at = p.addrs_named(evil);
+    assert_eq!(evil_at.len(), 2, "{load}");
+    let hidden_at: Vec<Address> = p
+        .binary()
+        .sections
+        .iter()
+        .filter(|sec| sec.name.as_str() == Some(hidden))
+        .filter_map(|sec| sec.va.map(|va| Address::ram(va.first)))
+        .collect();
+    assert_eq!(hidden_at.len(), 1, "{load}");
+    let cases = [
+        (&evil[..evil.len() - 1], "NOT_FOUND", &evil_at),
+        (evil, "AMBIGUOUS_NAME", &evil_at),
+        (&hidden[..hidden.len() - 1], "NOT_FOUND", &hidden_at),
+    ];
+    for (input, want, items) in cases {
+        let args = Value::object([("target", Value::from(input))]);
+        let envelope = call_value(&mut s, "func_get", args);
+        assert_eq!(code(&envelope), want, "{envelope}");
+        let candidates = envelope
+            .pointer("/error/candidates")
+            .and_then(Value::as_array)
+            .map(<[Value]>::to_vec)
+            .unwrap_or_default();
+        assert!(!candidates.is_empty(), "{envelope}");
+        let p = program(&s, &id);
+        let mut found = Vec::new();
+        for c in &candidates {
+            for key in ["value", "label"] {
+                let text = c.get(key).and_then(Value::as_str).unwrap_or_default();
+                let raw = text.chars().any(|ch| ch != '\\' && escapes(ch));
+                assert!(!raw, "{key} {text:?} holds a raw character: {envelope}");
+            }
+            let value = c.get("value").and_then(Value::as_str).unwrap_or_default();
+            let got = targets(p, value);
+            assert!(
+                !got.is_empty() && got.iter().all(|a| items.contains(a)),
+                "{value:?} gives {got:?}, not {items:?}"
+            );
+            found.extend(got);
+        }
+        found.sort();
+        found.dedup();
+        assert_eq!(&found, items, "{envelope}");
+    }
 }
 
 #[test]

@@ -8,7 +8,7 @@
 //! in and out). With `targets`, the result is `{ items: [{ input, ok, data | error }],
 //! ok_count, error_count }` in input order (AC-144).
 
-use ghidorah_base::Address;
+use ghidorah_base::{Address, BinText, Caps, FileOffset, FuncId, SectionId, SymId};
 use ghidorah_db::{CommentKind, FlowOverride, Program};
 use ghidorah_json::{Object, Value};
 
@@ -109,16 +109,61 @@ struct Parts {
     comments: bool,
 }
 
+/// Gives the ID of the section `s`: the [`SectionId`] text of its exact name. So the ID
+/// parses back to `s`.
+///
+/// A name that is not UTF-8 or an index above `u16::MAX` has no section ID. Then the ID is
+/// the start address of the section, else its file offset. An ID never holds a cut name.
+#[must_use]
+pub(crate) fn section_id(s: &ghidorah_loader::Section) -> String {
+    let id = s
+        .name
+        .as_str()
+        .zip(u16::try_from(s.index).ok())
+        .and_then(|(name, index)| SectionId::new(index, name).ok());
+    match (id, s.va) {
+        (Some(id), _) => id.to_string(),
+        (None, Some(va)) => Address::ram(va.first).to_string(),
+        (None, None) => FileOffset(s.file_off).to_string(),
+    }
+}
+
+/// Gives the display text of the binary name `name`: the escapes of `BinText` once, at most
+/// [`fs::NAME_CHARS`] characters. A UTF-8 name gives the text of [`fs::safe`].
+#[must_use]
+pub(crate) fn shown(name: &BinText) -> String {
+    name.render(Caps::new(fs::NAME_CHARS, 0)).text
+}
+
+/// Gives the ID of the symbol `name` at `addr`: the [`SymId`] text of the exact name. So the
+/// ID parses back to the symbol.
+///
+/// When [`SymId`] refuses the name, the ID is the function ID at `addr`, else the address.
+/// An ID never holds a cut name.
+#[must_use]
+pub(crate) fn symbol_id(p: &Program, name: &str, addr: Address) -> String {
+    SymId::new(name).map_or_else(
+        |_| {
+            let func = FuncId(addr);
+            if p.func(func).is_some() {
+                func.to_string()
+            } else {
+                addr.to_string()
+            }
+        },
+        |id| id.to_string(),
+    )
+}
+
 /// Gives the section that holds `addr`: `{ id, name }`, or `null`.
 fn section(p: &Program, addr: Address) -> Value {
     let found = p.binary().sections.iter().find(|s| {
         s.va.is_some_and(|r| addr.is_ram() && r.first <= addr.off && addr.off <= r.last)
     });
     found.map_or(Value::Null, |s| {
-        let name = fs::safe(&s.name.render(ghidorah_base::Caps::DETAILED).text);
         Value::object([
-            ("id", Value::from(format!("sec:{}:{name}", s.index))),
-            ("name", Value::from(name)),
+            ("id", Value::from(section_id(s))),
+            ("name", Value::from(shown(&s.name))),
         ])
     })
 }

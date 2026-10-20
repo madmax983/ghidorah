@@ -3,13 +3,14 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use ghidorah_base::{BinaryId, SetName};
+use ghidorah_base::{BinaryId, SectionId, SetName, SymId};
 use ghidorah_db::{Edit, Note, NoteKind, NoteSet, NoteStatus, SessionLabel, SetMembers, Source};
 use ghidorah_json::Value;
+use ghidorah_testkit::elf::{ElfBuilder, Loc, Note as ElfNote, Section, Symbol};
 
 use crate::support::{
-    addr_of, all_items, call, call_value, data, demo, fixture, items, json, program, str_of,
-    text_at, truth_fixtures,
+    addr_of, all_items, call, call_value, code, data, demo, fixture, items, json, load_bytes,
+    program, str_of, text_at, truth_fixtures,
 };
 
 /// Gives the sorted `(id, text)` pairs of every item of `search { kind }`.
@@ -52,7 +53,13 @@ fn ac_217_search_listing() {
         let mut sections: Vec<String> = b
             .sections
             .iter()
-            .map(|s| format!("sec:{}:{}", s.index, text(&s.name)))
+            .map(|s| {
+                let index = u16::try_from(s.index).expect("a small section index");
+                let raw = s.name.as_str().expect("a UTF-8 section name");
+                SectionId::new(index, raw)
+                    .expect("a section ID")
+                    .to_string()
+            })
             .collect();
         sections.sort();
         assert_eq!(
@@ -84,7 +91,7 @@ fn ac_217_search_listing() {
             .symbols
             .iter()
             .filter(|s| !s.name.is_empty())
-            .map(|s| format!("sym:{}", text(&s.name)))
+            .map(|s| SymId::new(&text(&s.name)).expect("a symbol ID").to_string())
             .collect();
         symbols.sort();
         assert_eq!(listing(&mut session, "symbol"), symbols, "{name} symbols");
@@ -184,6 +191,121 @@ fn search_names_strings_and_bytes() {
         scoped.iter().all(|i| str_of(i, "addr").starts_with("0x10")),
         "{scoped:?}"
     );
+}
+
+/// The symbol names of [`hostile`]: a name that starts with a quote, a backslash, a terminal
+/// escape with a bidi mark and a name above the 256 characters of a display name.
+pub fn hostile_names() -> [String; 5] {
+    [
+        "main".to_owned(),
+        "\"main\"".to_owned(),
+        "back\\slash".to_owned(),
+        "\x1b[2J\u{202e}evil".to_owned(),
+        format!("long_{}", "x".repeat(303)),
+    ]
+}
+
+/// The name of the section of [`hostile`] with a soft hyphen (U+00AD).
+pub const SOFT_SECTION: &str = ".x\u{ad}y";
+
+/// The owner name of the ELF note of [`hostile`]: a name with a backslash.
+pub const NOTE_NAME: &str = "a\\b";
+
+/// Loads an ELF file with the names of [`hostile_names`], one `ret` function each, the
+/// sections `"q` and [`SOFT_SECTION`] and a note of the owner [`NOTE_NAME`].
+pub fn hostile(test: &str) -> ghidorah_tools::Session {
+    let at = |off| Loc::section(".text", off);
+    let mut b = ElfBuilder::exec()
+        .section(Section::code(".text", &[0xc3; 8]))
+        .section(Section::rodata("\"q", &[1, 2, 3, 4]))
+        .section(Section::rodata(SOFT_SECTION, &[5, 6, 7, 8]))
+        .note(ElfNote {
+            section: ".note.test".to_owned(),
+            name: NOTE_NAME.to_owned(),
+            kind: 1,
+            desc: vec![0; 4],
+            align: 4,
+        });
+    for (name, off) in hostile_names().iter().zip(0u64..) {
+        b = b.symbol(Symbol::func(name, at(off), 1));
+    }
+    let (session, load) = load_bytes(test, &b.entry(Loc::symbol("main")).build(), "full");
+    assert_eq!(code(&load), "", "{load}");
+    session
+}
+
+/// Sends `id` through `addr_info`. Makes sure that rule `id` resolves it to `addr`, and gives
+/// the data.
+fn round_trip(session: &mut ghidorah_tools::Session, id: &str, addr: &str) -> Value {
+    let args = Value::object([("target", Value::from(id))]);
+    let envelope = call_value(session, "addr_info", args);
+    assert_eq!(code(&envelope), "", "{id:?}: {envelope}");
+    let d = data(&envelope).clone();
+    assert_eq!(text_at(&d, "/resolved_from/rule"), "id", "{id:?}: {d}");
+    assert_eq!(text_at(&d, "/addr"), addr, "{id:?}: {d}");
+    d
+}
+
+/// The IDs of `search`, `binary_survey` and `addr_info` parse back to their item. A name that
+/// starts with a quote, holds an escaped character or is long keeps its exact text in the ID
+/// (r2-surface-01, known-02).
+#[test]
+fn regress_emitted_ids_round_trip() {
+    let mut session = hostile("regress_emitted_ids_round_trip");
+    let args = Value::object([("kind", Value::from("symbol"))]);
+    let symbols: Vec<Value> = all_items(&mut session, "search", &args, 7)
+        .into_iter()
+        .filter(|i| i.pointer("/extra/kind").and_then(Value::as_str) == Some("func"))
+        .collect();
+    let mut found = BTreeSet::new();
+    for item in &symbols {
+        let id = str_of(item, "id");
+        let d = round_trip(&mut session, &id, &str_of(item, "addr"));
+        assert_eq!(text_at(&d, "/symbol/name"), str_of(item, "text"), "{d}");
+        if let Ok(ghidorah_base::Id::Sym(sym)) = ghidorah_base::Id::parse(&id) {
+            found.insert(sym.as_str().to_owned());
+        }
+    }
+    let want: BTreeSet<String> = hostile_names().into_iter().collect();
+    assert_eq!(found, want, "{symbols:?}");
+
+    let args = Value::object([("kind", Value::from("section"))]);
+    let sections: Vec<Value> = all_items(&mut session, "search", &args, 7)
+        .into_iter()
+        .filter(|i| !str_of(i, "addr").is_empty())
+        .collect();
+    let survey = call(&mut session, "binary_survey", r#"{"include":["sections"]}"#);
+    let listed = data(&survey)
+        .pointer("/sections/items")
+        .and_then(Value::as_array)
+        .map(<[Value]>::to_vec)
+        .unwrap_or_default();
+    let mut ids = BTreeSet::new();
+    for item in &sections {
+        let (id, addr) = (str_of(item, "id"), str_of(item, "addr"));
+        let d = round_trip(&mut session, &id, &addr);
+        assert_eq!(text_at(&d, "/section/id"), id, "{item}: {d}");
+        let at = call_value(
+            &mut session,
+            "addr_info",
+            Value::object([("target", Value::from(addr.as_str()))]),
+        );
+        let from_info = text_at(data(&at), "/section/id");
+        let d = round_trip(&mut session, &from_info, &addr);
+        assert_eq!(text_at(&d, "/section/id"), id, "{at}");
+        let row = listed
+            .iter()
+            .find(|s| str_of(s, "start") == addr)
+            .unwrap_or_else(|| panic!("binary_survey lists {addr}: {survey}"));
+        let d = round_trip(&mut session, &str_of(row, "id"), &addr);
+        assert_eq!(text_at(&d, "/section/id"), id, "{row}");
+        if let Ok(ghidorah_base::Id::Section(sec)) = ghidorah_base::Id::parse(&id) {
+            ids.insert(sec.name().to_owned());
+        }
+    }
+    for name in ["\"q", SOFT_SECTION, ".text"] {
+        assert!(ids.contains(name), "{name:?} in {sections:?}");
+    }
 }
 
 /// A query matches the decoded text of a UTF-16 string, not its raw bytes (found by WP-26).

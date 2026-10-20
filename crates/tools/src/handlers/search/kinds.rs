@@ -13,6 +13,7 @@ use super::{STRING_FUNCS, WHY_STRING_REFS};
 use crate::dispatch::Item;
 use crate::envelope::Warning;
 use crate::errors::ToolError;
+use crate::handlers::addr_info;
 use crate::handlers::func_sections::{self as fs, Namer};
 
 /// The largest number of byte pattern hits of one call.
@@ -82,7 +83,7 @@ pub fn names(items: &mut Items<'_>, m: &Matcher, namer: &Namer, fuel: &mut Fuel)
                 if !m.matches(name) || taken.contains(&pair) || !seen.insert(pair) {
                     continue;
                 }
-                let mut new = New::item("symbol", format!("sym:{}", namer.text(name)));
+                let mut new = New::item("symbol", addr_info::symbol_id(p, name, *a));
                 new.addr = Some(*a);
                 new.text = Some(Value::from(namer.text(name)));
                 new.func = p.owner_of(*a);
