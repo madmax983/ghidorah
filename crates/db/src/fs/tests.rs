@@ -1,6 +1,32 @@
-//! Tests of the real file system.
+//! Tests of the real file system and the file replace.
 
-use super::{Fs, FsError, RealFs};
+use std::path::Path;
+
+use super::{Fs, FsError, RealFs, replace_file};
+use crate::project::tests::fs_sim::SimFs;
+
+#[test]
+fn regress_replace_file_keeps_other_tmp() {
+    let fs = SimFs::new();
+    let dir = Path::new("/p/0011223344556677");
+    let path = dir.join("a.json");
+    let tmp = dir.join("a.json.tmp");
+    // The temporary files of two other processes. One is in flight at this time.
+    let other = dir.join("a.json.tmp.4194305.0");
+    fs.seed(&tmp, b"in flight");
+    fs.seed(&other, b"other");
+    let mut handle = fs.boxed();
+    replace_file(handle.as_mut(), &path, &tmp, b"new").unwrap();
+    replace_file(handle.as_mut(), &path, &tmp, b"newer").unwrap();
+    assert_eq!(fs.get(&path), Some(b"newer".to_vec()));
+    assert_eq!(fs.get(&tmp), Some(b"in flight".to_vec()), "the file stays");
+    assert_eq!(fs.get(&other), Some(b"other".to_vec()), "the file stays");
+    assert_eq!(
+        handle.list(dir).unwrap(),
+        vec!["a.json", "a.json.tmp", "a.json.tmp.4194305.0"],
+        "the temporary file of this process goes"
+    );
+}
 
 #[test]
 fn real_fs_operations() {

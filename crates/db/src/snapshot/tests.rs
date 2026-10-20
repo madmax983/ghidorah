@@ -22,14 +22,19 @@ fn ac_120a_snapshot_op_log() {
     handle.create_dir_all(dir).unwrap();
     let _ = fs.take_log();
     write(handle.as_mut(), dir, "{}").unwrap();
+    let log = fs.take_log();
+    // The temporary file has a name of this process: snapshot.json.tmp.<pid>.<n>.
+    let tmp = log[0].strip_prefix("create_new ").unwrap();
+    let own = format!("snapshot.json.tmp.{}.", std::process::id());
+    assert!(tmp.starts_with(&own), "{tmp}");
     assert_eq!(
-        fs.take_log(),
+        log,
         vec![
-            "create_new snapshot.json.tmp",
-            "write_all snapshot.json.tmp",
-            "sync_file snapshot.json.tmp",
-            "rename snapshot.json.tmp snapshot.json",
-            "sync_dir 0011223344556677",
+            format!("create_new {tmp}"),
+            format!("write_all {tmp}"),
+            format!("sync_file {tmp}"),
+            format!("rename {tmp} snapshot.json"),
+            "sync_dir 0011223344556677".to_owned(),
         ]
     );
     assert_eq!(fs.get(&dir.join("snapshot.json")), Some(b"{}".to_vec()));

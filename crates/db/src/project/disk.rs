@@ -39,7 +39,14 @@ pub(super) fn lock_error(e: LockError) -> ProjectError {
             owner: Some(owner),
             stale: false,
         },
-        LockError::Stale(owner) => ProjectError::Locked { owner, stale: true },
+        LockError::Unknown => ProjectError::Locked {
+            owner: None,
+            stale: false,
+        },
+        LockError::Stale(owner) => ProjectError::Locked {
+            owner: Some(owner),
+            stale: true,
+        },
         LockError::Fs(e) => ProjectError::Fs(e),
     }
 }

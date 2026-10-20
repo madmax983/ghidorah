@@ -6,7 +6,7 @@
 //! - The durable view: what a crash keeps. A file keeps the data of its last `sync_file`. A
 //!   directory keeps the names of its last `sync_dir`. A new directory is durable at once.
 //!
-//! The log records each changing operation, for example `rename snapshot.json.tmp snapshot.json`.
+//! The log records each changing operation, for example `rename snapshot.json.tmp.7.0 snapshot.json`.
 //! [`SimFs::stop_after`] lets `k` more changing operations work. Each later operation fails
 //! with [`FsError::Stopped`]: the simulated crash. [`SimFs::crash_image`] gives a new file
 //! system with the durable view only.
@@ -235,6 +235,21 @@ impl Fs for SimFs {
             .remove(from)
             .ok_or_else(|| FsError::NotFound(from.to_path_buf()))?;
         s.names.insert(to.to_path_buf(), id);
+        Ok(())
+    }
+
+    fn link_new(&mut self, src: &Path, dst: &Path) -> Result<(), FsError> {
+        let mut s = self.state();
+        s.step(format!("link_new {} {}", short(src), short(dst)))?;
+        if s.names.contains_key(dst) || s.dirs.contains(dst) {
+            return Err(FsError::Exists(dst.to_path_buf()));
+        }
+        s.parent_ok(dst)?;
+        let id = *s
+            .names
+            .get(src)
+            .ok_or_else(|| FsError::NotFound(src.to_path_buf()))?;
+        s.names.insert(dst.to_path_buf(), id);
         Ok(())
     }
 

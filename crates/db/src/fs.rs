@@ -11,18 +11,30 @@
 //! | [`Fs::write_all`] | the content of a file that exists |
 //! | [`Fs::sync_file`] | makes the data of a file durable |
 //! | [`Fs::rename`] | puts a temporary file in place |
+//! | [`Fs::link_new`] | puts a temporary file at a new name. It fails when the name exists. |
 //! | [`Fs::sync_dir`] | makes the names of a directory durable |
 //! | [`Fs::remove`] | removes a file |
 //! | [`Fs::read`] | reads a file |
 //!
 //! The other operations make directories, set the mode 0444, list a directory and test a
 //! path. A commit is [`Fs::append`] and then [`Fs::sync_file`].
+//!
+//! A temporary file has a name of this process: `<base>.<pid>.<n>`. `n` counts up in the
+//! process. So two processes never use the same temporary file, and no process removes the
+//! temporary file of another process.
 
 #[cfg(test)]
 mod tests;
 
 use std::fmt;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// The counter of the temporary file names of this process.
+static TMP_SEQ: AtomicU64 = AtomicU64::new(0);
+
+/// The maximum number of names that [`create_temp`] tries.
+const TMP_TRIES: usize = 64;
 
 /// The error of a file-system operation.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -131,6 +143,15 @@ pub trait Fs: Send {
     /// Returns [`FsError::NotFound`] when the source does not exist.
     fn rename(&mut self, from: &Path, to: &Path) -> Result<(), FsError>;
 
+    /// Gives the file `src` a second name `dst`: a hard link. The operation is atomic, and it
+    /// never replaces an entry at `dst`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`FsError::Exists`] when `dst` exists, and [`FsError::NotFound`] when `src`
+    /// does not exist.
+    fn link_new(&mut self, src: &Path, dst: &Path) -> Result<(), FsError>;
+
     /// Makes the names of a directory durable.
     ///
     /// # Errors
@@ -173,10 +194,37 @@ pub trait Fs: Send {
     fn boxed(&self) -> Box<dyn Fs>;
 }
 
-/// Puts `bytes` at `path` through the temporary file `tmp` and a rename.
+/// Makes a new empty temporary file of this process: `<base>.<pid>.<n>`.
 ///
-/// The operations are `remove` of a temporary file of an earlier crash, `create_new` of `tmp`,
-/// `write_all`, `sync_file` and `rename`. The caller syncs the directory.
+/// A name that exists stays as it is, and the next `n` gets a try. Gives the path of the
+/// new file.
+///
+/// # Errors
+///
+/// Returns the [`FsError`] of a failed `create_new`, or [`FsError::Exists`] after
+/// [`TMP_TRIES`] names that exist.
+pub(crate) fn create_temp(fs: &mut dyn Fs, base: &Path) -> Result<PathBuf, FsError> {
+    let pid = std::process::id();
+    let mut last = FsError::Exists(base.to_path_buf());
+    for _ in 0..TMP_TRIES {
+        let n = TMP_SEQ.fetch_add(1, Ordering::Relaxed);
+        let mut name = base.as_os_str().to_os_string();
+        name.push(format!(".{pid}.{n}"));
+        let tmp = PathBuf::from(name);
+        match fs.create_new(&tmp) {
+            Ok(()) => return Ok(tmp),
+            Err(e @ FsError::Exists(_)) => last = e,
+            Err(e) => return Err(e),
+        }
+    }
+    Err(last)
+}
+
+/// Puts `bytes` at `path` through a temporary file of this process and a rename.
+///
+/// The operations are `create_new` of `<tmp>.<pid>.<n>`, `write_all`, `sync_file` and
+/// `rename`. After a failure, the temporary file of this process goes. The caller syncs the
+/// directory.
 ///
 /// # Errors
 ///
@@ -187,13 +235,16 @@ pub(crate) fn replace_file(
     tmp: &Path,
     bytes: &[u8],
 ) -> Result<(), FsError> {
-    if fs.exists(tmp) {
-        fs.remove(tmp)?;
+    let own = create_temp(fs, tmp)?;
+    let done = fs
+        .write_all(&own, bytes)
+        .and_then(|()| fs.sync_file(&own))
+        .and_then(|()| fs.rename(&own, path));
+    if done.is_err() {
+        // The first error is the result. A failed remove leaves a file that no name uses.
+        let _ = fs.remove(&own);
     }
-    fs.create_new(tmp)?;
-    fs.write_all(tmp, bytes)?;
-    fs.sync_file(tmp)?;
-    fs.rename(tmp, path)
+    done
 }
 
 /// The file system of the operating system.
@@ -243,6 +294,16 @@ impl Fs for RealFs {
 
     fn rename(&mut self, from: &Path, to: &Path) -> Result<(), FsError> {
         std::fs::rename(from, to).map_err(|e| FsError::io("rename", from, &e))
+    }
+
+    fn link_new(&mut self, src: &Path, dst: &Path) -> Result<(), FsError> {
+        std::fs::hard_link(src, dst).map_err(|e| {
+            if e.kind() == std::io::ErrorKind::AlreadyExists {
+                FsError::Exists(dst.to_path_buf())
+            } else {
+                FsError::io("link_new", src, &e)
+            }
+        })
     }
 
     fn sync_dir(&mut self, path: &Path) -> Result<(), FsError> {

@@ -599,6 +599,90 @@ fn ac_125_project_safety() {
     let _ = std::fs::remove_dir_all(&tmp);
 }
 
+/// The number of rounds of the create race.
+const RACE_ROUNDS: usize = 32;
+
+/// The number of threads of one create race.
+const RACE_THREADS: usize = 8;
+
+/// Makes the project of `program` on the real file system, then commits one rename.
+fn create_and_rename(
+    root: &Path,
+    bytes: &[u8],
+    program: &mut Program,
+    options: &OpenOptions,
+) -> Result<(), String> {
+    let meta = ProjectMeta::new(program, "hello.gcc-O2", LoadSpec::Auto);
+    let mut project = Project::create(
+        Box::new(crate::fs::RealFs),
+        root,
+        meta,
+        bytes,
+        program,
+        options,
+    )
+    .map_err(|e| e.to_string())?;
+    let mut tx = program
+        .begin("symbol_rename", Source::Agent, session("mcp-1"))
+        .map_err(|e| e.to_string())?;
+    let fact = tx.fact("alpha".to_string());
+    tx.apply(Edit::SetName {
+        addr: Address::ram(0x1084),
+        key: None,
+        kind: SymKind::Label,
+        primary: true,
+        name: Some(fact),
+        evidence: Vec::new(),
+    })
+    .map_err(|e| e.to_string())?;
+    let commit = tx.commit().map_err(|e| e.to_string())?;
+    let line = Line::Tx(Box::new(TxLine::of_commit(&commit)));
+    project.append(&line, program).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[test]
+fn regress_concurrent_create_has_one_writer() {
+    let (bytes, program) = input("hello.gcc-O2");
+    let mut real = crate::fs::RealFs;
+    let mut options = write(1);
+    options.me = crate::lock::current(&mut real).unwrap_or_else(|| me(1));
+    let id = program.meta().binary_id;
+    for round in 0..RACE_ROUNDS {
+        let root =
+            std::env::temp_dir().join(format!("ghidorah-race-{}-{round}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let start = std::sync::Arc::new(std::sync::Barrier::new(RACE_THREADS));
+        // All threads start before the first join, so the barrier opens.
+        let mut threads = Vec::new();
+        for _ in 0..RACE_THREADS {
+            let (root, bytes, options) = (root.clone(), bytes.clone(), options.clone());
+            let (start, mut program) = (start.clone(), program.clone());
+            threads.push(std::thread::spawn(move || {
+                start.wait();
+                create_and_rename(&root, &bytes, &mut program, &options)
+            }));
+        }
+        let results: Vec<Result<(), String>> =
+            threads.into_iter().map(|t| t.join().unwrap()).collect();
+        let writers = results.iter().filter(|r| r.is_ok()).count();
+        assert_eq!(writers, 1, "round {round}: {results:?}");
+        let dir = Project::dir_of(&root, id);
+        let text = std::fs::read(dir.join(JOURNAL_FILE)).unwrap();
+        let revs: Vec<Rev> = crate::journal::parse(&text)
+            .unwrap()
+            .lines
+            .iter()
+            .filter_map(Line::rev)
+            .collect();
+        assert_eq!(revs, vec![Rev(1)], "round {round}: one rev line");
+        let opened = Project::open(Box::new(crate::fs::RealFs), &dir, &options).unwrap();
+        assert_eq!(opened.program.rev(), Rev(1));
+        drop(opened);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+}
+
 #[test]
 fn ac_128b_forward_undo() {
     let fs = sim(&[100]);

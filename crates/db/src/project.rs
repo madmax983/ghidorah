@@ -45,10 +45,10 @@ pub use roots::{ProjectSummary, check_root, inside_git_tree, list};
 /// The file name of the project file.
 pub const PROJECT_FILE: &str = "project.json";
 
-/// The file name of the temporary project file.
+/// The start of the name of a temporary project file.
 pub const PROJECT_TMP: &str = "project.json.tmp";
 
-/// The file name of the temporary journal of a tail repair.
+/// The start of the name of a temporary journal of a tail repair.
 pub const JOURNAL_TMP: &str = "journal.jsonl.tmp";
 
 /// The file name of the ignore file.
@@ -356,12 +356,15 @@ impl Project {
     ///
     /// The steps are the directory, the lock, `.gitignore`, the input copy with mode 0444, an
     /// empty journal and the project file last. A directory without a project file is an
-    /// incomplete project, so the steps replace its files.
+    /// incomplete project, so the steps replace its files. The create breaks a stale lock
+    /// only with `--break-lock`. When a project file exists after the lock, the create
+    /// releases the lock and writes nothing.
     ///
     /// # Errors
     ///
-    /// Returns [`ProjectError::Locked`] when a live process holds the lock, and
-    /// [`ProjectError::Fs`] for a failed file operation.
+    /// Returns [`ProjectError::Locked`] when another process holds the lock, and
+    /// [`ProjectError::Fs`] for a failed file operation. A project file that exists gives
+    /// [`FsError::Exists`].
     pub fn create(
         fs: Box<dyn Fs>,
         root: &Path,
@@ -375,12 +378,18 @@ impl Project {
         }
         let mut fs = fs;
         let dir = Self::dir_of(root, meta.binary_id);
+        let made = |dir: &Path| ProjectError::Fs(FsError::Exists(dir.join(PROJECT_FILE)));
         if Self::exists(fs.as_mut(), &dir) {
-            return Err(ProjectError::Fs(FsError::Exists(dir.join(PROJECT_FILE))));
+            return Err(made(&dir));
         }
         fs.create_dir_all(&dir.join(BIN_DIR))?;
-        // A directory without a project file holds no facts, so its lock can go.
-        lock::acquire(fs.as_mut(), &dir, &opts.me, true).map_err(disk::lock_error)?;
+        let break_lock = matches!(opts.access, Access::Write { break_lock: true });
+        lock::acquire(fs.as_mut(), &dir, &opts.me, break_lock).map_err(disk::lock_error)?;
+        if Self::exists(fs.as_mut(), &dir) {
+            // Another process made the project before this process took the lock.
+            lock::release(fs.as_mut(), &dir, &opts.me)?;
+            return Err(made(&dir));
+        }
         let mut project = Self {
             fs,
             dir,
