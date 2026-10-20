@@ -313,6 +313,50 @@ fn regress_void_signature_drops_result() {
     assert_eq!(lines[2], "    sink();", "{lines:?}");
 }
 
+/// The canary pass removed the canary store but kept the reload, the `fs:0x28` load and the
+/// difference. The failure call still read the difference, and the reload lost its class when
+/// its store went. The text read a slot that no statement wrote (decomp-09).
+#[test]
+fn regress_canary_statements_go_together() {
+    for (fixture, store) in [
+        ("recursion.gcc-O0", 0x12b0u64),
+        ("xor_decode.gcc-O0", 0),
+        ("xor_decode.gcc-O2", 0),
+        ("recursion.gcc-O2", 0),
+    ] {
+        let p = program(fixture);
+        let out = ghidorah_decomp::render(
+            p,
+            fid(entry_of(p, "main")),
+            &Opts::default(),
+            &NoNames,
+            &mut Fuel::new(50_000_000),
+        )
+        .unwrap_or_else(|e| panic!("{fixture}: {e}"));
+        let t = out.text();
+        assert!(
+            !t.contains(" + 0x28)"),
+            "{fixture}: the fs:0x28 load stays: {t}"
+        );
+        assert!(
+            !t.lines()
+                .any(|l| l.trim().contains(" - v") && l.contains(" = v") && !l.contains('(')),
+            "{fixture}: a canary difference stays: {t}"
+        );
+        if store != 0 {
+            assert!(
+                out.elided
+                    .iter()
+                    .any(|e| e.reason == ghidorah_decomp::ElideReason::Canary
+                        && e.start <= store
+                        && store < e.start + e.size),
+                "{fixture}: the store at {store:#x} is not a canary range: {:?}",
+                out.elided
+            );
+        }
+    }
+}
+
 /// `test rdx,rdx; je 12fc` at 0x12d2 of `decode` skips the loop when `n == 0`. So the loop
 /// runs under `param_3 != 0`. `test rdx,rdx; jne 1260` at 0x126b of `gcd` loops while the
 /// remainder is not 0, so the loop breaks on `== 0` (decomp-01).
