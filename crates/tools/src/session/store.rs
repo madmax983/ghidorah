@@ -171,8 +171,8 @@ fn fs_reason(error: &FsError, dir: Option<&Path>) -> String {
     }
 }
 
-/// Gives the tool error of a project error. `dir` is the project directory, when it is
-/// known. The reason in the details names no absolute path.
+/// Gives the tool error of a project error. `dir` is the project directory, or `None`. The
+/// reason in the details names no absolute path.
 pub(crate) fn project_error(error: &ProjectError, dir: Option<&Path>) -> ToolError {
     let mut out = ToolError::new(error.code());
     match error {

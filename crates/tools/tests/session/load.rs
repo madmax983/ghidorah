@@ -786,8 +786,8 @@ fn binary_required_gives_a_repair_call() {
     assert_ne!(demo_id, helpers);
 }
 
-/// The schema doc of `path` gives the root rule of `roots.rs`: a relative path starts at each
-/// root in order, not only at the first root (known-01).
+/// The schema doc of `path` gives the root rule of `roots.rs` (known-01). A relative path
+/// starts at each root in order.
 #[test]
 fn regress_path_doc_names_each_root() {
     let doc = handlers::load::SPEC

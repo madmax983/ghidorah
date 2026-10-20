@@ -339,7 +339,7 @@ fn regress_persist_reason_has_no_absolute_path() {
 
 /// The real file system with two hooks. The first `hidden` checks of a project file give
 /// `false`, so the test sees the race with a second process that makes the project. While
-/// `full` is set, each append to a journal fails like a full disk.
+/// `full` holds `true`, each append to a journal fails like a full disk.
 #[derive(Clone, Default)]
 struct HookFs {
     hidden: Arc<AtomicUsize>,
