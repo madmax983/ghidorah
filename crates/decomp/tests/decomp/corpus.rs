@@ -81,8 +81,8 @@ fn check(name: &str) -> (usize, usize, Vec<String>) {
     (count, flat, failures)
 }
 
-/// Gives the label faults of the lines of one function: a label that the text defines twice,
-/// and a `goto` to a label that the text does not define.
+/// Gives the label faults of one function: a label that the text defines twice, or a `goto`
+/// to an undefined label.
 fn label_faults(lines: &[Line]) -> Vec<String> {
     let mut defined = BTreeSet::new();
     let mut faults = Vec::new();
