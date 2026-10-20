@@ -10,11 +10,23 @@ use std::path::{Path, PathBuf};
 
 use ghidorah_testkit::bench::Stats;
 use ghidorah_testkit::fuzz::{self as tkfuzz, Outcome};
+use std::sync::{Mutex, MutexGuard, PoisonError};
 use xtask::bench::{self, BENCHES, Unit};
 use xtask::ci::{self, Step, TestTime};
 use xtask::fuzz::{self, TARGETS};
 use xtask::json::{self, Value};
 use xtask::workspace;
+
+/// Serializes the tests that write a program and start child processes.
+///
+/// A fork in one test thread copies the open write handle of a script that another
+/// thread writes. An exec of that script then fails with "Text file busy" (ETXTBSY).
+static PROCESS_LOCK: Mutex<()> = Mutex::new(());
+
+/// Takes [`PROCESS_LOCK`]. A test that panics with the lock does not block the others.
+fn process_lock() -> MutexGuard<'static, ()> {
+    PROCESS_LOCK.lock().unwrap_or_else(PoisonError::into_inner)
+}
 
 fn strings(items: &[&str]) -> Vec<String> {
     items.iter().map(|s| (*s).to_owned()).collect()
@@ -66,6 +78,7 @@ fn ac_020_hermetic_env() {
 
 #[test]
 fn hermetic_test_binaries() {
+    let _lock = process_lock();
     let lines = [
         r#"{"reason":"compiler-artifact","package_id":"path+file:///w/crates/json#ghidorah-json@0.1.0","manifest_path":"/w/crates/json/Cargo.toml","target":{"kind":["test"],"name":"parse"},"profile":{"test":true},"executable":"/w/target/debug/deps/parse-1"}"#,
         r#"{"reason":"compiler-artifact","manifest_path":"/w/crates/json/Cargo.toml","target":{"kind":["lib"],"name":"ghidorah_json"},"profile":{"test":false},"executable":null}"#,
@@ -116,6 +129,7 @@ fn script(dir: &Path, name: &str, body: &str) -> ci::TestBinary {
 /// of a spawned `ghidorah` is valid there. The step fails when a binary writes under HOME.
 #[test]
 fn regress_hermetic_home_outside_git_tree() {
+    let _lock = process_lock();
     let dir = tmp("hermetic_home");
     let seen = dir.join("seen.txt");
     // The reduced PATH has no `mkdir`, so the scripts use shell built-ins only.
@@ -475,6 +489,7 @@ fn ac_171_cold_start_request() {
 
 #[test]
 fn ac_202_bench_budgets() {
+    let _lock = process_lock();
     let text = std::fs::read_to_string(workspace::root().join(bench::BUDGET_PATH))
         .expect("the budget file");
     let budgets = bench::parse_budget(&text).expect("the budget parses");
@@ -510,6 +525,7 @@ fn ac_202_bench_budgets() {
 #[test]
 #[ignore = "tier2"]
 fn ac_234_fix_commits_step() {
+    let _lock = process_lock();
     let args = strings(&["--steps", "fix_commits"]);
     let report = ci::run(&workspace::root(), &args).expect("xtask ci runs");
     assert_eq!(
@@ -523,6 +539,7 @@ fn ac_234_fix_commits_step() {
 #[test]
 #[ignore = "tier2"]
 fn ac_190b_fuzz_batches() {
+    let _lock = process_lock();
     let args = strings(&["calc", "--iters", "4000", "--seed", "11"]);
     let report = fuzz::run(&workspace::root(), &args).expect("xtask fuzz runs");
     assert_eq!(

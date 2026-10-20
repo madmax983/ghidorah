@@ -6,11 +6,23 @@
 )]
 
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use xtask::json::{self, Value};
 use xtask::verify::patch::{self, PatchError};
 use xtask::verify::tree::{self, hash_files, hex, sha256};
 use xtask::verify::{self, KERNELS, POSTCONDITION, PRECONDITION, Settings, VERIFY_ERRORS};
+
+/// Serializes the tests that write a program and start child processes.
+///
+/// A fork in one test thread copies the open write handle of a script that another
+/// thread writes. An exec of that script then fails with "Text file busy" (ETXTBSY).
+static PROCESS_LOCK: Mutex<()> = Mutex::new(());
+
+/// Takes [`PROCESS_LOCK`]. A test that panics with the lock does not block the others.
+fn process_lock() -> MutexGuard<'static, ()> {
+    PROCESS_LOCK.lock().unwrap_or_else(PoisonError::into_inner)
+}
 
 fn root() -> PathBuf {
     xtask::workspace::root()
@@ -424,6 +436,7 @@ fn verify_finds_programs_on_path() {
 
 #[test]
 fn verify_without_verus_is_skipped_only_when_optional() {
+    let _lock = process_lock();
     let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("verify_no_verus");
     std::fs::create_dir_all(&dir).expect("the test directory is writable");
     let optional = Settings {
@@ -469,6 +482,7 @@ fn xtask_without_verus(args: &[&str], optional: bool) -> (Option<i32>, Value) {
 
 #[test]
 fn verify_is_a_command_of_the_binary() {
+    let _lock = process_lock();
     let (code, report) = xtask_without_verus(&["verify"], true);
     assert_eq!(code, Some(0), "{report:?}");
     assert_eq!(
@@ -568,6 +582,7 @@ fn kernel_functions(root: &Path) -> Vec<String> {
 #[cfg(unix)]
 #[test]
 fn regress_verify_requires_each_spec_function() {
+    let _lock = process_lock();
     let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("verify_fake_external");
     let _ = std::fs::remove_dir_all(&dir);
     copy_inputs(&dir);
@@ -614,6 +629,7 @@ fn status_of<'a>(out: &'a Value, name: &str) -> Option<&'a str> {
 #[cfg(unix)]
 #[test]
 fn verify_run_with_a_fake_verus() {
+    let _lock = process_lock();
     let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("verify_fake_run");
     let _ = std::fs::remove_dir_all(&dir);
     copy_inputs(&dir);
@@ -679,6 +695,7 @@ fn verify_run_with_a_fake_verus() {
 #[cfg(unix)]
 #[test]
 fn regress_verify_failed_run_keeps_the_record() {
+    let _lock = process_lock();
     let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("verify_fake_failed");
     let _ = std::fs::remove_dir_all(&dir);
     copy_inputs(&dir);
@@ -735,6 +752,7 @@ fn regress_verify_failed_run_keeps_the_record() {
 #[cfg(unix)]
 #[test]
 fn regress_negative_needs_its_expected_kind() {
+    let _lock = process_lock();
     let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("verify_fake_kind");
     let _ = std::fs::remove_dir_all(&dir);
     copy_inputs(&dir);
