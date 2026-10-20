@@ -4,10 +4,11 @@
 use std::path::{Path, PathBuf};
 
 use ghidorah_json::Value;
+use ghidorah_tools::handlers::analysis_run;
 use ghidorah_tools::session::ProjectsConfig;
 use ghidorah_tools::{Host, Profile, ProfileSet, Session};
 
-use crate::support::{call, code, config, fixture, load, session_with, text_at};
+use crate::support::{call, code, config, data, fixture, load, session_with, text_at};
 
 /// A binary with no analysis run gives partial results, an `analysis` member with the
 /// state `none` and the `analysis_run` hint.
@@ -152,4 +153,47 @@ fn regress_failed_call_frame_is_real() {
         "agent-7",
         "{undo}"
     );
+}
+
+/// Gives the items of a list envelope.
+fn items(envelope: &Value) -> Vec<Value> {
+    data(envelope)
+        .get("items")
+        .and_then(Value::as_array)
+        .unwrap_or_default()
+        .to_vec()
+}
+
+/// The `in` filter keeps the cross-references whose source function or source address is in
+/// the set.
+#[test]
+fn regress_in_filter_matches_xref_items() {
+    let mut s = session_in(ProfileSet::default(), None);
+    analysis_run::install(&mut s);
+    let load = call(&mut s, "binary_load", r#"{"builtin":"demo"}"#);
+    assert_eq!(
+        text_at(data(&load), "/analysis/state"),
+        "complete",
+        "{load}"
+    );
+    let ids = r#"{"kind":"set","set":{"name":"m","members":["fn:0x1080"]}}"#;
+    let _ = data(&call(&mut s, "note_write", ids));
+    let range =
+        r#"{"kind":"set","set":{"name":"r","members":[{"start":"0x1000","end":"0x2000"}]}}"#;
+    let _ = data(&call(&mut s, "note_write", range));
+    let from = r#""targets":["fn:0x1080"],"direction":"from""#;
+    let all = items(&call(&mut s, "xref_list", &format!("{{{from}}}")));
+    assert!(!all.is_empty(), "main has references");
+    for set in ["set:m", "set:r"] {
+        let args = format!(r#"{{{from},"in":"{set}"}}"#);
+        let kept = items(&call(&mut s, "xref_list", &args));
+        assert_eq!(kept.len(), all.len(), "{set}: {kept:?}");
+        for item in &kept {
+            assert_eq!(text_at(item, "/from_func/id"), "fn:0x1080", "{item}");
+        }
+    }
+    let other = r#"{"kind":"set","set":{"name":"o","members":["fn:0x11e0"]}}"#;
+    let _ = data(&call(&mut s, "note_write", other));
+    let args = format!(r#"{{{from},"in":"set:o"}}"#);
+    assert!(items(&call(&mut s, "xref_list", &args)).is_empty());
 }

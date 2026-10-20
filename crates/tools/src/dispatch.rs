@@ -115,20 +115,25 @@ pub struct Members {
 }
 
 impl Members {
-    /// Tells if a list item is a member: its `id` is in the set, or its `addr` is in a range.
+    /// Tells if a list item is a member.
+    ///
+    /// The `id` or the `from_func.id` of the item is in the set, or the `addr` or the `from`
+    /// of the item is in a range. A cross-reference has no `id` or `addr`, so its source
+    /// function and its source address decide.
     #[must_use]
     pub fn holds(&self, item: &Value) -> bool {
-        if item
-            .get("id")
-            .and_then(Value::as_str)
-            .is_some_and(|id| self.ids.contains(id))
-        {
-            return true;
-        }
-        item.get("addr")
-            .and_then(Value::as_str)
-            .and_then(hex::parse_u64)
-            .is_some_and(|a| self.ranges.iter().any(|(s, e)| *s <= a && a < *e))
+        let id = |pointer: &str| {
+            item.pointer(pointer)
+                .and_then(Value::as_str)
+                .is_some_and(|id| self.ids.contains(id))
+        };
+        let addr = |pointer: &str| {
+            item.pointer(pointer)
+                .and_then(Value::as_str)
+                .and_then(hex::parse_u64)
+                .is_some_and(|a| self.ranges.iter().any(|(s, e)| *s <= a && a < *e))
+        };
+        id("/id") || id("/from_func/id") || addr("/addr") || addr("/from")
     }
 }
 
