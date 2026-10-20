@@ -24,19 +24,30 @@
 //! | Level | Own arguments | Nested objects | Global arguments |
 //! |---|---|---|---|
 //! | [`Detail::Full`] | every keyword, the doc and the default | every keyword | all, with docs |
-//! | [`Detail::Catalog`] | the type, the enum and `maxItems` | the member types | [`CATALOG_GLOBALS`] |
-//! | [`Detail::Compact`] | the type and the enum | `{ type: "object" }` | [`CATALOG_GLOBALS`] |
+//! | [`Detail::Catalog`] | the type, the enum and `maxItems` | the member types | the kept globals, type only |
+//! | [`Detail::Compact`] | the type and the enum | `{ type: "object" }` | the kept globals, type only |
+//!
+//! A published schema holds each key that the tool tells the agent to send. So the catalog
+//! levels keep a global argument when one of these rules holds ([`kept_global`]):
+//!
+//! - The name is in [`CATALOG_GLOBALS`].
+//! - The name is `force`. A tool with `force` gives it in the repair call of a blocked write.
+//! - The global is the fuel `max_steps`. A fuel stop gives a repair call with more fuel.
+//! - The text of the tool names the global ([`text_names`]). The catalog level reads the
+//!   description and the summary. The compact level reads only the summary, its published text.
+//! - An example of the tool sends the global.
 
 use ghidorah_json::{Limits, Number, Object, Value};
 
 use crate::args::globals_of;
 use crate::errors::count;
-use crate::spec::{ArgKind, ArgSpec, ToolSpec};
+use crate::spec::{ArgKind, ArgSpec, Role, ToolSpec};
 
 /// The root keys that a schema must not have (AC-129b).
 pub const ROOT_COMBINATORS: [&str; 7] = ["oneOf", "anyOf", "allOf", "not", "if", "then", "else"];
 
-/// The global arguments that the catalog levels keep. The server instructions name the others.
+/// The global arguments that the catalog levels always keep. [`kept_global`] adds the globals
+/// that a tool names. The server instructions name the others.
 pub const CATALOG_GLOBALS: [&str; 3] = ["binary_id", "limit", "cursor"];
 
 /// The detail level of a schema.
@@ -58,8 +69,13 @@ fn integer(value: i64) -> Value {
     Number::parse(&value.to_string()).map_or(Value::Null, Value::Number)
 }
 
-/// Gives an object schema of `specs` at `detail` with no extra members.
-fn object_schema<'a>(specs: impl Iterator<Item = &'a ArgSpec>, detail: Detail) -> Object {
+/// Gives an object schema of `specs` at `detail`, then the optional members `extra`, with no
+/// other members.
+fn object_schema<'a>(
+    specs: impl Iterator<Item = &'a ArgSpec>,
+    detail: Detail,
+    extra: Vec<(&str, Value)>,
+) -> Object {
     let mut properties = Object::new();
     let mut required = Vec::new();
     for spec in specs {
@@ -67,6 +83,9 @@ fn object_schema<'a>(specs: impl Iterator<Item = &'a ArgSpec>, detail: Detail) -
         if spec.required {
             required.push(Value::from(spec.name));
         }
+    }
+    for (name, schema) in extra {
+        properties.push(name, schema);
     }
     let mut out = Object::new();
     out.push("type", Value::from("object"));
@@ -124,7 +143,7 @@ fn kind_schema(kind: &ArgKind, detail: Detail) -> Object {
         }
         ArgKind::Bool => out.push("type", Value::from("boolean")),
         ArgKind::Obj(members) => match detail {
-            Detail::Full => out = object_schema(members.iter(), detail),
+            Detail::Full => out = object_schema(members.iter(), detail, Vec::new()),
             Detail::Catalog => {
                 let properties = members.iter().map(|m| (m.name, schema_at(m, detail)));
                 out.push("type", Value::from("object"));
@@ -177,14 +196,76 @@ pub fn input_schema<S: 'static>(tool: &ToolSpec<S>) -> Value {
 }
 
 /// Gives the input schema of `tool` at `detail`: its arguments, then the global arguments
-/// that apply. The catalog levels keep only [`CATALOG_GLOBALS`]. See the module doc.
+/// that apply. The catalog levels keep the globals of [`kept_global`] with their type only.
+/// See the module doc.
 #[must_use]
 pub fn catalog_schema<S: 'static>(tool: &ToolSpec<S>, detail: Detail) -> Value {
     let globals = globals_of(tool);
+    if detail == Detail::Full {
+        return Value::Object(object_schema(
+            tool.args.iter().chain(&globals),
+            detail,
+            Vec::new(),
+        ));
+    }
     let kept = globals
         .iter()
-        .filter(|g| detail == Detail::Full || CATALOG_GLOBALS.contains(&g.name));
-    Value::Object(object_schema(tool.args.iter().chain(kept), detail))
+        .filter(|g| kept_global(tool, g, detail))
+        .map(|g| (g.name, type_only(&g.kind)))
+        .collect();
+    Value::Object(object_schema(tool.args.iter(), detail, kept))
+}
+
+/// Tells if the schema of `tool` at `detail` keeps the global argument `global`. The full
+/// level keeps every global. See the module doc for the rules of the catalog levels.
+#[must_use]
+pub fn kept_global<S: 'static>(tool: &ToolSpec<S>, global: &ArgSpec, detail: Detail) -> bool {
+    let described = detail != Detail::Compact && text_names(tool.description, global.name);
+    let example = |args: &str| {
+        ghidorah_json::parse(args, &Limits::DEFAULT)
+            .ok()
+            .is_some_and(|v| v.get(global.name).is_some())
+    };
+    detail == Detail::Full
+        || CATALOG_GLOBALS.contains(&global.name)
+        || global.name == "force"
+        || global.role == Role::Fuel
+        || described
+        || text_names(tool.summary, global.name)
+        || tool.examples.iter().any(|e| example(e.args))
+}
+
+/// Tells if `text` tells the agent to send the argument `name`. The name is a word of the text.
+/// It holds `_`, or a value comes after it, for example `force true` or `session *`.
+#[must_use]
+pub fn text_names(text: &str, name: &str) -> bool {
+    let words: Vec<&str> = text
+        .split(|c: char| c.is_ascii_whitespace() || matches!(c, ',' | '.' | ':' | ';'))
+        .filter(|w| !w.is_empty())
+        .collect();
+    let value = |w: Option<&&str>| {
+        w.is_some_and(|w| {
+            matches!(*w, "true" | "false" | "*") || w.starts_with(|c: char| c.is_ascii_digit())
+        })
+    };
+    words
+        .iter()
+        .enumerate()
+        .any(|(i, w)| *w == name && (name.contains('_') || value(words.get(i + 1))))
+}
+
+/// Gives the schema of a kind with its JSON type only.
+fn type_only(kind: &ArgKind) -> Value {
+    let name = match kind {
+        ArgKind::Addr => return Value::object([("type", address_type())]),
+        ArgKind::Json => return Value::Object(Object::new()),
+        ArgKind::AddrList(_) | ArgKind::List(..) => "array",
+        ArgKind::Id(_) | ArgKind::Str(_) | ArgKind::Enum(_) => "string",
+        ArgKind::Int { .. } => "integer",
+        ArgKind::Bool => "boolean",
+        ArgKind::Obj(_) => "object",
+    };
+    Value::object([("type", Value::from(name))])
 }
 
 /// Gives the full `tools/list` entry of `tool`:
