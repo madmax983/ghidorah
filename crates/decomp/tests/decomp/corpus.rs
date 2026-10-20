@@ -1,12 +1,16 @@
 //! Each function of the unstripped T1 and T2 fixtures decompiles. The tree of each function gives
-//! the block traces of its shape under 4 branch oracles.
+//! the block traces of its shape under 4 branch oracles. The text of each function defines each
+//! label once, and each `goto` names a label of the text.
+
+use std::collections::BTreeSet;
 
 use ghidorah_base::Fuel;
 use ghidorah_decomp::interp_ast::{Seeded, cfg_trace, tree_trace};
-use ghidorah_decomp::{Mode, Opts};
+use ghidorah_decomp::{Line, LineKind, Mode, Opts, ProgramEnv, print};
+use ghidorah_ir::NoNames;
 use ghidorah_json::Value;
 
-use crate::fixtures::{fid, json, program, root};
+use crate::fixtures::{entry_of, fid, json, program, root};
 
 /// The T1 and T2 fixtures with the variant `none`, in manifest order.
 fn plain() -> Vec<String> {
@@ -61,8 +65,76 @@ fn check(name: &str) -> (usize, usize, Vec<String>) {
                 break;
             }
         }
+        let out = ghidorah_decomp::finish(
+            d,
+            &ProgramEnv(p),
+            &NoNames,
+            "f",
+            &print::body_units(p, fid(entry)),
+        );
+        failures.extend(
+            label_faults(&out.lines)
+                .into_iter()
+                .map(|fault| format!("{name} {entry:#x}: {fault}")),
+        );
     }
     (count, flat, failures)
+}
+
+/// Gives the label faults of one function: a label that the text defines twice, or a `goto`
+/// to an undefined label.
+fn label_faults(lines: &[Line]) -> Vec<String> {
+    let mut defined = BTreeSet::new();
+    let mut faults = Vec::new();
+    for line in lines.iter().filter(|l| l.kind == LineKind::Label) {
+        let text = line.text.trim();
+        let name = text.strip_suffix(':').unwrap_or(text);
+        if !defined.insert(name.to_owned()) {
+            faults.push(format!("the label {name} is defined twice"));
+        }
+    }
+    for line in lines.iter().filter(|l| l.kind == LineKind::Goto) {
+        let text = line.text.trim();
+        let name = text
+            .strip_prefix("goto ")
+            .and_then(|t| t.split(';').next())
+            .unwrap_or(text);
+        if !defined.contains(name) {
+            faults.push(format!("`{text}` names no label of the text"));
+        }
+    }
+    faults
+}
+
+/// The gcc -O2 `parse_number` of `cold_split` copies a value on the edge to the block at
+/// 0x1301. The edge node had the address of its target block, so the text defined `L_1301`
+/// twice, and a `goto L_1301` had two targets (r2-engine-04).
+#[test]
+fn regress_edge_label_unique() {
+    let p = program("cold_split.gcc-O2");
+    let entry = entry_of(p, "parse_number");
+    let out = ghidorah_decomp::render(
+        p,
+        fid(entry),
+        &Opts::default(),
+        &NoNames,
+        &mut Fuel::new(50_000_000),
+    )
+    .expect("the decompile");
+    let text = out.text();
+    let faults = label_faults(&out.lines);
+    assert!(faults.is_empty(), "{faults:?}\n{text}");
+    assert_eq!(text.matches("L_1301:").count(), 1, "{text}");
+    let edge = out
+        .lines
+        .iter()
+        .find(|l| l.kind == LineKind::Label && l.text.starts_with("L_1301_"))
+        .map_or_else(
+            || panic!("no label of the edge copies:\n{text}"),
+            |l| l.text.trim_end_matches(':').to_owned(),
+        );
+    assert_eq!(text.matches(&format!("goto {edge};")).count(), 1, "{text}");
+    assert!(text.contains("goto L_1301;"), "{text}");
 }
 
 #[test]

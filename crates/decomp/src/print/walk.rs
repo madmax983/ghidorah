@@ -3,10 +3,13 @@
 //! The walk uses an explicit stack of tasks, so a deep tree does not overflow the thread
 //! stack.
 
+use std::collections::{BTreeMap, BTreeSet};
+
 use ghidorah_ir::Node;
 
 use super::{Buf, LineKind, Printer, expr};
 use crate::expr::Stmt;
+use crate::shape::NodeKind;
 use crate::tree::{Arm, Cond, LoopKind, Tree};
 use crate::view::{NodeView, View};
 
@@ -38,9 +41,42 @@ struct ForParts<'t> {
     at: [(Node, usize); 2],
 }
 
-/// Gives the label of a shape node: `L_<addr>`.
-fn label(view: &View, n: Node) -> String {
-    format!("L_{:x}", view.shape.addr(n))
+/// The label text of each node that a `goto` or a label of the tree names.
+type Labels = BTreeMap<Node, String>;
+
+/// Gives the label of each node that a `goto` or a label of `tree` names. A node gets
+/// `L_<addr>`. Two nodes can share an address, for example an `Edge` node and its target
+/// block. Then a `Block` node keeps `L_<addr>`, and each other node gets `L_<addr>_<n>` with
+/// its node number `n`. So the text defines each label once.
+fn labels(view: &View, tree: &Tree) -> Labels {
+    let mut by_addr: BTreeMap<u64, BTreeSet<(bool, Node)>> = BTreeMap::new();
+    for n in tree.labels().into_iter().chain(tree.gotos()) {
+        let block = matches!(view.shape.node(n).map(|s| s.kind), Some(NodeKind::Block(_)));
+        by_addr
+            .entry(view.shape.addr(n))
+            .or_default()
+            .insert((!block, n));
+    }
+    let mut out = Labels::new();
+    for (addr, nodes) in by_addr {
+        for (i, (_, n)) in nodes.into_iter().enumerate() {
+            let text = if i == 0 {
+                format!("L_{addr:x}")
+            } else {
+                format!("L_{addr:x}_{}", n.0)
+            };
+            out.insert(n, text);
+        }
+    }
+    out
+}
+
+/// Gives the label of a shape node from `labels`, else `L_<addr>`.
+fn label(view: &View, labels: &Labels, n: Node) -> String {
+    labels
+        .get(&n)
+        .cloned()
+        .unwrap_or_else(|| format!("L_{:x}", view.shape.addr(n)))
 }
 
 /// Tells if the run ends at the end of a tree: a stop node, a jump or a `break`.
@@ -274,8 +310,9 @@ impl<'a> Printer<'a> {
         self.push(&format!("{kw} ({text}) {{"), LineKind::Open, depth, buf);
     }
 
-    /// Prints one tree and adds the tasks of its parts.
-    fn tree(&mut self, t: &'a Tree, depth: u16, work: &mut Vec<Task<'a>>) {
+    /// Prints one tree and adds the tasks of its parts. A jump and a label take their text
+    /// from `labels`.
+    fn tree(&mut self, t: &'a Tree, depth: u16, work: &mut Vec<Task<'a>>, labels: &Labels) {
         let inner = depth.saturating_add(1);
         match t {
             Tree::Block(n) => self.block(*n, depth),
@@ -343,11 +380,11 @@ impl<'a> Printer<'a> {
                 work.extend(arms.iter().rev().map(|a| Task::Arm(*on, a, depth)));
             }
             Tree::Goto(n) => {
-                let text = format!("goto {};", label(self.view(), *n));
+                let text = format!("goto {};", label(self.view(), labels, *n));
                 self.push(&text, LineKind::Goto, depth, Buf::default());
             }
             Tree::Label(n) => {
-                let text = format!("{}:", label(self.view(), *n));
+                let text = format!("{}:", label(self.view(), labels, *n));
                 self.push(&text, LineKind::Label, depth, Buf::default());
             }
             Tree::Break(_) => self.push("break;", LineKind::Jump, depth, Buf::default()),
@@ -356,9 +393,9 @@ impl<'a> Printer<'a> {
     }
 
     /// Runs one task of the walk.
-    fn task(&mut self, task: Task<'a>, work: &mut Vec<Task<'a>>) {
+    fn task(&mut self, task: Task<'a>, work: &mut Vec<Task<'a>>, labels: &Labels) {
         match task {
-            Task::Tree(t, depth) => self.tree(t, depth, work),
+            Task::Tree(t, depth) => self.tree(t, depth, work, labels),
             Task::Else(depth) => self.push("} else {", LineKind::Close, depth, Buf::default()),
             Task::ElseIf(t, depth) => {
                 if let Tree::If { cond, then, els } = t {
@@ -416,9 +453,10 @@ impl<'a> Printer<'a> {
 
     /// Prints the tree of the decompile with an explicit stack.
     pub(super) fn walk(&mut self) {
+        let labels = labels(self.view(), &self.d.tree);
         let mut work: Vec<Task<'a>> = vec![Task::Tree(&self.d.tree, 1)];
         while let Some(task) = work.pop() {
-            self.task(task, &mut work);
+            self.task(task, &mut work, &labels);
         }
     }
 }

@@ -27,10 +27,13 @@ fn clean(text: &str) -> String {
         .text
 }
 
-/// Tells if the range of `line` holds `addr`.
+/// Tells if the range of `line` holds `addr`. A range of 0 bytes holds its start. The last
+/// address is inclusive, so a range at the top of the address space holds `u64::MAX`.
 fn holds(line: &Line, addr: u64) -> bool {
-    line.span
-        .is_some_and(|(s, n)| s <= addr && addr < s.saturating_add(n.max(1)))
+    line.span.is_some_and(|(s, n)| {
+        let last = s.saturating_add(n.saturating_sub(1));
+        s <= addr && addr <= last
+    })
 }
 
 /// The comment lines before and after each line.
