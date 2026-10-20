@@ -142,12 +142,12 @@ impl<'a> Facts<'a> {
     }
 
     /// Gives the addresses of the instructions of the reachable blocks with an effect that a
-    /// line must show. An instruction has an effect when one of its live ops is a store, a
-    /// call, a return, a branch or an opaque op with a memory address. A def of a value that
-    /// a return reads is an effect too.
+    /// line must show. An instruction has an effect when one of its live ops has one. An
+    /// effect is a store, a call, a return, a branch or an opaque memory op. The def of a
+    /// value that a return reads is an effect too.
     ///
-    /// A push or a pop of a callee-saved register, the frame setup and teardown, `nop` and
-    /// `endbr64` have no live op of this kind, so they stay `no effect`.
+    /// A push or a pop of a callee-saved register has no live op with an effect. The same is
+    /// true for the frame setup and teardown, `nop` and `endbr64`.
     pub(crate) fn effects(&self) -> BTreeSet<u64> {
         let mut out = BTreeSet::new();
         for &i in self.ops.values().flatten() {

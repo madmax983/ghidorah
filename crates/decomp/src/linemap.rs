@@ -9,13 +9,14 @@
 //! | Instruction | Result |
 //! |---|---|
 //! | the jump at the end of a block, which the structure shows | `control flow` |
-//! | an instruction of a reachable block with an effect: a store, a call, a return, a branch, an opaque memory op or a value that a return reads | no elided range, and `W_STRUCTURE_SELFCHECK` at the instruction |
+//! | an instruction of a reachable block with an effect | no elided range, and `W_STRUCTURE_SELFCHECK` at the instruction |
 //! | another instruction of a reachable block, for example a push of a callee-saved register, the frame setup, `nop` or `endbr64` | `no effect` |
 //! | an instruction of the body outside every block | `padding` |
 //!
-//! The effects come from the live ops of the L1 form ([`crate::View::effects`]). So a
-//! printer that drops a statement gives a self-check warning. It does not hide the statement
-//! as `no effect`.
+//! The effects come from the live ops of the L1 form ([`crate::View::effects`]). An effect is
+//! a store, a call, a return, a branch or an opaque memory op. The def of a value that a
+//! return reads is an effect too. So a printer that drops a statement gives a self-check
+//! warning. It does not hide the statement as `no effect`.
 
 use std::collections::BTreeSet;
 
@@ -130,8 +131,8 @@ pub fn merge(mut elided: Vec<Elided>) -> Vec<Elided> {
     out
 }
 
-/// Adds an elided range for each instruction that no line and no elided range holds, when
-/// the instruction has no effect that a line must show.
+/// Adds an elided range for each instruction with no effect that no line and no elided range
+/// holds.
 ///
 /// `insns` holds the instructions of the reachable blocks. `flow` holds the addresses of the
 /// jumps at the block ends. `effects` holds the addresses of the instructions with an effect

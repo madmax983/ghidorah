@@ -13,8 +13,8 @@ use ghidorah_ir::{Arg, Node, Op, OpId, Opc, Switches, rpo};
 use crate::fixtures::{fid, program};
 use crate::out_fixtures::{Item, corpus, elided_at};
 
-/// Tells if a line must hold the L1 op `op`: a store, a call, a return, a branch or an
-/// opaque op with a memory address.
+/// Tells if a line must hold the L1 op `op`. Such an op is a store, a call, a return, a
+/// branch or an opaque memory op.
 fn must_show(op: &Op) -> bool {
     match op.opc {
         Opc::Store
