@@ -70,13 +70,15 @@
           "type": "integer",
           "minimum": 1000,
           "maximum": 60000,
-          "description": "The largest result in characters. The count includes every copy of the result."
+          "description": "The largest result in characters. The count includes every copy of the result.",
+          "default": 16000
         },
         "limit": {
           "type": "integer",
           "minimum": 1,
           "maximum": 1000,
-          "description": "The largest number of items on one page."
+          "description": "The largest number of items on one page.",
+          "default": 20
         },
         "cursor": {
           "type": "string",
@@ -186,7 +188,8 @@
           "type": "integer",
           "minimum": 1000,
           "maximum": 60000,
-          "description": "The largest result in characters. The count includes every copy of the result."
+          "description": "The largest result in characters. The count includes every copy of the result.",
+          "default": 8000
         },
         "session": {
           "type": "string",
@@ -270,7 +273,8 @@
           "type": "integer",
           "minimum": 1000,
           "maximum": 60000,
-          "description": "The largest result in characters. The count includes every copy of the result."
+          "description": "The largest result in characters. The count includes every copy of the result.",
+          "default": 8000
         },
         "session": {
           "type": "string",
@@ -347,7 +351,8 @@
           "type": "integer",
           "minimum": 1000,
           "maximum": 60000,
-          "description": "The largest result in characters. The count includes every copy of the result."
+          "description": "The largest result in characters. The count includes every copy of the result.",
+          "default": 8000
         },
         "session": {
           "type": "string",
@@ -409,7 +414,8 @@
           "type": "integer",
           "minimum": 1000,
           "maximum": 60000,
-          "description": "The largest result in characters. The count includes every copy of the result."
+          "description": "The largest result in characters. The count includes every copy of the result.",
+          "default": 8000
         },
         "session": {
           "type": "string",
@@ -420,7 +426,8 @@
           "type": "integer",
           "minimum": 1,
           "maximum": 100000,
-          "description": "The fuel of the call in work units."
+          "description": "The fuel of the call in work units.",
+          "default": 1000
         },
         "max_ms": {
           "type": "integer",

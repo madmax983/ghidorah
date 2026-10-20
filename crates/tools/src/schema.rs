@@ -19,7 +19,8 @@
 //!
 //! Three detail levels exist ([`Detail`]). The catalog of `tools/list` uses the short levels,
 //! so the catalog stays small (AC-131a, AC-131b). `tool_search` with level `full` gives the
-//! full schema with every doc, default and bound.
+//! full schema with every doc, default and bound. A global argument takes the default of the
+//! tool, for example the page size of `limit`.
 //!
 //! | Level | Own arguments | Nested objects | Global arguments |
 //! |---|---|---|---|
@@ -39,7 +40,7 @@
 
 use ghidorah_json::{Limits, Number, Object, Value};
 
-use crate::args::globals_of;
+use crate::args::{global_default, globals_of};
 use crate::errors::count;
 use crate::spec::{ArgKind, ArgSpec, Role, ToolSpec};
 
@@ -196,17 +197,26 @@ pub fn input_schema<S: 'static>(tool: &ToolSpec<S>) -> Value {
 }
 
 /// Gives the input schema of `tool` at `detail`: its arguments, then the global arguments
-/// that apply. The catalog levels keep the globals of [`kept_global`] with their type only.
-/// See the module doc.
+/// that apply.
+///
+/// The full level adds the defaults of the tool ([`global_default`]). The catalog levels keep
+/// the globals of [`kept_global`] with their type only. See the module doc.
 #[must_use]
 pub fn catalog_schema<S: 'static>(tool: &ToolSpec<S>, detail: Detail) -> Value {
     let globals = globals_of(tool);
     if detail == Detail::Full {
-        return Value::Object(object_schema(
-            tool.args.iter().chain(&globals),
-            detail,
-            Vec::new(),
-        ));
+        let full = globals
+            .iter()
+            .map(|g| {
+                let mut schema = schema_at(g, detail);
+                let default = global_default(tool, g.name).map(Value::from);
+                if let (Value::Object(o), Some(value)) = (&mut schema, default) {
+                    o.push("default", value);
+                }
+                (g.name, schema)
+            })
+            .collect();
+        return Value::Object(object_schema(tool.args.iter(), detail, full));
     }
     let kept = globals
         .iter()

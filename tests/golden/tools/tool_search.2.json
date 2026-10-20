@@ -45,7 +45,8 @@
               "type": "integer",
               "minimum": 1000,
               "maximum": 60000,
-              "description": "The largest result in characters. The count includes every copy of the result."
+              "description": "The largest result in characters. The count includes every copy of the result.",
+              "default": 8000
             },
             "session": {
               "type": "string",

@@ -459,3 +459,49 @@ fn regress_repairs_fit_published_schema() {
         }
     }
 }
+
+/// Gives the default of the global `name` in the full schema of `tool`.
+fn full_default(s: &mut Session, tool: &str, name: &str) -> Option<Value> {
+    let args = format!(r#"{{"name":"{tool}","level":"full"}}"#);
+    let envelope = call(s, "tool_search", &args);
+    assert_eq!(code(&envelope), "", "{envelope}");
+    let path = format!("/data/items/0/schema/properties/{name}");
+    assert!(envelope.pointer(&path).is_some(), "{envelope}");
+    envelope.pointer(&format!("{path}/default")).cloned()
+}
+
+/// The full schema gives the defaults of the tool for its global arguments. A tool with no
+/// binary has no `in` (maintainability-docs-06, agent-protocol-13).
+#[test]
+fn regress_full_schema_has_tool_defaults() {
+    let reg = registry();
+    let mut s = session_with(config());
+    let (_, func_list) = reg.get("func_list").expect("func_list");
+    let (_, binary_load) = reg.get("binary_load").expect("binary_load");
+    let page = func_list
+        .list
+        .map(|l| l.default_limit)
+        .expect("a list tool");
+    assert_eq!(page, 100);
+    assert_eq!(
+        full_default(&mut s, "func_list", "limit"),
+        Some(json("100"))
+    );
+    let chars = func_list.max_chars.to_string();
+    assert_eq!(
+        full_default(&mut s, "func_list", "max_chars"),
+        Some(json(&chars))
+    );
+    let fuel = binary_load.fuel.map(|f| f.default.to_string());
+    assert_eq!(
+        full_default(&mut s, "binary_load", "max_steps"),
+        fuel.as_deref().map(json)
+    );
+    let undo = call(&mut s, "tool_search", r#"{"query":"undo","in":"set:foo"}"#);
+    assert_eq!(code(&undo), "UNKNOWN_ARGUMENT", "{undo}");
+    assert_eq!(
+        undo.pointer("/error/field_path").and_then(Value::as_str),
+        Some("/in"),
+        "{undo}"
+    );
+}
