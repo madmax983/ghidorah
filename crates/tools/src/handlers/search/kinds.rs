@@ -83,7 +83,10 @@ pub fn names(items: &mut Items<'_>, m: &Matcher, namer: &Namer, fuel: &mut Fuel)
                 if !m.matches(name) || taken.contains(&pair) || !seen.insert(pair) {
                     continue;
                 }
-                let mut new = New::item("symbol", addr_info::symbol_id(p, name, *a));
+                let Some(id) = addr_info::symbol_id(p, name, *a) else {
+                    continue;
+                };
+                let mut new = New::item("symbol", id);
                 new.addr = Some(*a);
                 new.text = Some(Value::from(namer.text(name)));
                 new.func = p.owner_of(*a);

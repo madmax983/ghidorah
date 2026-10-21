@@ -1,9 +1,11 @@
 //! The item lists of the `search` kinds of the loader model: imports, exports, sections,
 //! segments, libraries and symbols.
 
-use ghidorah_base::{Address, Caps};
+use ghidorah_base::{Address, Caps, ImportId};
+use ghidorah_db::Program;
 use ghidorah_json::Value;
-use ghidorah_loader::{SymBind, SymKind, SymTable};
+use ghidorah_loader::elf::consts::SHN_UNDEF;
+use ghidorah_loader::{Sym, SymBind, SymKind, SymTable};
 
 use super::filter::{Items, Matcher, New};
 use crate::handlers::addr_info;
@@ -177,7 +179,25 @@ fn sym_names(
     (kind, bind, table)
 }
 
+/// Gives the `imp:` ID of the undefined ELF symbol `s` with the name `raw`: the import of
+/// this name, else the import of the name before its first `@`. A versioned name such as
+/// `puts@GLIBC_2.2.5` gives `imp:puts`. Another symbol gives `None`.
+fn import_of(program: &Program, s: &Sym, raw: &str) -> Option<String> {
+    let elf = matches!(s.table, SymTable::Symtab | SymTable::Dynsym);
+    if !elf || s.shndx != SHN_UNDEF {
+        return None;
+    }
+    let base = raw.split('@').next().unwrap_or(raw);
+    [raw, base].into_iter().find_map(|name| {
+        let id = ImportId::elf(name).ok()?;
+        program.imports().contains_key(&id).then(|| id.to_string())
+    })
+}
+
 /// Adds the named symbols of the symbol tables of the loader model whose name matches.
+///
+/// The ID of each item resolves to the item ([`addr_info::symbol_id`], then [`import_of`]).
+/// A symbol with no such ID, for example a file symbol at 0, gives no item.
 pub fn symbols(items: &mut Items<'_>, m: &Matcher, namer: &Namer) {
     let program = items.program;
     let list: Vec<New> = program
@@ -191,8 +211,9 @@ pub fn symbols(items: &mut Items<'_>, m: &Matcher, namer: &Namer) {
             if !m.matches(&raw) {
                 return None;
             }
+            let id = addr_info::symbol_id(program, &raw, Address::ram(s.addr))
+                .or_else(|| import_of(program, s, &raw))?;
             let name = namer.text(&raw);
-            let id = addr_info::symbol_id(program, &raw, Address::ram(s.addr));
             let mut new = New::item("symbol", id);
             new.addr = (s.addr != 0).then(|| Address::ram(s.addr));
             new.text = Some(Value::from(name));
