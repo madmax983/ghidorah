@@ -40,6 +40,7 @@ fn check_va_to_file_rows() {
     ];
     for &(va, want) in va_rows {
         assert_eq!(va_to_file(&map, va), want, "va_to_file({va:#x})");
+        assert_eq!(model_va_to_file(&map, va), want, "model row {va:#x}");
     }
     let empty_map = Mapping {
         va: 0x1000,
@@ -88,6 +89,11 @@ fn ac_029_range_boundary_table() {
             range_last(start, len),
             want,
             "range_last({start:#x}, {len:#x})"
+        );
+        assert_eq!(
+            model_last(start, len),
+            want,
+            "model row ({start:#x}, {len:#x})"
         );
         let r = Range::with_len(start, len);
         assert_eq!(r.map(|r| (r.first, r.last)), want.map(|l| (start, l)));
@@ -139,6 +145,7 @@ fn ac_029_range_boundary_table() {
     assert_eq!(a.len(), 11);
 
     check_va_to_file_rows();
+    check_against_u128_model();
 }
 
 fn gen_range(g: &mut Gen) -> Range {
@@ -148,9 +155,9 @@ fn gen_range(g: &mut Gen) -> Range {
     }
 }
 
-#[test]
-fn k2_range_random_against_u128() {
-    check("k2_range_random_against_u128", 5_000, |g: &mut Gen| {
+/// Compares `range_last`, `Range` and `va_to_file` with the `u128` model on random inputs.
+fn check_against_u128_model() {
+    check("ac_029_range_against_u128", 5_000, |g: &mut Gen| {
         let (start, len, x) = (g.u64(), g.u64(), g.u64());
         if range_last(start, len) != model_last(start, len) {
             return Err(format!("range_last({start:#x}, {len:#x})"));

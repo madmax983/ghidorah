@@ -356,26 +356,114 @@ fn regress_cfg_gate_outside_verus_only() {
     }
 }
 
+/// The qualifiers that can come between `pub` and `fn` of a public function.
+const FN_QUALIFIERS: &[&str] = &["const", "unsafe", "async", "extern"];
+
+/// Gives the byte offset of each public function of stripped code, at its `pub` keyword.
+///
+/// `pub` takes optional `const`, `unsafe`, `async` or `extern ".."` qualifiers before `fn`.
+/// `pub(crate)` and `pub(super)` items are not public, so the scan skips them.
+fn public_fns(code: &str) -> Vec<usize> {
+    let mut found = Vec::new();
+    for (at, _) in code.match_indices("pub") {
+        let before = code.get(..at).and_then(|head| head.chars().next_back());
+        if before.is_some_and(|c| c.is_alphanumeric() || c == '_') {
+            continue;
+        }
+        let mut rest = code.get(at + 3..).unwrap_or_default();
+        if !rest.starts_with(char::is_whitespace) {
+            continue;
+        }
+        loop {
+            rest = rest.trim_start();
+            let Some(word) = FN_QUALIFIERS.iter().find(|w| {
+                rest.strip_prefix(**w)
+                    .is_some_and(|tail| tail.starts_with(char::is_whitespace))
+            }) else {
+                break;
+            };
+            rest = rest.get(word.len()..).unwrap_or_default().trim_start();
+            if *word == "extern"
+                && let Some(abi) = rest.strip_prefix('"')
+            {
+                rest = abi.split_once('"').map_or("", |(_, tail)| tail);
+            }
+        }
+        if rest.starts_with("fn")
+            && rest
+                .get(2..)
+                .is_some_and(|t| t.starts_with(char::is_whitespace))
+        {
+            found.push(at);
+        }
+    }
+    found
+}
+
+/// Gives a finding for each public function of `text` without a `#[verus_spec]` that has an `ensures`.
+fn missing_specs(path: &str, text: &str) -> Vec<String> {
+    let code = strip(text);
+    let mut found = Vec::new();
+    for at in public_fns(&code) {
+        let line = code.get(..at).unwrap_or_default().matches('\n').count() + 1;
+        let attrs = attributes_before(&code, at);
+        match attrs.iter().find(|a| a.starts_with("#[verus_spec(")) {
+            None => found.push(format!("{path}:{line}: a pub fn has no #[verus_spec]")),
+            Some(spec) if !spec.contains("ensures") => {
+                found.push(format!("{path}:{line}: the #[verus_spec] has no ensures"));
+            }
+            Some(_) => {}
+        }
+    }
+    found
+}
+
+#[test]
+fn regress_specs_present_sees_pub_const_fn() {
+    let bare = "pub const fn f() {}\n";
+    assert_eq!(missing_specs("x.rs", bare).len(), 1, "a bare pub const fn");
+    let specced = "#[verus_spec(r => ensures r == 0)]\npub const fn f() -> u8 { 0 }\n";
+    assert!(missing_specs("x.rs", specced).is_empty());
+    let no_ensures = "#[verus_spec(requires true)]\npub const fn f() {}\n";
+    assert_eq!(
+        missing_specs("x.rs", no_ensures).len(),
+        1,
+        "a spec without ensures"
+    );
+    for item in [
+        "pub unsafe fn f() {}",
+        "pub async fn f() {}",
+        "pub extern \"C\" fn f() {}",
+        "pub const unsafe extern \"C\" fn f() {}",
+        "pub fn f() {}",
+    ] {
+        assert_eq!(missing_specs("x.rs", item).len(), 1, "{item}");
+    }
+    for item in [
+        "pub(crate) fn f() {}",
+        "pub(super) const fn f() {}",
+        "pub const F: u8 = 1;",
+        "pub struct S;",
+        "fn f() {}",
+        "// pub fn f() {}",
+        "let s = \"pub fn f() {}\";",
+        "pub fnord: u8,",
+    ] {
+        assert!(missing_specs("x.rs", item).is_empty(), "{item}");
+    }
+}
+
 #[test]
 fn ac_035c_specs_present() {
     let sources = kernel_sources();
     assert!(!sources.is_empty(), "the kernel has source files");
     let mut total = 0u64;
+    let mut missing = Vec::new();
     for (path, text) in &sources {
-        let code = strip(text);
-        for (i, _) in code.match_indices("pub fn ") {
-            let attrs = attributes_before(&code, i);
-            let spec = attrs.iter().find(|a| a.starts_with("#[verus_spec("));
-            let line = code.get(..i).unwrap_or_default().lines().count();
-            let spec =
-                spec.unwrap_or_else(|| panic!("{path}:{line}: a pub fn has no #[verus_spec]"));
-            assert!(
-                spec.contains("ensures"),
-                "{path}:{line}: the #[verus_spec] has no ensures"
-            );
-        }
-        total += code.matches("#[verus_spec(").count() as u64;
+        missing.extend(missing_specs(path, text));
+        total += strip(text).matches("#[verus_spec(").count() as u64;
     }
+    assert!(missing.is_empty(), "{}", missing.join("\n"));
     assert!(total > 0, "the kernel has spec items");
     let kernels = record("/kernels");
     let kernels = kernels

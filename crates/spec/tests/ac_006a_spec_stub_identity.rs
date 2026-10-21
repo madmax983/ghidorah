@@ -72,8 +72,32 @@ fn count_to_limit(_ghost_steps: &Cell<u32>) -> u32 {
     i
 }
 
+/// Checks that the `ghidorah-spec` manifest has no dependency table of any kind.
+fn assert_no_dependencies() {
+    let manifest = include_str!("../Cargo.toml");
+    let tables: Vec<&str> = manifest
+        .lines()
+        .map(str::trim)
+        .filter(|line| line.starts_with('['))
+        .collect();
+    assert_eq!(
+        tables,
+        ["[package]", "[lib]", "[lints]"],
+        "ghidorah-spec takes no dependency of any kind"
+    );
+    assert!(manifest.contains("proc-macro = true"));
+    for line in manifest.lines().map(str::trim) {
+        assert!(
+            !line.contains("dependencies") && !line.starts_with("[target"),
+            "ghidorah-spec takes no dependency: {line}"
+        );
+    }
+}
+
 #[test]
 fn ac_006a_spec_stub_identity() {
+    assert_no_dependencies();
+
     let steps = Cell::new(0);
     for x in [0, 1, 7, 99] {
         assert_eq!(odd(x, &steps), plain_odd(x));
@@ -89,20 +113,4 @@ fn ac_006a_spec_stub_identity() {
     assert_eq!(Side::Left, Side::Left);
     assert_ne!(Side::Left, Side::Right);
     assert_eq!(size_of::<Pair>(), size_of::<PlainPair>());
-}
-
-#[test]
-fn ac_006a_spec_has_no_dependencies() {
-    let manifest = include_str!("../Cargo.toml");
-    let tables: Vec<&str> = manifest
-        .lines()
-        .map(str::trim)
-        .filter(|line| line.starts_with('['))
-        .collect();
-    assert_eq!(
-        tables,
-        ["[package]", "[lib]", "[lints]"],
-        "ghidorah-spec takes no dependency of any kind"
-    );
-    assert!(manifest.contains("proc-macro = true"));
 }
