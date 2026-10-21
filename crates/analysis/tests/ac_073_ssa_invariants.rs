@@ -164,8 +164,9 @@ struct T3 {
     violations: Vec<String>,
 }
 
-/// Checks `sample` decodable T3 functions with a fixed seed, or all T3 functions. A function
-/// with a decoder gap is skipped. The sample draws functions until `sample` of them decode.
+/// Checks `sample` decodable T3 functions with a fixed seed, or all T3 functions. The check
+/// skips a function with a decoder gap. The sample draws functions until `sample` of them
+/// decode.
 fn check_t3(sample: Option<usize>) -> T3 {
     let exe = std::env::current_exe().expect("the test executable");
     let bytes = std::fs::read(exe).expect("the executable bytes");

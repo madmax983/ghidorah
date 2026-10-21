@@ -74,10 +74,10 @@ struct Step {
     after: StateHash,
 }
 
-/// Runs the random undo and redo model of AC-116a with its fixed seed. Each sequence commits
-/// random edits, undoes all of them and redoes all of them. Each step must give the state hash
-/// before or after its commit. Returns the number of applied edits of each kind of
-/// [`EditKind::ALL`] over all the sequences.
+/// Runs the random undo and redo model of AC-116a with its fixed seed. Each sequence applies
+/// random edits in commits. Then it undoes all of them, and then it redoes all of them. Each step must
+/// give the state hash before or after its commit. Returns the number of applied edits of each
+/// kind of [`EditKind::ALL`] over all the sequences.
 fn undo_redo_model() -> [usize; 15] {
     let mut start = seeded();
     let fn_type = func_type(&mut start);

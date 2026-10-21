@@ -78,8 +78,8 @@ const fn mask(w: u8) -> u64 {
     if w >= 64 { u64::MAX } else { (1 << w) - 1 }
 }
 
-/// Gives the edge value of case `i` at the width `w` in bits: 0, 1, the sign bit and the
-/// all-ones mask for the cases 0 to 3. The data registers of these cases take that value
+/// Gives the edge value of case `i` at the width `w` in bits. The cases 0 to 3 take 0, 1,
+/// the sign bit and the all-ones mask. The data registers of these cases take that value
 /// before the input rule. The table [`EDGES`] holds each of them for 8 to 64 bits.
 fn width_edge(w: u16, i: usize) -> Option<u128> {
     let ones = u128::MAX.checked_shr(128u32.saturating_sub(u32::from(w)))?;

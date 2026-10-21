@@ -1,9 +1,10 @@
 //! The truth files `fixtures/truth/<build>.json` and their schema check.
 //!
 //! One truth file serves a build and every variant of it (the stripped twin, `noeh` and
-//! `noshdr`), because a variant keeps the code and the addresses of its build. A variant can
-//! have other protections: `objcopy` drops `PT_GNU_RELRO` in a `noeh` variant. The member
-//! `variant_protections` holds the fields of each such variant that differ from
+//! `noshdr`), because a variant keeps the code and the addresses of its build.
+//!
+//! A variant can have other protections: `objcopy` drops `PT_GNU_RELRO` in a `noeh` variant.
+//! The member `variant_protections` holds the fields of each such variant that differ from
 //! `protections`. A variant that it does not name has the `protections` of its build.
 //! [`super::assemble`] writes the files. Addresses are `0x` hex text. Sizes and counts are
 //! integers.

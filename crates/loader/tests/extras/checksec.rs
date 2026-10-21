@@ -41,8 +41,8 @@ const KEYS: [&str; 10] = [
     "build_id", "canary", "fortify", "ibt", "nx", "pie", "relro", "rpath", "runpath", "shstk",
 ];
 
-/// Gives the truth protections of the `variant` of a build: the `protections` block, with
-/// the fields of `variant_protections` for that variant in place of its own.
+/// Gives the truth protections of one `variant` of a build. The fields of
+/// `variant_protections` for that variant replace the fields of the `protections` block.
 fn truth_protections(truth: &json::Json, variant: &str) -> BTreeMap<String, json::Json> {
     let json::Json::Obj(base) = truth.get("protections") else {
         panic!("the protections block is an object");
