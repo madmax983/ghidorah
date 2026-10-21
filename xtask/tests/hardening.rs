@@ -454,6 +454,7 @@ fn ac_190b_long_runs() {
         name, "ba7816bf.bin",
         "the SHA-256 of abc starts with ba7816bf"
     );
+    check_batch_rules("long_runs");
 }
 
 #[test]
@@ -484,21 +485,89 @@ fn collect_moves_failing_inputs() {
 #[test]
 fn regress_fuzz_stage_miss_is_not_violation() {
     use fuzz::{End, Verdict, classify};
-    assert_eq!(classify(End::Pass, false), Verdict::Pass);
+    let all = Some(2_000);
+    assert_eq!(classify(End::Pass, false, all, 2_000), Verdict::Pass);
     assert_eq!(
-        classify(End::Fail { signal: false }, false),
+        classify(End::Fail { signal: false }, false, all, 2_000),
         Verdict::StageMiss
     );
     assert_eq!(
-        classify(End::Fail { signal: false }, true),
+        classify(End::Fail { signal: false }, true, all, 2_000),
         Verdict::Violation
     );
     assert_eq!(
-        classify(End::Fail { signal: true }, false),
+        classify(End::Fail { signal: true }, false, all, 2_000),
         Verdict::Violation
     );
-    assert_eq!(classify(End::Hang, false), Verdict::Violation);
-    assert_eq!(classify(End::Pass, true), Verdict::Violation);
+    assert_eq!(classify(End::Hang, false, all, 2_000), Verdict::Violation);
+    assert_eq!(classify(End::Pass, true, all, 2_000), Verdict::Violation);
+}
+
+/// A batch that fails before its cases runs no case. Its exit code alone looked like a stage
+/// miss, so a run with no passed case gave no violation (AC-190b).
+#[test]
+fn regress_fuzz_short_batch_is_violation() {
+    check_batch_rules("regress");
+}
+
+/// Checks the verdict of each batch, the passed-case sum and the `ok` rule of `xtask fuzz`.
+///
+/// `tag` names the temp directory of the caller, so two tests do not share it.
+fn check_batch_rules(tag: &str) {
+    use fuzz::{End, Tally, Verdict, classify};
+    let fail = End::Fail { signal: false };
+    // A failed replay or a harness error ends the batch before the report.
+    assert_eq!(classify(fail, false, None, 2_000), Verdict::Violation);
+    assert_eq!(classify(fail, false, Some(0), 2_000), Verdict::Violation);
+    assert_eq!(classify(End::Pass, false, None, 2_000), Verdict::Violation);
+    assert_eq!(
+        classify(End::Pass, false, Some(1_999), 2_000),
+        Verdict::Violation
+    );
+    assert_eq!(
+        classify(End::Pass, false, Some(2_500), 2_000),
+        Verdict::Pass
+    );
+    assert!(fuzz::ran_all(Some(2_000), 2_000) && !fuzz::ran_all(None, 0));
+    let mut tally = Tally::default();
+    tally.add(End::Pass, Vec::new(), Some(2_000), 2_000);
+    tally.add(fail, Vec::new(), Some(2_000), 2_000);
+    tally.add(fail, Vec::new(), None, 2_000);
+    tally.add(End::Pass, Vec::new(), Some(10), 2_000);
+    tally.add(End::Hang, Vec::new(), None, 2_000);
+    tally.add(fail, vec!["ba7816bf.bin".to_owned()], Some(1_999), 2_000);
+    let got = (
+        tally.batches,
+        tally.passed_cases,
+        tally.short,
+        tally.failed,
+        tally.hangs,
+        tally.stage_misses,
+    );
+    assert_eq!(got, (6, 6_009, 4, 4, 1, 1));
+    let row = tally.to_json(2_000);
+    assert_eq!(row.get("passed_cases").and_then(Value::as_u64), Some(6_009));
+    assert_eq!(row.get("cases").and_then(Value::as_u64), Some(12_000));
+    assert_eq!(row.get("short").and_then(Value::as_u64), Some(4));
+    // `ok` needs `iters` passed cases for each target.
+    assert!(fuzz::enough_cases(&[4_000, 100_000], 4_000));
+    assert!(!fuzz::enough_cases(&[4_000, 3_999], 4_000));
+    assert!(!fuzz::enough_cases(&[], 4_000));
+    // The harness reports the cases with no panic and no violation.
+    let report = tkfuzz::Report {
+        cases: 10,
+        panics: 1,
+        violations: 2,
+        ..tkfuzz::Report::default()
+    };
+    assert_eq!(tkfuzz::passed_cases(&report), 7);
+    let dir = tmp(&format!("fuzz_report_{tag}"));
+    let file = dir.join("calc.passed");
+    assert_eq!(fuzz::read_passed(&file), None);
+    std::fs::write(&file, "2000\n").expect("write");
+    assert_eq!(fuzz::read_passed(&file), Some(2_000));
+    std::fs::write(&file, "x").expect("write");
+    assert_eq!(fuzz::read_passed(&file), None);
 }
 
 #[test]
@@ -601,9 +670,20 @@ fn ac_234_fix_commits_step() {
 fn ac_190b_fuzz_batches() {
     let _lock = process_lock();
     let args = strings(&["calc", "--iters", "4000", "--seed", "11"]);
+    check_batch_rules("batches");
     let report = fuzz::run(&workspace::root(), &args).expect("xtask fuzz runs");
     assert_eq!(
         report.pointer("/violations").and_then(Value::as_u64),
+        Some(0),
+        "{report}"
+    );
+    assert_eq!(report.pointer("/ok"), Some(&Value::Bool(true)), "{report}");
+    let passed = report.pointer("/passed_cases").and_then(Value::as_u64);
+    assert!(passed.is_some_and(|p| p >= 4_000), "{report}");
+    assert_eq!(
+        report
+            .pointer("/targets/calc/short")
+            .and_then(Value::as_u64),
         Some(0),
         "{report}"
     );

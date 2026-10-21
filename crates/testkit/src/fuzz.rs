@@ -14,7 +14,8 @@
 //! the panics that a target catches. Put each fuzz target in its own test binary.
 //!
 //! `xtask fuzz` runs long batches of a target binary with [`SEED_ENV`]. Then each batch
-//! uses a new seed, and the run saves the shrunk input of each failed case.
+//! uses a new seed, and the run saves the shrunk input of each failed case. With
+//! [`REPORT_ENV`], the batch also writes its count of passed cases.
 
 mod havoc;
 
@@ -57,6 +58,12 @@ pub const DEFAULT_MAX_LEN: usize = 4096;
 /// seed into that seed. Then it shrinks each failed case and saves its input in the pending
 /// directory as `crash-<case>.input`.
 pub const SEED_ENV: &str = "FUZZ_SEED";
+
+/// The variable that gives the report file of a long run batch (AC-190b).
+///
+/// A long run writes [`passed_cases`] to this file at the end of [`run`]. A run without
+/// [`SEED_ENV`] does not read the variable.
+pub const REPORT_ENV: &str = "FUZZ_REPORT";
 
 /// The file extension of a failing input that a long run saves.
 pub const CRASH_EXT: &str = "input";
@@ -316,6 +323,23 @@ where
     Ok(())
 }
 
+/// Gives the number of cases of `report` with no panic and no violation.
+#[must_use]
+pub fn passed_cases(report: &Report) -> u64 {
+    u64::from(report.cases)
+        .saturating_sub(report.panics)
+        .saturating_sub(report.violations)
+}
+
+/// Writes [`passed_cases`] to the file of [`REPORT_ENV`]. Without the variable, it writes nothing.
+fn write_passed(report: &Report) -> Result<(), FuzzError> {
+    let Some(path) = std::env::var_os(REPORT_ENV).map(PathBuf::from) else {
+        return Ok(());
+    };
+    let text = format!("{}\n", passed_cases(report));
+    std::fs::write(&path, text).map_err(|e| io_error(&path, &e))
+}
+
 fn io_error(path: &Path, e: &std::io::Error) -> FuzzError {
     FuzzError::Io {
         path: path.display().to_string(),
@@ -492,6 +516,9 @@ where
         }
         if let (Some(_), Some(dir)) = (batch, config.pending_dir.as_deref()) {
             save_crashes(dir, &report, target)?;
+        }
+        if batch.is_some() {
+            write_passed(&report)?;
         }
         Ok(report)
     })

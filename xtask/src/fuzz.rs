@@ -10,19 +10,26 @@
 //! saves the input. A `pending.bin` from an abort, a stack overflow or a hang keeps its bytes.
 //! Every later test run replays the regression files.
 //!
-//! A batch with a saved input, a hang or a signal is a violation. A batch that fails with an
-//! exit code and saves no input is a stage miss: an assertion of the test outside the cases
-//! fails. An example is a stage share of design Section 13.5 with a new batch seed. The tier-1
-//! run with the fixed seed is the gate of these assertions.
+//! Each batch writes its count of passed cases to a report file ([`tkfuzz::REPORT_ENV`]).
+//! A batch with a saved input, a hang or a signal is a violation. A batch without a report,
+//! or with fewer passed cases than its plan, is a violation too: it did not run all its cases.
 //!
-//! Output: `{ ok, iters, seed, violations, targets: { <target>: { batches, cases, failed,
-//! hangs, stage_misses, saved } } }`. AC-190b reads `/violations`.
+//! A batch that runs all its cases, fails with an exit code and saves no input is a stage
+//! miss. Then an assertion of the test after the cases fails. An example is a stage share of
+//! design Section 13.5 with a new batch seed. The tier-1 run with the fixed seed is the gate of
+//! these assertions.
+//!
+//! Output: `{ ok, iters, seed, violations, passed_cases, targets: { <target>: { batches,
+//! cases, passed_cases, short, failed, hangs, stage_misses, saved } } }`. AC-190b reads
+//! `/violations`. `ok` needs no violation and at least `iters` passed cases for each target.
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
+
+use ghidorah_testkit::fuzz as tkfuzz;
 
 use crate::json::Value;
 use crate::verify::tree::sha256;
@@ -318,23 +325,55 @@ pub enum End {
 /// The verdict of one batch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Verdict {
-    /// The batch passed and saved no input.
+    /// The batch passed all its cases and saved no input.
     Pass,
-    /// A case failed, the process stopped on a signal or the watchdog stopped it.
+    /// A case failed, the batch did not run all its cases, the process stopped on a signal or
+    /// the watchdog stopped it.
     Violation,
-    /// The test failed with an exit code and saved no input.
+    /// The batch passed all its cases. Then the test failed with an exit code.
     StageMiss,
 }
 
-/// Gives the verdict of a batch with the end `end`. `saved` is `true` when the batch saved a
-/// failing input.
+/// Tells if a batch with the report `passed` runs all `planned` cases. No report is a short
+/// batch.
 #[must_use]
-pub const fn classify(end: End, saved: bool) -> Verdict {
+pub const fn ran_all(passed: Option<u64>, planned: u64) -> bool {
+    matches!(passed, Some(p) if p >= planned)
+}
+
+/// Gives the verdict of a batch with the end `end`.
+///
+/// `saved` is `true` when the batch saved a failing input. `passed` is the passed-case count
+/// of the batch report, or `None` without a report. `planned` is the case count of a batch.
+#[must_use]
+pub const fn classify(end: End, saved: bool, passed: Option<u64>, planned: u64) -> Verdict {
     match (end, saved) {
         (_, true) | (End::Hang | End::Fail { signal: true }, false) => Verdict::Violation,
+        _ if !ran_all(passed, planned) => Verdict::Violation,
         (End::Fail { signal: false }, false) => Verdict::StageMiss,
         (End::Pass, false) => Verdict::Pass,
     }
+}
+
+/// Reads the passed-case count of a batch report. A missing or bad report gives `None`.
+#[must_use]
+pub fn read_passed(path: &Path) -> Option<u64> {
+    std::fs::read_to_string(path).ok()?.trim().parse().ok()
+}
+
+/// Gives the report file of the batches of `target`.
+#[must_use]
+pub fn report_file(root: &Path, target: &Target) -> PathBuf {
+    root.join("target")
+        .join("xtask-fuzz")
+        .join(format!("{}.passed", target.name))
+}
+
+/// Tells if each target of a run passes at least `iters` cases. A run without targets does not
+/// pass.
+#[must_use]
+pub fn enough_cases(passed: &[u64], iters: u64) -> bool {
+    !passed.is_empty() && passed.iter().all(|&p| p >= iters)
 }
 
 /// Builds the test binary of `target` and gives its executable and package directory.
@@ -361,19 +400,30 @@ fn build(root: &Path, target: &Target) -> Result<ci::TestBinary, Error> {
         .ok_or_else(|| Error::data(format!("cargo test --test {test}"), "no test binary"))
 }
 
+/// Removes the report file of an earlier batch. A missing file is no error.
+fn remove_report(report: &Path) -> Result<(), Error> {
+    match std::fs::remove_file(report) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(Error::io(report, e)),
+        _ => Ok(()),
+    }
+}
+
 /// Runs one batch of the test `test` of `binary` with the batch seed `seed` and the watchdog
-/// `timeout`.
+/// `timeout`. Gives the end of the batch and the passed-case count of its file `report`.
 fn run_batch(
     binary: &ci::TestBinary,
     test: &str,
     seed: u64,
     timeout: Duration,
-) -> Result<End, Error> {
+    report: &Path,
+) -> Result<(End, Option<u64>), Error> {
+    remove_report(report)?;
     let mut cmd = Command::new(&binary.exe);
     cmd.args(["--exact", test, "--test-threads=1", "-q"])
         .current_dir(&binary.dir)
         .env("CARGO_MANIFEST_DIR", &binary.dir)
-        .env("FUZZ_SEED", seed.to_string())
+        .env(tkfuzz::SEED_ENV, seed.to_string())
+        .env(tkfuzz::REPORT_ENV, report)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
@@ -381,37 +431,84 @@ fn run_batch(
     let mut child = cmd.spawn().map_err(|e| proc::start_error(&argv, &e))?;
     let start = Instant::now();
     // The watchdog bounds the wait: the loop ends at the exit or at the time limit.
-    loop {
+    let end = loop {
         if let Some(status) = child.try_wait().map_err(|e| proc::start_error(&argv, &e))? {
-            return Ok(if status.success() {
+            break if status.success() {
                 End::Pass
             } else {
                 End::Fail {
                     signal: status.code().is_none(),
                 }
-            });
+            };
         }
         if start.elapsed() > timeout {
             let _ = child.kill();
             let _ = child.wait();
-            return Ok(End::Hang);
+            break End::Hang;
         }
         std::thread::sleep(POLL);
-    }
+    };
+    Ok((end, read_passed(report)))
 }
 
 /// The result of the batches of one target.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-struct Summary {
-    batches: u64,
-    failed: u64,
-    hangs: u64,
-    stage_misses: u64,
-    saved: Vec<String>,
+pub struct Tally {
+    /// The number of batches that ran.
+    pub batches: u64,
+    /// The sum of the passed-case counts of the batch reports.
+    pub passed_cases: u64,
+    /// The number of batches without a report or with fewer passed cases than their plan.
+    pub short: u64,
+    /// The number of batches with a violation.
+    pub failed: u64,
+    /// The number of batches that the watchdog stopped.
+    pub hangs: u64,
+    /// The number of stage misses.
+    pub stage_misses: u64,
+    /// The regression file names of the saved inputs.
+    pub saved: Vec<String>,
+}
+
+impl Tally {
+    /// Adds one batch with the end `end`, the saved inputs `saved` and the report `passed`.
+    /// `planned` is the case count of one batch.
+    pub fn add(&mut self, end: End, saved: Vec<String>, passed: Option<u64>, planned: u64) {
+        self.batches = self.batches.saturating_add(1);
+        self.passed_cases = self.passed_cases.saturating_add(passed.unwrap_or(0));
+        if !ran_all(passed, planned) {
+            self.short = self.short.saturating_add(1);
+        }
+        if end == End::Hang {
+            self.hangs = self.hangs.saturating_add(1);
+        }
+        match classify(end, !saved.is_empty(), passed, planned) {
+            Verdict::Pass => {}
+            Verdict::StageMiss => self.stage_misses = self.stage_misses.saturating_add(1),
+            Verdict::Violation => self.failed = self.failed.saturating_add(1),
+        }
+        self.saved.extend(saved);
+    }
+
+    /// Gives the JSON object of the tally of a target with `planned` cases in each batch.
+    #[must_use]
+    pub fn to_json(&self, planned: u64) -> Value {
+        let saved: Vec<Value> = self.saved.iter().map(|n| Value::from(n.as_str())).collect();
+        Value::object([
+            ("batches", Value::from(self.batches)),
+            ("cases", Value::from(self.batches.saturating_mul(planned))),
+            ("passed_cases", Value::from(self.passed_cases)),
+            ("short", Value::from(self.short)),
+            ("failed", Value::from(self.failed)),
+            ("hangs", Value::from(self.hangs)),
+            ("stage_misses", Value::from(self.stage_misses)),
+            ("saved", Value::from(saved)),
+        ])
+    }
 }
 
 /// Runs the batches of one target.
-fn run_target(root: &Path, target: &Target, options: &Options) -> Result<Summary, Error> {
+fn run_target(root: &Path, target: &Target, options: &Options) -> Result<Tally, Error> {
     let binary = build(root, target)?;
     let file = root.join(test_file(target));
     let source = std::fs::read_to_string(&file).map_err(|e| Error::io(&file, e))?;
@@ -419,24 +516,21 @@ fn run_target(root: &Path, target: &Target, options: &Options) -> Result<Summary
         test_name(&source).ok_or_else(|| Error::data(test_file(target), "no test function"))?;
     let dir = regress_dir(root, target);
     let timeout = Duration::from_secs(options.timeout_secs);
-    let mut out = Summary::default();
+    let report = report_file(root, target);
+    if let Some(parent) = report.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| Error::io(parent, e))?;
+    }
+    let planned = u64::from(target.cases);
+    let mut out = Tally::default();
     for batch in 0..batches(options.iters, target.cases) {
-        let end = run_batch(&binary, &test, batch_seed(options.seed, batch), timeout)?;
-        out.batches = out.batches.saturating_add(1);
-        let saved = collect(&dir)?;
-        if end == End::Hang {
-            out.hangs = out.hangs.saturating_add(1);
-        }
-        match classify(end, !saved.is_empty()) {
-            Verdict::Pass => {}
-            Verdict::StageMiss => out.stage_misses = out.stage_misses.saturating_add(1),
-            Verdict::Violation => out.failed = out.failed.saturating_add(1),
-        }
-        out.saved.extend(saved);
+        let seed = batch_seed(options.seed, batch);
+        let (end, passed) = run_batch(&binary, &test, seed, timeout, &report)?;
+        out.add(end, collect(&dir)?, passed, planned);
         if out.failed >= MAX_FAILED_BATCHES {
             break;
         }
     }
+    remove_report(&report)?;
     Ok(out)
 }
 
@@ -449,31 +543,27 @@ fn run_target(root: &Path, target: &Target, options: &Options) -> Result<Summary
 pub fn run(root: &Path, args: &[String]) -> Result<Value, Error> {
     let options = parse_args(args)?;
     let mut violations = 0u64;
+    let mut passed = Vec::new();
     let mut targets = BTreeMap::new();
     for target in &options.targets {
-        let s = run_target(root, target, &options)?;
-        violations = violations.saturating_add(s.failed);
-        let saved: Vec<Value> = s.saved.iter().map(|n| Value::from(n.as_str())).collect();
+        let tally = run_target(root, target, &options)?;
+        violations = violations.saturating_add(tally.failed);
+        passed.push(tally.passed_cases);
         targets.insert(
             target.name.to_owned(),
-            Value::object([
-                ("batches", Value::from(s.batches)),
-                (
-                    "cases",
-                    Value::from(s.batches.saturating_mul(u64::from(target.cases))),
-                ),
-                ("failed", Value::from(s.failed)),
-                ("hangs", Value::from(s.hangs)),
-                ("stage_misses", Value::from(s.stage_misses)),
-                ("saved", Value::from(saved)),
-            ]),
+            tally.to_json(u64::from(target.cases)),
         );
     }
+    let total = passed.iter().fold(0u64, |sum, p| sum.saturating_add(*p));
     Ok(Value::object([
-        ("ok", Value::from(violations == 0)),
+        (
+            "ok",
+            Value::from(violations == 0 && enough_cases(&passed, options.iters)),
+        ),
         ("iters", Value::from(options.iters)),
         ("seed", Value::from(options.seed)),
         ("violations", Value::from(violations)),
+        ("passed_cases", Value::from(total)),
         ("targets", Value::Object(targets)),
     ]))
 }
