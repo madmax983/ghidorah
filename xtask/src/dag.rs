@@ -1,0 +1,222 @@
+//! The allowed-edge table of design Section 2.2 and the `xtask deps` command.
+//!
+//! The table is the contract. `docs/architecture/crates.mmd` is its generated picture.
+//! A new edge needs a design change first, then one line in [`ALLOWED`].
+
+use std::fmt::Write as _;
+use std::path::Path;
+
+use crate::json::Value;
+use crate::workspace::{self, BINARY, DepKind, Kind, Metadata, PACKAGES, spec};
+use crate::{Error, Finding};
+
+/// The generated crate graph, relative to the workspace root.
+pub const MMD_PATH: &str = "docs/architecture/crates.mmd";
+
+/// The allowed normal edges `(from, to)` by package name.
+pub const ALLOWED: &[(&str, &str)] = &[
+    ("ghidorah-kernel", "ghidorah-spec"),
+    ("ghidorah-base", "ghidorah-kernel"),
+    ("ghidorah-loader", "ghidorah-base"),
+    ("ghidorah-loader", "ghidorah-kernel"),
+    ("ghidorah-ir", "ghidorah-base"),
+    ("ghidorah-ir", "ghidorah-kernel"),
+    ("ghidorah-x86", "ghidorah-ir"),
+    ("ghidorah-x86", "ghidorah-base"),
+    ("ghidorah-types", "ghidorah-base"),
+    ("ghidorah-db", "ghidorah-base"),
+    ("ghidorah-db", "ghidorah-kernel"),
+    ("ghidorah-db", "ghidorah-json"),
+    ("ghidorah-db", "ghidorah-loader"),
+    ("ghidorah-db", "ghidorah-types"),
+    ("ghidorah-analysis", "ghidorah-db"),
+    ("ghidorah-analysis", "ghidorah-ir"),
+    ("ghidorah-analysis", "ghidorah-x86"),
+    ("ghidorah-analysis", "ghidorah-types"),
+    ("ghidorah-analysis", "ghidorah-loader"),
+    ("ghidorah-analysis", "ghidorah-base"),
+    ("ghidorah-analysis", "ghidorah-kernel"),
+    ("ghidorah-analysis", "ghidorah-json"),
+    ("ghidorah-decomp", "ghidorah-analysis"),
+    ("ghidorah-decomp", "ghidorah-base"),
+    ("ghidorah-decomp", "ghidorah-ir"),
+    ("ghidorah-decomp", "ghidorah-db"),
+    ("ghidorah-decomp", "ghidorah-types"),
+    ("ghidorah-tools", "ghidorah-decomp"),
+    ("ghidorah-tools", "ghidorah-analysis"),
+    ("ghidorah-tools", "ghidorah-db"),
+    ("ghidorah-tools", "ghidorah-x86"),
+    ("ghidorah-tools", "ghidorah-types"),
+    ("ghidorah-tools", "ghidorah-loader"),
+    ("ghidorah-tools", "ghidorah-json"),
+    ("ghidorah-tools", "ghidorah-base"),
+    ("ghidorah", "ghidorah-tools"),
+    ("ghidorah", "ghidorah-json"),
+    ("ghidorah", "ghidorah-base"),
+    ("ghidorah-eval", "ghidorah-tools"),
+    ("ghidorah-eval", "ghidorah-json"),
+    ("xtask", "ghidorah-json"),
+    ("xtask", "ghidorah-base"),
+    ("xtask", "ghidorah-testkit"),
+];
+
+/// The allowed dev edges beyond [`ALLOWED`] and [`DEV_ANY`].
+pub const DEV_ALLOWED: &[(&str, &str)] = &[
+    ("ghidorah-loader", "ghidorah-oracle"),
+    ("ghidorah-decomp", "ghidorah-json"),
+    ("ghidorah-decomp", "ghidorah-loader"),
+];
+
+/// Every package except this one can take it as a dev-dependency.
+pub const DEV_ANY: &str = "ghidorah-testkit";
+
+/// One dependency edge between two workspace packages.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Edge {
+    /// The package that has the dependency.
+    pub from: String,
+    /// The package that it depends on.
+    pub to: String,
+    /// The edge kind.
+    pub kind: DepKind,
+}
+
+/// Gives every edge between workspace packages, sorted.
+#[must_use]
+pub fn edges(meta: &Metadata) -> Vec<Edge> {
+    let mut found: Vec<Edge> = meta
+        .packages
+        .iter()
+        .flat_map(|p| {
+            p.deps
+                .iter()
+                .filter(|d| meta.package(&d.name).is_some())
+                .map(|d| Edge {
+                    from: p.name.clone(),
+                    to: d.name.clone(),
+                    kind: d.kind,
+                })
+        })
+        .collect();
+    found.sort();
+    found.dedup();
+    found
+}
+
+/// Tells if the table allows an edge.
+#[must_use]
+pub fn is_allowed(from: &str, to: &str, kind: DepKind) -> bool {
+    let normal = ALLOWED.contains(&(from, to));
+    match kind {
+        DepKind::Normal | DepKind::Build => normal,
+        DepKind::Dev => {
+            normal || (to == DEV_ANY && from != DEV_ANY) || DEV_ALLOWED.contains(&(from, to))
+        }
+    }
+}
+
+/// AC-003: gives one finding for each edge that the table does not allow.
+#[must_use]
+pub fn check_edges(edges: &[Edge]) -> Vec<Finding> {
+    edges
+        .iter()
+        .filter(|e| !is_allowed(&e.from, &e.to, e.kind))
+        .map(|e| {
+            let dir = spec(&e.from).map_or("?", |s| s.dir);
+            Finding::new(
+                "AC-003",
+                format!("{dir}/Cargo.toml"),
+                0,
+                format!(
+                    "edge `{}` -> `{}` ({:?}) is not in the allowed-edge table",
+                    e.from, e.to, e.kind
+                ),
+            )
+        })
+        .collect()
+}
+
+fn node_id(name: &str) -> &str {
+    if name == BINARY {
+        "cli"
+    } else {
+        name.strip_prefix("ghidorah-").unwrap_or(name)
+    }
+}
+
+/// Renders the allowed-edge table as a Mermaid graph.
+#[must_use]
+pub fn render() -> String {
+    let mut out = String::from("%% Generated by `cargo xtask deps`. Do not edit.\ngraph TD\n");
+    for package in PACKAGES {
+        let dev = if package.kind == Kind::Dev {
+            " dev"
+        } else {
+            ""
+        };
+        let _ = writeln!(out, "  {}[{}{dev}]", node_id(package.name), package.name);
+    }
+    for (from, to) in ALLOWED {
+        let _ = writeln!(out, "  {} --> {}", node_id(from), node_id(to));
+    }
+    for (from, to) in DEV_ALLOWED {
+        let _ = writeln!(out, "  {} -. dev .-> {}", node_id(from), node_id(to));
+    }
+    let _ = writeln!(
+        out,
+        "  %% Every package except {} can take it as a dev-dependency.",
+        node_id(DEV_ANY)
+    );
+    out
+}
+
+/// AC-003: gives a finding when `crates.mmd` differs from [`render`].
+#[must_use]
+pub fn check_mmd(root: &Path) -> Vec<Finding> {
+    let current = std::fs::read_to_string(root.join(MMD_PATH)).unwrap_or_default();
+    if current == render() {
+        Vec::new()
+    } else {
+        vec![Finding::new(
+            "AC-003",
+            MMD_PATH,
+            0,
+            "the file differs from the generated graph; run `cargo xtask deps`",
+        )]
+    }
+}
+
+/// Runs `xtask deps [--check]`.
+///
+/// Without `--check`, the command writes `crates.mmd` again.
+///
+/// # Errors
+///
+/// Returns an error when cargo metadata fails or the file write fails.
+pub fn run(root: &Path, args: &[String]) -> Result<Value, Error> {
+    let check_only = match args {
+        [] => false,
+        [flag] if flag == "--check" => true,
+        _ => return Err(Error::Usage("cargo xtask deps [--check]".to_owned())),
+    };
+    let meta = workspace::load_metadata(root)?;
+    let all = edges(&meta);
+    let mut findings = check_edges(&all);
+    if check_only {
+        findings.extend(check_mmd(root));
+    } else {
+        let path = root.join(MMD_PATH);
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir).map_err(|e| Error::io(dir, e))?;
+        }
+        std::fs::write(&path, render()).map_err(|e| Error::io(&path, e))?;
+    }
+    Ok(Value::object([
+        ("ok", Value::from(findings.is_empty())),
+        ("edges", Value::from(all.len())),
+        (
+            "findings",
+            Value::from(findings.iter().map(Finding::to_json).collect::<Vec<_>>()),
+        ),
+    ]))
+}

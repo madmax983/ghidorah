@@ -1,0 +1,543 @@
+//! The address resolver: the rule order, the errors and the target table (AC-138, AC-215).
+
+use std::path::PathBuf;
+
+use ghidorah_base::bintext::escapes;
+use ghidorah_base::{Address, BinaryId, ErrorCode, FuncId};
+use ghidorah_db::Program;
+use ghidorah_json::Value;
+use ghidorah_testkit::elf::{ElfBuilder, Loc, Section, Symbol};
+use ghidorah_tools::resolve::{
+    Family, Named, Resolved, Rule, Site, Target, accepted, address, function, resolve, target,
+    value_of,
+};
+use ghidorah_tools::{Call, Roots, Session, SessionConfig};
+
+use crate::support::{
+    DEMO_ID, DEMO_MAIN, add_function, call_value, code, data, demo, fixture, json, session_with,
+    text_at,
+};
+
+/// The names of the `adversarial_names` fixture with their symbol addresses (gcc -O2).
+const ADVERSARIAL: [(&str, u64); 5] = [
+    ("x@plt", 0x11b0),
+    ("puts@GLIBC_2.2.5", 0x11c0),
+    ("FUN_00401000", 0x11d0),
+    (".fini", 0x11e0),
+    ("foo.cold", 0x11f0),
+];
+
+/// The two `helper` functions of the `two_helpers` fixture (gcc -O2).
+const HELPERS: [u64; 2] = [0x1190, 0x11c0];
+
+fn program<'s>(session: &'s Session, id: &str) -> &'s Program {
+    let id = BinaryId::parse(id).expect("a binary ID");
+    &session.binary(id).expect("the binary is open").program
+}
+
+fn resolve_str(p: &Program, text: &str) -> Result<Resolved, ghidorah_tools::ToolError> {
+    resolve(p, &Value::from(text), &Site::default())
+}
+
+fn addr_of(p: &Program, text: &str) -> u64 {
+    let resolved = resolve_str(p, text).unwrap_or_else(|e| panic!("{text}: {e}"));
+    value_of(p, &resolved).expect("an address").off
+}
+
+fn candidate_values(error: &ghidorah_tools::ToolError) -> Vec<String> {
+    error
+        .candidates
+        .iter()
+        .map(|c| c.value.as_str().unwrap_or_default().to_owned())
+        .collect()
+}
+
+#[test]
+fn ac_138_ambiguous_names() {
+    let (s, id) = fixture("two_helpers.gcc-O2");
+    let p = program(&s, &id);
+    let error = resolve_str(p, "helper").expect_err("two matches");
+    assert_eq!(error.code, ghidorah_base::ErrorCode::AmbiguousName);
+    let want: Vec<String> = HELPERS.iter().map(|a| format!("helper@{a:#x}")).collect();
+    assert_eq!(candidate_values(&error), want);
+    let json = error.to_json();
+    assert_eq!(json.pointer("/candidates_total"), Some(&Value::from(2_u64)));
+    let addrs: Vec<String> = error
+        .candidates
+        .iter()
+        .filter_map(|c| c.addr.clone())
+        .collect();
+    assert_eq!(addrs, ["0x1190", "0x11c0"]);
+    for (value, want) in want.iter().zip(HELPERS) {
+        let resolved = resolve_str(p, value).expect("the candidate resolves");
+        assert_eq!(resolved.rule, Rule::NameAt);
+        assert_eq!(resolved.named, Named::Addr(Address::ram(want)));
+    }
+    let error = resolve_str(p, "sym:helper").expect_err("the sym: form is also ambiguous");
+    assert_eq!(error.code, ghidorah_base::ErrorCode::AmbiguousName);
+    assert!(
+        resolve_str(p, "helper@0x1191").is_err(),
+        "no helper at 0x1191"
+    );
+
+    let mut s = s;
+    let envelope = call_value(
+        &mut s,
+        "calc",
+        Value::object([("expr", Value::from("helper"))]),
+    );
+    assert_eq!(code(&envelope), "AMBIGUOUS_NAME", "{envelope}");
+    let envelope = call_value(
+        &mut s,
+        "calc",
+        Value::object([("expr", Value::from("helper@0x11c0 + 0x2"))]),
+    );
+    assert_eq!(text_at(data(&envelope), "/value"), "0x11c2");
+}
+
+#[test]
+fn ac_215_adversarial_names() {
+    let (s, id) = fixture("adversarial_names.gcc-O2");
+    let p = program(&s, &id);
+    for (name, want) in ADVERSARIAL {
+        let resolved = resolve_str(p, &format!("sym:{name}")).expect("the sym: form resolves");
+        assert_eq!(resolved.rule, Rule::Id, "{name}");
+        assert_eq!(
+            value_of(p, &resolved).ok(),
+            Some(Address::ram(want)),
+            "{name}"
+        );
+        match resolve_str(p, name) {
+            Ok(bare) => {
+                assert_eq!(bare.rule, Rule::Symbol, "{name} resolves by rule 4");
+                assert_eq!(value_of(p, &bare).ok(), Some(Address::ram(want)), "{name}");
+            }
+            Err(e) => {
+                assert_eq!(
+                    e.code,
+                    ghidorah_base::ErrorCode::AmbiguousName,
+                    "{name}: {e}"
+                );
+                let addrs: Vec<String> =
+                    e.candidates.iter().filter_map(|c| c.addr.clone()).collect();
+                assert!(addrs.contains(&format!("{want:#x}")), "{name}: {addrs:?}");
+                for value in candidate_values(&e) {
+                    assert!(resolve_str(p, &value).is_ok(), "{value} resolves");
+                }
+            }
+        }
+    }
+    // The section .fini is not the symbol .fini.
+    let section = resolve_str(p, "sec:17:.fini").expect("the section ID resolves");
+    assert_eq!(value_of(p, &section).ok(), Some(Address::ram(0x11f8)));
+    // The real FUN_00401000 hides the default name of 0x401000.
+    assert_eq!(addr_of(p, "FUN_00401000"), 0x11d0);
+    assert_eq!(addr_of(p, "FUN_00001060"), 0x1060);
+    assert_eq!(
+        resolve_str(p, "FUN_00001060").map(|r| r.rule).ok(),
+        Some(Rule::DefaultName)
+    );
+}
+
+/// Gives the addresses of a candidate value: its one address, or the addresses of the
+/// candidates of its `AMBIGUOUS_NAME`.
+fn targets(p: &Program, value: &str) -> Vec<Address> {
+    let at = |text: &str| {
+        let resolved = resolve_str(p, text).unwrap_or_else(|e| panic!("{text}: {e}"));
+        value_of(p, &resolved).expect("an address")
+    };
+    match resolve_str(p, value) {
+        Ok(_) => vec![at(value)],
+        Err(e) if e.code == ErrorCode::AmbiguousName => e
+            .candidates
+            .iter()
+            .map(|c| at(c.value.as_str().unwrap_or_default()))
+            .collect(),
+        Err(e) => panic!("{value:?}: {e}"),
+    }
+}
+
+/// The `NOT_FOUND` and `AMBIGUOUS_NAME` candidates of a hostile binary name hold escaped text.
+/// Each candidate value resolves to a matching item (AC-146a, r2-surface-03).
+///
+/// A name with a space at its start or end is hostile too (r3-surface-02). The resolver trims
+/// outer white space, so its candidate value is the quoted `sym:` ID.
+#[test]
+fn regress_hostile_candidates_escape_and_resolve() {
+    let evil = "\x1b[2J\u{202e}evil";
+    let hidden = "\u{200b}hidden";
+    let at = |off| Loc::section(".text", off);
+    let b = ElfBuilder::exec()
+        .section(Section::code(".text", &[0xc3; 8]))
+        .section(Section::rodata(hidden, &[1, 2, 3, 4]))
+        .symbol(Symbol::func("main", at(0), 1))
+        .symbol(Symbol::func(evil, at(1), 1))
+        .symbol(Symbol::func(evil, at(2), 1).local())
+        .symbol(Symbol::func("foo ", at(3), 1))
+        .symbol(Symbol::func(" bar", at(4), 1))
+        .entry(Loc::symbol("main"));
+    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("session_hostile_candidates");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("the temp directory exists");
+    std::fs::write(dir.join("input.elf"), b.build()).expect("the file writes");
+    let roots = Roots::new(&dir, &[PathBuf::from(".")]).expect("the root is valid");
+    let mut s = session_with(SessionConfig::new(roots));
+    let load = call_value(
+        &mut s,
+        "binary_load",
+        Value::object([("path", Value::from("input.elf"))]),
+    );
+    let id = text_at(&load, "/data/binary_id");
+    let p = program(&s, &id);
+    let evil_at = p.addrs_named(evil);
+    assert_eq!(evil_at.len(), 2, "{load}");
+    let hidden_at: Vec<Address> = p
+        .binary()
+        .sections
+        .iter()
+        .filter(|sec| sec.name.as_str() == Some(hidden))
+        .filter_map(|sec| sec.va.map(|va| Address::ram(va.first)))
+        .collect();
+    assert_eq!(hidden_at.len(), 1, "{load}");
+    let foo_at = p.addrs_named("foo ");
+    let bar_at = p.addrs_named(" bar");
+    assert_eq!((foo_at.len(), bar_at.len()), (1, 1), "{load}");
+    let cases = [
+        (&evil[..evil.len() - 1], "NOT_FOUND", &evil_at),
+        (evil, "AMBIGUOUS_NAME", &evil_at),
+        (&hidden[..hidden.len() - 1], "NOT_FOUND", &hidden_at),
+        ("foo", "NOT_FOUND", &foo_at),
+        ("foo ", "NOT_FOUND", &foo_at),
+        ("bar", "NOT_FOUND", &bar_at),
+    ];
+    for (input, want, items) in cases {
+        let args = Value::object([("target", Value::from(input))]);
+        let envelope = call_value(&mut s, "func_get", args);
+        assert_eq!(code(&envelope), want, "{envelope}");
+        let candidates = envelope
+            .pointer("/error/candidates")
+            .and_then(Value::as_array)
+            .map(<[Value]>::to_vec)
+            .unwrap_or_default();
+        assert!(!candidates.is_empty(), "{envelope}");
+        let p = program(&s, &id);
+        let mut found = Vec::new();
+        for c in &candidates {
+            for key in ["value", "label"] {
+                let text = c.get(key).and_then(Value::as_str).unwrap_or_default();
+                let raw = text.chars().any(|ch| ch != '\\' && escapes(ch));
+                assert!(!raw, "{key} {text:?} holds a raw character: {envelope}");
+            }
+            let value = c.get("value").and_then(Value::as_str).unwrap_or_default();
+            let got = targets(p, value);
+            assert!(
+                !got.is_empty() && got.iter().all(|a| items.contains(a)),
+                "{value:?} gives {got:?}, not {items:?}"
+            );
+            found.extend(got);
+        }
+        found.sort();
+        found.dedup();
+        assert_eq!(&found, items, "{envelope}");
+    }
+}
+
+/// Writes the file of `b` to a new directory `dir` and loads it. Gives the session and the
+/// binary ID.
+fn open_elf(dir: &str, b: &ElfBuilder) -> (Session, String) {
+    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(dir);
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("the temp directory exists");
+    std::fs::write(dir.join("input.elf"), b.build()).expect("the file writes");
+    let roots = Roots::new(&dir, &[PathBuf::from(".")]).expect("the root is valid");
+    let mut s = session_with(SessionConfig::new(roots));
+    let load = call_value(
+        &mut s,
+        "binary_load",
+        Value::object([("path", Value::from("input.elf"))]),
+    );
+    assert_eq!(code(&load), "", "{load}");
+    let id = text_at(&load, "/data/binary_id");
+    (s, id)
+}
+
+/// A candidate value has at most 256 characters, the cut of a candidate text. A longer value
+/// takes the rule of a hostile name. The `AMBIGUOUS_NAME` value is the address. The
+/// `NOT_FOUND` value is the function ID or the address. Each value resolves (k3-04).
+#[test]
+fn regress_long_name_candidates_resolve() {
+    let twice = format!("t{}", "x".repeat(299));
+    let func = format!("o{}", "y".repeat(257));
+    let object = format!("d{}", "w".repeat(257));
+    let quoted = format!("\u{202e}{}", "z".repeat(250));
+    let at = |off| Loc::section(".text", off);
+    let b = ElfBuilder::exec()
+        .section(Section::code(".text", &[0xc3; 8]))
+        .section(Section::rodata(".rodata", &[1, 2, 3, 4]))
+        .symbol(Symbol::func("main", at(0), 1))
+        .symbol(Symbol::func(&twice, at(1), 1))
+        .symbol(Symbol::func(&twice, at(2), 1).local())
+        .symbol(Symbol::func(&func, at(3), 1))
+        .symbol(Symbol::func(&quoted, at(4), 1))
+        .symbol(Symbol::object(&object, Loc::section(".rodata", 0), 4))
+        .entry(Loc::symbol("main"));
+    let (mut s, id) = open_elf("session_long_candidates", &b);
+    let entry = program(&s, &id)
+        .addrs_named(&func)
+        .first()
+        .copied()
+        .expect("the long function name has an address");
+    add_function(&mut s, &id, entry.off, 1);
+    let p = program(&s, &id);
+    let cut = |name: &str, n: usize| name.chars().take(n).collect::<String>();
+    let cases = [
+        (twice.clone(), "AMBIGUOUS_NAME", p.addrs_named(&twice)),
+        (cut(&func, 256), "NOT_FOUND", p.addrs_named(&func)),
+        (cut(&object, 256), "NOT_FOUND", p.addrs_named(&object)),
+        (cut(&quoted, 250), "NOT_FOUND", p.addrs_named(&quoted)),
+    ];
+    for (input, want, items) in &cases {
+        assert!(!items.is_empty(), "{input}");
+        let args = Value::object([("target", Value::from(input.as_str()))]);
+        let envelope = call_value(&mut s, "addr_info", args);
+        assert_eq!(code(&envelope), *want, "{envelope}");
+        let candidates = envelope
+            .pointer("/error/candidates")
+            .and_then(Value::as_array)
+            .map(<[Value]>::to_vec)
+            .unwrap_or_default();
+        assert!(!candidates.is_empty(), "{envelope}");
+        let p = program(&s, &id);
+        let mut found = Vec::new();
+        for c in &candidates {
+            let value = c.get("value").and_then(Value::as_str).unwrap_or_default();
+            assert!(value.chars().count() <= 256, "{value:?}");
+            let got = targets(p, value);
+            assert!(
+                got.iter().all(|a| items.contains(a)),
+                "{value:?} gives {got:?}, not {items:?}"
+            );
+            found.extend(got);
+        }
+        found.sort();
+        found.dedup();
+        assert_eq!(&found, items, "{envelope}");
+    }
+    let envelope = call_value(
+        &mut s,
+        "addr_info",
+        Value::object([("target", Value::from(cut(&func, 256)))]),
+    );
+    let value = text_at(&envelope, "/error/candidates/0/value");
+    assert_eq!(value, FuncId(entry).to_string(), "{envelope}");
+    let data = program(&s, &id).addrs_named(&object);
+    let envelope = call_value(
+        &mut s,
+        "addr_info",
+        Value::object([("target", Value::from(cut(&object, 256)))]),
+    );
+    let value = text_at(&envelope, "/error/candidates/0/value");
+    let want: Vec<String> = data.iter().map(ToString::to_string).collect();
+    assert_eq!(vec![value], want, "{envelope}");
+}
+
+#[test]
+fn resolver_rule_order() {
+    let s = demo();
+    let p = program(&s, DEMO_ID);
+    let main = Address::ram(DEMO_MAIN);
+    let cases: [(Value, Rule, Named); 9] = [
+        (json("4224"), Rule::Integer, Named::Addr(main)),
+        (Value::from("0x1080"), Rule::Hex, Named::Addr(main)),
+        (Value::from("bb:0x1080"), Rule::Id, Named::Addr(main)),
+        (Value::from("sym:main"), Rule::Id, Named::Addr(main)),
+        (Value::from("main"), Rule::Symbol, Named::Addr(main)),
+        (Value::from(".text"), Rule::Section, Named::Addr(main)),
+        (
+            Value::from("LAB_00001080"),
+            Rule::DefaultName,
+            Named::Addr(main),
+        ),
+        (Value::from("main@0x1080"), Rule::NameAt, Named::Addr(main)),
+        (
+            Value::from("check_password-0x160"),
+            Rule::Offset,
+            Named::Addr(main),
+        ),
+    ];
+    for (input, rule, named) in cases {
+        let resolved =
+            resolve(p, &input, &Site::default()).unwrap_or_else(|e| panic!("{input}: {e}"));
+        assert_eq!(resolved.rule, rule, "{input}");
+        assert_eq!(resolved.named, named, "{input}");
+        let from = resolved.resolved_from();
+        assert_eq!(text_at(&from, "/rule"), rule.name(), "{input}");
+        assert!(!text_at(&from, "/matched").is_empty(), "{input}");
+    }
+    let names: Vec<&str> = Rule::ALL.iter().map(|r| r.name()).collect();
+    assert_eq!(
+        names,
+        [
+            "integer",
+            "hex",
+            "id",
+            "symbol",
+            "section",
+            "default_name",
+            "name_at",
+            "offset"
+        ]
+    );
+    let imp = resolve_str(p, "imp:puts").expect("the import resolves");
+    assert!(matches!(imp.named, Named::Import(_)), "{imp:?}");
+    let stub = value_of(p, &imp).expect("the stub address");
+    assert!((0x1020..0x1080).contains(&stub.off), "{stub}");
+    let ext = resolve_str(p, "ext:0x1").expect("an EXTERNAL address");
+    assert_eq!(value_of(p, &ext).ok(), Some(Address::external(1)));
+    let fun = resolve_str(p, "fn:0x1080").expect_err("no function without analysis");
+    assert_eq!(fun.code, ghidorah_base::ErrorCode::NotFound);
+}
+
+#[test]
+fn resolver_errors() {
+    let s = demo();
+    let p = program(&s, DEMO_ID);
+    let error = resolve_str(p, "4224").expect_err("digits only");
+    assert_eq!(error.code, ghidorah_base::ErrorCode::AddressBaseAmbiguous);
+    assert_eq!(candidate_values(&error), ["0x1080", "0x4224"]);
+    let labels: Vec<&str> = error.candidates.iter().map(|c| c.label.as_str()).collect();
+    assert!(
+        labels[0].contains("mapped") && labels[1].contains("not mapped"),
+        "{labels:?}"
+    );
+    let error = resolve_str(p, "main+16").expect_err("a digits offset");
+    assert_eq!(error.code, ghidorah_base::ErrorCode::AddressBaseAmbiguous);
+    assert_eq!(candidate_values(&error), ["main+0x10", "main+0x16"]);
+
+    let error = resolve_str(p, "mian").expect_err("an unknown name");
+    assert_eq!(error.code, ghidorah_base::ErrorCode::NotFound);
+    assert_eq!(
+        candidate_values(&error).first().map(String::as_str),
+        Some("main")
+    );
+    let error = resolve_str(p, "0xffffffffffffffff+0x1").expect_err("the offset wraps");
+    assert_eq!(error.code, ghidorah_base::ErrorCode::AddressInvalid);
+    let error = resolve(p, &json("9007199254740992"), &Site::default()).expect_err("2^53");
+    assert_eq!(error.code, ghidorah_base::ErrorCode::AddressInvalid);
+    let error = resolve(p, &json("true"), &Site::default()).expect_err("a boolean");
+    assert_eq!(error.code, ghidorah_base::ErrorCode::InvalidArgument);
+    let error = resolve_str(p, "imp:no_such_import").expect_err("an unknown import");
+    assert_eq!(error.code, ghidorah_base::ErrorCode::NotFound);
+    let error = resolve_str(p, "sec:16:.data").expect_err("the index has another name");
+    assert_eq!(error.code, ghidorah_base::ErrorCode::NotFound);
+    let error = resolve_str(p, "seg:99").expect_err("no such segment");
+    assert_eq!(error.code, ghidorah_base::ErrorCode::NotFound);
+
+    let repair = |text: &str| {
+        Call::new(
+            "calc",
+            Value::object([("expr", Value::from(text))]),
+            "Send the address as a 0x hex string.",
+        )
+    };
+    let site = Site {
+        path: "/target",
+        repair: Some(&repair),
+    };
+    let error = resolve(p, &Value::from("1080abc"), &site).expect_err("bare hex text");
+    assert_eq!(error.code, ghidorah_base::ErrorCode::AddressInvalid);
+    assert_eq!(error.field_path.as_deref(), Some("/target"));
+    let next = error.next.first().expect("a repair call");
+    assert_eq!(text_at(&next.args, "/expr"), "0x1080abc");
+
+    let unmapped = address(p, &Value::from("0x100000"), &Site::default()).expect_err("not mapped");
+    assert_eq!(unmapped.code, ghidorah_base::ErrorCode::AddressUnmapped);
+    assert!(
+        !unmapped.candidates.is_empty(),
+        "the nearest mapped addresses"
+    );
+}
+
+#[test]
+fn target_table() {
+    let mut s = demo();
+    add_function(&mut s, DEMO_ID, DEMO_MAIN, 0x53);
+    let p = program(&s, DEMO_ID);
+    let main = FuncId(Address::ram(DEMO_MAIN));
+    let get = |text: &str, family: Family| {
+        let resolved = resolve_str(p, text).unwrap_or_else(|e| panic!("{text}: {e}"));
+        target(p, &resolved, family)
+    };
+    assert_eq!(
+        get("main+0x10", Family::Function).ok(),
+        Some(Target::Func(main))
+    );
+    assert_eq!(
+        get("fn:0x1080", Family::Address).ok(),
+        Some(Target::Addr(main.0))
+    );
+    assert_eq!(
+        get("fn:0x1080", Family::XrefFrom).ok(),
+        Some(Target::RefsFromBody(main))
+    );
+    assert_eq!(
+        get("main+0x4", Family::XrefFrom).ok(),
+        Some(Target::RefsFromInsn(Address::ram(DEMO_MAIN + 4)))
+    );
+    assert_eq!(
+        get("str:0x2004", Family::XrefTo).ok(),
+        Some(Target::RefsTo(Address::ram(0x2004)))
+    );
+    assert!(matches!(
+        get("imp:puts", Family::XrefTo),
+        Ok(Target::ImportSites(_))
+    ));
+    assert!(matches!(
+        get("sys:1", Family::XrefTo),
+        Ok(Target::SyscallSites(_))
+    ));
+    assert!(matches!(
+        get("jt:0x1090", Family::XrefFrom),
+        Ok(Target::CaseEdges(_))
+    ));
+    assert_eq!(
+        get("jt:0x1090", Family::Function).ok(),
+        Some(Target::Func(main))
+    );
+    let not_in = get("0x11e0", Family::Function).expect_err("no function at check_password");
+    assert_eq!(not_in.code, ghidorah_base::ErrorCode::NotInFunction);
+    for (text, family) in [
+        ("sys:1", Family::Address),
+        ("note:1", Family::Address),
+        ("str:0x2004", Family::Function),
+        ("sec:16:.text", Family::Function),
+        ("imp:puts", Family::XrefFrom),
+        ("t:int", Family::XrefTo),
+    ] {
+        let error = get(text, family).expect_err("an invalid kind");
+        assert_eq!(
+            error.code,
+            ghidorah_base::ErrorCode::InvalidArgument,
+            "{text}"
+        );
+        let listed = error
+            .details
+            .as_ref()
+            .and_then(|d| d.get("accepted"))
+            .and_then(Value::as_array)
+            .map(<[Value]>::len);
+        assert_eq!(listed, Some(accepted(family).len()), "{text}");
+    }
+    for family in [
+        Family::Address,
+        Family::Function,
+        Family::XrefTo,
+        Family::XrefFrom,
+    ] {
+        assert!(!accepted(family).is_empty());
+    }
+    let (f, _) = function(p, &Value::from("main+0x8"), &Site::default()).expect("a function");
+    assert_eq!(f, main);
+    let (a, _) = address(p, &Value::from("main"), &Site::default()).expect("an address");
+    assert_eq!(a, main.0);
+}

@@ -1,0 +1,30 @@
+[package]
+name = "ghidorah-decomp"
+description = "Decompiler core: expression view, safe folding, variables, structurer, SAILR-lite passes, FLAT output and the AST interpreter."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# The crate has no unit tests. Its tests are in the test binary `tests/decomp/main.rs`.
+[lib]
+name = "ghidorah_decomp"
+path = "src/lib.rs"
+test = false
+
+[dependencies]
+ghidorah-analysis = { path = "../analysis" }
+ghidorah-base = { path = "../base" }
+ghidorah-db = { path = "../db" }
+ghidorah-ir = { path = "../ir" }
+ghidorah-types = { path = "../types" }
+
+[dev-dependencies]
+# The tests load the fixtures and read the truth files and the leaf vectors.
+ghidorah-json = { path = "../json" }
+ghidorah-loader = { path = "../loader" }
+ghidorah-testkit = { path = "../testkit" }
+
+[lints]
+workspace = true

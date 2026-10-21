@@ -1,0 +1,45 @@
+{
+  "id": "abstain-04",
+  "question": "q-abstain-04",
+  "turns": [
+    {
+      "call": {
+        "tool": "binary_load",
+        "args": {
+          "path": "fixtures/bin/recursion.gcc-O2"
+        }
+      }
+    },
+    {
+      "call": {
+        "tool": "fact_check",
+        "args": {
+          "claims": [
+            {
+              "rel": "calls",
+              "args": [
+                "walk",
+                "fib"
+              ]
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "answer": {
+    "turn": 1,
+    "ptr": "/data/verdicts/0"
+  },
+  "provenance": {
+    "/turns/0/call/args/path": "question:binaries/0",
+    "/turns/1/call/args/claims/0/rel": "schema:fact_check.claims.rel",
+    "/turns/1/call/args/claims/0/args/0": "question",
+    "/turns/1/call/args/claims/0/args/1": "question"
+  },
+  "budgets": {
+    "max_calls": 2,
+    "max_chars": 1400,
+    "max_peak_chars": 900
+  }
+}

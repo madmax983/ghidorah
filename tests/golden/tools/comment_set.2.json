@@ -1,0 +1,54 @@
+{"golden":"generator=tools_examples version=1 fixture=crackme.gcc-O2 fixture_sha256=467a43b75d95c826daba8cb216d01d7fd386aa96c5ef5a95c2effffe1780de8f"}
+{
+  "ok": true,
+  "binary_id": "467a43b75d95c826",
+  "rev": 2,
+  "session": "cli",
+  "analysis": {
+    "state": "complete",
+    "rev": 1
+  },
+  "partial": false,
+  "data": {
+    "items": [
+      {
+        "input": {
+          "target": "0x1090",
+          "kind": "eol",
+          "text": "Reads the input."
+        },
+        "ok": true,
+        "data": {
+          "target": "0x1090",
+          "addr": "0x1090",
+          "kind": "eol",
+          "old": null,
+          "new": "Reads the input.",
+          "noop": false
+        }
+      },
+      {
+        "input": {
+          "target": "0x1094",
+          "kind": "pre",
+          "text": ""
+        },
+        "ok": true,
+        "data": {
+          "target": "0x1094",
+          "addr": "0x1094",
+          "kind": "pre",
+          "old": null,
+          "new": null,
+          "noop": true
+        }
+      }
+    ],
+    "ok_count": 2,
+    "error_count": 0,
+    "rev": 2,
+    "tx": "tx:2"
+  },
+  "tx": "tx:2",
+  "noop": false
+}

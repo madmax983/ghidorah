@@ -33,7 +33,7 @@ A change to an accepted decision is a new ADR or an amendment section with a dat
 | [0011](0011-verus-hybrid-pattern.md) | Verus hybrid pattern | Accepted (amended) | Measured loop form, `proof!{}`, negative patches, tree-hash freshness, tier-1 second evidence. |
 | [0012](0012-deterministic-output.md) | Deterministic output rules | Accepted (amended) | No HashMap on output paths, fuel not time, no floats, `RunConfig`, no `set_var`, relative paths. |
 | [0013](0013-source-priority-agent-rank.md) | Source priority with an AGENT rank | Accepted | Default 1 < Analysis 2 < Agent 3 < Imported 4 < User 5; the journal records forced overwrites. |
-| [0014](0014-composition-batch-run.md) | Composition layer is `batch_run` | Accepted (hypothesis) | One pointer dialect with `*`, typed refs, one Tx per mutating batch, no destructive steps; a decision rule. |
+| [0014](0014-composition-batch-run.md) | Composition layer is `batch_run` | Accepted (hypothesis, amended) | One pointer dialect with `*`, typed refs, one Tx per mutating batch, no destructive steps; a decision rule. |
 | [0015](0015-offline-eval-harness.md) | Offline evaluation harness | Accepted (amended) | Frozen questions (one `pe` append by WP-30) and held-out intents; floors with baselines and a bless log; robots and lints against self-grading. |
 | [0016](0016-synchronous-fuel-sliced-analysis.md) | Synchronous fuel-sliced analysis | Accepted (amended) | `analysis_run` resumes by fuel; committed and shadow sets; full analysis on load. |
 | [0017](0017-undo-as-forward-commits.md) | Undo as forward commits | Accepted (amended) | Forward undo and redo commits on one linear stack per session. |

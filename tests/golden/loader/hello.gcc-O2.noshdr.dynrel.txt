@@ -1,0 +1,17 @@
+# golden: generator=xtask-fixtures version=1 binutils=2.42 fixture=hello.gcc-O2.noshdr fixture_sha256=0f367402be64ec4a098e3707c3dbaf8cd1c630137eefd8d8b479c80e3a49a25d
+
+'RELA' relocation section at offset 0x590 contains 192 bytes:
+    Offset             Info             Type               Symbol's Value  Symbol's Name + Addend
+0000000000003db0  0000000000000008 R_X86_64_RELATIVE                         1170
+0000000000003db8  0000000000000008 R_X86_64_RELATIVE                         1130
+0000000000004008  0000000000000008 R_X86_64_RELATIVE                         4008
+0000000000003fd8  0000000100000006 R_X86_64_GLOB_DAT      0000000000000000 __libc_start_main@GLIBC_2.34 + 0
+0000000000003fe0  0000000200000006 R_X86_64_GLOB_DAT      0000000000000000 _ITM_deregisterTMCloneTable + 0
+0000000000003fe8  0000000400000006 R_X86_64_GLOB_DAT      0000000000000000 __gmon_start__ + 0
+0000000000003ff0  0000000600000006 R_X86_64_GLOB_DAT      0000000000000000 _ITM_registerTMCloneTable + 0
+0000000000003ff8  0000000700000006 R_X86_64_GLOB_DAT      0000000000000000 __cxa_finalize@GLIBC_2.2.5 + 0
+
+'PLT' relocation section at offset 0x650 contains 48 bytes:
+    Offset             Info             Type               Symbol's Value  Symbol's Name + Addend
+0000000000003fc8  0000000300000007 R_X86_64_JUMP_SLOT     0000000000000000 puts@GLIBC_2.2.5 + 0
+0000000000003fd0  0000000500000007 R_X86_64_JUMP_SLOT     0000000000000000 __printf_chk@GLIBC_2.3.4 + 0

@@ -1,0 +1,48 @@
+{"golden":"generator=tools_examples version=1 fixture=crackme.gcc-O2 fixture_sha256=467a43b75d95c826daba8cb216d01d7fd386aa96c5ef5a95c2effffe1780de8f"}
+{
+  "ok": true,
+  "binary_id": "467a43b75d95c826",
+  "rev": 1,
+  "session": "cli",
+  "analysis": {
+    "state": "complete",
+    "rev": 1
+  },
+  "partial": false,
+  "data": {
+    "input": "main",
+    "addr": "0x1080",
+    "resolved_from": {
+      "rule": "symbol",
+      "matched": "main"
+    },
+    "region": {
+      "name": "seg:3",
+      "perms": "r-x"
+    },
+    "section": {
+      "id": "sec:16:.text",
+      "name": ".text"
+    },
+    "func": {
+      "id": "fn:0x1080",
+      "name": "main",
+      "offset": "0x0"
+    },
+    "symbol": {
+      "name": "main",
+      "source": "imported",
+      "kind": "function"
+    },
+    "code_unit": {
+      "kind": "insn",
+      "len": 4,
+      "mnem": "endbr64",
+      "text": "endbr64"
+    },
+    "xrefs_in": 1,
+    "xrefs_out": 0,
+    "notes": 0,
+    "file_offset": "0x1080"
+  }
+}

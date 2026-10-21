@@ -1,0 +1,66 @@
+# golden: generator=xtask-fixtures version=1 binutils=2.42 fixture=syscall_only.gcc-O0 fixture_sha256=c281d6368d54ac7b01377770fb70136ec5acb7538cf17cd2e789b517c85cf312
+
+syscall_only.gcc-O0:     file format elf64-x86-64
+
+
+Disassembly of section .text:
+
+0000000000401000 <emit_banner>:
+  401000:	f3 0f 1e fa          	endbr64
+  401004:	55                   	push   rbp
+  401005:	48 89 e5             	mov    rbp,rsp
+  401008:	48 8d 35 f1 0f 00 00 	lea    rsi,[rip+0xff1]        # 402000 <banner>
+  40100f:	b8 01 00 00 00       	mov    eax,0x1
+  401014:	bf 01 00 00 00       	mov    edi,0x1
+  401019:	ba 0d 00 00 00       	mov    edx,0xd
+  40101e:	0f 05                	syscall
+  401020:	48 89 45 f8          	mov    QWORD PTR [rbp-0x8],rax
+  401024:	90                   	nop
+  401025:	5d                   	pop    rbp
+  401026:	c3                   	ret
+
+0000000000401027 <emit_status>:
+  401027:	f3 0f 1e fa          	endbr64
+  40102b:	55                   	push   rbp
+  40102c:	48 89 e5             	mov    rbp,rsp
+  40102f:	48 8d 35 da 0f 00 00 	lea    rsi,[rip+0xfda]        # 402010 <status>
+  401036:	b8 01 00 00 00       	mov    eax,0x1
+  40103b:	bf 02 00 00 00       	mov    edi,0x2
+  401040:	ba 0b 00 00 00       	mov    edx,0xb
+  401045:	0f 05                	syscall
+  401047:	48 89 45 f8          	mov    QWORD PTR [rbp-0x8],rax
+  40104b:	90                   	nop
+  40104c:	5d                   	pop    rbp
+  40104d:	c3                   	ret
+
+000000000040104e <get_pid>:
+  40104e:	f3 0f 1e fa          	endbr64
+  401052:	55                   	push   rbp
+  401053:	48 89 e5             	mov    rbp,rsp
+  401056:	b8 27 00 00 00       	mov    eax,0x27
+  40105b:	0f 05                	syscall
+  40105d:	48 89 45 f8          	mov    QWORD PTR [rbp-0x8],rax
+  401061:	48 8b 45 f8          	mov    rax,QWORD PTR [rbp-0x8]
+  401065:	5d                   	pop    rbp
+  401066:	c3                   	ret
+
+0000000000401067 <exit_ok>:
+  401067:	f3 0f 1e fa          	endbr64
+  40106b:	55                   	push   rbp
+  40106c:	48 89 e5             	mov    rbp,rsp
+  40106f:	b8 3c 00 00 00       	mov    eax,0x3c
+  401074:	ba 00 00 00 00       	mov    edx,0x0
+  401079:	48 89 d7             	mov    rdi,rdx
+  40107c:	0f 05                	syscall
+  40107e:	48 89 45 f8          	mov    QWORD PTR [rbp-0x8],rax
+
+0000000000401082 <_start>:
+  401082:	f3 0f 1e fa          	endbr64
+  401086:	55                   	push   rbp
+  401087:	48 89 e5             	mov    rbp,rsp
+  40108a:	e8 71 ff ff ff       	call   401000 <emit_banner>
+  40108f:	e8 ba ff ff ff       	call   40104e <get_pid>
+  401094:	48 85 c0             	test   rax,rax
+  401097:	7e 05                	jle    40109e <_start+0x1c>
+  401099:	e8 89 ff ff ff       	call   401027 <emit_status>
+  40109e:	e8 c4 ff ff ff       	call   401067 <exit_ok>

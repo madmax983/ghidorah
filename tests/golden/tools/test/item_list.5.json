@@ -1,0 +1,69 @@
+{"golden":"generator=tools_examples version=1"}
+{
+  "ok": true,
+  "binary_id": "b1",
+  "rev": 7,
+  "session": "test",
+  "analysis": {
+    "state": "complete",
+    "rev": 7
+  },
+  "partial": false,
+  "data": {
+    "items": [
+      {
+        "id": "fn:0x401000",
+        "addr": "0x401000",
+        "name": "func_0000",
+        "size": 1,
+        "label": {
+          "text": "func_0000",
+          "hex": "66756e635f30303030",
+          "len": 9,
+          "src": "binary"
+        }
+      },
+      {
+        "id": "fn:0x401020",
+        "addr": "0x401020",
+        "name": "func_0002",
+        "size": 75,
+        "label": {
+          "text": "func_0002",
+          "hex": "66756e635f30303032",
+          "len": 9,
+          "src": "binary"
+        }
+      },
+      {
+        "id": "fn:0x401040",
+        "addr": "0x401040",
+        "name": "func_0004",
+        "size": 149,
+        "label": {
+          "text": "func_0004",
+          "hex": "66756e635f30303034",
+          "len": 9,
+          "src": "binary"
+        }
+      }
+    ],
+    "sorted_by": "addr"
+  },
+  "page": {
+    "returned": 3,
+    "total": 4,
+    "truncated": true,
+    "next_cursor": "c:0:0x401040",
+    "hint": "Add filter.name or filter.size_min to narrow the list."
+  },
+  "next": [
+    {
+      "tool": "item_get",
+      "args": {
+        "target": "fn:0x401000"
+      },
+      "why": "Read the first item."
+    }
+  ]
+}

@@ -1,0 +1,1007 @@
+# x86-64 decoder spec vectors (design Section 5, AC-061).
+#
+# Each vector decodes at address 0x1000 with the default options.
+# Line format: bytes|mnem|operands|len|flow
+#
+# - bytes: the instruction bytes in hex, separated by spaces.
+# - mnem: the canonical mnemonic. `(vector)` marks an opaque form.
+# - operands: the operand texts of the printer, separated by `,`. `?` is an opaque operand.
+# - len: the instruction length.
+# - flow: seq, jmp, jcc, call, icall, ijmp, ret or trap.
+#
+# An error line has `!truncated`, `!invalid`, `!invalid_in_mode` or `!unsupported` in the
+# mnem field and an empty flow field. Its len field holds `need_at_least` for `!truncated`,
+# `len_consumed` for `!invalid` and `len` for the other two errors.
+#
+# Source: GNU objdump 2.42 (`objdump -D -b binary -m i386:x86-64 -M intel`) for the text
+# of each valid vector, changed to the printer syntax. A tier-2 test compares each line
+# with GNU objdump again. The opaque and error lines follow design Section 5.1.
+# ALU r/m forms, all eight operations
+00 c8|add|al,cl|2|seq
+01 c8|add|eax,ecx|2|seq
+02 c8|add|cl,al|2|seq
+03 c8|add|ecx,eax|2|seq
+04 7f|add|al,0x7f|2|seq
+05 78 56 34 12|add|eax,0x12345678|5|seq
+08 d1|or|cl,dl|2|seq
+09 d1|or|ecx,edx|2|seq
+0a d1|or|dl,cl|2|seq
+0b d1|or|edx,ecx|2|seq
+0c 01|or|al,0x1|2|seq
+0d 00 01 00 00|or|eax,0x100|5|seq
+10 c0|adc|al,al|2|seq
+11 c0|adc|eax,eax|2|seq
+12 c0|adc|al,al|2|seq
+13 c0|adc|eax,eax|2|seq
+14 ff|adc|al,0xff|2|seq
+15 ff ff ff ff|adc|eax,0xffffffff|5|seq
+18 c0|sbb|al,al|2|seq
+19 c0|sbb|eax,eax|2|seq
+1a c0|sbb|al,al|2|seq
+1b c0|sbb|eax,eax|2|seq
+1c 01|sbb|al,0x1|2|seq
+1d 01 00 00 00|sbb|eax,0x1|5|seq
+20 c0|and|al,al|2|seq
+21 c0|and|eax,eax|2|seq
+22 c0|and|al,al|2|seq
+23 c0|and|eax,eax|2|seq
+24 0f|and|al,0xf|2|seq
+25 ff 00 00 00|and|eax,0xff|5|seq
+28 c0|sub|al,al|2|seq
+29 c0|sub|eax,eax|2|seq
+2a c0|sub|al,al|2|seq
+2b c0|sub|eax,eax|2|seq
+2c 01|sub|al,0x1|2|seq
+2d 10 00 00 00|sub|eax,0x10|5|seq
+30 c0|xor|al,al|2|seq
+31 c0|xor|eax,eax|2|seq
+32 c0|xor|al,al|2|seq
+33 c0|xor|eax,eax|2|seq
+34 01|xor|al,0x1|2|seq
+35 01 00 00 00|xor|eax,0x1|5|seq
+38 c0|cmp|al,al|2|seq
+39 c0|cmp|eax,eax|2|seq
+3a c0|cmp|al,al|2|seq
+3b c0|cmp|eax,eax|2|seq
+3c 01|cmp|al,0x1|2|seq
+3d 01 00 00 00|cmp|eax,0x1|5|seq
+# Operand sizes and REX registers
+48 01 d8|add|rax,rbx|3|seq
+66 01 d8|add|ax,bx|3|seq
+4c 01 c0|add|rax,r8|3|seq
+49 01 c0|add|r8,rax|3|seq
+4d 01 c0|add|r8,r8|3|seq
+45 31 c0|xor|r8d,r8d|3|seq
+45 31 ff|xor|r15d,r15d|3|seq
+48 31 c0|xor|rax,rax|3|seq
+66 31 c0|xor|ax,ax|3|seq
+48 05 00 01 00 00|add|rax,0x100|6|seq
+66 05 34 12|add|ax,0x1234|4|seq
+48 3d ff ff ff 7f|cmp|rax,0x7fffffff|6|seq
+48 35 00 00 00 80|xor|rax,0xffffffff80000000|6|seq
+# Group 1
+80 c1 01|add|cl,0x1|3|seq
+80 38 00|cmp|byte ptr [rax],0x0|3|seq
+80 7d f8 ff|cmp|byte ptr [rbp-0x8],0xff|4|seq
+81 c1 00 01 00 00|add|ecx,0x100|6|seq
+81 38 01 00 00 00|cmp|dword ptr [rax],0x1|6|seq
+66 81 c1 34 12|add|cx,0x1234|5|seq
+48 81 ec 00 01 00 00|sub|rsp,0x100|7|seq
+83 c0 01|add|eax,0x1|3|seq
+83 e8 80|sub|eax,0xffffff80|3|seq
+48 83 ec 08|sub|rsp,0x8|4|seq
+48 83 c4 08|add|rsp,0x8|4|seq
+48 83 e4 f0|and|rsp,0xfffffffffffffff0|4|seq
+83 7d fc 00|cmp|dword ptr [rbp-0x4],0x0|4|seq
+48 83 3d 10 00 00 00 00|cmp|qword ptr [rip+0x10],0x0|8|seq
+83 f8 ff|cmp|eax,0xffffffff|3|seq
+41 83 f8 0a|cmp|r8d,0xa|4|seq
+49 83 c7 01|add|r15,0x1|4|seq
+# Addressing forms
+8b 00|mov|eax,dword ptr [rax]|2|seq
+8b 40 08|mov|eax,dword ptr [rax+0x8]|3|seq
+8b 80 00 01 00 00|mov|eax,dword ptr [rax+0x100]|6|seq
+8b 04 24|mov|eax,dword ptr [rsp]|3|seq
+8b 44 24 08|mov|eax,dword ptr [rsp+0x8]|4|seq
+8b 84 24 00 01 00 00|mov|eax,dword ptr [rsp+0x100]|7|seq
+41 8b 04 24|mov|eax,dword ptr [r12]|4|seq
+41 8b 45 00|mov|eax,dword ptr [r13+0x0]|4|seq
+8b 45 00|mov|eax,dword ptr [rbp+0x0]|3|seq
+8b 45 f8|mov|eax,dword ptr [rbp-0x8]|3|seq
+8b 04 88|mov|eax,dword ptr [rax+rcx*4]|3|seq
+8b 04 c8|mov|eax,dword ptr [rax+rcx*8]|3|seq
+8b 44 88 10|mov|eax,dword ptr [rax+rcx*4+0x10]|4|seq
+8b 04 8d 00 10 00 00|mov|eax,dword ptr [rcx*4+0x1000]|7|seq
+8b 04 25 00 10 00 00|mov|eax,dword ptr [0x1000]|7|seq
+42 8b 04 a0|mov|eax,dword ptr [rax+r12*4]|4|seq
+4a 8b 04 e8|mov|rax,qword ptr [rax+r13*8]|4|seq
+43 8b 04 2c|mov|eax,dword ptr [r12+r13*1]|4|seq
+8b 05 10 00 00 00|mov|eax,dword ptr [rip+0x10]|6|seq
+48 8b 05 f0 ff ff ff|mov|rax,qword ptr [rip-0x10]|7|seq
+67 8b 00|mov|eax,dword ptr [eax]|3|seq
+67 8b 05 10 00 00 00|mov|eax,dword ptr [eip+0x10]|7|seq
+67 8b 04 24|mov|eax,dword ptr [esp]|4|seq
+64 48 8b 04 25 28 00 00 00|mov|rax,qword ptr fs:[0x28]|9|seq
+65 48 8b 04 25 00 00 00 00|mov|rax,qword ptr gs:[0x0]|9|seq
+64 8b 00|mov|eax,dword ptr fs:[rax]|3|seq
+48 8b 0c 24|mov|rcx,qword ptr [rsp]|4|seq
+48 8b 6c 24 10|mov|rbp,qword ptr [rsp+0x10]|5|seq
+4c 8b 6d 00|mov|r13,qword ptr [rbp+0x0]|4|seq
+4e 8b 2c 0f|mov|r13,qword ptr [rdi+r9*1]|4|seq
+48 8b 44 cd 00|mov|rax,qword ptr [rbp+rcx*8+0x0]|5|seq
+# mov
+88 c8|mov|al,cl|2|seq
+88 e0|mov|al,ah|2|seq
+40 88 e0|mov|al,spl|3|seq
+40 88 f7|mov|dil,sil|3|seq
+41 88 c0|mov|r8b,al|3|seq
+89 e5|mov|ebp,esp|2|seq
+48 89 e5|mov|rbp,rsp|3|seq
+66 89 c8|mov|ax,cx|3|seq
+48 89 45 f8|mov|qword ptr [rbp-0x8],rax|4|seq
+c6 00 01|mov|byte ptr [rax],0x1|3|seq
+c6 05 10 00 00 00 01|mov|byte ptr [rip+0x10],0x1|7|seq
+c7 05 10 00 00 00 01 00 00 00|mov|dword ptr [rip+0x10],0x1|10|seq
+c7 45 fc 00 00 00 00|mov|dword ptr [rbp-0x4],0x0|7|seq
+48 c7 c0 ff ff ff ff|mov|rax,0xffffffffffffffff|7|seq
+48 c7 04 24 00 00 00 00|mov|qword ptr [rsp],0x0|8|seq
+66 c7 00 34 12|mov|word ptr [rax],0x1234|5|seq
+8a 00|mov|al,byte ptr [rax]|2|seq
+8a 45 ff|mov|al,byte ptr [rbp-0x1]|3|seq
+8b c8|mov|ecx,eax|2|seq
+48 8b c8|mov|rcx,rax|3|seq
+b0 01|mov|al,0x1|2|seq
+b4 01|mov|ah,0x1|2|seq
+40 b4 01|mov|spl,0x1|3|seq
+41 b0 01|mov|r8b,0x1|3|seq
+b8 01 00 00 00|mov|eax,0x1|5|seq
+41 b9 01 00 00 00|mov|r9d,0x1|6|seq
+66 b8 34 12|mov|ax,0x1234|4|seq
+48 b8 88 77 66 55 44 33 22 11|movabs|rax,0x1122334455667788|10|seq
+49 ba 00 00 00 00 00 00 00 80|movabs|r10,0x8000000000000000|10|seq
+a0 00 10 00 00 00 00 00 00|movabs|al,[0x1000]|9|seq
+a1 00 10 00 00 00 00 00 00|movabs|eax,[0x1000]|9|seq
+48 a3 00 10 00 00 00 00 00 00|movabs|[0x1000],rax|10|seq
+8c d8|mov|eax,ds|2|seq
+8e d8|mov|ds,eax|2|seq
+8c 18|mov|word ptr [rax],ds|2|seq
+# lea
+8d 04 08|lea|eax,[rax+rcx*1]|3|seq
+48 8d 04 40|lea|rax,[rax+rax*2]|4|seq
+48 8d 3d 10 00 00 00|lea|rdi,[rip+0x10]|7|seq
+48 8d 05 00 00 00 00|lea|rax,[rip+0x0]|7|seq
+48 8d 64 24 08|lea|rsp,[rsp+0x8]|5|seq
+4c 8d 0c 89|lea|r9,[rcx+rcx*4]|4|seq
+67 8d 04 08|lea|eax,[eax+ecx*1]|4|seq
+8d 44 00 01|lea|eax,[rax+rax*1+0x1]|4|seq
+# push and pop
+50|push|rax|1|seq
+55|push|rbp|1|seq
+41 54|push|r12|2|seq
+41 57|push|r15|2|seq
+58|pop|rax|1|seq
+5d|pop|rbp|1|seq
+41 5c|pop|r12|2|seq
+41 5f|pop|r15|2|seq
+66 50|push|ax|2|seq
+6a 01|push|0x1|2|seq
+6a ff|push|0xffffffffffffffff|2|seq
+68 00 01 00 00|push|0x100|5|seq
+ff 30|push|qword ptr [rax]|2|seq
+ff 75 f8|push|qword ptr [rbp-0x8]|3|seq
+41 ff 34 24|push|qword ptr [r12]|4|seq
+8f 00|pop|qword ptr [rax]|2|seq
+8f 45 f8|pop|qword ptr [rbp-0x8]|3|seq
+0f a0|push|fs|2|seq
+0f a1|pop|fs|2|seq
+0f a8|push|gs|2|seq
+0f a9|pop|gs|2|seq
+9c|pushf||1|seq
+9d|popf||1|seq
+# movsxd, imul, test, xchg
+48 63 c0|movsxd|rax,eax|3|seq
+63 c0|movsxd|eax,eax|2|seq
+48 63 45 fc|movsxd|rax,dword ptr [rbp-0x4]|4|seq
+69 c0 10 00 00 00|imul|eax,eax,0x10|6|seq
+48 69 c0 10 00 00 00|imul|rax,rax,0x10|7|seq
+6b c0 0a|imul|eax,eax,0xa|3|seq
+48 6b c0 f0|imul|rax,rax,0xfffffffffffffff0|4|seq
+66 6b c0 02|imul|ax,ax,0x2|4|seq
+0f af c1|imul|eax,ecx|3|seq
+48 0f af 45 f8|imul|rax,qword ptr [rbp-0x8]|5|seq
+84 c0|test|al,al|2|seq
+84 e4|test|ah,ah|2|seq
+85 c0|test|eax,eax|2|seq
+48 85 c0|test|rax,rax|3|seq
+85 00|test|dword ptr [rax],eax|2|seq
+a8 01|test|al,0x1|2|seq
+a9 01 00 00 00|test|eax,0x1|5|seq
+48 a9 ff 00 00 00|test|rax,0xff|6|seq
+f6 c1 01|test|cl,0x1|3|seq
+f6 00 80|test|byte ptr [rax],0x80|3|seq
+f7 c1 01 00 00 00|test|ecx,0x1|6|seq
+48 f7 c1 01 00 00 00|test|rcx,0x1|7|seq
+86 c1|xchg|cl,al|2|seq
+87 c8|xchg|eax,ecx|2|seq
+48 87 c8|xchg|rax,rcx|3|seq
+87 00|xchg|dword ptr [rax],eax|2|seq
+91|xchg|ecx,eax|1|seq
+48 91|xchg|rcx,rax|2|seq
+49 90|xchg|r8,rax|2|seq
+41 90|xchg|r8d,eax|2|seq
+90|nop||1|seq
+66 90|xchg|ax,ax|2|seq
+f3 90|pause||2|seq
+# Short and near branches
+70 10|jo|0x1012|2|jcc
+71 10|jno|0x1012|2|jcc
+72 10|jb|0x1012|2|jcc
+73 10|jae|0x1012|2|jcc
+74 10|je|0x1012|2|jcc
+75 10|jne|0x1012|2|jcc
+76 10|jbe|0x1012|2|jcc
+77 10|ja|0x1012|2|jcc
+78 10|js|0x1012|2|jcc
+79 10|jns|0x1012|2|jcc
+7a 10|jp|0x1012|2|jcc
+7b 10|jnp|0x1012|2|jcc
+7c 10|jl|0x1012|2|jcc
+7d 10|jge|0x1012|2|jcc
+7e 10|jle|0x1012|2|jcc
+7f 10|jg|0x1012|2|jcc
+74 fe|je|0x1000|2|jcc
+75 80|jne|0xf82|2|jcc
+0f 80 00 01 00 00|jo|0x1106|6|jcc
+0f 81 00 01 00 00|jno|0x1106|6|jcc
+0f 82 00 01 00 00|jb|0x1106|6|jcc
+0f 83 00 01 00 00|jae|0x1106|6|jcc
+0f 84 00 01 00 00|je|0x1106|6|jcc
+0f 85 00 01 00 00|jne|0x1106|6|jcc
+0f 86 00 01 00 00|jbe|0x1106|6|jcc
+0f 87 00 01 00 00|ja|0x1106|6|jcc
+0f 88 00 01 00 00|js|0x1106|6|jcc
+0f 89 00 01 00 00|jns|0x1106|6|jcc
+0f 8a 00 01 00 00|jp|0x1106|6|jcc
+0f 8b 00 01 00 00|jnp|0x1106|6|jcc
+0f 8c 00 01 00 00|jl|0x1106|6|jcc
+0f 8d 00 01 00 00|jge|0x1106|6|jcc
+0f 8e 00 01 00 00|jle|0x1106|6|jcc
+0f 8f f0 fe ff ff|jg|0xef6|6|jcc
+eb 10|jmp|0x1012|2|jmp
+eb fe|jmp|0x1000|2|jmp
+e9 00 01 00 00|jmp|0x1105|5|jmp
+e9 f0 fe ff ff|jmp|0xef5|5|jmp
+e8 00 00 00 00|call|0x1005|5|call
+e8 fb ef ff ff|call|0x0|5|call
+e3 10|jrcxz|0x1012|2|jcc
+67 e3 10|jecxz|0x1013|3|jcc
+e2 10|loop|0x1012|2|jcc
+e1 10|loope|0x1012|2|jcc
+e0 10|loopne|0x1012|2|jcc
+ff d0|call|rax|2|icall
+41 ff d3|call|r11|3|icall
+ff 10|call|qword ptr [rax]|2|icall
+ff 15 10 00 00 00|call|qword ptr [rip+0x10]|6|icall
+ff 14 c5 00 10 00 00|call|qword ptr [rax*8+0x1000]|7|icall
+ff e0|jmp|rax|2|ijmp
+41 ff e3|jmp|r11|3|ijmp
+ff 20|jmp|qword ptr [rax]|2|ijmp
+ff 25 10 00 00 00|jmp|qword ptr [rip+0x10]|6|ijmp
+ff 24 c5 00 10 00 00|jmp|qword ptr [rax*8+0x1000]|7|ijmp
+3e ff e0|jmp|rax|3|ijmp
+3e ff d0|call|rax|3|icall
+f2 e9 00 01 00 00|jmp|0x1106|6|jmp
+f2 c3|ret||2|ret
+f3 c3|ret||2|ret
+c3|ret||1|ret
+c2 08 00|ret|0x8|3|ret
+cb|retf||1|ret
+cc|int3||1|trap
+cd 80|int|0x80|2|seq
+f1|int1||1|trap
+f4|hlt||1|trap
+c9|leave||1|seq
+c8 10 00 00|enter|0x10,0x0|4|seq
+c8 20 00 01|enter|0x20,0x1|4|seq
+0f 0b|ud2||2|trap
+0f ff c0|ud0|eax,eax|3|trap
+0f b9 c0|ud1|eax,eax|3|trap
+# Nop forms
+0f 1f 00|nop|dword ptr [rax]|3|seq
+0f 1f 40 00|nop|dword ptr [rax+0x0]|4|seq
+0f 1f 44 00 00|nop|dword ptr [rax+rax*1+0x0]|5|seq
+66 0f 1f 44 00 00|nop|word ptr [rax+rax*1+0x0]|6|seq
+0f 1f 80 00 00 00 00|nop|dword ptr [rax+0x0]|7|seq
+0f 1f 84 00 00 00 00 00|nop|dword ptr [rax+rax*1+0x0]|8|seq
+66 0f 1f 84 00 00 00 00 00|nop|word ptr [rax+rax*1+0x0]|9|seq
+66 2e 0f 1f 84 00 00 00 00 00|nop|word ptr [rax+rax*1+0x0]|10|seq
+66 66 2e 0f 1f 84 00 00 00 00 00|nop|word ptr [rax+rax*1+0x0]|11|seq
+66 66 66 2e 0f 1f 84 00 00 00 00 00|nop|word ptr [rax+rax*1+0x0]|12|seq
+0f 1f c0|nop|eax|3|seq
+0f 19 c0|nop|eax|3|seq
+0f 1e c8|nop|eax|3|seq
+f3 0f 1e fa|endbr64||4|seq
+f3 0f 1e fb|endbr32||4|seq
+0f 18 00|prefetchnta|byte ptr [rax]|3|seq
+0f 18 08|prefetcht0|byte ptr [rax]|3|seq
+0f 18 10|prefetcht1|byte ptr [rax]|3|seq
+0f 18 18|prefetcht2|byte ptr [rax]|3|seq
+0f 0d 08|prefetchw|byte ptr [rax]|3|seq
+# Conversions and flags
+98|cwde||1|seq
+48 98|cdqe||2|seq
+66 98|cbw||2|seq
+99|cdq||1|seq
+48 99|cqo||2|seq
+66 99|cwd||2|seq
+9e|sahf||1|seq
+9f|lahf||1|seq
+f5|cmc||1|seq
+f8|clc||1|seq
+f9|stc||1|seq
+fa|cli||1|seq
+fb|sti||1|seq
+fc|cld||1|seq
+fd|std||1|seq
+d7|xlat|byte ptr ds:[rbx]|1|seq
+# Strings
+a4|movs|byte ptr es:[rdi],byte ptr ds:[rsi]|1|seq
+a5|movs|dword ptr es:[rdi],dword ptr ds:[rsi]|1|seq
+48 a5|movs|qword ptr es:[rdi],qword ptr ds:[rsi]|2|seq
+66 a5|movs|word ptr es:[rdi],word ptr ds:[rsi]|2|seq
+f3 a4|movs|byte ptr es:[rdi],byte ptr ds:[rsi]|2|seq
+f3 48 a5|movs|qword ptr es:[rdi],qword ptr ds:[rsi]|3|seq
+a6|cmps|byte ptr ds:[rsi],byte ptr es:[rdi]|1|seq
+f3 a6|cmps|byte ptr ds:[rsi],byte ptr es:[rdi]|2|seq
+f2 a6|cmps|byte ptr ds:[rsi],byte ptr es:[rdi]|2|seq
+aa|stos|byte ptr es:[rdi],al|1|seq
+ab|stos|dword ptr es:[rdi],eax|1|seq
+48 ab|stos|qword ptr es:[rdi],rax|2|seq
+f3 aa|stos|byte ptr es:[rdi],al|2|seq
+f3 48 ab|stos|qword ptr es:[rdi],rax|3|seq
+ac|lods|al,byte ptr ds:[rsi]|1|seq
+ad|lods|eax,dword ptr ds:[rsi]|1|seq
+48 ad|lods|rax,qword ptr ds:[rsi]|2|seq
+ae|scas|al,byte ptr es:[rdi]|1|seq
+f2 ae|scas|al,byte ptr es:[rdi]|2|seq
+af|scas|eax,dword ptr es:[rdi]|1|seq
+f3 af|scas|eax,dword ptr es:[rdi]|2|seq
+6c|ins|byte ptr es:[rdi],dx|1|seq
+6d|ins|dword ptr es:[rdi],dx|1|seq
+6e|outs|dx,byte ptr ds:[rsi]|1|seq
+6f|outs|dx,dword ptr ds:[rsi]|1|seq
+# Shifts and rotates
+d0 c0|rol|al,1|2|seq
+d0 c8|ror|al,1|2|seq
+d0 d0|rcl|al,1|2|seq
+d0 d8|rcr|al,1|2|seq
+d0 e0|shl|al,1|2|seq
+d0 e8|shr|al,1|2|seq
+d0 f8|sar|al,1|2|seq
+d1 e0|shl|eax,1|2|seq
+d1 f8|sar|eax,1|2|seq
+48 d1 e0|shl|rax,1|3|seq
+c0 e0 03|shl|al,0x3|3|seq
+c1 e0 03|shl|eax,0x3|3|seq
+c1 e8 1f|shr|eax,0x1f|3|seq
+48 c1 f8 3f|sar|rax,0x3f|4|seq
+48 c1 c0 0d|rol|rax,0xd|4|seq
+c1 c8 07|ror|eax,0x7|3|seq
+c1 d0 01|rcl|eax,0x1|3|seq
+c1 d8 01|rcr|eax,0x1|3|seq
+d2 e0|shl|al,cl|2|seq
+d3 e0|shl|eax,cl|2|seq
+48 d3 e8|shr|rax,cl|3|seq
+48 d3 f8|sar|rax,cl|3|seq
+d3 c0|rol|eax,cl|2|seq
+d3 c8|ror|eax,cl|2|seq
+d3 64 24 08|shl|dword ptr [rsp+0x8],cl|4|seq
+0f a4 c2 03|shld|edx,eax,0x3|4|seq
+0f a5 c2|shld|edx,eax,cl|3|seq
+48 0f a4 c2 03|shld|rdx,rax,0x3|5|seq
+0f ac c2 03|shrd|edx,eax,0x3|4|seq
+0f ad c2|shrd|edx,eax,cl|3|seq
+48 0f ad c2|shrd|rdx,rax,cl|4|seq
+# Group 3, 4 and 5
+f6 d0|not|al|2|seq
+f7 d0|not|eax|2|seq
+48 f7 d0|not|rax|3|seq
+f6 d8|neg|al|2|seq
+f7 d8|neg|eax|2|seq
+48 f7 d8|neg|rax|3|seq
+f6 e1|mul|cl|2|seq
+f7 e1|mul|ecx|2|seq
+48 f7 e1|mul|rcx|3|seq
+f6 e9|imul|cl|2|seq
+f7 e9|imul|ecx|2|seq
+48 f7 e9|imul|rcx|3|seq
+f6 f1|div|cl|2|seq
+f7 f1|div|ecx|2|seq
+48 f7 f1|div|rcx|3|seq
+f6 f9|idiv|cl|2|seq
+f7 f9|idiv|ecx|2|seq
+48 f7 f9|idiv|rcx|3|seq
+f7 75 f8|div|dword ptr [rbp-0x8]|3|seq
+fe c0|inc|al|2|seq
+fe c8|dec|al|2|seq
+ff c0|inc|eax|2|seq
+ff c8|dec|eax|2|seq
+48 ff c0|inc|rax|3|seq
+48 ff c8|dec|rax|3|seq
+ff 00|inc|dword ptr [rax]|2|seq
+48 ff 08|dec|qword ptr [rax]|3|seq
+fe 00|inc|byte ptr [rax]|2|seq
+66 ff c0|inc|ax|3|seq
+# 0F general purpose
+0f 05|syscall||2|seq
+0f a2|cpuid||2|seq
+0f 31|rdtsc||2|seq
+0f 01 f9|rdtscp||3|seq
+0f 01 d0|xgetbv||3|seq
+0f 40 c1|cmovo|eax,ecx|3|seq
+0f 41 c1|cmovno|eax,ecx|3|seq
+0f 42 c1|cmovb|eax,ecx|3|seq
+0f 43 c1|cmovae|eax,ecx|3|seq
+0f 44 c1|cmove|eax,ecx|3|seq
+0f 45 c1|cmovne|eax,ecx|3|seq
+0f 46 c1|cmovbe|eax,ecx|3|seq
+0f 47 c1|cmova|eax,ecx|3|seq
+0f 48 c1|cmovs|eax,ecx|3|seq
+0f 49 c1|cmovns|eax,ecx|3|seq
+0f 4a c1|cmovp|eax,ecx|3|seq
+0f 4b c1|cmovnp|eax,ecx|3|seq
+0f 4c c1|cmovl|eax,ecx|3|seq
+0f 4d c1|cmovge|eax,ecx|3|seq
+0f 4e c1|cmovle|eax,ecx|3|seq
+0f 4f c1|cmovg|eax,ecx|3|seq
+48 0f 44 45 f8|cmove|rax,qword ptr [rbp-0x8]|5|seq
+0f 90 c0|seto|al|3|seq
+0f 91 c0|setno|al|3|seq
+0f 92 c0|setb|al|3|seq
+0f 93 c0|setae|al|3|seq
+0f 94 c0|sete|al|3|seq
+0f 95 c0|setne|al|3|seq
+0f 96 c0|setbe|al|3|seq
+0f 97 c0|seta|al|3|seq
+0f 98 c0|sets|al|3|seq
+0f 99 c0|setns|al|3|seq
+0f 9a c0|setp|al|3|seq
+0f 9b c0|setnp|al|3|seq
+0f 9c c0|setl|al|3|seq
+0f 9d c0|setge|al|3|seq
+0f 9e c0|setle|al|3|seq
+0f 9f c0|setg|al|3|seq
+41 0f 94 c0|sete|r8b|4|seq
+0f 94 00|sete|byte ptr [rax]|3|seq
+0f a3 c8|bt|eax,ecx|3|seq
+48 0f a3 c8|bt|rax,rcx|4|seq
+0f ab c8|bts|eax,ecx|3|seq
+0f b3 c8|btr|eax,ecx|3|seq
+0f bb c8|btc|eax,ecx|3|seq
+0f ba e0 03|bt|eax,0x3|4|seq
+0f ba e8 03|bts|eax,0x3|4|seq
+0f ba f0 03|btr|eax,0x3|4|seq
+0f ba f8 03|btc|eax,0x3|4|seq
+48 0f ba e0 3f|bt|rax,0x3f|5|seq
+0f b0 0a|cmpxchg|byte ptr [rdx],cl|3|seq
+0f b1 0a|cmpxchg|dword ptr [rdx],ecx|3|seq
+48 0f b1 0a|cmpxchg|qword ptr [rdx],rcx|4|seq
+f0 0f b1 0a|cmpxchg|dword ptr [rdx],ecx|4|seq
+f0 48 0f b1 0a|cmpxchg|qword ptr [rdx],rcx|5|seq
+f0 0f c1 02|xadd|dword ptr [rdx],eax|4|seq
+0f c0 c8|xadd|al,cl|3|seq
+0f c1 c8|xadd|eax,ecx|3|seq
+48 0f c1 c8|xadd|rax,rcx|4|seq
+0f c8|bswap|eax|2|seq
+0f cf|bswap|edi|2|seq
+49 0f c8|bswap|r8|3|seq
+48 0f c9|bswap|rcx|3|seq
+0f b6 c0|movzx|eax,al|3|seq
+0f b6 00|movzx|eax,byte ptr [rax]|3|seq
+0f b7 c0|movzx|eax,ax|3|seq
+48 0f b6 c0|movzx|rax,al|4|seq
+48 0f b7 c0|movzx|rax,ax|4|seq
+0f be c0|movsx|eax,al|3|seq
+0f bf c0|movsx|eax,ax|3|seq
+48 0f be c0|movsx|rax,al|4|seq
+48 0f bf c0|movsx|rax,ax|4|seq
+66 0f be c0|movsx|ax,al|4|seq
+44 0f b6 c0|movzx|r8d,al|4|seq
+0f b6 c4|movzx|eax,ah|3|seq
+40 0f b6 c7|movzx|eax,dil|4|seq
+0f bc c0|bsf|eax,eax|3|seq
+0f bd c0|bsr|eax,eax|3|seq
+48 0f bc c0|bsf|rax,rax|4|seq
+f3 0f bc c0|tzcnt|eax,eax|4|seq
+f3 0f bd c0|lzcnt|eax,eax|4|seq
+f3 48 0f bd c0|lzcnt|rax,rax|5|seq
+f3 0f b8 c0|popcnt|eax,eax|4|seq
+f3 48 0f b8 c0|popcnt|rax,rax|5|seq
+0f c7 08|cmpxchg8b|qword ptr [rax]|3|seq
+48 0f c7 08|cmpxchg16b|xmmword ptr [rax]|4|seq
+0f c7 f0|rdrand|eax|3|seq
+0f c7 f8|rdseed|eax|3|seq
+0f ae e8|lfence||3|seq
+0f ae f0|mfence||3|seq
+0f ae f8|sfence||3|seq
+0f ae 00|fxsave|[rax]|3|seq
+0f ae 08|fxrstor|[rax]|3|seq
+0f ae 10|ldmxcsr|dword ptr [rax]|3|seq
+0f ae 18|stmxcsr|dword ptr [rax]|3|seq
+0f ae 38|clflush|byte ptr [rax]|3|seq
+# Lock
+f0 01 00|add|dword ptr [rax],eax|3|seq
+f0 48 01 08|add|qword ptr [rax],rcx|4|seq
+f0 83 00 01|add|dword ptr [rax],0x1|4|seq
+f0 ff 00|inc|dword ptr [rax]|3|seq
+f0 87 00|xchg|dword ptr [rax],eax|3|seq
+# SSE and SSE2 with operands
+0f 10 c1|movups|xmm0,xmm1|3|seq
+0f 10 00|movups|xmm0,xmmword ptr [rax]|3|seq
+0f 11 00|movups|xmmword ptr [rax],xmm0|3|seq
+66 0f 10 c1|movupd|xmm0,xmm1|4|seq
+66 0f 11 00|movupd|xmmword ptr [rax],xmm0|4|seq
+f3 0f 10 c1|movss|xmm0,xmm1|4|seq
+f3 0f 10 00|movss|xmm0,dword ptr [rax]|4|seq
+f3 0f 11 00|movss|dword ptr [rax],xmm0|4|seq
+f2 0f 10 c1|movsd|xmm0,xmm1|4|seq
+f2 0f 10 45 f8|movsd|xmm0,qword ptr [rbp-0x8]|5|seq
+f2 0f 11 45 f8|movsd|qword ptr [rbp-0x8],xmm0|5|seq
+0f 28 c1|movaps|xmm0,xmm1|3|seq
+0f 28 05 10 00 00 00|movaps|xmm0,xmmword ptr [rip+0x10]|7|seq
+0f 29 00|movaps|xmmword ptr [rax],xmm0|3|seq
+66 0f 28 c1|movapd|xmm0,xmm1|4|seq
+66 0f 29 00|movapd|xmmword ptr [rax],xmm0|4|seq
+66 0f 6f c1|movdqa|xmm0,xmm1|4|seq
+66 0f 6f 05 10 00 00 00|movdqa|xmm0,xmmword ptr [rip+0x10]|8|seq
+66 0f 7f 00|movdqa|xmmword ptr [rax],xmm0|4|seq
+f3 0f 6f c1|movdqu|xmm0,xmm1|4|seq
+f3 0f 6f 00|movdqu|xmm0,xmmword ptr [rax]|4|seq
+f3 0f 7f 00|movdqu|xmmword ptr [rax],xmm0|4|seq
+66 44 0f 6f c1|movdqa|xmm8,xmm1|5|seq
+66 45 0f 6f c8|movdqa|xmm9,xmm8|5|seq
+66 0f 6e c0|movd|xmm0,eax|4|seq
+66 48 0f 6e c0|movq|xmm0,rax|5|seq
+66 0f 6e 00|movd|xmm0,dword ptr [rax]|4|seq
+66 0f 7e c0|movd|eax,xmm0|4|seq
+66 48 0f 7e c0|movq|rax,xmm0|5|seq
+66 0f 7e 00|movd|dword ptr [rax],xmm0|4|seq
+f3 0f 7e c1|movq|xmm0,xmm1|4|seq
+f3 0f 7e 00|movq|xmm0,qword ptr [rax]|4|seq
+66 0f d6 00|movq|qword ptr [rax],xmm0|4|seq
+66 0f ef c0|pxor|xmm0,xmm0|4|seq
+66 0f ef 05 10 00 00 00|pxor|xmm0,xmmword ptr [rip+0x10]|8|seq
+0f 57 c0|xorps|xmm0,xmm0|3|seq
+66 0f 57 c0|xorpd|xmm0,xmm0|4|seq
+0f 54 c1|andps|xmm0,xmm1|3|seq
+66 0f 54 c1|andpd|xmm0,xmm1|4|seq
+0f 56 c1|orps|xmm0,xmm1|3|seq
+66 0f 74 c1|pcmpeqb|xmm0,xmm1|4|seq
+66 0f 76 c1|pcmpeqd|xmm0,xmm1|4|seq
+66 0f d7 c0|pmovmskb|eax,xmm0|4|seq
+66 0f 60 c1|punpcklbw|xmm0,xmm1|4|seq
+66 0f 6c c1|punpcklqdq|xmm0,xmm1|4|seq
+66 0f 70 c0 44|pshufd|xmm0,xmm0,0x44|5|seq
+66 0f 70 00 1b|pshufd|xmm0,xmmword ptr [rax],0x1b|5|seq
+f2 0f 2a c0|cvtsi2sd|xmm0,eax|4|seq
+f2 48 0f 2a c0|cvtsi2sd|xmm0,rax|5|seq
+f2 0f 2a 00|cvtsi2sd|xmm0,dword ptr [rax]|4|seq
+f2 0f 2c c0|cvttsd2si|eax,xmm0|4|seq
+f2 48 0f 2c c0|cvttsd2si|rax,xmm0|5|seq
+f2 0f 58 c1|addsd|xmm0,xmm1|4|seq
+f2 0f 5c c1|subsd|xmm0,xmm1|4|seq
+f2 0f 59 c1|mulsd|xmm0,xmm1|4|seq
+f2 0f 5e c1|divsd|xmm0,xmm1|4|seq
+f3 0f 58 c1|addss|xmm0,xmm1|4|seq
+f3 0f 5c c1|subss|xmm0,xmm1|4|seq
+f3 0f 59 c1|mulss|xmm0,xmm1|4|seq
+f3 0f 5e c1|divss|xmm0,xmm1|4|seq
+f2 0f 58 05 10 00 00 00|addsd|xmm0,qword ptr [rip+0x10]|8|seq
+66 0f 2e c1|ucomisd|xmm0,xmm1|4|seq
+0f 2e c1|ucomiss|xmm0,xmm1|3|seq
+66 0f 2f c1|comisd|xmm0,xmm1|4|seq
+0f 2f c1|comiss|xmm0,xmm1|3|seq
+66 0f 2e 00|ucomisd|xmm0,qword ptr [rax]|4|seq
+0f 16 00|movhps|xmm0,qword ptr [rax]|3|seq
+0f 17 00|movhps|qword ptr [rax],xmm0|3|seq
+0f 12 00|movlps|xmm0,qword ptr [rax]|3|seq
+0f 13 00|movlps|qword ptr [rax],xmm0|3|seq
+66 0f d4 c1|paddq|xmm0,xmm1|4|seq
+66 0f fe c1|paddd|xmm0,xmm1|4|seq
+66 0f fb c1|psubq|xmm0,xmm1|4|seq
+66 0f db c1|pand|xmm0,xmm1|4|seq
+66 0f df c1|pandn|xmm0,xmm1|4|seq
+66 0f eb c1|por|xmm0,xmm1|4|seq
+66 0f 66 c1|pcmpgtd|xmm0,xmm1|4|seq
+66 0f 73 d8 08|psrldq|xmm0,0x8|5|seq
+66 0f 73 f8 08|pslldq|xmm0,0x8|5|seq
+66 0f 72 e0 04|psrad|xmm0,0x4|5|seq
+f2 0f 5a c1|cvtsd2ss|xmm0,xmm1|4|seq
+f3 0f 5a c1|cvtss2sd|xmm0,xmm1|4|seq
+0f c6 c1 1b|shufps|xmm0,xmm1,0x1b|4|seq
+0f c2 c1 01|cmpps|xmm0,xmm1,0x1|4|seq
+f2 0f c2 c1 00|cmpsd|xmm0,xmm1,0x0|5|seq
+0f ef c1|pxor|mm0,mm1|3|seq
+0f 77|emms||2|seq
+# x87
+d9 00|fld|dword ptr [rax]|2|seq
+dd 00|fld|qword ptr [rax]|2|seq
+db 28|fld|tbyte ptr [rax]|2|seq
+d9 18|fstp|dword ptr [rax]|2|seq
+dd 18|fstp|qword ptr [rax]|2|seq
+dd 45 f8|fld|qword ptr [rbp-0x8]|3|seq
+df 28|fild|qword ptr [rax]|2|seq
+db 00|fild|dword ptr [rax]|2|seq
+d9 c1|fld|st(1)|2|seq
+d9 c9|fxch|st(1)|2|seq
+dd d9|fstp|st(1)|2|seq
+d8 c1|fadd|st,st(1)|2|seq
+dc c1|fadd|st(1),st|2|seq
+de c1|faddp|st(1),st|2|seq
+de e9|fsubp|st(1),st|2|seq
+de f9|fdivp|st(1),st|2|seq
+d9 e8|fld1||2|seq
+d9 ee|fldz||2|seq
+d9 e0|fchs||2|seq
+d9 e1|fabs||2|seq
+df e0|fnstsw|ax|2|seq
+db e3|fninit||2|seq
+db e8|fucomi|st,st(0)|2|seq
+df e8|fucomip|st,st(0)|2|seq
+d9 38|fnstcw|word ptr [rax]|2|seq
+d9 28|fldcw|word ptr [rax]|2|seq
+9b|fwait||1|seq
+# System and other 0F forms
+0f 0d 10|prefetchwt1|byte ptr [rax]|3|seq
+0f 0d 18|prefetch|byte ptr [rax]|3|seq
+48 90|nop||2|seq
+0f 01 c8|monitor||3|seq
+0f 01 c9|mwait||3|seq
+0f 01 ca|clac||3|seq
+0f 01 cb|stac||3|seq
+0f 01 d1|xsetbv||3|seq
+0f 01 d5|xend||3|seq
+0f 01 d6|xtest||3|seq
+0f 01 ee|rdpkru||3|seq
+0f 01 ef|wrpkru||3|seq
+0f 01 e8|serialize||3|seq
+0f 01 f8|swapgs||3|seq
+0f 01 e0|smsw|eax|3|seq
+0f 01 f0|lmsw|ax|3|seq
+0f 01 38|invlpg|byte ptr [rax]|3|seq
+0f 01 10|lgdt|[rax]|3|seq
+0f 01 00|sgdt|[rax]|3|seq
+66 0f c7 f0|rdrand|ax|4|seq
+48 0f c7 f0|rdrand|rax|4|seq
+0f 00 c0|sldt|eax|3|seq
+0f 00 d0|lldt|eax|3|seq
+0f 00 e0|verr|eax|3|seq
+0f 00 e8|verw|eax|3|seq
+0f 20 c0|mov|rax,cr0|3|seq
+0f 22 c0|mov|cr0,rax|3|seq
+0f 21 c0|mov|rax,dr0|3|seq
+44 0f 20 c0|mov|rax,cr8|4|seq
+0f 02 c0|lar|eax,eax|3|seq
+0f 03 c0|lsl|eax,eax|3|seq
+0f 06|clts||2|seq
+0f 07|sysret||2|ret
+0f 34|sysenter||2|seq
+0f 30|wrmsr||2|seq
+0f 32|rdmsr||2|seq
+0f 33|rdpmc||2|seq
+0f 08|invd||2|seq
+0f 09|wbinvd||2|seq
+0f aa|rsm||2|ret
+0f b2 00|lss|eax,fword ptr [rax]|3|seq
+0f b4 00|lfs|eax,fword ptr [rax]|3|seq
+0f b5 00|lgs|eax,fword ptr [rax]|3|seq
+0f c3 00|movnti|dword ptr [rax],eax|3|seq
+48 0f c3 00|movnti|qword ptr [rax],rax|4|seq
+0f c7 20|xsavec|[rax]|3|seq
+0f c7 28|xsaves|[rax]|3|seq
+0f c7 18|xrstors|[rax]|3|seq
+48 0f c7 20|xsavec64|[rax]|4|seq
+0f c7 30|vmptrld|qword ptr [rax]|3|seq
+66 0f c7 30|vmclear|qword ptr [rax]|4|seq
+f3 0f c7 30|vmxon|qword ptr [rax]|4|seq
+0f c7 38|vmptrst|qword ptr [rax]|3|seq
+f3 0f c7 f8|rdpid|rax|4|seq
+0f ae 20|xsave|[rax]|3|seq
+0f ae 28|xrstor|[rax]|3|seq
+0f ae 30|xsaveopt|[rax]|3|seq
+f3 0f ae c0|rdfsbase|eax|4|seq
+f3 48 0f ae c0|rdfsbase|rax|5|seq
+f3 0f ae c8|rdgsbase|eax|4|seq
+f3 0f ae d0|wrfsbase|eax|4|seq
+f3 0f ae d8|wrgsbase|eax|4|seq
+66 0f ae 30|clwb|byte ptr [rax]|4|seq
+66 0f ae 38|clflushopt|byte ptr [rax]|4|seq
+0f 1c 00|cldemote|byte ptr [rax]|3|seq
+0f 1d c0|nop|eax|3|seq
+f3 0f 1e 08|nop|dword ptr [rax]|4|seq
+f3 0f 1e c8|rdsspd|eax|4|seq
+f3 48 0f 1e c8|rdsspq|rax|5|seq
+e4 60|in|al,0x60|2|seq
+e5 60|in|eax,0x60|2|seq
+e6 60|out|0x60,al|2|seq
+e7 60|out|0x60,eax|2|seq
+ec|in|al,dx|1|seq
+ed|in|eax,dx|1|seq
+ee|out|dx,al|1|seq
+ef|out|dx,eax|1|seq
+66 ed|in|ax,dx|2|seq
+cf|iret||1|ret
+48 cf|iretq||2|ret
+ca 08 00|retf|0x8|3|ret
+6a 80|push|0xffffffffffffff80|2|seq
+# More SSE and SSE2 forms
+f2 0f f0 00|lddqu|xmm0,[rax]|4|seq
+0f 2b 00|movntps|xmmword ptr [rax],xmm0|3|seq
+66 0f e7 00|movntdq|xmmword ptr [rax],xmm0|4|seq
+0f e7 00|movntq|qword ptr [rax],mm0|3|seq
+0f 50 c1|movmskps|eax,xmm1|3|seq
+66 0f 50 c1|movmskpd|eax,xmm1|4|seq
+66 0f c5 c1 03|pextrw|eax,xmm1,0x3|5|seq
+66 0f c4 c0 03|pinsrw|xmm0,eax,0x3|5|seq
+0f 70 c1 1b|pshufw|mm0,mm1,0x1b|4|seq
+f2 0f 70 c1 1b|pshuflw|xmm0,xmm1,0x1b|5|seq
+f3 0f 70 c1 1b|pshufhw|xmm0,xmm1,0x1b|5|seq
+f3 0f e6 c1|cvtdq2pd|xmm0,xmm1|4|seq
+f2 0f e6 c1|cvtpd2dq|xmm0,xmm1|4|seq
+66 0f e6 c1|cvttpd2dq|xmm0,xmm1|4|seq
+0f 5b c1|cvtdq2ps|xmm0,xmm1|3|seq
+66 0f 5b c1|cvtps2dq|xmm0,xmm1|4|seq
+f3 0f 5b c1|cvttps2dq|xmm0,xmm1|4|seq
+0f 2c c1|cvttps2pi|mm0,xmm1|3|seq
+66 0f 2d c1|cvtpd2pi|mm0,xmm1|4|seq
+f3 0f 2d c0|cvtss2si|eax,xmm0|4|seq
+f3 48 0f 2c c0|cvttss2si|rax,xmm0|5|seq
+0f 2a c1|cvtpi2ps|xmm0,mm1|3|seq
+66 0f 2a c1|cvtpi2pd|xmm0,mm1|4|seq
+f3 0f 2a c0|cvtsi2ss|xmm0,eax|4|seq
+66 0f 78 c0 01 02|extrq|xmm0,0x1,0x2|6|seq
+f2 0f 78 c1 01 02|insertq|xmm0,xmm1,0x1,0x2|6|seq
+66 0f 79 c1|extrq|xmm0,xmm1|4|seq
+0f a7 c0|xstore-rng||3|seq
+0f a7 c8|xcrypt-ecb||3|seq
+f3 0f a7 d0|xcrypt-cbc||4|seq
+0f a7 d8|xcrypt-ctr||3|seq
+0f a7 e0|xcrypt-cfb||3|seq
+0f a7 e8|xcrypt-ofb||3|seq
+f3 0f a6 c0|montmul||4|seq
+0f a6 c8|xsha1||3|seq
+0f a6 d0|xsha256||3|seq
+f2 0f 00 32|lkgs|word ptr [rdx]|4|seq
+f2 0f 00 f0|lkgs|eax|4|seq
+f2 0f 01 ca|erets||4|ret
+f3 0f 01 ca|eretu||4|ret
+f2 0f 79 ca|insertq|xmm1,xmm2|4|seq
+f2 0f 7c c1|haddps|xmm0,xmm1|4|seq
+66 0f 7c c1|haddpd|xmm0,xmm1|4|seq
+f3 0f 12 c1|movsldup|xmm0,xmm1|4|seq
+f2 0f 12 c1|movddup|xmm0,xmm1|4|seq
+0f 12 c1|movhlps|xmm0,xmm1|3|seq
+0f 16 c1|movlhps|xmm0,xmm1|3|seq
+66 0f 16 00|movhpd|xmm0,qword ptr [rax]|4|seq
+66 0f 12 00|movlpd|xmm0,qword ptr [rax]|4|seq
+0f 14 c1|unpcklps|xmm0,xmm1|3|seq
+66 0f 15 c1|unpckhpd|xmm0,xmm1|4|seq
+66 0f d6 c1|movq|xmm1,xmm0|4|seq
+f3 0f d6 c1|movq2dq|xmm0,mm1|4|seq
+f2 0f d6 c1|movdq2q|mm0,xmm1|4|seq
+0f 7e c0|movd|eax,mm0|3|seq
+48 0f 7e c0|movq|rax,mm0|4|seq
+0f 6e c0|movd|mm0,eax|3|seq
+0f 6f c1|movq|mm0,mm1|3|seq
+0f 7f 00|movq|qword ptr [rax],mm0|3|seq
+66 0f f7 c1|maskmovdqu|xmm0,xmm1|4|seq
+0f f7 c1|maskmovq|mm0,mm1|3|seq
+66 0f 71 d0 02|psrlw|xmm0,0x2|5|seq
+66 0f 71 e0 02|psraw|xmm0,0x2|5|seq
+66 0f 71 f0 02|psllw|xmm0,0x2|5|seq
+0f 71 d0 02|psrlw|mm0,0x2|4|seq
+66 0f 73 d0 02|psrlq|xmm0,0x2|5|seq
+66 0f 73 f0 02|psllq|xmm0,0x2|5|seq
+66 0f 72 d0 02|psrld|xmm0,0x2|5|seq
+66 0f 72 f0 02|pslld|xmm0,0x2|5|seq
+f3 0f 51 c1|sqrtss|xmm0,xmm1|4|seq
+f2 0f 51 c1|sqrtsd|xmm0,xmm1|4|seq
+0f 52 c1|rsqrtps|xmm0,xmm1|3|seq
+f3 0f 53 c1|rcpss|xmm0,xmm1|4|seq
+66 0f 5d c1|minpd|xmm0,xmm1|4|seq
+f2 0f 5f c1|maxsd|xmm0,xmm1|4|seq
+66 0f d0 c1|addsubpd|xmm0,xmm1|4|seq
+f2 0f d0 c1|addsubps|xmm0,xmm1|4|seq
+66 0f e0 c1|pavgb|xmm0,xmm1|4|seq
+66 0f f6 c1|psadbw|xmm0,xmm1|4|seq
+66 0f f4 c1|pmuludq|xmm0,xmm1|4|seq
+66 0f f5 c1|pmaddwd|xmm0,xmm1|4|seq
+66 0f e4 c1|pmulhuw|xmm0,xmm1|4|seq
+66 0f d5 c1|pmullw|xmm0,xmm1|4|seq
+66 0f 63 c1|packsswb|xmm0,xmm1|4|seq
+66 0f 6b c1|packssdw|xmm0,xmm1|4|seq
+66 0f 67 c1|packuswb|xmm0,xmm1|4|seq
+66 0f 68 c1|punpckhbw|xmm0,xmm1|4|seq
+66 0f 6d c1|punpckhqdq|xmm0,xmm1|4|seq
+66 0f 62 c1|punpckldq|xmm0,xmm1|4|seq
+0f 62 c1|punpckldq|mm0,mm1|3|seq
+0f 62 00|punpckldq|mm0,dword ptr [rax]|3|seq
+66 0f 62 00|punpckldq|xmm0,xmmword ptr [rax]|4|seq
+66 0f fa c1|psubd|xmm0,xmm1|4|seq
+66 0f f8 c1|psubb|xmm0,xmm1|4|seq
+66 0f ea c1|pminsw|xmm0,xmm1|4|seq
+66 0f da c1|pminub|xmm0,xmm1|4|seq
+66 0f de c1|pmaxub|xmm0,xmm1|4|seq
+66 0f ee c1|pmaxsw|xmm0,xmm1|4|seq
+0f 15 c1|unpckhps|xmm0,xmm1|3|seq
+66 0f 14 c1|unpcklpd|xmm0,xmm1|4|seq
+0f c6 00 1b|shufps|xmm0,xmmword ptr [rax],0x1b|4|seq
+66 0f c6 c1 01|shufpd|xmm0,xmm1,0x1|5|seq
+66 0f c2 c1 04|cmppd|xmm0,xmm1,0x4|5|seq
+f3 0f c2 c1 07|cmpss|xmm0,xmm1,0x7|5|seq
+f2 0f c2 c1 08|cmpsd|xmm0,xmm1,0x8|5|seq
+f2 0f 2d c1|cvtsd2si|eax,xmm1|4|seq
+0f 5a c1|cvtps2pd|xmm0,xmm1|3|seq
+66 0f 5a c1|cvtpd2ps|xmm0,xmm1|4|seq
+0f 55 c1|andnps|xmm0,xmm1|3|seq
+66 0f 56 c1|orpd|xmm0,xmm1|4|seq
+0f 58 c1|addps|xmm0,xmm1|3|seq
+66 0f 58 c1|addpd|xmm0,xmm1|4|seq
+0f 59 c1|mulps|xmm0,xmm1|3|seq
+0f 5c c1|subps|xmm0,xmm1|3|seq
+0f 5e c1|divps|xmm0,xmm1|3|seq
+0f 5d c1|minps|xmm0,xmm1|3|seq
+0f 5f c1|maxps|xmm0,xmm1|3|seq
+# More x87 forms
+d9 d0|fnop||2|seq
+d9 e4|ftst||2|seq
+d9 e5|fxam||2|seq
+d9 f0|f2xm1||2|seq
+d9 fa|fsqrt||2|seq
+d9 ff|fcos||2|seq
+da e9|fucompp||2|seq
+de d9|fcompp||2|seq
+df c0|ffreep|st(0)|2|seq
+dd c0|ffree|st(0)|2|seq
+dd e0|fucom|st(0)|2|seq
+dd e8|fucomp|st(0)|2|seq
+db c0|fcmovnb|st,st(0)|2|seq
+db d0|fcmovnbe|st,st(0)|2|seq
+da c1|fcmovb|st,st(1)|2|seq
+db e2|fnclex||2|seq
+d8 d1|fcom|st(1)|2|seq
+d8 d9|fcomp|st(1)|2|seq
+d8 e1|fsub|st,st(1)|2|seq
+d8 f1|fdiv|st,st(1)|2|seq
+dc e1|fsubr|st(1),st|2|seq
+dc f9|fdiv|st(1),st|2|seq
+de e1|fsubrp|st(1),st|2|seq
+de f1|fdivrp|st(1),st|2|seq
+d8 c9|fmul|st,st(1)|2|seq
+de c9|fmulp|st(1),st|2|seq
+da 00|fiadd|dword ptr [rax]|2|seq
+de 00|fiadd|word ptr [rax]|2|seq
+df 00|fild|word ptr [rax]|2|seq
+df 38|fistp|qword ptr [rax]|2|seq
+db 38|fstp|tbyte ptr [rax]|2|seq
+dd 08|fisttp|qword ptr [rax]|2|seq
+db 08|fisttp|dword ptr [rax]|2|seq
+df 08|fisttp|word ptr [rax]|2|seq
+d9 20|fldenv|[rax]|2|seq
+d9 10|fst|dword ptr [rax]|2|seq
+df 20|fbld|tbyte ptr [rax]|2|seq
+df 30|fbstp|tbyte ptr [rax]|2|seq
+dd 20|frstor|[rax]|2|seq
+dd 30|fnsave|[rax]|2|seq
+d9 30|fnstenv|[rax]|2|seq
+dd 38|fnstsw|word ptr [rax]|2|seq
+d8 00|fadd|dword ptr [rax]|2|seq
+dc 08|fmul|qword ptr [rax]|2|seq
+d8 30|fdiv|dword ptr [rax]|2|seq
+dc 38|fdivr|qword ptr [rax]|2|seq
+# Opaque VEX, EVEX, REX2 and XOP forms
+c5 f8 77|(vector)||3|seq
+c5 fc 77|(vector)||3|seq
+c5 f9 6f c1|(vector)||4|seq
+c5 fd 6f 00|(vector)|[rax]|4|seq
+c5 f9 ef c0|(vector)||4|seq
+c5 f1 ef 44 24 10|(vector)|[rsp+0x10]|6|seq
+c5 7d 7f 05 10 00 00 00|(vector)|[rip+0x10]|8|seq
+c4 e2 79 f7 c0|(vector)||5|seq
+c4 e3 79 0f c1 04|(vector)||6|seq
+c4 e2 7d 18 05 10 00 00 00|(vector)|[rip+0x10]|9|seq
+c4 c1 7a 6f 04 24|(vector)|[r12]|6|seq
+c4 a1 7a 6f 04 e8|(vector)|[rax+r13*8]|6|seq
+c4 e2 f9 90 04 88|(vector)|[rax+xmm1*4]|6|seq
+c4 e1 f9 7e c0|(vector)||5|seq
+62 f1 6c 48 58 d9|(vector)||6|seq
+62 f1 7d 48 6f 00|(vector)|?|6|seq
+62 f1 7c 48 10 44 24 01|(vector)|?|8|seq
+62 f3 7d 48 1e c1 02|(vector)||7|seq
+62 f2 7d 48 90 04 88|(vector)|?|7|seq
+62 f5 7c 48 58 c1|(vector)||6|seq
+62 f1 7c 48 11 84 24 00 01 00 00|(vector)|?|11|seq
+d5 10 89 c0|(vector)||4|seq
+d5 18 01 c3|(vector)||4|seq
+d5 90 af c1|(vector)||4|seq
+d5 11 8b 00|(vector)|[r24]|4|seq
+d5 30 8b 04 08|(vector)|[r16+r17*1]|5|seq
+d5 08 81 c0 00 01 00 00|(vector)||8|seq
+d5 10 ff d0|(vector)||4|icall
+d5 10 ff e0|(vector)||4|ijmp
+d5 00 a1 00 10 00 00 00 00 00 00|(vector)|0x1000|11|jmp
+8f e8 78 a2 c1 10|(vector)||6|seq
+8f e9 78 81 c1|(vector)||5|seq
+8f ea 78 10 c0 00 01 00 00|(vector)||9|seq
+# Opaque legacy 0F 0F, 0F 38 and 0F 3A forms
+0f 0f c1 b4|(vector)||4|seq
+0f 38 f0 00|(vector)|[rax]|4|seq
+f2 0f 38 f1 c1|(vector)||5|seq
+66 0f 38 00 c1|(vector)||5|seq
+66 0f 3a 0f c1 04|(vector)||6|seq
+66 0f 3a 16 c0 01|(vector)||6|seq
+0f 3a cc 45 08 01|(vector)|[rbp+0x8]|6|seq
+# Errors: the length field holds need_at_least, len_consumed or len
+06|!invalid_in_mode||1|
+07|!invalid_in_mode||1|
+0e|!invalid_in_mode||1|
+16|!invalid_in_mode||1|
+17|!invalid_in_mode||1|
+1e|!invalid_in_mode||1|
+1f|!invalid_in_mode||1|
+27|!invalid_in_mode||1|
+2f|!invalid_in_mode||1|
+37|!invalid_in_mode||1|
+3f|!invalid_in_mode||1|
+60|!invalid_in_mode||1|
+61|!invalid_in_mode||1|
+82 c0 01|!invalid_in_mode||1|
+9a|!invalid_in_mode||1|
+ce|!invalid_in_mode||1|
+d4 0a|!invalid_in_mode||1|
+d6|!invalid_in_mode||1|
+ea|!invalid_in_mode||1|
+66 06|!invalid_in_mode||2|
+c4|!truncated||2|
+c5 f8|!truncated||3|
+62 f1|!truncated||3|
+d5|!truncated||2|
+0f|!truncated||2|
+0f 38|!truncated||3|
+0f 3a 0f|!truncated||4|
+66|!truncated||2|
+f0|!truncated||2|
+48|!truncated||2|
+e8 00 00|!truncated||5|
+0f 84 00|!truncated||6|
+c7 05 10 00 00 00 01|!truncated||10|
+8b 04|!truncated||3|
+8b 44 24|!truncated||4|
+48 b8 00 00|!truncated||10|
+a1 00 00 00|!truncated||9|
+c4 e2 79 f7|!truncated||5|
+0f 04|!invalid||2|
+0f 0a|!invalid||2|
+0f 0c|!invalid||2|
+0f 24 c0|!invalid||2|
+0f 36|!invalid||2|
+0f 39|!invalid||2|
+0f 3b|!invalid||2|
+0f a6 d8|!invalid||3|
+0f a7 c1|!invalid||3|
+0f a7 00|!invalid||3|
+0f b8 c0|!invalid||3|
+0f 0d c0|!invalid||3|
+dd 28|!invalid||2|
+f0 90|!invalid||2|
+f0 01 c0|!invalid||3|
+f0 0f c8|!invalid||3|
+f0 8b 00|!invalid||3|
+8d c0|!invalid||2|
+c4 e0 79 10 c0|!invalid||2|
+c4 e4 79 10 c0|!invalid||2|
+62 f0 7c 48 10 c0|!invalid||2|
+66 66 66 66 66 66 66 66 66 66 66 66 66 66 90|xchg|ax,ax|15|seq
+66 66 66 66 66 66 66 66 66 66 66 66 66 66 66 90|!invalid||15|
+0f 01 c0|!unsupported||3|
+0f 01 c1|!unsupported||3|

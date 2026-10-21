@@ -1,0 +1,206 @@
+{
+  "binaries": [
+    {
+      "name": "xor_decode.gcc-O2",
+      "sha256": "5260681f7d9496c1a23692e1972f56e7e7dd67e4c615768eff87dc0cdad091a4",
+      "variant": "none"
+    },
+    {
+      "name": "xor_decode.gcc-O2.stripped",
+      "sha256": "5a3c0c58d405dc339933a949eea4466d2025547777baf0f7b22b8a9eb21dc8d9",
+      "variant": "stripped"
+    }
+  ],
+  "build": {
+    "cflags": ["-O2"],
+    "compiler": "gcc 13.3.0",
+    "id": "gcc-O2",
+    "ldflags": []
+  },
+  "call_edges": [
+    ["__do_global_dtors_aux","__cxa_finalize"],
+    ["__do_global_dtors_aux","deregister_tm_clones"],
+    ["_start","__libc_start_main"],
+    ["decode","key_at"],
+    ["frame_dummy","register_tm_clones"],
+    ["main","__printf_chk"],
+    ["main","__stack_chk_fail"],
+    ["main","decode"],
+    ["main","mix32"],
+    ["main","puts"],
+    ["main","strcmp"],
+    ["main","strlen"]
+  ],
+  "cold_parts": [],
+  "duplicate_names": {},
+  "elf": {
+    "entry": "0x1190",
+    "image_base": "0x0",
+    "interp": true,
+    "type": "DYN"
+  },
+  "facts": {
+    "claims": [
+      {
+        "args": ["main","decode"],
+        "rel": "calls"
+      },
+      {
+        "args": ["decode","key_at"],
+        "rel": "calls"
+      }
+    ],
+    "constants": {
+      "key_base": "0x5a",
+      "key_step": "3"
+    },
+    "secrets": {
+      "plaintext": "attack at dawn"
+    }
+  },
+  "fixture": "xor_decode.gcc-O2",
+  "function_count": 12,
+  "functions": [
+    {
+      "addr": "0x1000",
+      "insns": 8,
+      "name": "_init",
+      "size": 0
+    },
+    {
+      "addr": "0x10e0",
+      "insns": 45,
+      "name": "main",
+      "size": 163
+    },
+    {
+      "addr": "0x1190",
+      "insns": 13,
+      "name": "_start",
+      "size": 38
+    },
+    {
+      "addr": "0x11c0",
+      "insns": 11,
+      "name": "deregister_tm_clones",
+      "size": 0
+    },
+    {
+      "addr": "0x11f0",
+      "insns": 16,
+      "name": "register_tm_clones",
+      "size": 0
+    },
+    {
+      "addr": "0x1230",
+      "insns": 16,
+      "name": "__do_global_dtors_aux",
+      "size": 0
+    },
+    {
+      "addr": "0x1270",
+      "insns": 3,
+      "name": "frame_dummy",
+      "size": 0
+    },
+    {
+      "addr": "0x1280",
+      "insns": 3,
+      "name": "key_at",
+      "size": 9
+    },
+    {
+      "addr": "0x1290",
+      "insns": 5,
+      "name": "rotl32",
+      "size": 11
+    },
+    {
+      "addr": "0x12a0",
+      "insns": 9,
+      "name": "mix32",
+      "size": 28
+    },
+    {
+      "addr": "0x12c0",
+      "insns": 28,
+      "name": "decode",
+      "size": 75
+    },
+    {
+      "addr": "0x130c",
+      "insns": 4,
+      "name": "_fini",
+      "size": 0
+    }
+  ],
+  "gaps": [],
+  "generator": {
+    "name": "xtask-fixtures",
+    "version": "1"
+  },
+  "imports": ["__cxa_finalize","__libc_start_main","__printf_chk","__stack_chk_fail","puts","strcmp","strlen"],
+  "jump_tables": [],
+  "leaf_functions": [],
+  "libraries": ["libc.so.6"],
+  "network_imports": [],
+  "program": "xor_decode",
+  "protections": {
+    "build_id": "1645c755b6b771b1495082aeedfcbb64d57aa8b4",
+    "canary": true,
+    "fortify": true,
+    "ibt": true,
+    "nx": true,
+    "pie": true,
+    "relro": "full",
+    "rpath": false,
+    "runpath": false,
+    "shstk": true
+  },
+  "self_calls": [],
+  "strings": [],
+  "survey_facts": [
+    {
+      "kind": "function",
+      "value": "decode"
+    },
+    {
+      "kind": "import",
+      "value": "strcmp"
+    },
+    {
+      "kind": "library",
+      "value": "libc.so.6"
+    },
+    {
+      "kind": "protection",
+      "value": "canary"
+    },
+    {
+      "kind": "protection",
+      "value": "fortify"
+    },
+    {
+      "kind": "protection",
+      "value": "ibt"
+    },
+    {
+      "kind": "protection",
+      "value": "nx"
+    },
+    {
+      "kind": "protection",
+      "value": "pie"
+    },
+    {
+      "kind": "protection",
+      "value": "shstk"
+    }
+  ],
+  "syscall_names": [],
+  "syscalls": [],
+  "tail_calls": [
+    ["frame_dummy","register_tm_clones"]
+  ],
+  "tier": "T1"
+}

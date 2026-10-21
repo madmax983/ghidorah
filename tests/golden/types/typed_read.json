@@ -1,0 +1,38 @@
+{"golden":"generator=typed_read version=1 fixture=crackme.gcc-O2 fixture_sha256=467a43b75d95c826daba8cb216d01d7fd386aa96c5ef5a95c2effffe1780de8f"}
+{
+  "fields": [
+    {
+      "path": "sin_family",
+      "offset": 0,
+      "size": 2,
+      "type": "sa_family_t",
+      "value": "0x7375"
+    },
+    {
+      "path": "sin_port",
+      "offset": 2,
+      "size": 2,
+      "type": "in_port_t",
+      "value": "0x6761"
+    },
+    {
+      "path": "sin_addr.s_addr",
+      "offset": 4,
+      "size": 4,
+      "type": "in_addr_t",
+      "value": "0x63203a65"
+    },
+    {
+      "path": "sin_zero",
+      "offset": 8,
+      "size": 8,
+      "type": "unsigned char [8]",
+      "value": {
+        "text": "rackme <",
+        "hex": "7261636b6d65203c",
+        "len": 8,
+        "src": "binary"
+      }
+    }
+  ]
+}

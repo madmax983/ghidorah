@@ -1,0 +1,399 @@
+//! The expression view of an L1 form (design Section 8.2).
+//!
+//! [`build`] reads an L1 form and gives a [`View`]. The view holds the statements, the branch
+//! condition and the switch target of each shape node. It also holds the variables and the
+//! [`Shape`].
+//!
+//! The build has four steps:
+//!
+//! 1. Each reachable block becomes a shape node. Its live ops give statements in run order.
+//! 2. Safe folding puts a single-use value into its use (the `fold` module).
+//! 3. Out-of-SSA: the values that stay become variables. Values without interference share a
+//!    variable. A phi argument in another variable gets a copy on its edge (the `vars`
+//!    module).
+//! 4. The exit of each node comes from the flow ops of its last instruction and the CFG.
+//!
+//! A variable has a storage-based identity ([`VarId`]): a parameter number, a stack offset or
+//! a register name with the address of its first def. So an agent name survives a new
+//! decompile (AC-105a).
+
+use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
+
+use ghidorah_analysis::cc::ParamSource;
+use ghidorah_analysis::fir::ret::FloatRet;
+use ghidorah_analysis::jumptable::GuardInfo;
+use ghidorah_base::{Fuel, VarId};
+use ghidorah_ir::ssa::Ssa;
+use ghidorah_ir::{Arena, Loc, Node, OpId};
+use ghidorah_types::CallConv;
+
+use crate::expr::{Expr, Stmt};
+use crate::shape::Shape;
+use crate::{ElideReason, Elided, Warning, fold, vars};
+
+mod args;
+mod assemble;
+pub(crate) mod facts;
+pub(crate) mod stmts;
+mod switch;
+
+use facts::Facts;
+use stmts::{Ex, Raw};
+
+/// The facts outside the L1 form that a view reads.
+pub trait Env {
+    /// Gives the name of the function or import stub at `addr`.
+    fn callee_name(&self, addr: u64) -> Option<String>;
+    /// Tells if the function at `addr` does not return.
+    fn is_noreturn(&self, addr: u64) -> bool;
+    /// Tells if a string literal starts at `addr`.
+    fn is_string(&self, addr: u64) -> bool;
+
+    /// Tells if the function at `entry` is a thunk: a stub that jumps to another function and
+    /// passes its arguments on. The default knows no thunk.
+    fn is_thunk(&self, entry: u64) -> bool {
+        let _ = entry;
+        false
+    }
+
+    /// Gives the call target of the import with the slot `slot`, a GOT or IAT entry. The
+    /// target is the stub, or the slot for an import with no stub. Another address gives
+    /// `None`. The default knows no import.
+    fn import_at_slot(&self, slot: u64) -> Option<u64> {
+        let _ = slot;
+        None
+    }
+
+    /// Gives the count of the integer and stack parameter slots of the function at `addr`:
+    /// from its signature, its Tier-0 prototype or the parameter recovery. The stack
+    /// parameters come after all integer argument registers. A positional convention counts
+    /// its floating slots too. The floating slots of another convention are in
+    /// [`Env::param_slots`]. The default knows no count.
+    fn param_count(&self, addr: u64) -> Option<u8> {
+        let _ = addr;
+        None
+    }
+
+    /// Gives the location of each parameter slot of the function at `addr`, in slot order.
+    ///
+    /// - In a positional convention, the list holds the register of each register slot that
+    ///   the parameter recovery chose. A slot is a floating slot when the recovery reads only
+    ///   its floating register. A signature or a prototype gives `None`.
+    /// - Another convention (`SysV`) numbers its integer and floating slots apart. The list
+    ///   holds the integer registers, then the floating registers, then the stack slots
+    ///   `Stack(k)` of the recovery. A signature or a prototype gives each parameter the next
+    ///   register of its class, or a stack slot.
+    ///
+    /// The default gives `None`.
+    fn param_slots(&self, addr: u64) -> Option<Vec<Loc>> {
+        let _ = addr;
+        None
+    }
+
+    /// Gives the parameter count of the function at `addr` with its source and its varargs
+    /// flag. The default takes [`Env::param_count`] as a recovered count with no varargs.
+    fn param_info(&self, addr: u64) -> Option<ParamInfo> {
+        self.param_count(addr).map(|count| ParamInfo {
+            count,
+            source: ParamSource::Recovered,
+            varargs: false,
+        })
+    }
+
+    /// Tells if the facts hold an unresolved jump table at the indirect jump `site`. Such a
+    /// fact is a jump-table record with no targets or the caveat `W_JUMPTABLE_UNRESOLVED`.
+    /// The default knows no fact, so it gives `true` for each site.
+    fn jumptable_unresolved(&self, site: u64) -> bool {
+        let _ = site;
+        true
+    }
+}
+
+/// The parameter count of a function, its source and its varargs flag.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ParamInfo {
+    /// The count of the parameter slots (see [`Env::param_count`]).
+    pub count: u8,
+    /// The source of the count.
+    pub source: ParamSource,
+    /// The function takes a variable argument list after the counted parameters.
+    pub varargs: bool,
+}
+
+impl ParamInfo {
+    /// Tells if the slots that the body reads can add to the count. Only a recovered count
+    /// of a function with no variable argument list can grow. The registers of a varargs save
+    /// area are no parameters, and a signature or a prototype bounds the count.
+    #[must_use]
+    pub fn grows(&self) -> bool {
+        self.source == ParamSource::Recovered && !self.varargs
+    }
+}
+
+/// An environment that knows no fact.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct NoEnv;
+
+impl Env for NoEnv {
+    fn callee_name(&self, _addr: u64) -> Option<String> {
+        None
+    }
+
+    fn is_noreturn(&self, _addr: u64) -> bool {
+        false
+    }
+
+    fn is_string(&self, _addr: u64) -> bool {
+        false
+    }
+}
+
+/// The input of a view: an L1 form and its L0 arena.
+#[derive(Debug, Clone, Copy)]
+pub struct Input<'a> {
+    /// The L1 form.
+    pub ssa: &'a Ssa,
+    /// The L0 arena. Its ops have the same indexes as the instruction ops of the L1 form.
+    pub l0: &'a Arena,
+    /// The addresses of the tail jumps that the L1 form has as calls.
+    pub tail_calls: &'a BTreeSet<u64>,
+    /// The calling convention, for the parameter numbers.
+    pub conv: Option<&'a CallConv>,
+    /// The guard of each indirect jump with a jump table, by the address of the jump.
+    pub guards: &'a BTreeMap<u64, GuardInfo>,
+    /// The kind of the floating return of the function ([`L1Ir::float_ret`]).
+    ///
+    /// [`L1Ir::float_ret`]: ghidorah_analysis::fir::l1::L1Ir::float_ret
+    pub float_ret: Option<FloatRet>,
+}
+
+/// The kind of a variable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum VarKind {
+    /// A parameter: the entry value of an argument register or of a stack parameter slot.
+    Param,
+    /// A local: a value of a stack slot of the frame.
+    Local,
+    /// A register value or a temporary.
+    Temp,
+}
+
+/// A variable of the view.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Var {
+    /// The storage-based identity.
+    pub id: VarId,
+    /// The width in bits: the widest value of the variable.
+    pub w: u8,
+    /// The kind.
+    pub kind: VarKind,
+    /// The location of the values of the variable, when the view knows one.
+    pub home: Option<Loc>,
+    /// The location whose entry value the variable holds at the function start.
+    pub input: Option<Loc>,
+}
+
+/// The view of one shape node.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
+pub struct NodeView {
+    /// The statements in run order.
+    pub stmts: Vec<Stmt>,
+    /// The branch condition of a `Cond` exit: true goes to `t`.
+    pub cond: Option<Expr>,
+    /// The computed target address of a `Switch` exit.
+    pub target: Option<Expr>,
+    /// The block address of each case of a `Switch` exit.
+    pub cases: Vec<u64>,
+    /// The selector of a `Switch` exit: the value whose table index chooses the case. With no
+    /// selector, the switch is over the computed target, and the labels are the positions.
+    pub index: Option<Expr>,
+    /// The selector value of the first table entry. The label of case `i` is `bias + i`.
+    pub bias: u64,
+    /// The last case of the `Switch` exit is the default: the target of the guard for an
+    /// index above the table.
+    pub default: bool,
+    /// The ops of the guard compare and branch that the line of the switch shows.
+    pub guard: Vec<OpId>,
+    /// The flow op that ends a block node: a jump, a branch or an indirect jump.
+    pub term: Option<OpId>,
+    /// The L1 ops of a block node in run order. An added node has none.
+    pub ops: Vec<u32>,
+    /// The address range `[start, end)` of the instructions of a block node.
+    pub span: Option<(u64, u64)>,
+}
+
+/// The expression view of a function.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct View {
+    /// The entry address.
+    pub entry: u64,
+    /// The CFG of the structurer.
+    pub shape: Shape,
+    /// The view of each shape node. Node `n` is `nodes[n]`.
+    pub nodes: Vec<NodeView>,
+    /// The variables. Variable `i` is `vars[i]`.
+    pub vars: Vec<Var>,
+    /// The address and the length of each instruction of the reachable blocks, in address
+    /// order.
+    pub insns: Vec<(u64, u8)>,
+    /// The addresses of the instructions with an effect that a line must show. An effect is a
+    /// store, a call, a return, a branch or an opaque memory op. The def of a value that a
+    /// return reads is an effect too.
+    pub effects: BTreeSet<u64>,
+    /// The flag thunk op of each fused compare op. A line that shows the compare shows the
+    /// instruction of the thunk too, for example the `cmp` of a `jne`.
+    pub sources: BTreeMap<OpId, OpId>,
+    /// The kind of the floating return of the function. Then each return reads `xmm0`.
+    pub float_ret: Option<FloatRet>,
+    /// The location of each parameter slot in slot order, in a convention that numbers its
+    /// integer and floating slots apart ([`Env::param_slots`]). The slots that the body reads
+    /// can add integer and stack slots to a recovered count. `None` when the facts give no
+    /// slots or the convention is positional.
+    pub params: Option<Vec<Loc>>,
+}
+
+impl View {
+    /// Gives the length of the instruction at `addr`, or `None`.
+    #[must_use]
+    pub fn insn_len(&self, addr: u64) -> Option<u8> {
+        let i = self.insns.binary_search_by_key(&addr, |x| x.0).ok()?;
+        self.insns.get(i).map(|x| x.1)
+    }
+
+    /// Gives the view of a node.
+    #[must_use]
+    pub fn node(&self, n: Node) -> Option<&NodeView> {
+        self.nodes.get(n.index())
+    }
+
+    /// Gives a variable.
+    #[must_use]
+    pub fn var(&self, v: crate::VarIdx) -> Option<&Var> {
+        self.vars.get(v.index())
+    }
+}
+
+/// The result of [`build`]: the view, the left-out ranges and the warnings.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Built {
+    /// The view.
+    pub view: View,
+    /// The blocks that no run reaches.
+    pub elided: Vec<Elided>,
+    /// The warnings, for example `W_JUMPTABLE_UNRESOLVED`.
+    pub warnings: Vec<Warning>,
+}
+
+/// The error of [`build`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ViewError {
+    /// The work used all of its fuel.
+    OutOfFuel,
+    /// The L1 form has no entry block.
+    NoEntry,
+    /// The function has more nodes or variables than a `u32` can count.
+    TooLarge,
+}
+
+impl fmt::Display for ViewError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::OutOfFuel => f.write_str("The view used all of its fuel."),
+            Self::NoEntry => f.write_str("The L1 form has no entry block."),
+            Self::TooLarge => f.write_str("The function has too many nodes or variables."),
+        }
+    }
+}
+
+impl std::error::Error for ViewError {}
+
+/// Builds the view of `input`. With `fold`, single-use values go into their use.
+///
+/// Each op of the L1 form takes one unit of `fuel`.
+///
+/// # Errors
+///
+/// Returns [`ViewError::OutOfFuel`] when the fuel runs out, [`ViewError::NoEntry`] for an L1
+/// form without an entry block and [`ViewError::TooLarge`] when a count does not fit.
+pub fn build(
+    input: &Input<'_>,
+    env: &dyn Env,
+    fold: bool,
+    fuel: &mut Fuel,
+) -> Result<Built, ViewError> {
+    let ssa = input.ssa;
+    let count = u64::try_from(ssa.arena().ops().len()).map_err(|_| ViewError::TooLarge)?;
+    fuel.take(count).map_err(|_| ViewError::OutOfFuel)?;
+    if u32::try_from(ssa.blocks().len()).is_err() {
+        return Err(ViewError::TooLarge);
+    }
+    let f = Facts::collect(ssa);
+    let first = *f.reach.first().ok_or(ViewError::NoEntry)?;
+    let entry = ssa.block_addr(first).ok_or(ViewError::NoEntry)?;
+    let plan = fold::plan(&f, fold);
+    let ex = Ex {
+        f: &f,
+        l0: input.l0,
+        plan: &plan,
+        env,
+        tails: input.tail_calls,
+        guards: input.guards,
+        thunk: env.is_thunk(entry),
+    };
+    let mut raws: Vec<Raw> = f.reach.iter().map(|&b| stmts::block(&ex, b)).collect();
+    let read = crate::vars_names::read_slots(&f, input.conv);
+    let info = env.param_info(entry);
+    let layout = input.conv.filter(|c| !c.positional).and_then(|c| {
+        let grows = info.is_some_and(|i| i.grows());
+        Some(crate::vars_names::layout(
+            &f,
+            c,
+            env.param_slots(entry)?,
+            grows,
+        ))
+    });
+    let cx = vars::Ctx {
+        f: &f,
+        raws: &raws,
+        l0: input.l0,
+        conv: input.conv,
+        entry,
+        params: match &layout {
+            Some(l) => Some(u16::try_from(l.len()).unwrap_or(u16::MAX)),
+            None => info.map(|i| {
+                let n = u16::from(i.count);
+                if i.grows() { n.max(read) } else { n }
+            }),
+        },
+        slots: layout.clone().or_else(|| env.param_slots(entry)),
+    };
+    let assigned = vars::assign(&cx);
+    let mut warnings = Vec::new();
+    for raw in &mut raws {
+        assemble::remap_raw(raw, &assigned.of);
+        warnings.append(&mut raw.warnings);
+    }
+    let mut view = assemble::shape(&f, &mut raws, &assigned, entry);
+    view.float_ret = input.float_ret;
+    view.params = layout;
+    let reached: BTreeSet<Node> = f.reach.iter().copied().collect();
+    let elided = (0..ssa.blocks().len())
+        .filter_map(|i| u32::try_from(i).ok().map(Node))
+        .filter(|b| !reached.contains(b))
+        .filter_map(|b| {
+            let start = ssa.block_addr(b)?;
+            let end = ssa.last_insn(b)?.next_addr()?;
+            Some(Elided {
+                start,
+                size: end.saturating_sub(start),
+                reason: ElideReason::Unreachable,
+            })
+        })
+        .collect();
+    Ok(Built {
+        view,
+        elided,
+        warnings,
+    })
+}

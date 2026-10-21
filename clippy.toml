@@ -1,0 +1,12 @@
+disallowed-types = [
+    { path = "std::collections::HashMap", reason = "iteration order is random; use BTreeMap (ADR-0012)" },
+    { path = "std::collections::HashSet", reason = "iteration order is random; use BTreeSet (ADR-0012)" },
+    { path = "std::hash::RandomState", reason = "the seed is random; output must be deterministic (ADR-0012)" },
+]
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true
+allow-indexing-slicing-in-tests = true
+allow-print-in-tests = true
+allow-dbg-in-tests = true
+too-many-lines-threshold = 100

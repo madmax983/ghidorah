@@ -1,0 +1,40 @@
+{
+  "id": "locate-02",
+  "question": "q-locate-02",
+  "turns": [
+    {
+      "call": {
+        "tool": "binary_load",
+        "args": {
+          "path": "fixtures/bin/strings.gcc-O2"
+        }
+      }
+    },
+    {
+      "call": {
+        "tool": "search",
+        "args": {
+          "kind": "string",
+          "query": "Wide hello from UTF-16"
+        }
+      }
+    }
+  ],
+  "answer": {
+    "turn": 1,
+    "ptr": "/data/items/0/addr"
+  },
+  "provenance": {
+    "/turns/0/call/args/path": "question:binaries/0",
+    "/turns/1/call/args/kind": "schema:search.kind",
+    "/turns/1/call/args/query": "question"
+  },
+  "budgets": {
+    "max_calls": 2,
+    "max_chars": 1600,
+    "max_peak_chars": 900
+  },
+  "evidence": [
+    "str:0x2060"
+  ]
+}

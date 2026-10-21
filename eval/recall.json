@@ -1,0 +1,13 @@
+{
+  "binary": "fixtures/bin/func_ptrs.gcc-O2.stripped",
+  "facts": [
+    { "kind": "rename", "target": "fn:0x12a0", "name": "op_plus" },
+    { "kind": "rename", "target": "fn:0x12b0", "name": "op_minus" },
+    { "kind": "rename", "target": "fn:0x1310", "name": "on_event" },
+    { "kind": "finding", "text": "op_plus adds its two arguments.", "evidence": ["fn:0x12a0"] },
+    { "kind": "finding", "text": "on_event prints the event code.", "evidence": ["fn:0x1310"] },
+    { "kind": "todo", "text": "Find the table that holds op_plus.", "at": "fn:0x12a0" },
+    { "kind": "todo", "text": "Check who sets the event callback.", "at": "fn:0x1310" }
+  ],
+  "noise": { "seed": 26, "edits": 50 }
+}

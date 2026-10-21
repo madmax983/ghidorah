@@ -1,0 +1,46 @@
+# golden: generator=xtask-fixtures version=1 binutils=2.42 fixture=syscall_only.gcc-O2 fixture_sha256=9bc269247f3ef1fb6941f141b9ef72dfb29203bbfc3116373206a395f450a2e2
+Contents of the .eh_frame section:
+
+
+00000000 0000000000000014 00000000 CIE
+  Version:               1
+  Augmentation:          "zR"
+  Code alignment factor: 1
+  Data alignment factor: -8
+  Return address column: 16
+  Augmentation data:     1b
+  DW_CFA_def_cfa: r7 (rsp) ofs 8
+  DW_CFA_offset: r16 (rip) at cfa-8
+  DW_CFA_nop
+  DW_CFA_nop
+
+00000018 0000000000000010 0000001c FDE cie=00000000 pc=0000000000401000..000000000040101b
+  DW_CFA_nop
+  DW_CFA_nop
+  DW_CFA_nop
+
+0000002c 0000000000000010 00000030 FDE cie=00000000 pc=0000000000401020..000000000040103d
+  DW_CFA_nop
+  DW_CFA_nop
+  DW_CFA_nop
+
+00000040 0000000000000010 00000044 FDE cie=00000000 pc=0000000000401040..000000000040104c
+  DW_CFA_nop
+  DW_CFA_nop
+  DW_CFA_nop
+
+00000054 0000000000000010 00000058 FDE cie=00000000 pc=0000000000401050..000000000040105d
+  DW_CFA_nop
+  DW_CFA_nop
+  DW_CFA_nop
+
+00000068 0000000000000018 0000006c FDE cie=00000000 pc=0000000000401060..0000000000401083
+  DW_CFA_advance_loc: 5 to 0000000000401065
+  DW_CFA_def_cfa_offset: 16
+  DW_CFA_advance_loc: 1 to 0000000000401066
+  DW_CFA_def_cfa_offset: 8
+  DW_CFA_advance_loc: 4 to 000000000040106a
+  DW_CFA_def_cfa_offset: 16
+  DW_CFA_nop
+  DW_CFA_nop
+

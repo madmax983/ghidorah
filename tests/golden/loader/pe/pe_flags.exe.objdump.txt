@@ -1,0 +1,238 @@
+# golden: generator=xtask-fixtures version=1 fixture=pe_flags.exe fixture_sha256=a4dd43acd23608ebcda8962db5c08867e595f124200996c622fc7080e1c0d7e0 llvm=22.1.6
+
+pe_flags.exe:	file format coff-x86-64
+
+Disassembly of section .text:
+
+0000000140001000 <.text>:
+140001000: 48 8b 02                    	mov	rax, qword ptr [rdx]
+140001003: c3                          	ret
+140001004: 66 66 66 2e 0f 1f 84 00 00 00 00 00 	nop	word ptr cs:[rax + rax]
+140001010: 83 f9 07                    	cmp	ecx, 0x7
+140001013: 77 6d                       	ja	0x140001082 <.text+0x82>
+140001015: 89 c8                       	mov	eax, ecx
+140001017: 48 8d 0d e2 0f 00 00        	lea	rcx, [rip + 0xfe2]      # 0x140002000
+14000101e: 48 63 04 81                 	movsxd	rax, dword ptr [rcx + 4*rax]
+140001022: 48 01 c8                    	add	rax, rcx
+140001025: ff e0                       	jmp	rax
+140001027: 8b 05 ff 1f 00 00           	mov	eax, dword ptr [rip + 0x1fff] # 0x14000302c
+14000102d: 83 c0 0b                    	add	eax, 0xb
+140001030: c3                          	ret
+140001031: 8b 05 f5 1f 00 00           	mov	eax, dword ptr [rip + 0x1ff5] # 0x14000302c
+140001037: 83 c0 65                    	add	eax, 0x65
+14000103a: c3                          	ret
+14000103b: 8b 05 eb 1f 00 00           	mov	eax, dword ptr [rip + 0x1feb] # 0x14000302c
+140001041: 83 c0 fd                    	add	eax, -0x3
+140001044: c3                          	ret
+140001045: 8b 05 e1 1f 00 00           	mov	eax, dword ptr [rip + 0x1fe1] # 0x14000302c
+14000104b: 83 f0 55                    	xor	eax, 0x55
+14000104e: c3                          	ret
+14000104f: b8 00 01 00 00              	mov	eax, 0x100
+140001054: 0b 05 d2 1f 00 00           	or	eax, dword ptr [rip + 0x1fd2] # 0x14000302c
+14000105a: c3                          	ret
+14000105b: 8b 0d cb 1f 00 00           	mov	ecx, dword ptr [rip + 0x1fcb] # 0x14000302c
+140001061: 8d 04 cd 00 00 00 00        	lea	eax, [8*rcx]
+140001068: 29 c8                       	sub	eax, ecx
+14000106a: c3                          	ret
+14000106b: 8b 05 bb 1f 00 00           	mov	eax, dword ptr [rip + 0x1fbb] # 0x14000302c
+140001071: 8d 0c 40                    	lea	ecx, [rax + 2*rax]
+140001074: 8d 04 88                    	lea	eax, [rax + 4*rcx]
+140001077: c3                          	ret
+140001078: 8b 05 ae 1f 00 00           	mov	eax, dword ptr [rip + 0x1fae] # 0x14000302c
+14000107e: 83 c0 b3                    	add	eax, -0x4d
+140001081: c3                          	ret
+140001082: b8 ff ff ff ff              	mov	eax, 0xffffffff
+140001087: c3                          	ret
+140001088: 0f 1f 84 00 00 00 00 00     	nop	dword ptr [rax + rax]
+140001090: 8d 04 09                    	lea	eax, [rcx + rcx]
+140001093: 03 05 93 1f 00 00           	add	eax, dword ptr [rip + 0x1f93] # 0x14000302c
+140001099: c3                          	ret
+14000109a: 66 0f 1f 44 00 00           	nop	word ptr [rax + rax]
+1400010a0: 8d 04 49                    	lea	eax, [rcx + 2*rcx]
+1400010a3: 03 05 83 1f 00 00           	add	eax, dword ptr [rip + 0x1f83] # 0x14000302c
+1400010a9: c3                          	ret
+1400010aa: 66 0f 1f 44 00 00           	nop	word ptr [rax + rax]
+1400010b0: 56                          	push	rsi
+1400010b1: 48 83 ec 20                 	sub	rsp, 0x20
+1400010b5: 89 c8                       	mov	eax, ecx
+1400010b7: 83 e0 01                    	and	eax, 0x1
+1400010ba: 4c 8d 05 3f 1f 00 00        	lea	r8, [rip + 0x1f3f]      # 0x140003000
+1400010c1: 89 d1                       	mov	ecx, edx
+1400010c3: 41 ff 14 c0                 	call	qword ptr [r8 + 8*rax]
+1400010c7: 89 c6                       	mov	esi, eax
+1400010c9: 89 c1                       	mov	ecx, eax
+1400010cb: e8 10 01 00 00              	call	0x1400011e0 <.text+0x1e0>
+1400010d0: ff 15 ea 10 00 00           	call	qword ptr [rip + 0x10ea] # 0x1400021c0
+1400010d6: 01 f0                       	add	eax, esi
+1400010d8: 48 83 c4 20                 	add	rsp, 0x20
+1400010dc: 5e                          	pop	rsi
+1400010dd: c3                          	ret
+1400010de: 66 90                       	nop
+1400010e0: 56                          	push	rsi
+1400010e1: 57                          	push	rdi
+1400010e2: 48 83 ec 28                 	sub	rsp, 0x28
+1400010e6: ff 15 ec 10 00 00           	call	qword ptr [rip + 0x10ec] # 0x1400021d8
+1400010ec: 89 c6                       	mov	esi, eax
+1400010ee: 89 c1                       	mov	ecx, eax
+1400010f0: e8 2b 01 00 00              	call	0x140001220 <.text+0x220>
+1400010f5: 89 c7                       	mov	edi, eax
+1400010f7: 89 c1                       	mov	ecx, eax
+1400010f9: ff 15 19 1f 00 00           	call	qword ptr [rip + 0x1f19] # 0x140003018
+1400010ff: 01 f7                       	add	edi, esi
+140001101: 01 f8                       	add	eax, edi
+140001103: 48 83 c4 28                 	add	rsp, 0x28
+140001107: 5f                          	pop	rdi
+140001108: 5e                          	pop	rsi
+140001109: c3                          	ret
+14000110a: 66 0f 1f 44 00 00           	nop	word ptr [rax + rax]
+140001110: 48 83 ec 28                 	sub	rsp, 0x28
+140001114: 89 0d 12 1f 00 00           	mov	dword ptr [rip + 0x1f12], ecx # 0x14000302c
+14000111a: ff 15 98 10 00 00           	call	qword ptr [rip + 0x1098] # 0x1400021b8
+140001120: cc                          	int3
+140001121: 66 66 66 66 66 66 2e 0f 1f 84 00 00 00 00 00	nop	word ptr cs:[rax + rax]
+140001130: 56                          	push	rsi
+140001131: 57                          	push	rdi
+140001132: 48 83 ec 28                 	sub	rsp, 0x28
+140001136: 31 c9                       	xor	ecx, ecx
+140001138: e8 d3 fe ff ff              	call	0x140001010 <.text+0x10>
+14000113d: 89 c6                       	mov	esi, eax
+14000113f: b9 01 00 00 00              	mov	ecx, 0x1
+140001144: e8 c7 fe ff ff              	call	0x140001010 <.text+0x10>
+140001149: 01 c6                       	add	esi, eax
+14000114b: b9 02 00 00 00              	mov	ecx, 0x2
+140001150: e8 bb fe ff ff              	call	0x140001010 <.text+0x10>
+140001155: 89 c7                       	mov	edi, eax
+140001157: b9 03 00 00 00              	mov	ecx, 0x3
+14000115c: e8 af fe ff ff              	call	0x140001010 <.text+0x10>
+140001161: 01 c7                       	add	edi, eax
+140001163: 01 f7                       	add	edi, esi
+140001165: b9 04 00 00 00              	mov	ecx, 0x4
+14000116a: e8 a1 fe ff ff              	call	0x140001010 <.text+0x10>
+14000116f: 89 c6                       	mov	esi, eax
+140001171: b9 05 00 00 00              	mov	ecx, 0x5
+140001176: e8 95 fe ff ff              	call	0x140001010 <.text+0x10>
+14000117b: 01 c6                       	add	esi, eax
+14000117d: b9 06 00 00 00              	mov	ecx, 0x6
+140001182: e8 89 fe ff ff              	call	0x140001010 <.text+0x10>
+140001187: 01 c6                       	add	esi, eax
+140001189: 01 fe                       	add	esi, edi
+14000118b: b9 07 00 00 00              	mov	ecx, 0x7
+140001190: e8 7b fe ff ff              	call	0x140001010 <.text+0x10>
+140001195: 89 c7                       	mov	edi, eax
+140001197: b9 08 00 00 00              	mov	ecx, 0x8
+14000119c: e8 6f fe ff ff              	call	0x140001010 <.text+0x10>
+1400011a1: 01 c7                       	add	edi, eax
+1400011a3: 01 f7                       	add	edi, esi
+1400011a5: 89 f9                       	mov	ecx, edi
+1400011a7: ba 05 00 00 00              	mov	edx, 0x5
+1400011ac: e8 ff fe ff ff              	call	0x1400010b0 <.text+0xb0>
+1400011b1: 01 c7                       	add	edi, eax
+1400011b3: 89 f9                       	mov	ecx, edi
+1400011b5: e8 26 ff ff ff              	call	0x1400010e0 <.text+0xe0>
+1400011ba: 01 c7                       	add	edi, eax
+1400011bc: 89 f9                       	mov	ecx, edi
+1400011be: e8 4d ff ff ff              	call	0x140001110 <.text+0x110>
+1400011c3: cc                          	int3
+1400011c4: cc                          	int3
+1400011c5: cc                          	int3
+1400011c6: cc                          	int3
+1400011c7: cc                          	int3
+1400011c8: cc                          	int3
+1400011c9: cc                          	int3
+1400011ca: cc                          	int3
+1400011cb: cc                          	int3
+1400011cc: cc                          	int3
+1400011cd: cc                          	int3
+1400011ce: cc                          	int3
+1400011cf: cc                          	int3
+1400011d0: 01 15 5e 1e 00 00           	add	dword ptr [rip + 0x1e5e], edx # 0x140003034
+1400011d6: c3                          	ret
+1400011d7: cc                          	int3
+1400011d8: cc                          	int3
+1400011d9: cc                          	int3
+1400011da: cc                          	int3
+1400011db: cc                          	int3
+1400011dc: cc                          	int3
+1400011dd: cc                          	int3
+1400011de: cc                          	int3
+1400011df: cc                          	int3
+1400011e0: ff 25 e2 0f 00 00           	jmp	qword ptr [rip + 0xfe2] # 0x1400021c8
+1400011e6: cc                          	int3
+1400011e7: cc                          	int3
+1400011e8: cc                          	int3
+1400011e9: cc                          	int3
+1400011ea: cc                          	int3
+1400011eb: cc                          	int3
+1400011ec: cc                          	int3
+1400011ed: cc                          	int3
+1400011ee: cc                          	int3
+1400011ef: cc                          	int3
+1400011f0: ff 25 c2 0f 00 00           	jmp	qword ptr [rip + 0xfc2] # 0x1400021b8
+1400011f6: cc                          	int3
+1400011f7: cc                          	int3
+1400011f8: cc                          	int3
+1400011f9: cc                          	int3
+1400011fa: cc                          	int3
+1400011fb: cc                          	int3
+1400011fc: cc                          	int3
+1400011fd: cc                          	int3
+1400011fe: cc                          	int3
+1400011ff: cc                          	int3
+140001200: ff 25 ba 0f 00 00           	jmp	qword ptr [rip + 0xfba] # 0x1400021c0
+140001206: cc                          	int3
+140001207: cc                          	int3
+140001208: cc                          	int3
+140001209: cc                          	int3
+14000120a: cc                          	int3
+14000120b: cc                          	int3
+14000120c: cc                          	int3
+14000120d: cc                          	int3
+14000120e: cc                          	int3
+14000120f: cc                          	int3
+140001210: ff 25 c2 0f 00 00           	jmp	qword ptr [rip + 0xfc2] # 0x1400021d8
+140001216: cc                          	int3
+140001217: cc                          	int3
+140001218: cc                          	int3
+140001219: cc                          	int3
+14000121a: cc                          	int3
+14000121b: cc                          	int3
+14000121c: cc                          	int3
+14000121d: cc                          	int3
+14000121e: cc                          	int3
+14000121f: cc                          	int3
+140001220: ff 25 ba 0f 00 00           	jmp	qword ptr [rip + 0xfba] # 0x1400021e0
+140001226: cc                          	int3
+140001227: cc                          	int3
+140001228: cc                          	int3
+140001229: cc                          	int3
+14000122a: cc                          	int3
+14000122b: cc                          	int3
+14000122c: cc                          	int3
+14000122d: cc                          	int3
+14000122e: cc                          	int3
+14000122f: cc                          	int3
+140001230: ff 25 e2 1d 00 00           	jmp	qword ptr [rip + 0x1de2] # 0x140003018
+140001236: 48 8d 05 db 1d 00 00        	lea	rax, [rip + 0x1ddb]     # 0x140003018
+14000123d: e9 00 00 00 00              	jmp	0x140001242 <.text+0x242>
+140001242: 48 89 4c 24 08              	mov	qword ptr [rsp + 0x8], rcx
+140001247: 48 89 54 24 10              	mov	qword ptr [rsp + 0x10], rdx
+14000124c: 4c 89 44 24 18              	mov	qword ptr [rsp + 0x18], r8
+140001251: 4c 89 4c 24 20              	mov	qword ptr [rsp + 0x20], r9
+140001256: 48 83 ec 68                 	sub	rsp, 0x68
+14000125a: 66 0f 7f 44 24 20           	movdqa	xmmword ptr [rsp + 0x20], xmm0
+140001260: 66 0f 7f 4c 24 30           	movdqa	xmmword ptr [rsp + 0x30], xmm1
+140001266: 66 0f 7f 54 24 40           	movdqa	xmmword ptr [rsp + 0x40], xmm2
+14000126c: 66 0f 7f 5c 24 50           	movdqa	xmmword ptr [rsp + 0x50], xmm3
+140001272: 48 8b d0                    	mov	rdx, rax
+140001275: 48 8d 0d 5c 0e 00 00        	lea	rcx, [rip + 0xe5c]      # 0x1400020d8
+14000127c: e8 7f fd ff ff              	call	0x140001000 <.text>
+140001281: 66 0f 6f 44 24 20           	movdqa	xmm0, xmmword ptr [rsp + 0x20]
+140001287: 66 0f 6f 4c 24 30           	movdqa	xmm1, xmmword ptr [rsp + 0x30]
+14000128d: 66 0f 6f 54 24 40           	movdqa	xmm2, xmmword ptr [rsp + 0x40]
+140001293: 66 0f 6f 5c 24 50           	movdqa	xmm3, xmmword ptr [rsp + 0x50]
+140001299: 48 8b 4c 24 70              	mov	rcx, qword ptr [rsp + 0x70]
+14000129e: 48 8b 54 24 78              	mov	rdx, qword ptr [rsp + 0x78]
+1400012a3: 4c 8b 84 24 80 00 00 00     	mov	r8, qword ptr [rsp + 0x80]
+1400012ab: 4c 8b 8c 24 88 00 00 00     	mov	r9, qword ptr [rsp + 0x88]
+1400012b3: 48 83 c4 68                 	add	rsp, 0x68
+1400012b7: ff e0                       	jmp	rax

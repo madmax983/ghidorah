@@ -1,0 +1,58 @@
+{
+  "id": "decompile-02",
+  "question": "q-decompile-02",
+  "turns": [
+    {
+      "call": {
+        "tool": "binary_load",
+        "args": {
+          "path": "fixtures/bin/crackme.gcc-O2"
+        }
+      }
+    },
+    {
+      "call": {
+        "tool": "func_get",
+        "args": {
+          "target": "check_password",
+          "include": [
+            "decomp"
+          ]
+        }
+      }
+    }
+  ],
+  "answer": {
+    "turn": 1,
+    "ptr": "/data/decomp/text",
+    "steps": [
+      {
+        "op": "lines"
+      },
+      {
+        "op": "grep",
+        "glob": "*^ 0x*"
+      },
+      {
+        "op": "first"
+      },
+      {
+        "op": "after",
+        "text": "^ "
+      },
+      {
+        "op": "token"
+      }
+    ]
+  },
+  "provenance": {
+    "/turns/0/call/args/path": "question:binaries/0",
+    "/turns/1/call/args/target": "question",
+    "/turns/1/call/args/include/0": "instructions"
+  },
+  "budgets": {
+    "max_calls": 2,
+    "max_chars": 5000,
+    "max_peak_chars": 4200
+  }
+}

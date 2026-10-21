@@ -1,0 +1,34 @@
+# The PE list of functions that do not return (design Section 7.7).
+#
+# Source: Ghidra, Ghidra/Features/Base/data/PEFunctionsThatDoNotReturn
+# (https://github.com/NationalSecurityAgency/ghidra), branch master, 28 lines.
+# Copyright the Ghidra authors. Apache License, Version 2.0. NOTICE holds the attribution.
+#
+# Format: one name on each line. A line that starts with # is a comment.
+# A name has no leading underscore. The match removes the leading underscores of a name first.
+#
+# The list keeps 21 names of the source. ___raise_securityfailure and ___report_rangecheckfailure
+# lose their leading underscores. CxxThrowException@8 is the same name as CxxThrowException after
+# the match rule. The 6 MSVC C++ decorated names (?_Xbad_alloc@std@@YAXXZ and the other ?_X names,
+# and ?terminate@@YAXXZ) stay out, because the list format holds C names only.
+abort
+CxxThrowException
+CxxFrameHandler3
+crtExitProcess
+ExitProcess
+ExitThread
+exit
+ExRaiseAccessViolation
+ExRaiseDatatypeMisalignment
+ExRaiseStatus
+FreeLibraryAndExitThread
+invalid_parameter_noinfo_noreturn
+invoke_watson
+KeBugCheck
+KeBugCheckEx
+longjmp
+quick_exit
+RpcRaiseException
+terminate
+raise_securityfailure
+report_rangecheckfailure

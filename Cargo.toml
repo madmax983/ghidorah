@@ -1,0 +1,78 @@
+[workspace]
+resolver = "3"
+members = ["crates/*", "xtask"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+license = "Apache-2.0"
+publish = false
+
+# The lint policy of ADR-0019. Each package sets `[lints] workspace = true`.
+[workspace.lints.rust]
+unsafe_code = "deny"
+missing_docs = "deny"
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(verus_only)"] }
+
+[workspace.lints.rustdoc]
+broken_intra_doc_links = "deny"
+
+[workspace.lints.clippy]
+all = { level = "deny", priority = -1 }
+pedantic = { level = "deny", priority = -1 }
+nursery = { level = "deny", priority = -1 }
+cargo = { level = "deny", priority = -1 }
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+dbg_macro = "deny"
+allow_attributes_without_reason = "deny"
+print_stdout = "deny"
+print_stderr = "deny"
+# Reviewed allowlist of ADR-0019. Each line names its reason.
+# Reason: the `if let` form is often clearer than `map_or_else`.
+option_if_let_else = "allow"
+# Reason: `pub(crate)` is the default visibility of the workspace.
+redundant_pub_crate = "allow"
+# Reason: the lint gives false positives on guards with a short scope.
+significant_drop_tightening = "allow"
+# Reason: `const fn` is not a goal, and the lint is noisy.
+missing_const_for_fn = "allow"
+# Reason: `too_many_lines` at 100 lines covers the same risk.
+cognitive_complexity = "allow"
+# Reason: the workspace has no async code.
+future_not_send = "allow"
+
+[profile.release]
+overflow-checks = true
+
+[profile.test]
+opt-level = 1
+
+# Hot crates use opt-level 2 in tests (ADR-0020).
+[profile.dev.package.ghidorah-x86]
+opt-level = 2
+
+[profile.dev.package.ghidorah-ir]
+opt-level = 2
+
+[profile.dev.package.ghidorah-analysis]
+opt-level = 2
+
+[profile.dev.package.ghidorah-decomp]
+opt-level = 2
+
+[profile.test.package.ghidorah-x86]
+opt-level = 2
+
+[profile.test.package.ghidorah-ir]
+opt-level = 2
+
+[profile.test.package.ghidorah-analysis]
+opt-level = 2
+
+[profile.test.package.ghidorah-decomp]
+opt-level = 2

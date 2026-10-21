@@ -1,0 +1,953 @@
+//! Workspace gate tests. Each test proves one AC that WP-01 closes.
+//!
+//! Each test checks the real repository and a synthetic bad input.
+#![allow(
+    clippy::expect_used,
+    reason = "test helpers stop at the first failure with a message"
+)]
+
+use std::sync::OnceLock;
+
+use xtask::ac::{self, AcRow, Evidence};
+use xtask::acrun::{Status, record};
+use xtask::ci::{self, Step};
+use xtask::cov::{self, Counts, Coverage};
+use xtask::dag::{self, Edge};
+use xtask::gates::{self, Repo};
+use xtask::json::{self, Value};
+use xtask::workspace::{self, DepKind};
+use xtask::{Finding, manifest, scan, workflow};
+
+fn repo() -> &'static Repo {
+    static REPO: OnceLock<Repo> = OnceLock::new();
+    REPO.get_or_init(|| Repo::load(&workspace::root()).expect("the workspace model loads"))
+}
+
+fn render(findings: &[Finding]) -> String {
+    findings
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn assert_clean(ac: &str) {
+    let findings = gates::check(repo(), ac).expect("the gate runs");
+    assert!(findings.is_empty(), "{ac} findings:\n{}", render(&findings));
+}
+
+fn package(name: &str, dir: &str, extra: &str) -> String {
+    format!(
+        r#"{{"name":"{name}","manifest_path":"/w/{dir}/Cargo.toml","edition":"2024",
+        "license":"Apache-2.0","publish":[],"dependencies":[{extra}],
+        "targets":[{{"name":"{name}","kind":["lib"],"src_path":"/w/{dir}/src/lib.rs","edition":"2024"}}]}}"#
+    )
+}
+
+fn metadata(packages: &[String]) -> workspace::Metadata {
+    let text = format!(
+        r#"{{"packages":[{}],"workspace_root":"/w","version":1}}"#,
+        packages.join(",")
+    );
+    workspace::parse_metadata(std::path::Path::new("/w"), &text).expect("synthetic metadata parses")
+}
+
+fn path_dep(name: &str, dir: &str, kind: &str) -> String {
+    format!(r#"{{"name":"{name}","source":null,"kind":{kind},"path":"/w/{dir}"}}"#)
+}
+
+#[test]
+fn ac_001a_workspace_packages() {
+    assert_clean("AC-001a");
+    let good = metadata(&[package("ghidorah-json", "crates/json", "")]);
+    assert!(workspace::check_packages(&good).is_empty());
+    let unknown = metadata(&[package("serde", "crates/serde", "")]);
+    assert_eq!(workspace::check_packages(&unknown).len(), 1);
+    let moved = metadata(&[package("ghidorah-json", "crates/jsonx", "")]);
+    assert_eq!(workspace::check_packages(&moved).len(), 1);
+}
+
+#[test]
+fn ac_001b_no_source_key() {
+    assert_clean("AC-001b");
+    let lock = "version = 4\n\n[[package]]\nname = \"xtask\"\nversion = \"0.1.0\"\n";
+    assert!(manifest::no_lock_sources(lock).is_empty());
+    let bad = "[[package]]\nname = \"serde\"\nversion = \"1.0.0\"\nsource = \"registry+https://github.com/rust-lang/crates.io-index\"\n";
+    let found = manifest::no_lock_sources(bad);
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].line, 4);
+}
+
+#[test]
+fn ac_001c_workspace_deps_only() {
+    assert_clean("AC-001c");
+    let base = package("ghidorah-base", "crates/base", "");
+    let local = package(
+        "ghidorah-types",
+        "crates/types",
+        &path_dep("ghidorah-base", "crates/base", "null"),
+    );
+    assert!(workspace::check_workspace_deps(&metadata(&[base.clone(), local])).is_empty());
+    let registry = package(
+        "ghidorah-types",
+        "crates/types",
+        r#"{"name":"serde","source":"registry+https://github.com/rust-lang/crates.io-index","kind":null}"#,
+    );
+    assert_eq!(
+        workspace::check_workspace_deps(&metadata(&[base, registry])).len(),
+        1
+    );
+    let vendored = package(
+        "ghidorah-types",
+        "crates/types",
+        &path_dep("vendored", "vendor/vendored", "null"),
+    );
+    assert_eq!(
+        workspace::check_workspace_deps(&metadata(&[vendored])).len(),
+        1
+    );
+}
+
+#[test]
+fn ac_001d_no_patch_tables() {
+    assert_clean("AC-001d");
+    assert_eq!(
+        manifest::no_patch_tables("Cargo.toml", "[patch.crates-io]\nfoo = { path = \"x\" }\n")
+            .len(),
+        1
+    );
+    assert_eq!(
+        manifest::no_patch_tables(
+            "Cargo.toml",
+            "[replace]\n\"foo:1.0.0\" = { path = \"x\" }\n"
+        )
+        .len(),
+        1
+    );
+    assert!(manifest::no_patch_tables("Cargo.toml", "[workspace]\nmembers = [\"x\"]\n").is_empty());
+    assert_eq!(
+        manifest::no_source_tables(
+            ".cargo/config.toml",
+            "[source.crates-io]\nreplace-with = \"v\"\n"
+        )
+        .len(),
+        1
+    );
+    assert_eq!(
+        manifest::no_source_tables(".cargo/config.toml", "[patch.crates-io]\n").len(),
+        1
+    );
+    assert!(manifest::no_source_tables(".cargo/config.toml", "[net]\noffline = true\n").is_empty());
+}
+
+#[test]
+fn ac_001e_publish_and_license() {
+    assert_clean("AC-001e");
+    let good = metadata(&[package("ghidorah-json", "crates/json", "")]);
+    assert!(workspace::check_publish_license(&good).is_empty());
+    let text = package("ghidorah-json", "crates/json", "")
+        .replace("\"publish\":[]", "\"publish\":null")
+        .replace("Apache-2.0", "MIT");
+    assert_eq!(
+        workspace::check_publish_license(&metadata(&[text])).len(),
+        2
+    );
+}
+
+#[test]
+fn ac_002_offline_config() {
+    assert_clean("AC-002");
+    assert!(manifest::offline("[net]\noffline = true\n").is_empty());
+    assert_eq!(manifest::offline("[net]\noffline = false\n").len(), 1);
+    assert_eq!(manifest::offline("").len(), 1);
+    // The step passes only when the build passes and the config sets `net.offline`.
+    let config = repo()
+        .read(ci::CARGO_CONFIG)
+        .expect("the cargo config reads");
+    assert!(ci::offline_build_ok(true, &config));
+    assert!(!ci::offline_build_ok(false, &config));
+    let online = config.replace("offline = true", "offline = false");
+    assert!(
+        !ci::offline_build_ok(true, &online),
+        "the build passes, the config does not"
+    );
+    assert!(!ci::offline_build_ok(true, "[alias]\nx = \"run\"\n"));
+    assert!(!ci::offline_build_ok(true, ""));
+    let root = workspace::root();
+    let cmd = ci::command(&root, Step::OfflineBuild);
+    let args: Vec<String> = cmd
+        .get_args()
+        .map(|a| a.to_string_lossy().into_owned())
+        .collect();
+    assert!(args.iter().any(|a| a == "--offline") && args.iter().any(|a| a == "--locked"));
+    let home = cmd
+        .get_envs()
+        .find(|(k, _)| *k == "CARGO_HOME")
+        .and_then(|(_, v)| v)
+        .map(std::path::PathBuf::from);
+    assert_eq!(home, Some(ci::offline_home(&root)));
+}
+
+#[test]
+#[ignore = "tier2"]
+fn ac_002_offline_build() {
+    let args = vec!["--steps".to_owned(), "offline_build".to_owned()];
+    let report = ci::run(&workspace::root(), &args).expect("xtask ci runs");
+    assert_eq!(
+        report.pointer("/steps/offline_build/ok"),
+        Some(&Value::Bool(true)),
+        "{report}"
+    );
+}
+
+#[test]
+fn ac_003_crate_dag() {
+    assert_clean("AC-003");
+    assert!(dag::is_allowed(
+        "ghidorah-x86",
+        "ghidorah-ir",
+        DepKind::Normal
+    ));
+    assert!(!dag::is_allowed(
+        "ghidorah-ir",
+        "ghidorah-x86",
+        DepKind::Normal
+    ));
+    assert!(dag::is_allowed(
+        "ghidorah-json",
+        "ghidorah-testkit",
+        DepKind::Dev
+    ));
+    assert!(!dag::is_allowed(
+        "ghidorah-json",
+        "ghidorah-testkit",
+        DepKind::Normal
+    ));
+    assert!(dag::is_allowed(
+        "ghidorah-loader",
+        "ghidorah-oracle",
+        DepKind::Dev
+    ));
+    assert!(!dag::is_allowed(
+        "ghidorah-tools",
+        "ghidorah-oracle",
+        DepKind::Dev
+    ));
+    let bad = Edge {
+        from: "ghidorah-ir".to_owned(),
+        to: "ghidorah-x86".to_owned(),
+        kind: DepKind::Normal,
+    };
+    let found = dag::check_edges(&[bad]);
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].rule, "AC-003");
+    let graph = dag::render();
+    assert!(graph.contains("graph TD"));
+    assert!(workspace::PACKAGES.iter().all(|p| graph.contains(p.name)));
+    assert_eq!(graph, dag::render());
+}
+
+#[test]
+fn ac_004_no_unsafe_in_shipped() {
+    assert_clean("AC-004");
+    let rel = "crates/base/src/lib.rs";
+    assert_eq!(scan::no_unsafe(rel, "unsafe fn f() {}\n").len(), 1);
+    assert_eq!(
+        scan::no_unsafe(rel, "#![expect(unsafe_code, reason = \"x\")]\n").len(),
+        1
+    );
+    assert!(
+        scan::no_unsafe(
+            rel,
+            "// unsafe here\nfn unsafe_free() { let _ = \"unsafe\"; }\n"
+        )
+        .is_empty()
+    );
+    let meta = metadata(&[
+        package(
+            "ghidorah",
+            "crates/cli",
+            &path_dep("ghidorah-tools", "crates/tools", "null"),
+        ),
+        package(
+            "ghidorah-tools",
+            "crates/tools",
+            &format!(
+                "{},{}",
+                path_dep("ghidorah-base", "crates/base", "null"),
+                path_dep("ghidorah-testkit", "crates/testkit", "\"dev\"")
+            ),
+        ),
+        package("ghidorah-base", "crates/base", ""),
+        package("ghidorah-testkit", "crates/testkit", ""),
+    ]);
+    let names: Vec<String> = workspace::closure(&meta, "ghidorah").into_iter().collect();
+    assert_eq!(names, ["ghidorah", "ghidorah-base", "ghidorah-tools"]);
+}
+
+#[test]
+fn ac_005_no_vstd() {
+    assert_clean("AC-005");
+    assert_eq!(
+        manifest::no_vstd("Cargo.toml", "[dependencies]\nvstd = { path = \"v\" }\n").len(),
+        1
+    );
+    assert_eq!(
+        manifest::no_vstd("Cargo.toml", "[dev-dependencies]\nverus_builtin = \"1\"\n").len(),
+        1
+    );
+    assert!(
+        manifest::no_vstd(
+            "Cargo.toml",
+            "[dependencies]\nghidorah-spec = { path = \"../spec\" }\n"
+        )
+        .is_empty()
+    );
+}
+
+#[test]
+fn ac_007a_toolchain_pin() {
+    assert_clean("AC-007a");
+    let good = "[toolchain]\nchannel = \"1.97.0\"\ncomponents = [\"clippy\", \"rustfmt\", \"llvm-tools\"]\n";
+    assert!(manifest::toolchain_pin(good).is_empty());
+    assert_eq!(
+        manifest::toolchain_pin(&good.replace(", \"llvm-tools\"", "")).len(),
+        1
+    );
+    assert_eq!(
+        manifest::toolchain_pin(&good.replace("1.97.0", "stable")).len(),
+        1
+    );
+}
+
+#[test]
+fn ac_007b_edition_2024() {
+    assert_clean("AC-007b");
+    let old = package("ghidorah-json", "crates/json", "").replace("2024", "2021");
+    assert_eq!(workspace::check_edition(&metadata(&[old])).len(), 2);
+}
+
+#[test]
+fn ac_007c_resolver_3() {
+    assert_clean("AC-007c");
+    assert!(manifest::resolver_3("[workspace]\nresolver = \"3\"\n").is_empty());
+    assert_eq!(
+        manifest::resolver_3("[workspace]\nresolver = \"2\"\n").len(),
+        1
+    );
+    assert_eq!(manifest::resolver_3("[workspace]\nmembers = []\n").len(), 1);
+}
+
+#[test]
+fn ac_008_no_networked_build_scripts() {
+    assert_clean("AC-008");
+    let rel = "crates/x86/build.rs";
+    assert_eq!(
+        scan::build_script(rel, "use std::process::Command;\nfn main() {}\n").len(),
+        1
+    );
+    assert_eq!(
+        scan::build_script(
+            rel,
+            "fn main() { let _ = std::net::TcpStream::connect(\"h:1\"); }\n"
+        )
+        .len(),
+        1
+    );
+    assert!(
+        scan::build_script(
+            rel,
+            "fn main() { println!(\"cargo::rerun-if-changed=build.rs\"); }\n"
+        )
+        .is_empty()
+    );
+}
+
+#[test]
+fn ac_009_fmt_check() {
+    assert_clean("AC-009");
+}
+
+#[test]
+fn ac_010_clippy_policy() {
+    assert_clean("AC-010");
+    let root_toml = repo().read("Cargo.toml").expect("root manifest reads");
+    assert!(manifest::lint_policy(&root_toml).is_empty());
+    let no_nursery = root_toml.replace("nursery = { level = \"deny\", priority = -1 }", "");
+    assert_eq!(manifest::lint_policy(&no_nursery).len(), 1);
+    let warn = root_toml.replace(
+        "pedantic = { level = \"deny\"",
+        "pedantic = { level = \"warn\"",
+    );
+    assert_eq!(manifest::lint_policy(&warn).len(), 1);
+    let extra = root_toml.replace(
+        "future_not_send = \"allow\"",
+        "future_not_send = \"allow\"\ntoo_many_lines = \"allow\"",
+    );
+    assert_eq!(manifest::lint_policy(&extra).len(), 1);
+    assert_eq!(
+        manifest::lints_inherited("crates/x/Cargo.toml", "[package]\nname = \"x\"\n").len(),
+        1
+    );
+    assert!(
+        manifest::lints_inherited("crates/x/Cargo.toml", "[lints]\nworkspace = true\n").is_empty()
+    );
+    check_adr_names_exceptions();
+    check_clippy_source_scan(&root_toml);
+}
+
+/// ADR-0019 names each workspace allowlist lint and each reviewed item exception.
+fn check_adr_names_exceptions() {
+    let adr = repo().read(manifest::LINT_ADR).expect("ADR-0019 reads");
+    for lint in manifest::ALLOWED_LINTS {
+        assert!(adr.contains(&format!("`{lint}`")), "ADR-0019 names {lint}");
+    }
+    for (path, lint) in manifest::REVIEWED_EXCEPTIONS {
+        let row = adr
+            .lines()
+            .find(|l| l.contains(&format!("`{path}`")) && l.contains(&format!("`{lint}`")));
+        let reason = row.and_then(|r| r.rsplit('|').nth(1)).map(str::trim);
+        assert!(
+            reason.is_some_and(|r| r.ends_with('.')),
+            "ADR-0019 gives the reason of {path} {lint}"
+        );
+    }
+    assert!(manifest::adr_names_exceptions(&adr).is_empty());
+    let first = manifest::REVIEWED_EXCEPTIONS.first().expect("one entry");
+    let dropped = adr.replace(&format!("`{}`", first.0), "`gone`");
+    assert_eq!(manifest::adr_names_exceptions(&dropped).len(), 1);
+    let no_allowlist = adr.replace("`future_not_send`", "future_not_send");
+    assert_eq!(manifest::adr_names_exceptions(&no_allowlist).len(), 1);
+}
+
+/// The source scan accepts restriction lints, `tables/` files, a reasoned `disallowed_types`
+/// and the reviewed items. It finds each other group lint exception.
+fn check_clippy_source_scan(root_toml: &str) {
+    let restriction = manifest::restriction_lints(root_toml);
+    for lint in ["unwrap_used", "expect_used", "panic", "print_stdout"] {
+        assert!(restriction.iter().any(|r| r == lint), "{lint}");
+    }
+    assert!(
+        !restriction
+            .iter()
+            .any(|r| r == "pedantic" || r == "option_if_let_else")
+    );
+    let mut restriction = restriction;
+    restriction.extend(scan::denied_clippy_lints(
+        "#![deny(clippy::indexing_slicing, clippy::arithmetic_side_effects)]\n",
+    ));
+    let scan = |rel: &str, text: &str| scan::clippy_exceptions(rel, text, &restriction);
+    let src = "crates/base/src/x.rs";
+    let long = "#[allow(clippy::too_many_lines, reason = \"long\")]\nfn f() {}\n";
+    let found = scan(src, long);
+    assert_eq!(found.len(), 1, "{}", render(&found));
+    assert_eq!(found.first().map(|f| f.line), Some(1));
+    let bare = "#[allow(clippy::too_many_lines)]\nfn f() {}\n";
+    assert_eq!(scan(src, bare).len(), 1, "a group lint outside tables/");
+    assert_eq!(scan(src, "#![allow(clippy::pedantic)]\n").len(), 1);
+    let inner = "//! Doc.\n#![expect(\n    clippy::enum_glob_use,\n    reason = \"rows\"\n)]\n";
+    assert_eq!(scan(src, inner).first().map(|f| f.line), Some(2));
+    let cfg = "#[cfg_attr(test, allow(clippy::cast_lossless, reason = \"x\"))]\nfn f() {}\n";
+    assert_eq!(scan(src, cfg).len(), 1);
+    assert_eq!(scan("crates/x86/src/tables/map0.rs", long).len(), 0);
+    let reviewed = "#[expect(clippy::fn_params_excessive_bools, reason = \"r\")]\n";
+    assert!(scan("crates/kernel/src/flags.rs", reviewed).is_empty());
+    assert_eq!(scan("crates/kernel/src/range.rs", reviewed).len(), 1);
+    for ok in [
+        "#[allow(clippy::panic, reason = \"a golden mismatch fails the test\")]\n",
+        "#[expect(clippy::arithmetic_side_effects, reason = \"bound proved by Verus\")]\n",
+        "#[expect(clippy::disallowed_types, reason = \"an internal lookup\")]\n",
+        "#[allow(unused_mut, reason = \"a rustc lint\")]\n",
+        "#[deny(clippy::cast_lossless)]\n",
+        "// #[allow(clippy::too_many_lines)]\nlet s = \"#[allow(clippy::too_many_lines)]\";\n",
+    ] {
+        let found = scan(src, ok);
+        assert!(found.is_empty(), "{ok}: {}", render(&found));
+    }
+    assert_eq!(
+        scan(src, "#[expect(clippy::disallowed_types)]\n").len(),
+        1,
+        "disallowed_types needs a reason"
+    );
+    assert!(scan::is_source_file("xtask/src/verify/tree.rs"));
+    assert!(scan::is_source_file("crates/testkit/src/golden.rs"));
+    assert!(!scan::is_source_file("crates/db/src/edit/tests.rs"));
+    assert!(!scan::is_source_file("crates/db/tests/db/main.rs"));
+    assert!(!scan::is_source_file("xtask/tests/gates.rs"));
+}
+
+#[test]
+fn ac_011_docs_policy() {
+    assert_clean("AC-011");
+    let root_toml = repo().read("Cargo.toml").expect("root manifest reads");
+    assert!(manifest::docs_policy(&root_toml).is_empty());
+    let warn = root_toml.replace("missing_docs = \"deny\"", "missing_docs = \"warn\"");
+    assert_eq!(manifest::docs_policy(&warn).len(), 1);
+    let rustdoc = root_toml.replace(
+        "broken_intra_doc_links = \"deny\"",
+        "broken_intra_doc_links = \"allow\"",
+    );
+    assert_eq!(manifest::docs_policy(&rustdoc).len(), 1);
+    let src = "crates/base/src/x.rs";
+    for bad in [
+        "#![allow(missing_docs, reason = \"x\")]\n",
+        "#[expect(missing_docs, reason = \"x\")]\npub fn f() {}\n",
+        "#![allow(rustdoc::broken_intra_doc_links, reason = \"x\")]\n",
+        "#[cfg_attr(test, allow(missing_docs))]\n",
+    ] {
+        assert_eq!(scan::docs_exceptions(src, bad).len(), 1, "{bad}");
+    }
+    for ok in [
+        "#![deny(missing_docs)]\n",
+        "// #[allow(missing_docs)]\n",
+        "fn missing_docs() {}\n",
+        "#[allow(clippy::panic, reason = \"x\")]\n",
+    ] {
+        assert!(scan::docs_exceptions(src, ok).is_empty(), "{ok}");
+    }
+}
+
+#[test]
+fn ac_012_no_stubs() {
+    assert_clean("AC-012");
+    let rel = "crates/base/src/lib.rs";
+    let bad = [
+        "fn f() { todo!() }",
+        "fn f() { unimplemented!() }",
+        "fn f() { dbg!(1); }",
+        "fn f() { x.unwrap(); }",
+        "fn f() { x.expect(\"m\"); }",
+        "// TODO later",
+        "/* FIXME */",
+        "// XXX",
+    ];
+    for text in bad {
+        assert_eq!(scan::no_stubs(rel, text).len(), 1, "{text}");
+    }
+    let good = [
+        "fn f() { x.unwrap_or(0); }",
+        "#[expect(clippy::too_many_lines, reason = \"table\")]",
+        "fn todo_list() {}",
+        "let s = \"todo!()\";",
+    ];
+    for text in good {
+        assert!(scan::no_stubs(rel, text).is_empty(), "{text}");
+    }
+}
+
+#[test]
+fn ac_013_coverage_gate() {
+    assert_eq!(
+        (cov::WORKSPACE_MIN, cov::CORE_MIN, cov::KERNEL_MIN),
+        (85, 90, 95)
+    );
+    assert_eq!(cov::min_percent("kernel"), Some(95));
+    assert_eq!(cov::min_percent("json"), Some(90));
+    assert_eq!(cov::min_percent("decomp"), Some(90));
+    assert_eq!(cov::min_percent("base"), None);
+    // One crate changes. Each other gated crate has 100 of 100 lines.
+    let one = |dir: &str, lines: u64, covered: u64| {
+        let mut coverage = gated_coverage();
+        let counts = Counts {
+            lines,
+            covered,
+            ..Counts::default()
+        };
+        coverage.crates.insert(dir.to_owned(), counts);
+        coverage
+    };
+    assert_eq!(cov_ok(&Coverage::default()), Some(false));
+    assert_eq!(cov_ok(&one("kernel", 100, 95)), Some(true));
+    assert_eq!(cov_ok(&one("kernel", 100, 94)), Some(false));
+    assert_eq!(cov_ok(&one("json", 100, 90)), Some(true));
+    assert_eq!(cov_ok(&one("json", 100, 89)), Some(false));
+    // The workspace line: 900 gated lines plus 5,100 lines of `base` give 6,000 lines.
+    assert_eq!(cov_ok(&one("base", 5_100, 4_200)), Some(true));
+    assert_eq!(cov_ok(&one("base", 5_100, 4_199)), Some(false));
+}
+
+/// Gives a coverage with each gated crate (the kernel and each core crate) at 100 of 100 lines.
+fn gated_coverage() -> Coverage {
+    let full = Counts {
+        lines: 100,
+        covered: 100,
+        ..Counts::default()
+    };
+    Coverage {
+        crates: std::iter::once("kernel")
+            .chain(cov::CORE.iter().copied())
+            .map(|dir| (dir.to_owned(), full))
+            .collect(),
+    }
+}
+
+fn cov_ok(coverage: &Coverage) -> Option<bool> {
+    cov::gate(coverage).get("ok").and_then(Value::as_bool)
+}
+
+#[test]
+fn regress_cov_empty_measurement_fails() {
+    assert_eq!(cov_ok(&gated_coverage()), Some(true));
+    // No profile gives no rows.
+    assert_eq!(cov_ok(&Coverage::default()), Some(false));
+    // Rows with zero instrumented lines are no measurement.
+    let mut zero = gated_coverage();
+    for counts in zero.crates.values_mut() {
+        *counts = Counts::default();
+    }
+    assert_eq!(cov_ok(&zero), Some(false));
+    // The coverage build removes `CARGO_ENCODED_RUSTFLAGS`, so its `RUSTFLAGS` apply.
+    let dir = std::path::Path::new("/w");
+    let cmd = cov::instrumented(dir, &dir.join("target/cov"), &dir.join("p"), &["test"]);
+    let env = |key: &str| {
+        cmd.get_envs()
+            .find(|(k, _)| *k == key)
+            .map(|(_, v)| v.map(|v| v.to_string_lossy().into_owned()))
+    };
+    assert_eq!(env("CARGO_ENCODED_RUSTFLAGS"), Some(None));
+    assert_eq!(
+        env("RUSTFLAGS"),
+        Some(Some("-C instrument-coverage".to_owned()))
+    );
+}
+
+#[test]
+fn regress_cov_missing_core_crate_fails() {
+    for dir in std::iter::once("kernel").chain(cov::CORE.iter().copied()) {
+        let mut absent = gated_coverage();
+        absent.crates.remove(dir);
+        let report = cov::gate(&absent);
+        assert_eq!(report.get("ok"), Some(&Value::Bool(false)), "{dir}");
+        assert_eq!(
+            report.get("missing"),
+            Some(&Value::Array(vec![Value::from(dir)])),
+            "{dir}"
+        );
+        let mut empty = gated_coverage();
+        empty.crates.insert(dir.to_owned(), Counts::default());
+        assert_eq!(cov_ok(&empty), Some(false), "{dir}");
+    }
+    // A crate outside the core list has only the workspace line.
+    let mut other = gated_coverage();
+    other.crates.insert("base".to_owned(), Counts::default());
+    assert_eq!(cov_ok(&other), Some(true));
+}
+
+#[test]
+#[ignore = "tier2"]
+fn ac_013_coverage_run() {
+    let report = cov::run(&workspace::root(), &[]).expect("xtask cov runs");
+    assert_eq!(
+        report.get("ok"),
+        Some(&Value::Bool(true)),
+        "{}",
+        json::write(&report)
+    );
+}
+
+#[test]
+fn ac_014_file_size() {
+    assert_clean("AC-014");
+    let rel = "crates/base/src/lib.rs";
+    assert!(scan::file_size(rel, &"x\n".repeat(600)).is_empty());
+    assert_eq!(scan::file_size(rel, &"x\n".repeat(601)).len(), 1);
+    assert!(scan::is_table_file("crates/x86/src/tables/ops.rs"));
+    assert!(scan::is_test_file("crates/base/src/addr/tests.rs"));
+    assert!(scan::is_test_file("crates/base/tests/ac_026.rs"));
+    assert!(!scan::is_test_file("crates/base/src/lib.rs"));
+}
+
+#[test]
+fn ac_016_disallowed_types() {
+    assert_clean("AC-016");
+    let config = repo().read("clippy.toml").expect("clippy.toml reads");
+    assert!(manifest::clippy_config(&config).is_empty());
+    assert_eq!(
+        manifest::clippy_config(&config.replace("std::collections::HashSet", "x")).len(),
+        1
+    );
+    let rel = "crates/db/src/lib.rs";
+    assert_eq!(
+        scan::disallowed_exceptions(rel, "#[allow(clippy::disallowed_types)]\n").len(),
+        1
+    );
+    assert_eq!(
+        scan::disallowed_exceptions(rel, "#[expect(clippy::disallowed_types)]\n").len(),
+        1
+    );
+    let reasoned = "#[expect(clippy::disallowed_types, reason = \"lookup only\")]\n";
+    assert!(scan::disallowed_exceptions(rel, reasoned).is_empty());
+}
+
+#[test]
+fn ac_017_layering() {
+    assert_clean("AC-017");
+    let rel = "crates/json/src/lib.rs";
+    let bad = [
+        "use std::fs;",
+        "use std::{collections::BTreeMap, env};",
+        "fn f() { std::process::exit(1) }",
+        "fn f() { let _ = std::time::SystemTime::now(); }",
+        "use std::net::TcpStream;",
+    ];
+    for text in bad {
+        assert_eq!(scan::layering(rel, text).len(), 1, "{text}");
+    }
+    assert!(scan::layering(rel, "use std::time::Instant;\n// std::fs in a comment\n").is_empty());
+    assert_eq!(scan::crate_dir("crates/json/src/lib.rs"), Some("json"));
+    assert_eq!(scan::crate_dir("xtask/src/main.rs"), Some("xtask"));
+}
+
+fn row(id: &str, closes: &[&str], needs: &[&str]) -> AcRow {
+    AcRow {
+        id: id.to_owned(),
+        line: 1,
+        stretch: false,
+        removed: false,
+        evidence: Vec::new(),
+        closes: closes.iter().map(|s| (*s).to_owned()).collect(),
+        needs: needs.iter().map(|s| (*s).to_owned()).collect(),
+    }
+}
+
+#[test]
+fn ac_018c_needs_order() {
+    assert_clean("AC-018c");
+    assert_eq!(ac::position("01"), Some((0, 0)));
+    assert_eq!(ac::position("WP-02"), Some((0, 1)));
+    assert_eq!(ac::needs_order(&[row("AC-1", &["07"], &["17b"])]).len(), 1);
+    assert!(ac::needs_order(&[row("AC-2", &["17b"], &["19"])]).is_empty());
+    assert_eq!(ac::needs_order(&[row("AC-3", &["19"], &["17b"])]).len(), 1);
+    assert!(ac::needs_order(&[row("AC-4", &["13a", "25"], &["24"])]).is_empty());
+    assert_eq!(ac::needs_order(&[row("AC-5", &["13a"], &["24"])]).len(), 1);
+    assert_eq!(ac::needs_order(&[row("AC-6", &["99"], &[])]).len(), 1);
+    assert!(ac::needs_order(&[row("AC-7", &["30"], &["23"])]).is_empty());
+    assert_eq!(ac::needs_order(&[row("AC-8", &["23"], &["30"])]).len(), 1);
+    assert!(ac::needs_order(&[row("AC-9", &["29"], &["25", "21"])]).is_empty());
+    let removed = AcRow {
+        removed: true,
+        ..row("AC-10", &["01"], &["28"])
+    };
+    assert!(ac::needs_order(&[removed]).is_empty());
+}
+
+#[test]
+fn ac_018c_pairs_follow_revision_5() {
+    let pairs: Vec<&str> = ac::PAIRS.iter().map(|(name, _)| *name).collect();
+    let expected: Vec<String> = (1..=19).map(|n| format!("P{n}")).collect();
+    assert_eq!(pairs, expected);
+    let wps: usize = ac::PAIRS.iter().map(|(_, wps)| wps.len()).sum();
+    assert_eq!(wps, 37);
+    assert_eq!(ac::position("19c"), Some((15, 0)));
+    assert_eq!(ac::position("25b"), Some((15, 1)));
+    assert_eq!(ac::position("18"), Some((6, 1)));
+    assert_eq!(ac::position("16"), Some((7, 1)));
+    assert_eq!(ac::position("20"), Some((9, 1)));
+    assert_eq!(ac::position("19b"), Some((12, 0)));
+    assert_eq!(ac::position("23"), Some((12, 1)));
+    assert_eq!(ac::position("22b"), Some((13, 1)));
+    assert_eq!(ac::position("30"), Some((16, 1)));
+    assert_eq!(ac::position("29"), Some((16, 0)));
+    assert_eq!(ac::position("26"), Some((17, 0)));
+    assert_eq!(ac::position("28"), Some((18, 1)));
+    let design = repo().read(ac::DESIGN_PATH).expect("design reads");
+    let headings: Vec<&str> = design
+        .lines()
+        .filter_map(|l| l.strip_prefix("#### WP-"))
+        .filter_map(|l| l.split_whitespace().next())
+        .collect();
+    assert_eq!(headings.len(), wps);
+    for wp in headings {
+        assert!(ac::position(wp).is_some(), "WP-{wp} is in no pair");
+    }
+}
+
+#[test]
+fn ac_019_ci_workflow() {
+    assert_clean("AC-019");
+    let yaml = repo().read(workflow::PATH).expect("ci.yml reads");
+    let jobs = workflow::jobs(&yaml);
+    assert!(jobs.iter().any(|j| j == "tier1") && jobs.iter().any(|j| j == "tier2"));
+    assert!(jobs.iter().any(|j| j == "verus"));
+    let node = yaml.replacen("actions/cache@v4", "actions/setup-node@v4", 1);
+    assert!(!workflow::check(&node).is_empty());
+    let no_tier2 = yaml.replacen("\n  tier2:", "\n  other:", 1);
+    assert!(!workflow::check(&no_tier2).is_empty());
+    // Gate 7 and the fixture checks run in tier 1.
+    assert!(
+        job_runs(&yaml, "tier1", "cargo xtask ac"),
+        "tier1 runs xtask ac"
+    );
+    assert!(
+        job_runs(&yaml, "tier1", "cargo xtask fixtures check"),
+        "tier1 runs xtask fixtures check"
+    );
+    // The evidence run of tier 2 fails the job when its failed list is not empty.
+    let tier2 = workflow::job_text(&yaml, "tier2").expect("tier2 exists");
+    let run = step_of(&tier2, "cargo xtask ac --run --tier2").expect("tier2 runs xtask ac --run");
+    assert!(
+        run.contains("shell: bash"),
+        "pipefail keeps the exit code:\n{run}"
+    );
+    assert!(
+        run.contains(r#"grep -q '"failed":\[\]'"#),
+        "the step checks the failed list:\n{run}"
+    );
+    // The Verus job compares the new proof record with the committed record.
+    let verus = workflow::job_text(&yaml, "verus").expect("verus exists");
+    let verify = verus
+        .find("run: cargo xtask verify")
+        .expect("verus runs xtask verify");
+    let diff = verus
+        .find("run: git diff --exit-code verify/results.json")
+        .expect("verus compares the record");
+    assert!(verify < diff, "the diff runs after xtask verify");
+}
+
+/// Tells if a job runs `command` as the whole `run:` line of a step.
+fn job_runs(yaml: &str, job: &str, command: &str) -> bool {
+    workflow::job_text(yaml, job).is_some_and(|text| {
+        text.lines()
+            .any(|line| line.trim().strip_prefix("run:").map(str::trim) == Some(command))
+    })
+}
+
+/// Gives the text of the step of a job that holds a line that starts with `command`.
+fn step_of(job: &str, command: &str) -> Option<String> {
+    job.split("\n      - ")
+        .find(|step| step.lines().any(|l| l.trim().starts_with(command)))
+        .map(str::to_owned)
+}
+
+#[test]
+fn ac_018b_failed_is_empty() {
+    let report = ac::run(&workspace::root(), &[]).expect("xtask ac runs");
+    assert_eq!(
+        report.pointer("/failed"),
+        Some(&Value::Array(Vec::new())),
+        "{report}"
+    );
+    // The committed rows come from an earlier commit, so the test reads only the list form.
+    for list in ["/stale", "/not_passed"] {
+        assert!(
+            report.pointer(list).and_then(Value::as_array).is_some(),
+            "{list}: {report}"
+        );
+    }
+}
+
+/// A proof record of the kernel K1 and a host record of bash. Every claim holds.
+const RECORD: &str = r#"{"tree_sha256":"aa",
+    "kernels":{"K1":{"name":"K1","status":"verified","errors":0,"verified":3,"spec_items":2}},
+    "negatives":[{"kernel":"K1","ok":true}],
+    "bash":{"path":"/usr/bin/bash","sha256":"bb","insns":10,"agree":10,"mismatches":0}}"#;
+
+fn record_status(text: &str, pointer: &str, input: &str, current: &str, require: bool) -> Status {
+    let record = json::parse(text).expect("the record parses");
+    record::record_match(&record, pointer, input, Some(current), require)
+}
+
+#[test]
+fn regress_host_record_other_hash_is_skipped() {
+    let host = |text: &str, current: &str, require: bool| {
+        record_status(text, "/bash", "host-bash", current, require)
+    };
+    let silent = RECORD.replace(r#","insns":10,"agree":10,"mismatches":0"#, "");
+    let mismatches = RECORD.replace(r#""mismatches":0"#, r#""mismatches":3"#);
+    for require in [false, true] {
+        assert_eq!(host(RECORD, "bb", require), Status::Recorded);
+        // Another host file: the claims hold, so only the host differs.
+        assert_eq!(host(RECORD, "bc", require), Status::Skipped);
+        // A record without its claims fails on each host.
+        assert_eq!(host(&silent, "bc", require), Status::Fail);
+        assert_eq!(host(&silent, "bb", require), Status::Fail);
+        assert_eq!(host(&mismatches, "bc", require), Status::Fail);
+    }
+}
+
+/// Gives a repository copy with one kernel file and the proof record `RECORD`.
+fn stale_repository() -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("ghidorah-xtask-record-{}", std::process::id()));
+    for (rel, text) in [
+        ("crates/kernel/src/lib.rs", "//! A kernel.\n"),
+        ("crates/spec/src/lib.rs", "//! A stub.\n"),
+        ("verify/results.json", RECORD),
+    ] {
+        let path = dir.join(rel);
+        std::fs::create_dir_all(path.parent().expect("the path has a parent"))
+            .expect("the directory is made");
+        std::fs::write(&path, text).expect("the file is written");
+    }
+    dir
+}
+
+#[test]
+fn regress_stale_tree_record_warns_without_require_proofs() {
+    let tree = |text: &str, current: &str, require: bool| {
+        record_status(text, "/kernels/K1", "tree", current, require)
+    };
+    assert_eq!(tree(RECORD, "aa", false), Status::Recorded);
+    assert_eq!(tree(RECORD, "aa", true), Status::Recorded);
+    // A stale tree is a warning in plain `cargo test` (design Section 13.3).
+    assert_eq!(tree(RECORD, "ab", false), Status::Skipped);
+    assert_eq!(tree(RECORD, "ab", true), Status::Fail);
+    // A record without its claims fails, also when the tree is stale.
+    let failed = RECORD.replace(r#""status":"verified""#, r#""status":"failed""#);
+    assert_eq!(tree(&failed, "ab", false), Status::Fail);
+    assert_eq!(tree(&failed, "aa", false), Status::Fail);
+
+    // The live check of `xtask ac` follows the same rule.
+    let root = stale_repository();
+    let mut ac_row = row("AC-028", &["03"], &[]);
+    ac_row.evidence = vec![Evidence::Record {
+        file: "verify/results.json".to_owned(),
+        pointer: "/kernels/K1".to_owned(),
+        input: "tree".to_owned(),
+    }];
+    let statuses = |require: bool| -> Vec<Status> {
+        record::live(&root, std::slice::from_ref(&ac_row), require)
+            .iter()
+            .map(|o| o.status)
+            .collect()
+    };
+    let (plain, strict) = (statuses(false), statuses(true));
+    std::fs::remove_dir_all(&root).expect("the repository copy is removed");
+    assert_eq!(plain, [Status::Skipped]);
+    assert_eq!(strict, [Status::Fail]);
+}
+
+#[test]
+fn regress_verus_build_is_online() {
+    let yaml = repo().read(workflow::PATH).expect("ci.yml reads");
+    assert!(workflow::check(&yaml).is_empty());
+    let offline = yaml.replacen("CARGO_NET_OFFLINE: \"false\"", "", 1);
+    assert!(!workflow::check(&offline).is_empty());
+}
+
+#[test]
+fn regress_verus_checkout_is_outside_the_workspace() {
+    let yaml = repo().read(workflow::PATH).expect("ci.yml reads");
+    let inside = yaml.replace("${{ runner.temp }}/verus-src", "verus-src");
+    assert!(!workflow::check(&inside).is_empty());
+}
+
+#[test]
+fn ac_223_no_set_var() {
+    assert_clean("AC-223");
+    let rel = "crates/cli/tests/x.rs";
+    assert_eq!(
+        scan::no_set_var(rel, "fn f() { std::env::set_var(\"A\", \"1\"); }").len(),
+        1
+    );
+    assert_eq!(
+        scan::no_set_var(rel, "fn f() { env::remove_var(\"A\"); }").len(),
+        1
+    );
+    assert!(
+        scan::no_set_var(
+            rel,
+            "fn f() { cmd.env(\"A\", \"1\"); let _ = \"set_var(\"; }"
+        )
+        .is_empty()
+    );
+}

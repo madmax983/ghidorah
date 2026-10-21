@@ -1,0 +1,57 @@
+{
+  "id": "pe-05",
+  "question": "q-pe-05",
+  "turns": [
+    {
+      "call": {
+        "tool": "binary_load",
+        "args": {
+          "path": "fixtures/bin/pe/pe_main.exe"
+        }
+      }
+    },
+    {
+      "call": {
+        "tool": "func_get",
+        "args": {
+          "target": "0x140001010",
+          "include": [
+            "decomp"
+          ]
+        }
+      }
+    }
+  ],
+  "answer": {
+    "turn": 1,
+    "ptr": "/data/decomp/text",
+    "steps": [
+      {
+        "op": "split",
+        "on": "case "
+      },
+      {
+        "op": "drop",
+        "count": 1
+      },
+      {
+        "op": "grep",
+        "glob": "*:*break;*",
+        "not": true
+      },
+      {
+        "op": "count"
+      }
+    ]
+  },
+  "provenance": {
+    "/turns/0/call/args/path": "question:binaries/0",
+    "/turns/1/call/args/target": "question",
+    "/turns/1/call/args/include/0": "instructions"
+  },
+  "budgets": {
+    "max_calls": 2,
+    "max_chars": 5900,
+    "max_peak_chars": 5100
+  }
+}

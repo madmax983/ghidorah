@@ -1,0 +1,10 @@
+{"golden":"generator=cli_examples version=1"}
+{
+  "ok": true,
+  "rev": 0,
+  "session": "s",
+  "partial": false,
+  "data": {
+    "text": "hello"
+  }
+}

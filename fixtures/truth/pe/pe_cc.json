@@ -1,0 +1,158 @@
+{
+  "binaries": [
+    {
+      "name": "pe_cc.exe",
+      "sha256": "ef0afb15757115e861050d1da25b2f33bf4d0899e697b791879bc4dd60d70f06"
+    }
+  ],
+  "build": {
+    "cflags": ["--target=x86_64-pc-windows-msvc","-O2"],
+    "compiler": "clang 18.1.3",
+    "ldflags": [
+      "/subsystem:console",
+      "/nodefaultlib",
+      "/Brepro",
+      "/debug",
+      "/machine:x64",
+      "/entry:cc_start",
+      "/pdbaltpath:pe_cc.pdb",
+      "/pdbsourcepath:/src"
+    ]
+  },
+  "codeview": {
+    "age": 1,
+    "guid": "6BEA5324-609A-B4B6-4C4C-44205044422E",
+    "pdb": "pe_cc.pdb"
+  },
+  "entry": "0x1400011e0",
+  "exports": [],
+  "fixture": "pe_cc.exe",
+  "functions": [
+    {
+      "addr": "0x140001000",
+      "name": "p1",
+      "params": 1,
+      "pdata": false
+    },
+    {
+      "addr": "0x140001010",
+      "name": "p2",
+      "params": 2,
+      "pdata": false
+    },
+    {
+      "addr": "0x140001020",
+      "name": "p3",
+      "params": 3,
+      "pdata": false
+    },
+    {
+      "addr": "0x140001030",
+      "name": "p4",
+      "params": 4,
+      "pdata": false
+    },
+    {
+      "addr": "0x140001050",
+      "name": "p5",
+      "params": 5,
+      "pdata": false
+    },
+    {
+      "addr": "0x140001070",
+      "name": "p6",
+      "params": 6,
+      "pdata": false
+    },
+    {
+      "addr": "0x140001090",
+      "name": "p7",
+      "params": 7,
+      "pdata": false
+    },
+    {
+      "addr": "0x1400010b0",
+      "name": "p8",
+      "params": 8,
+      "pdata": false
+    },
+    {
+      "addr": "0x1400010e0",
+      "name": "q4",
+      "params": 4,
+      "pdata": false
+    },
+    {
+      "addr": "0x1400010f0",
+      "name": "ptr2",
+      "params": 2,
+      "pdata": false
+    },
+    {
+      "addr": "0x140001100",
+      "name": "f1",
+      "params": 1,
+      "pdata": false
+    },
+    {
+      "addr": "0x140001120",
+      "name": "f2",
+      "params": 2,
+      "pdata": false
+    },
+    {
+      "addr": "0x140001130",
+      "name": "m3",
+      "params": 3,
+      "pdata": false
+    },
+    {
+      "addr": "0x140001150",
+      "name": "m4",
+      "params": 4,
+      "pdata": false
+    },
+    {
+      "addr": "0x140001170",
+      "name": "m5",
+      "params": 5,
+      "pdata": false
+    },
+    {
+      "addr": "0x1400011a0",
+      "name": "m6",
+      "params": 6,
+      "pdata": false
+    },
+    {
+      "addr": "0x1400011c0",
+      "name": "g2",
+      "params": 2,
+      "pdata": false
+    },
+    {
+      "addr": "0x1400011e0",
+      "name": "cc_start",
+      "params": 0,
+      "pdata": true
+    }
+  ],
+  "generator": {
+    "name": "xtask-fixtures",
+    "version": "1"
+  },
+  "image_base": "0x140000000",
+  "imports": [],
+  "program": "pe_cc",
+  "protections": {
+    "dynamic_base": true,
+    "force_integrity": false,
+    "guard_cf": false,
+    "high_entropy_va": true,
+    "nx_compat": true
+  },
+  "switch": null,
+  "thunks": [],
+  "tier": "PE",
+  "tls_callbacks": []
+}

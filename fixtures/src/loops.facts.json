@@ -1,0 +1,41 @@
+{
+  "claims": [
+    {
+      "args": [
+        "main",
+        "gcd"
+      ],
+      "rel": "calls"
+    },
+    {
+      "args": [
+        "main",
+        "sum_squares"
+      ],
+      "rel": "calls"
+    }
+  ],
+  "constants": {
+    "grid_mask": "0xf",
+    "reverse_rounds": "32",
+    "sum_squares_mask": "0x3f"
+  },
+  "program": "loops",
+  "runs": [
+    {
+      "args": [],
+      "exit": 0,
+      "stdout": "285 2 2 1342177280 141\n"
+    }
+  ],
+  "survey_facts": [
+    {
+      "kind": "function",
+      "value": "gcd"
+    },
+    {
+      "kind": "function",
+      "value": "count_bits"
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+diff --git a/crates/kernel/src/rangeset.rs b/crates/kernel/src/rangeset.rs
+--- a/crates/kernel/src/rangeset.rs
++++ b/crates/kernel/src/rangeset.rs
+@@ -199,7 +199,7 @@
+     #[expect(clippy::indexing_slicing, reason = "bound proved by Verus")]
+     #[expect(clippy::arithmetic_side_effects, reason = "bound proved by Verus")]
+     pub fn insert(&mut self, range: Range) {
+-        if range.first > range.last {
++        if range.first >= range.last {
+             return;
+         }
+         let list = self.ranges.as_slice();

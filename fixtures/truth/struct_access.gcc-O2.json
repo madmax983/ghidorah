@@ -1,0 +1,227 @@
+{
+  "binaries": [
+    {
+      "name": "struct_access.gcc-O2",
+      "sha256": "7b7ba7d65bb6892db75ee43706602e372e1984c1e3d220239ead35886c78f480",
+      "variant": "none"
+    },
+    {
+      "name": "struct_access.gcc-O2.stripped",
+      "sha256": "894970b28192c5dacd73cdae71bff5670280abe0dbb474f3fd8fc711273af132",
+      "variant": "stripped"
+    }
+  ],
+  "build": {
+    "cflags": ["-O2"],
+    "compiler": "gcc 13.3.0",
+    "id": "gcc-O2",
+    "ldflags": []
+  },
+  "call_edges": [
+    ["__do_global_dtors_aux","__cxa_finalize"],
+    ["__do_global_dtors_aux","deregister_tm_clones"],
+    ["_start","__libc_start_main"],
+    ["frame_dummy","register_tm_clones"],
+    ["free_list","free"],
+    ["main","__printf_chk"],
+    ["main","bump_count"],
+    ["main","free_list"],
+    ["main","new_record"],
+    ["main","sum_counts"],
+    ["new_record","malloc"],
+    ["new_record","strncpy"]
+  ],
+  "cold_parts": [],
+  "duplicate_names": {},
+  "elf": {
+    "entry": "0x1140",
+    "image_base": "0x0",
+    "interp": true,
+    "type": "DYN"
+  },
+  "facts": {
+    "claims": [
+      {
+        "args": ["new_record","malloc"],
+        "rel": "calls"
+      },
+      {
+        "args": ["free_list","free"],
+        "rel": "calls"
+      },
+      {
+        "args": ["main","sum_counts"],
+        "rel": "calls"
+      }
+    ],
+    "layouts": [
+      {
+        "fields": [
+          {
+            "name": "id",
+            "offset": 0,
+            "size": 4
+          },
+          {
+            "name": "name",
+            "offset": 4,
+            "size": 12
+          },
+          {
+            "name": "count",
+            "offset": 16,
+            "size": 8
+          },
+          {
+            "name": "next",
+            "offset": 24,
+            "size": 8
+          }
+        ],
+        "size": 32,
+        "type": "struct record"
+      }
+    ]
+  },
+  "fixture": "struct_access.gcc-O2",
+  "function_count": 12,
+  "functions": [
+    {
+      "addr": "0x1000",
+      "insns": 8,
+      "name": "_init",
+      "size": 0
+    },
+    {
+      "addr": "0x10c0",
+      "insns": 34,
+      "name": "main",
+      "size": 126
+    },
+    {
+      "addr": "0x1140",
+      "insns": 13,
+      "name": "_start",
+      "size": 38
+    },
+    {
+      "addr": "0x1170",
+      "insns": 11,
+      "name": "deregister_tm_clones",
+      "size": 0
+    },
+    {
+      "addr": "0x11a0",
+      "insns": 16,
+      "name": "register_tm_clones",
+      "size": 0
+    },
+    {
+      "addr": "0x11e0",
+      "insns": 16,
+      "name": "__do_global_dtors_aux",
+      "size": 0
+    },
+    {
+      "addr": "0x1220",
+      "insns": 3,
+      "name": "frame_dummy",
+      "size": 0
+    },
+    {
+      "addr": "0x1230",
+      "insns": 31,
+      "name": "new_record",
+      "size": 96
+    },
+    {
+      "addr": "0x1290",
+      "insns": 3,
+      "name": "bump_count",
+      "size": 9
+    },
+    {
+      "addr": "0x12a0",
+      "insns": 12,
+      "name": "sum_counts",
+      "size": 33
+    },
+    {
+      "addr": "0x12d0",
+      "insns": 15,
+      "name": "free_list",
+      "size": 41
+    },
+    {
+      "addr": "0x12fc",
+      "insns": 4,
+      "name": "_fini",
+      "size": 0
+    }
+  ],
+  "gaps": [],
+  "generator": {
+    "name": "xtask-fixtures",
+    "version": "1"
+  },
+  "imports": ["__cxa_finalize","__libc_start_main","__printf_chk","free","malloc","strncpy"],
+  "jump_tables": [],
+  "leaf_functions": [],
+  "libraries": ["libc.so.6"],
+  "network_imports": [],
+  "program": "struct_access",
+  "protections": {
+    "build_id": "b0910cb1852c71d95aef4b11dae62c4d62d39677",
+    "canary": false,
+    "fortify": true,
+    "ibt": true,
+    "nx": true,
+    "pie": true,
+    "relro": "full",
+    "rpath": false,
+    "runpath": false,
+    "shstk": true
+  },
+  "self_calls": [],
+  "strings": [],
+  "survey_facts": [
+    {
+      "kind": "import",
+      "value": "free"
+    },
+    {
+      "kind": "import",
+      "value": "malloc"
+    },
+    {
+      "kind": "library",
+      "value": "libc.so.6"
+    },
+    {
+      "kind": "protection",
+      "value": "fortify"
+    },
+    {
+      "kind": "protection",
+      "value": "ibt"
+    },
+    {
+      "kind": "protection",
+      "value": "nx"
+    },
+    {
+      "kind": "protection",
+      "value": "pie"
+    },
+    {
+      "kind": "protection",
+      "value": "shstk"
+    }
+  ],
+  "syscall_names": [],
+  "syscalls": [],
+  "tail_calls": [
+    ["frame_dummy","register_tm_clones"]
+  ],
+  "tier": "T1"
+}

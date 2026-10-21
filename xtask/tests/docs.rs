@@ -1,0 +1,714 @@
+//! Doc and evidence tests of WP-28: AC-018a, AC-018b, AC-023a, AC-023b and AC-027.
+//!
+//! Each test checks the real repository and synthetic bad inputs.
+#![allow(
+    clippy::expect_used,
+    reason = "test helpers stop at the first failure with a message"
+)]
+
+use std::collections::BTreeSet;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+use xtask::ac::{self, AcRow, Evidence, Op, Tier};
+use xtask::acrun::table::{self, Row};
+use xtask::acrun::{self, Outcome, Status, record};
+use xtask::gates::docs;
+use xtask::gates::ledger::{self, DataFile};
+use xtask::json::{self, Value};
+use xtask::{Finding, workspace};
+
+fn root() -> PathBuf {
+    workspace::root()
+}
+
+fn render(findings: &[Finding]) -> String {
+    findings
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn design_rows() -> Vec<AcRow> {
+    let text = std::fs::read_to_string(root().join(ac::DESIGN_PATH)).expect("design reads");
+    let (rows, grammar) = ac::parse_rows(&text);
+    assert!(grammar.is_empty(), "{}", render(&grammar));
+    rows
+}
+
+fn gate_ids() -> BTreeSet<String> {
+    design_rows()
+        .into_iter()
+        .filter(AcRow::is_gate)
+        .map(|r| r.id)
+        .collect()
+}
+
+fn adr(number: &str, status: &str, body: &str) -> (String, String) {
+    (
+        format!("{number}-sample.md"),
+        format!("# ADR-{number}: Sample\n\nStatus: {status}\nDate: 2026-10-17\n{body}"),
+    )
+}
+
+#[test]
+fn ac_023a_docs_present() {
+    let found = docs::check_present(&root()).expect("the check runs");
+    assert!(found.is_empty(), "{}", render(&found));
+    assert_eq!(docs::missing_docs(&|_| false).len(), docs::REQUIRED.len());
+    assert!(docs::missing_docs(&|_| true).is_empty());
+    let only_readme = docs::missing_docs(&|p| p != "README.md");
+    assert_eq!(only_readme.len(), 1);
+    assert_eq!(only_readme[0].path, "README.md");
+    let readme = "See [the design](docs/design.md), [the web](https://example.org), \
+                  [a part](#quick-start), [the ADRs](docs/adr/) and [gone](docs/nope.md#a).";
+    let exists = |p: &str| p == "docs/design.md" || p == "docs/adr/";
+    let found = docs::readme_links(readme, &exists);
+    assert_eq!(found.len(), 1, "{}", render(&found));
+    assert!(found[0].detail.contains("docs/nope.md"), "{}", found[0]);
+}
+
+#[test]
+fn adr_index_matches_files() {
+    let index = std::fs::read_to_string(root().join(docs::ADR_INDEX)).expect("index reads");
+    let files = docs::adr_files(&root()).expect("ADRs read");
+    assert!(files.len() >= 29, "{}", files.len());
+    let rows = docs::index_rows(&index);
+    assert_eq!(rows.len(), files.len());
+    assert_eq!(rows[0].number, "0001");
+    assert_eq!(rows[0].file, "0001-zero-third-party-dependencies.md");
+    let found = docs::adr_index(&index, &files);
+    assert!(found.is_empty(), "{}", render(&found));
+    assert!(docs::is_adr_file("0001-zero-third-party-dependencies.md"));
+    assert!(!docs::is_adr_file("README.md"));
+    assert!(!docs::is_adr_file("01-short.md"));
+
+    let header = "| ADR | Title | Status | Decision in one line |\n|---|---|---|---|\n";
+    let one = adr("0001", "Accepted", "## Alternatives\n");
+    let amended = adr(
+        "0002",
+        "Accepted (amended 2026-10-17)",
+        "## Amendment 2026-10-17\n",
+    );
+    let good = format!(
+        "{header}| [0001](0001-sample.md) | Sample | Accepted | One. |\n\
+         | [0002](0002-sample.md) | Sample | Accepted (amended) | Two. |\n"
+    );
+    let pair = [one.clone(), amended.clone()];
+    assert!(docs::adr_index(&good, &pair).is_empty());
+    let unlisted = format!("{header}| [0001](0001-sample.md) | Sample | Accepted | One. |\n");
+    assert_eq!(docs::adr_index(&unlisted, &pair).len(), 1);
+    assert_eq!(docs::adr_index(&good, std::slice::from_ref(&one)).len(), 1);
+    let stale = good.replace("Accepted (amended)", "Accepted");
+    assert_eq!(docs::adr_index(&stale, &pair).len(), 1);
+    let wrong_number = good.replace("[0002](0002", "[0003](0002");
+    assert_eq!(docs::adr_index(&wrong_number, &pair).len(), 1);
+    let no_status = (one.0.clone(), one.1.replace("Status: Accepted\n", ""));
+    let found = docs::adr_index(&good, &[no_status, amended]);
+    assert!(
+        found.iter().any(|f| f.detail.contains("Status")),
+        "{}",
+        render(&found)
+    );
+}
+
+#[test]
+fn ac_023b_adr_sections() {
+    let found = docs::check_adrs(&root()).expect("the check runs");
+    assert!(found.is_empty(), "{}", render(&found));
+    let acs: BTreeSet<String> = ["AC-001a", "AC-175a", "AC-175b", "AC-185", "AC-018a"]
+        .iter()
+        .map(|s| (*s).to_owned())
+        .collect();
+    let text = |verified: &str, alternatives: bool| {
+        let alt = if alternatives {
+            "## Alternatives\n"
+        } else {
+            ""
+        };
+        format!("# ADR-0001: X\n\nStatus: Accepted\n{verified}\n## Context\n{alt}")
+    };
+    let ok = text("Verified by: AC-001a, AC-175 to AC-185 (all sub-ACs)", true);
+    assert!(docs::adr_sections("a.md", &ok, &acs).is_empty());
+    assert_eq!(
+        docs::adr_sections("a.md", &text("Verified by: AC-001a", false), &acs).len(),
+        1
+    );
+    assert_eq!(
+        docs::adr_sections("a.md", &text("Proved by: AC-001a", true), &acs).len(),
+        1
+    );
+    let unknown = docs::adr_sections("a.md", &text("Verified by: AC-999, AC-018a", true), &acs);
+    assert_eq!(unknown.len(), 1, "{}", render(&unknown));
+    assert!(unknown[0].detail.contains("AC-999"));
+    assert_eq!(unknown[0].rule, "AC-023b");
+}
+
+#[test]
+fn ac_027_license_ledger() {
+    let found = ledger::check_ledger(&root()).expect("the check runs");
+    assert!(found.is_empty(), "{}", render(&found));
+    let files = ledger::data_files(&root()).expect("data files read");
+    assert!(
+        files
+            .iter()
+            .any(|f| f.path == "crates/types/data/noreturn_elf.txt")
+    );
+    assert!(ledger::glob_match(
+        "tests/data/jsontestsuite/*.json",
+        "tests/data/jsontestsuite/y_true.json"
+    ));
+    assert!(!ledger::glob_match(
+        "tests/data/jsontestsuite/*.json",
+        "tests/data/jsontestsuite/LICENSE"
+    ));
+    assert!(!ledger::glob_match(
+        "tests/data/*.json",
+        "tests/data/a/b.json"
+    ));
+    assert!(ledger::glob_match("a/b.txt", "a/b.txt"));
+
+    let ledger = "| File | Source | License | Added by |\n|---|---|---|---|\n\
+                  | `crates/x/data/list.txt` (2 names) | Upstream | MIT | WP-10 |\n\
+                  | `tests/data/corpus/*.json` | Corpus | MIT | WP-04 |\n";
+    let notice = "Vendored data files:\n\n- crates/x/data/list.txt: a list.\n\
+                  - tests/data/corpus/*.json: a corpus.\n";
+    let text = |path: &str, head: &str| DataFile {
+        path: path.to_owned(),
+        head: Some(head.to_owned()),
+    };
+    let header =
+        "# Source: Upstream (https://example.org).\n# Copyright 2020 Someone. MIT License.\n";
+    let good = vec![
+        text("crates/x/data/list.txt", header),
+        text(
+            "crates/x/data/own.txt",
+            "# Source: ghidorah. License: Apache-2.0.\n",
+        ),
+        text("tests/data/corpus/LICENSE", "MIT License\n"),
+        text(
+            "tests/data/corpus/README.md",
+            "- Source: the corpus.\n- License: MIT.\n",
+        ),
+        DataFile {
+            path: "tests/data/corpus/a.json".to_owned(),
+            head: None,
+        },
+        text("tests/data/own.jsonl", "{\"a\":1}\n"),
+    ];
+    let found = ledger::license_ledger(notice, ledger, &good);
+    assert!(found.is_empty(), "{}", render(&found));
+    let rows = ledger::ledger_rows(ledger);
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].pattern, "crates/x/data/list.txt");
+    assert_eq!(rows[1].license, "MIT");
+
+    let mut unlisted = good.clone();
+    unlisted.push(text(
+        "tests/data/other.txt",
+        "# Copyright 2019 Another. BSD.\n",
+    ));
+    assert_eq!(ledger::license_ledger(notice, ledger, &unlisted).len(), 1);
+    let mut corpus = good.clone();
+    corpus.push(text("tests/data/corpus2/LICENSE", "MIT License\n"));
+    corpus.push(DataFile {
+        path: "tests/data/corpus2/b.json".to_owned(),
+        head: None,
+    });
+    let found = ledger::license_ledger(notice, ledger, &corpus);
+    assert!(
+        found.iter().any(|f| f.path == "tests/data/corpus2/b.json"),
+        "{}",
+        render(&found)
+    );
+    let no_notice = notice.replace("- crates/x/data/list.txt: a list.\n", "");
+    assert_eq!(ledger::license_ledger(&no_notice, ledger, &good).len(), 1);
+    let extra_notice = format!("{notice}- tests/data/gone.txt: a file.\n");
+    assert_eq!(
+        ledger::license_ledger(&extra_notice, ledger, &good).len(),
+        1
+    );
+    let no_file: Vec<DataFile> = good
+        .iter()
+        .filter(|f| f.path != "crates/x/data/list.txt")
+        .cloned()
+        .collect();
+    assert_eq!(ledger::license_ledger(notice, ledger, &no_file).len(), 1);
+    let mut no_source = good;
+    no_source[1] = text("crates/x/data/own.txt", "# A list of names.\n");
+    assert_eq!(ledger::license_ledger(notice, ledger, &no_source).len(), 1);
+}
+
+#[test]
+fn ac_018a_every_ac_has_evidence() {
+    let rows = design_rows();
+    assert!(ac::missing(&rows).is_empty(), "{:?}", ac::missing(&rows));
+    let report = ac::run(&root(), &[]).expect("xtask ac runs");
+    assert_eq!(report.pointer("/missing"), Some(&Value::Array(Vec::new())));
+    assert!(
+        report
+            .pointer("/failed")
+            .and_then(Value::as_array)
+            .is_some(),
+        "{report}"
+    );
+    let text = "| AC-901 | Gate. | - | 28 | - |\n\
+                | AC-902 | Removed in revision 3 (x). | - | - | - |\n\
+                | AC-903 | Moved to stretch S1 (x). | - | - | - |\n\
+                | AC-904 | Gate. | `test:xtask::ac_904_a@T1` | 28 | - |\n";
+    let (rows, grammar) = ac::parse_rows(text);
+    assert!(grammar.is_empty());
+    assert_eq!(ac::missing(&rows), ["AC-901"]);
+}
+
+fn outcome(id: &str, kind: &'static str, status: Status) -> Outcome {
+    Outcome {
+        ac: id.to_owned(),
+        tier: Tier::T1,
+        kind,
+        status,
+    }
+}
+
+/// Gives the set of fresh commits of the `stale` list.
+fn fresh(commits: &[&str]) -> BTreeSet<String> {
+    commits.iter().map(|c| (*c).to_owned()).collect()
+}
+
+fn gate_row(id: &str, evidence: Vec<Evidence>) -> AcRow {
+    AcRow {
+        id: id.to_owned(),
+        line: 1,
+        stretch: false,
+        removed: false,
+        evidence,
+        closes: vec!["28".to_owned()],
+        needs: Vec::new(),
+    }
+}
+
+/// A proof record with the kernels K1 and K6, and a host record of bash. Every claim holds.
+const CLAIMS: &str = r#"{"tree_sha256":"aa",
+    "kernels":{
+        "K1":{"name":"K1","status":"verified","errors":0,"verified":3,"spec_items":2},
+        "K6":{"name":"K6","status":"verified","errors":0,"verified":2,"spec_items":2}},
+    "negatives":[{"kernel":"K1","ok":true},{"kernel":"K6","ok":true},{"kernel":"K6","ok":true}],
+    "bash":{"path":"/usr/bin/bash","sha256":"bb","insns":10,"agree":10,"mismatches":0}}"#;
+
+#[test]
+fn regress_record_checks_claims() {
+    let check = |text: &str, pointer: &str, input: &str, current: Option<&str>| {
+        let record = json::parse(text).expect("record parses");
+        record::record_match(&record, pointer, input, current, true)
+    };
+    let tree = |text: &str, pointer: &str| check(text, pointer, "tree", Some("aa"));
+    assert_eq!(tree(CLAIMS, "/kernels/K6"), Status::Recorded);
+    assert_eq!(tree(CLAIMS, "/kernels"), Status::Recorded);
+
+    // A failed kernel row does not match, also when the hash matches.
+    let failed = CLAIMS.replace(
+        r#""name":"K6","status":"verified""#,
+        r#""name":"K6","status":"failed""#,
+    );
+    assert_eq!(tree(&failed, "/kernels/K6"), Status::Fail);
+    assert_eq!(tree(&failed, "/kernels"), Status::Fail);
+    assert_eq!(tree(&failed, "/kernels/K1"), Status::Recorded);
+    let errors = CLAIMS.replace(
+        r#""K6","status":"verified","errors":0"#,
+        r#""K6","status":"verified","errors":1"#,
+    );
+    assert_eq!(tree(&errors, "/kernels/K6"), Status::Fail);
+    let few = CLAIMS.replace(
+        r#""verified":2,"spec_items":2"#,
+        r#""verified":1,"spec_items":2"#,
+    );
+    assert_eq!(tree(&few, "/kernels/K6"), Status::Fail);
+
+    // Each negative row of the kernel must hold, and the kernel needs one.
+    let negative = CLAIMS.replacen(
+        r#"{"kernel":"K6","ok":true}"#,
+        r#"{"kernel":"K6","ok":false}"#,
+        1,
+    );
+    assert_eq!(tree(&negative, "/kernels/K6"), Status::Fail);
+    assert_eq!(tree(&negative, "/kernels/K1"), Status::Recorded);
+    let none = CLAIMS.replace(r#"{"kernel":"K1","ok":true},"#, "");
+    assert_eq!(tree(&none, "/kernels/K1"), Status::Fail);
+
+    // A host record needs full agreement.
+    let host = |text: &str, current: Option<&str>| check(text, "/bash", "host-bash", current);
+    assert_eq!(host(CLAIMS, Some("bb")), Status::Recorded);
+    assert_eq!(host(CLAIMS, None), Status::Skipped);
+    let mismatches = CLAIMS.replace(
+        r#""agree":10,"mismatches":0"#,
+        r#""agree":10,"mismatches":3"#,
+    );
+    assert_eq!(host(&mismatches, Some("bb")), Status::Fail);
+    assert_eq!(host(&mismatches, None), Status::Fail);
+    let disagree = CLAIMS.replace(r#""agree":10"#, r#""agree":4"#);
+    assert_eq!(host(&disagree, Some("bb")), Status::Fail);
+    let silent = CLAIMS.replace(r#","insns":10,"agree":10,"mismatches":0"#, "");
+    assert_eq!(host(&silent, Some("bb")), Status::Fail);
+}
+
+#[test]
+fn regress_acrun_requires_proofs() {
+    let names = ["ac_034_proof_freshness"];
+    for tier2 in [false, true] {
+        let cmd = acrun::test_command(&root(), "ghidorah-kernel", &names, tier2);
+        let require = cmd
+            .get_envs()
+            .find(|(key, _)| *key == "GHIDORAH_REQUIRE_PROOFS")
+            .and_then(|(_, value)| value);
+        assert_eq!(
+            require.and_then(|v| v.to_str()),
+            Some("1"),
+            "a stale proof record fails the evidence run, as in `xtask ci`"
+        );
+        let args: Vec<String> = cmd
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(
+            args.get(..3),
+            Some(&["test", "-p", "ghidorah-kernel"].map(String::from)[..])
+        );
+        assert!(
+            args.contains(&"ac_034_proof_freshness".to_owned()),
+            "{args:?}"
+        );
+        assert_eq!(
+            args.contains(&"--include-ignored".to_owned()),
+            tier2,
+            "{args:?}"
+        );
+        assert_eq!(cmd.get_current_dir(), Some(root().as_path()));
+    }
+}
+
+/// Checks the `not_passed` list of AC-018b: a row that is not `pass` and an item without a row.
+fn check_not_passed(design: &[AcRow], merged: &[Row]) {
+    // A skipped tier-1 test row does not pass. A skipped record row on another host is no gap.
+    let mut skipped = merged.to_vec();
+    for row in &mut skipped {
+        row.status = Status::Skipped;
+    }
+    assert_eq!(
+        json::write(&table::not_passed(&skipped, design)),
+        concat!(
+            r#"[{"ac":"AC-001","kind":"test","status":"skipped","tier":"T1"},"#,
+            r#"{"ac":"AC-002","kind":"test","status":"skipped","tier":"T1"}]"#
+        )
+    );
+    // A design item without a row does not pass. The rows match the items by kind and tier.
+    let short: Vec<Row> = merged
+        .iter()
+        .filter(|r| r.ac != "AC-002" || r.kind != "test")
+        .cloned()
+        .collect();
+    assert_eq!(
+        json::write(&table::not_passed(&short, design)),
+        r#"[{"ac":"AC-002","kind":"test","status":"missing","tier":"T1"}]"#
+    );
+    let no_record: Vec<Row> = merged
+        .iter()
+        .filter(|r| r.kind != "record")
+        .cloned()
+        .collect();
+    assert_eq!(
+        json::write(&table::not_passed(&no_record, design)),
+        r#"[{"ac":"AC-002","kind":"record","status":"missing","tier":"T2"}]"#
+    );
+    // An `xtask:ac` item reads the table of its own run, so its row never counts.
+    let own = Evidence::Xtask {
+        sub: "ac".to_owned(),
+        pointer: "/stale".to_owned(),
+        op: Op::Eq,
+        value: "[]".to_owned(),
+    };
+    let ci = Evidence::Xtask {
+        sub: "ci".to_owned(),
+        pointer: "/ok".to_owned(),
+        op: Op::Eq,
+        value: "true".to_owned(),
+    };
+    let with_self = vec![
+        gate_row("AC-018b", vec![own.clone()]),
+        gate_row("AC-020", vec![ci, own]),
+    ];
+    let xtask_row = |id: &str, status: Status, commit: &str| {
+        let item = Outcome {
+            tier: Tier::T2,
+            ..outcome(id, "xtask", status)
+        };
+        Row::new(&item, commit)
+    };
+    // During the run, the table holds no row of an `xtask:ac` item.
+    let during = vec![xtask_row("AC-020", Status::Pass, "c2")];
+    assert_eq!(
+        table::not_passed(&during, &with_self),
+        Value::Array(Vec::new())
+    );
+    assert_eq!(
+        table::stale(&during, &with_self, &fresh(&["c2"])),
+        Value::Array(Vec::new())
+    );
+    // After an older run, the rows of the `xtask:ac` items come last and do not count.
+    let after = vec![
+        xtask_row("AC-018b", Status::Fail, "c1"),
+        xtask_row("AC-020", Status::Pass, "c2"),
+        xtask_row("AC-020", Status::Fail, "c1"),
+    ];
+    assert_eq!(
+        table::not_passed(&after, &with_self),
+        Value::Array(Vec::new())
+    );
+    assert_eq!(
+        table::stale(&after, &with_self, &fresh(&["c2"])),
+        Value::Array(Vec::new())
+    );
+    let failed_ci = vec![xtask_row("AC-020", Status::Fail, "c1")];
+    assert_eq!(
+        json::write(&table::not_passed(&failed_ci, &with_self)),
+        r#"[{"ac":"AC-020","kind":"xtask","status":"fail","tier":"T2"}]"#
+    );
+    assert_eq!(
+        table::stale(&failed_ci, &with_self, &fresh(&["c2"]))
+            .as_array()
+            .map(<[Value]>::len),
+        Some(1)
+    );
+}
+
+/// Checks the record status of each named input, and the tree record of the repository.
+fn check_record_inputs() {
+    // The record check of each named input.
+    let record = json::parse(CLAIMS).expect("record parses");
+    assert_eq!(record::expected(&record, "/kernels/K1", "tree"), Some("aa"));
+    assert_eq!(record::expected(&record, "/bash", "host-bash"), Some("bb"));
+    let check = |pointer: &str, input: &str, current: Option<&str>| {
+        record::record_match(&record, pointer, input, current, true)
+    };
+    assert_eq!(check("/kernels/K1", "tree", Some("aa")), Status::Recorded);
+    assert_eq!(check("/kernels/K1", "tree", Some("ab")), Status::Fail);
+    assert_eq!(check("/kernels/K1", "tree", None), Status::Fail);
+    assert_eq!(check("/kernels/K9", "tree", Some("aa")), Status::Fail);
+    assert_eq!(check("/bash", "host-bash", Some("bb")), Status::Recorded);
+    assert_eq!(check("/bash", "host-bash", Some("bc")), Status::Skipped);
+    assert_eq!(check("/bash", "host-bash", None), Status::Skipped);
+    assert_eq!(check("/bash", "other", Some("bb")), Status::Fail);
+    // The tree record of the repository matches its proof inputs. A stale record is a warning
+    // in plain `cargo test` and a failure under `GHIDORAH_REQUIRE_PROOFS=1` (design 13.3).
+    let require = std::env::var(record::REQUIRE_PROOFS).is_ok_and(|v| v == "1");
+    for kernel in ["K1", "K2", "K3", "K5", "K6", "K7"] {
+        let pointer = format!("/kernels/{kernel}");
+        let status = record::status(&root(), "verify/results.json", &pointer, "tree", require);
+        let allowed: &[Status] = if require {
+            &[Status::Recorded]
+        } else {
+            &[Status::Recorded, Status::Skipped]
+        };
+        assert!(allowed.contains(&status), "{kernel}: {status:?}");
+    }
+    assert_eq!(
+        record::status(&root(), "verify/none.json", "/kernels", "tree", true),
+        Status::Fail
+    );
+}
+
+#[test]
+fn ac_018b_evidence_passes() {
+    check_record_inputs();
+
+    // The failed list and the merge of a partial run.
+    let test_item = |func: &str| Evidence::Test {
+        krate: "xtask".to_owned(),
+        func: func.to_owned(),
+        tier: Tier::T1,
+    };
+    let record_item = Evidence::Record {
+        file: "verify/results.json".to_owned(),
+        pointer: "/kernels/K1".to_owned(),
+        input: "tree".to_owned(),
+    };
+    let design = vec![
+        gate_row("AC-001", vec![test_item("ac_001_a")]),
+        gate_row("AC-002", vec![test_item("ac_002_a"), record_item]),
+    ];
+    let old = vec![
+        Row::new(&outcome("AC-002", "test", Status::Fail), "c1"),
+        Row::new(&outcome("AC-001", "test", Status::Pass), "c1"),
+        Row::new(&outcome("AC-777", "test", Status::Pass), "c1"),
+    ];
+    assert_eq!(
+        json::write(&table::failed(&old)),
+        r#"[{"ac":"AC-002","kind":"test","tier":"T1"}]"#
+    );
+    let ran: BTreeSet<String> = std::iter::once("AC-002".to_owned()).collect();
+    let recorded = Outcome {
+        tier: Tier::T2,
+        ..outcome("AC-002", "record", Status::Recorded)
+    };
+    let new = vec![
+        Row::new(&outcome("AC-002", "test", Status::Pass), "c2"),
+        Row::new(&recorded, "c2"),
+    ];
+    let merged = table::merge(&old, &ran, &new, &design);
+    let ids: Vec<(&str, &str)> = merged
+        .iter()
+        .map(|r| (r.ac.as_str(), r.commit.as_str()))
+        .collect();
+    assert_eq!(ids, [("AC-001", "c1"), ("AC-002", "c2"), ("AC-002", "c2")]);
+    assert_eq!(table::failed(&merged), Value::Array(Vec::new()));
+    // The partial run at HEAD c2 keeps the AC-001 row of c1. That row is stale.
+    assert_eq!(
+        json::write(&table::stale(&merged, &design, &fresh(&["c2"]))),
+        r#"[{"ac":"AC-001","commit":"c1","kind":"test","tier":"T1"}]"#
+    );
+    assert_eq!(
+        table::stale(&merged, &design, &fresh(&["c1"]))
+            .as_array()
+            .map(<[Value]>::len),
+        Some(2)
+    );
+    assert_eq!(
+        table::not_passed(&merged, &design),
+        Value::Array(Vec::new())
+    );
+    check_not_passed(&design, &merged);
+    let text = format!(
+        "[\n{}\n]\n",
+        merged
+            .iter()
+            .map(|r| json::write(&r.to_json()))
+            .collect::<Vec<_>>()
+            .join(",\n")
+    );
+    assert_eq!(table::parse(&text), Ok(merged));
+    assert!(table::parse("{}").is_err());
+    assert_eq!(Status::parse("recorded"), Some(Status::Recorded));
+    assert_eq!(Status::parse("other"), None);
+
+    // An `xtask:ac` item runs after the table of its run exists.
+    let own = Evidence::Xtask {
+        sub: "ac".to_owned(),
+        pointer: "/failed".to_owned(),
+        op: Op::Eq,
+        value: "[]".to_owned(),
+    };
+    let plain = Evidence::Test {
+        krate: "xtask".to_owned(),
+        func: "a".to_owned(),
+        tier: Tier::T1,
+    };
+    assert!(acrun::is_self(&own) && !acrun::is_self(&plain));
+    let rows = vec![
+        gate_row("AC-018b", vec![own.clone()]),
+        gate_row("AC-020", vec![plain.clone(), own]),
+        gate_row("AC-021", vec![plain]),
+    ];
+    let (first, last) = acrun::split_self(&rows);
+    let first_ids: Vec<&str> = first.iter().map(|r| r.id.as_str()).collect();
+    let last_ids: Vec<&str> = last.iter().map(|r| r.id.as_str()).collect();
+    assert_eq!(first_ids, ["AC-020", "AC-021"]);
+    assert_eq!(last_ids, ["AC-018b", "AC-020"]);
+
+    check_committed_table();
+}
+
+/// Checks that the committed table covers each MVP AC with evidence and names no other AC.
+fn check_committed_table() {
+    let gates = gate_ids();
+    let committed = table::read(&root()).expect("the evidence table reads");
+    let named: BTreeSet<&str> = committed.iter().map(|r| r.ac.as_str()).collect();
+    for row in design_rows()
+        .iter()
+        .filter(|r| r.is_gate() && !r.evidence.is_empty())
+    {
+        assert!(named.contains(row.id.as_str()), "{} has no row", row.id);
+    }
+    for id in &named {
+        assert!(gates.contains(*id), "{id} is not an MVP AC");
+    }
+}
+
+/// Runs `git` in `dir` with a fixed identity and gives its trimmed stdout. `None` means that
+/// `git` does not start: the hermetic run of `xtask ci` has no `git` on `PATH`.
+fn git(dir: &Path, args: &[&str]) -> Option<String> {
+    let out = Command::new("git")
+        .args(["-c", "user.name=t", "-c", "user.email=t@example.org"])
+        .args([
+            "-c",
+            "commit.gpgsign=false",
+            "-c",
+            "init.defaultBranch=main",
+        ])
+        .args(args)
+        .current_dir(dir)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .env_remove("GIT_INDEX_FILE")
+        .output()
+        .ok()?;
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "git {args:?}: {stderr}");
+    Some(String::from_utf8_lossy(&out.stdout).trim().to_owned())
+}
+
+/// Writes `text` to `rel` in `dir`, commits all files and gives the new commit.
+fn commit_file(dir: &Path, rel: &str, text: &str) -> String {
+    std::fs::write(dir.join(rel), text).expect("the file is written");
+    git(dir, &["add", "-A"]).expect("git runs");
+    git(dir, &["commit", "-q", "-m", rel]).expect("git runs");
+    git(dir, &["rev-parse", "HEAD"]).expect("git runs")
+}
+
+#[test]
+fn regress_table_only_commit_is_not_stale() {
+    let dir = std::env::temp_dir().join(format!("ghidorah-xtask-stale-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("docs")).expect("the directory is made");
+    if git(&dir, &["init", "-q"]).is_none() {
+        std::fs::remove_dir_all(&dir).expect("the directory is removed");
+        return;
+    }
+    let item = Evidence::Test {
+        krate: "xtask".to_owned(),
+        func: "ac_001_a".to_owned(),
+        tier: Tier::T1,
+    };
+    let design = vec![gate_row("AC-001", vec![item])];
+    commit_file(&dir, acrun::TABLE_PATH, "[]\n");
+    let run = commit_file(&dir, "code.rs", "fn a() {}\n");
+    let rows = vec![Row::new(&outcome("AC-001", "test", Status::Pass), &run)];
+    let stale_at = |head: &str, rows: &[Row]| {
+        let found = table::fresh_commits(&dir, rows, head);
+        let stale = table::stale(rows, &design, &found);
+        (found, stale)
+    };
+    // The commit that writes the table after the run changes no other file. No row is stale.
+    let written = commit_file(&dir, acrun::TABLE_PATH, "[\n]\n");
+    let (found, stale) = stale_at(&written, &rows);
+    assert_eq!(found, fresh(&[run.as_str(), written.as_str()]));
+    assert_eq!(stale, Value::Array(Vec::new()));
+    // A change outside the table makes the row stale.
+    let code = commit_file(&dir, "code.rs", "fn b() {}\n");
+    let (found, stale) = stale_at(&code, &rows);
+    assert_eq!(found, fresh(&[code.as_str()]));
+    assert_eq!(stale.as_array().map(<[Value]>::len), Some(1), "{stale}");
+    // An unknown commit and a text that is not a commit name stay stale.
+    let unknown = vec![
+        Row::new(&outcome("AC-001", "test", Status::Pass), &"0".repeat(40)),
+        Row::new(&outcome("AC-001", "test", Status::Pass), "--output=out.txt"),
+    ];
+    let (found, stale) = stale_at(&written, &unknown);
+    assert_eq!(found, fresh(&[written.as_str()]));
+    assert_eq!(stale.as_array().map(<[Value]>::len), Some(1), "{stale}");
+    assert!(!dir.join("out.txt").exists());
+    // A head that is not a commit name gives no fresh commit.
+    assert!(table::fresh_commits(&dir, &rows, "").is_empty());
+    std::fs::remove_dir_all(&dir).expect("the directory is removed");
+}

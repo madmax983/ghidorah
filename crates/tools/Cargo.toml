@@ -1,0 +1,38 @@
+[package]
+name = "ghidorah-tools"
+description = "Tool registry, dispatcher pipeline, session, address resolver, cursors, profiles, server instructions and the helper tools."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# The unit tests in `src/roots/tests.rs` make special files under a temporary root. The test
+# binary `tests/tools/main.rs` tests the pipeline with the test registry of WP-13a
+# (`tests/support/test_registry.rs`). The test binary `tests/session/main.rs` tests the
+# session, the resolver and the helper tools.
+[lib]
+name = "ghidorah_tools"
+path = "src/lib.rs"
+
+[dependencies]
+# `analysis_run` runs the scheduler of the analysis crate.
+ghidorah-analysis = { path = "../analysis" }
+ghidorah-base = { path = "../base" }
+# `func_get include decomp` prints the decompile of a function.
+ghidorah-decomp = { path = "../decomp" }
+# `ToolSpec.reads_tables` names the tables of `ghidorah_db::Table`.
+ghidorah-db = { path = "../db" }
+ghidorah-json = { path = "../json" }
+# `binary_load` reads files through the loader.
+ghidorah-loader = { path = "../loader" }
+# `binary_survey`, `func_list`, `search` and `mem_read` read the C types and the Tier-0 data.
+ghidorah-types = { path = "../types" }
+# `func_get`, `xref_list` and `mem_read` decode and print instructions.
+ghidorah-x86 = { path = "../x86" }
+
+[dev-dependencies]
+ghidorah-testkit = { path = "../testkit" }
+
+[lints]
+workspace = true

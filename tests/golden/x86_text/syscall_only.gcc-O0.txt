@@ -1,0 +1,56 @@
+# golden: generator=x86-print version=1 fixture=syscall_only.gcc-O0 fixture_sha256=c281d6368d54ac7b01377770fb70136ec5acb7538cf17cd2e789b517c85cf312
+<emit_banner>:
+401000 endbr64
+401004 push rbp
+401005 mov rbp, rsp
+401008 lea rsi, [rip+0xff1] ; 0x402000
+40100f mov eax, 0x1
+401014 mov edi, 0x1
+401019 mov edx, 0xd
+40101e syscall
+401020 mov qword ptr [rbp-0x8], rax
+401024 nop
+401025 pop rbp
+401026 ret
+<emit_status>:
+401027 endbr64
+40102b push rbp
+40102c mov rbp, rsp
+40102f lea rsi, [rip+0xfda] ; 0x402010
+401036 mov eax, 0x1
+40103b mov edi, 0x2
+401040 mov edx, 0xb
+401045 syscall
+401047 mov qword ptr [rbp-0x8], rax
+40104b nop
+40104c pop rbp
+40104d ret
+<get_pid>:
+40104e endbr64
+401052 push rbp
+401053 mov rbp, rsp
+401056 mov eax, 0x27
+40105b syscall
+40105d mov qword ptr [rbp-0x8], rax
+401061 mov rax, qword ptr [rbp-0x8]
+401065 pop rbp
+401066 ret
+<exit_ok>:
+401067 endbr64
+40106b push rbp
+40106c mov rbp, rsp
+40106f mov eax, 0x3c
+401074 mov edx, 0x0
+401079 mov rdi, rdx
+40107c syscall
+40107e mov qword ptr [rbp-0x8], rax
+<_start>:
+401082 endbr64
+401086 push rbp
+401087 mov rbp, rsp
+40108a call emit_banner
+40108f call get_pid
+401094 test rax, rax
+401097 jle 0x40109e
+401099 call emit_status
+40109e call exit_ok

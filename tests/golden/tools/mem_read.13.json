@@ -1,0 +1,63 @@
+{"golden":"generator=tools_examples version=1 fixture=crackme.gcc-O2 fixture_sha256=467a43b75d95c826daba8cb216d01d7fd386aa96c5ef5a95c2effffe1780de8f"}
+{
+  "ok": true,
+  "binary_id": "467a43b75d95c826",
+  "rev": 1,
+  "session": "cli",
+  "analysis": {
+    "state": "complete",
+    "rev": 1
+  },
+  "partial": false,
+  "data": {
+    "addr": "0x1080",
+    "len": 17,
+    "rows": [
+      {
+        "a": "0x1080",
+        "n": 4,
+        "b": "f30f1efa",
+        "m": "endbr64",
+        "t": "endbr64",
+        "f": "seq"
+      },
+      {
+        "a": "0x1084",
+        "n": 4,
+        "b": "4883ec08",
+        "m": "sub",
+        "t": "sub rsp, 0x8",
+        "f": "seq"
+      },
+      {
+        "a": "0x1088",
+        "n": 3,
+        "b": "83ff01",
+        "m": "cmp",
+        "t": "cmp edi, 0x1",
+        "f": "seq"
+      },
+      {
+        "a": "0x108b",
+        "n": 2,
+        "b": "7e33",
+        "m": "jle",
+        "t": "jle 0x10c0",
+        "f": "jcc"
+      },
+      {
+        "a": "0x108d",
+        "n": 4,
+        "b": "488b7e08",
+        "m": "mov",
+        "t": "mov rdi, qword ptr [rsi+0x8]",
+        "f": "seq"
+      }
+    ],
+    "next_cursor": "0107001df26f58b1e95702030000000000000000000100911000000000000058b1f481",
+    "region": {
+      "name": "seg:3",
+      "perms": "r-x"
+    }
+  }
+}

@@ -1,0 +1,228 @@
+{
+  "binaries": [
+    {
+      "name": "cold_split.gcc-O0",
+      "sha256": "db21749c85271ec6100caa75b0375431482fdc6cfb85af7df568840fd1a52d16",
+      "variant": "none"
+    },
+    {
+      "name": "cold_split.gcc-O0.stripped",
+      "sha256": "912667e8600b2ef870fda5bea1c658874ff5e98c31b42e5d8636c43e693a3039",
+      "variant": "stripped"
+    }
+  ],
+  "build": {
+    "cflags": ["-O0"],
+    "compiler": "gcc 13.3.0",
+    "id": "gcc-O0",
+    "ldflags": []
+  },
+  "call_edges": [
+    ["__do_global_dtors_aux","__cxa_finalize"],
+    ["__do_global_dtors_aux","deregister_tm_clones"],
+    ["_start","__libc_start_main"],
+    ["die","exit"],
+    ["die","fprintf"],
+    ["frame_dummy","register_tm_clones"],
+    ["main","parse_number"],
+    ["main","printf"],
+    ["parse_digit","fprintf"],
+    ["parse_digit","report_error"],
+    ["parse_number","die"],
+    ["parse_number","fprintf"],
+    ["parse_number","parse_digit"],
+    ["parse_number","report_error"],
+    ["report_error","fprintf"]
+  ],
+  "cold_parts": [],
+  "duplicate_names": {},
+  "elf": {
+    "entry": "0x10a0",
+    "image_base": "0x0",
+    "interp": true,
+    "type": "DYN"
+  },
+  "facts": {
+    "claims": [
+      {
+        "args": ["parse_number","parse_digit"],
+        "rel": "calls"
+      },
+      {
+        "args": ["parse_digit","report_error"],
+        "rel": "calls"
+      },
+      {
+        "args": ["parse_number","die"],
+        "rel": "calls"
+      }
+    ],
+    "noreturn": ["die"]
+  },
+  "fixture": "cold_split.gcc-O0",
+  "function_count": 12,
+  "functions": [
+    {
+      "addr": "0x1000",
+      "insns": 8,
+      "name": "_init",
+      "size": 0
+    },
+    {
+      "addr": "0x10a0",
+      "insns": 13,
+      "name": "_start",
+      "size": 38
+    },
+    {
+      "addr": "0x10d0",
+      "insns": 11,
+      "name": "deregister_tm_clones",
+      "size": 0
+    },
+    {
+      "addr": "0x1100",
+      "insns": 16,
+      "name": "register_tm_clones",
+      "size": 0
+    },
+    {
+      "addr": "0x1140",
+      "insns": 16,
+      "name": "__do_global_dtors_aux",
+      "size": 0
+    },
+    {
+      "addr": "0x1180",
+      "insns": 2,
+      "name": "frame_dummy",
+      "size": 0
+    },
+    {
+      "addr": "0x1189",
+      "insns": 16,
+      "name": "report_error",
+      "size": 56
+    },
+    {
+      "addr": "0x11c1",
+      "insns": 14,
+      "name": "die",
+      "size": 60
+    },
+    {
+      "addr": "0x11fd",
+      "insns": 33,
+      "name": "parse_digit",
+      "size": 113
+    },
+    {
+      "addr": "0x126e",
+      "insns": 56,
+      "name": "parse_number",
+      "size": 200
+    },
+    {
+      "addr": "0x1336",
+      "insns": 22,
+      "name": "main",
+      "size": 79
+    },
+    {
+      "addr": "0x1388",
+      "insns": 4,
+      "name": "_fini",
+      "size": 0
+    }
+  ],
+  "gaps": [],
+  "generator": {
+    "name": "xtask-fixtures",
+    "version": "1"
+  },
+  "imports": ["__cxa_finalize","__libc_start_main","exit","fprintf","printf"],
+  "jump_tables": [],
+  "leaf_functions": [],
+  "libraries": ["libc.so.6"],
+  "network_imports": [],
+  "program": "cold_split",
+  "protections": {
+    "build_id": "4ee16e2857c4cac1780410f551c7e0446185f34c",
+    "canary": false,
+    "fortify": false,
+    "ibt": true,
+    "nx": true,
+    "pie": true,
+    "relro": "full",
+    "rpath": false,
+    "runpath": false,
+    "shstk": true
+  },
+  "self_calls": [],
+  "strings": [
+    {
+      "addr": "0x2004",
+      "encoding": "bytes",
+      "hex": "6572726f723a20257320282564290a",
+      "len": 15,
+      "text": "error: %s (%d)\n"
+    },
+    {
+      "addr": "0x201d",
+      "encoding": "bytes",
+      "hex": "6e6f742061206469676974",
+      "len": 11,
+      "text": "not a digit"
+    },
+    {
+      "addr": "0x2040",
+      "encoding": "bytes",
+      "hex": "626164206e756d626572",
+      "len": 10,
+      "text": "bad number"
+    },
+    {
+      "addr": "0x2037",
+      "encoding": "bytes",
+      "hex": "6e6f20696e707574",
+      "len": 8,
+      "text": "no input"
+    }
+  ],
+  "survey_facts": [
+    {
+      "kind": "function",
+      "value": "parse_number"
+    },
+    {
+      "kind": "library",
+      "value": "libc.so.6"
+    },
+    {
+      "kind": "protection",
+      "value": "ibt"
+    },
+    {
+      "kind": "protection",
+      "value": "nx"
+    },
+    {
+      "kind": "protection",
+      "value": "pie"
+    },
+    {
+      "kind": "protection",
+      "value": "shstk"
+    },
+    {
+      "kind": "string",
+      "value": "not a digit"
+    }
+  ],
+  "syscall_names": [],
+  "syscalls": [],
+  "tail_calls": [
+    ["frame_dummy","register_tm_clones"]
+  ],
+  "tier": "T1"
+}

@@ -1,0 +1,35 @@
+# golden: generator=x86-print version=1 fixture=syscall_only.clang-O2 fixture_sha256=5a9804666bfbbfcc725332d70a7a38a3a7a18dcec9dfa114201d5d495cfac9c7
+<emit_banner>:
+401000 lea rsi, [rip+0xff9] ; 0x402000
+401007 mov eax, 0x1
+40100c mov edi, 0x1
+401011 mov edx, 0xd
+401016 syscall
+401018 ret
+401019 nop dword ptr [rax+0x0]
+<emit_status>:
+401020 lea rsi, [rip+0xfe7] ; 0x40200e
+401027 mov eax, 0x1
+40102c mov edi, 0x2
+401031 mov edx, 0xb
+401036 syscall
+401038 ret
+401039 nop dword ptr [rax+0x0]
+<get_pid>:
+401040 mov eax, 0x27
+401045 syscall
+401047 ret
+401048 nop dword ptr [rax+rax*1+0x0]
+<exit_ok>:
+401050 mov eax, 0x3c
+401055 xor edi, edi
+401057 syscall
+401059 nop dword ptr [rax+0x0]
+<_start>:
+401060 push rax
+401061 call emit_banner
+401066 call get_pid
+40106b test rax, rax
+40106e jle 0x401075
+401070 call emit_status
+401075 call exit_ok

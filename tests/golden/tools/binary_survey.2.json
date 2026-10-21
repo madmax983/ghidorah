@@ -1,0 +1,105 @@
+{"golden":"generator=tools_examples version=1 fixture=crackme.gcc-O2 fixture_sha256=467a43b75d95c826daba8cb216d01d7fd386aa96c5ef5a95c2effffe1780de8f"}
+{
+  "ok": true,
+  "binary_id": "467a43b75d95c826",
+  "rev": 1,
+  "session": "cli",
+  "analysis": {
+    "state": "complete",
+    "rev": 1
+  },
+  "partial": false,
+  "data": {
+    "identity": {
+      "file_name": "demo.elf",
+      "sha256": "467a43b75d95c826daba8cb216d01d7fd386aa96c5ef5a95c2effffe1780de8f",
+      "format": "elf64-le",
+      "arch": "x86_64",
+      "bits": 64,
+      "kind": "dyn",
+      "image_base": "0x0",
+      "entry": "0x10e0",
+      "size": 16112,
+      "build_id": "eff2012c44affa52f66e0e37d87fa2ec64c41d1b",
+      "interp": {
+        "text": "/lib64/ld-linux-x86-64.so.2",
+        "hex": "2f6c696236342f6c642d6c696e75782d7838362d36342e736f2e32",
+        "len": 27,
+        "src": "binary"
+      }
+    },
+    "protections": {
+      "pie": true,
+      "nx": true,
+      "relro": "full",
+      "canary": false,
+      "fortify": false,
+      "ibt": true,
+      "shstk": true,
+      "rpath": false,
+      "runpath": false,
+      "stripped": false
+    },
+    "imports": {
+      "total": 7,
+      "libraries": [
+        "libc.so.6"
+      ],
+      "items": [
+        {
+          "id": "imp:__cxa_finalize",
+          "name": "__cxa_finalize",
+          "category": "process"
+        },
+        {
+          "id": "imp:__libc_start_main",
+          "name": "__libc_start_main",
+          "category": "process"
+        },
+        {
+          "id": "imp:strlen",
+          "name": "strlen",
+          "category": "string"
+        },
+        {
+          "id": "imp:puts",
+          "name": "puts",
+          "category": "io"
+        },
+        {
+          "id": "imp:_ITM_deregisterTMCloneTable",
+          "name": "_ITM_deregisterTMCloneTable",
+          "category": "other"
+        },
+        {
+          "id": "imp:_ITM_registerTMCloneTable",
+          "name": "_ITM_registerTMCloneTable",
+          "category": "other"
+        },
+        {
+          "id": "imp:__gmon_start__",
+          "name": "__gmon_start__",
+          "category": "other"
+        }
+      ]
+    }
+  },
+  "next": [
+    {
+      "tool": "func_list",
+      "args": {
+        "binary_id": "467a43b75d95c826",
+        "sort": "priority"
+      },
+      "why": "List the functions in priority order."
+    },
+    {
+      "tool": "func_get",
+      "args": {
+        "binary_id": "467a43b75d95c826",
+        "target": "fn:0x1080"
+      },
+      "why": "Read the main function."
+    }
+  ]
+}

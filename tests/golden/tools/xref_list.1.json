@@ -1,0 +1,68 @@
+{"golden":"generator=tools_examples version=1 fixture=crackme.gcc-O2 fixture_sha256=467a43b75d95c826daba8cb216d01d7fd386aa96c5ef5a95c2effffe1780de8f"}
+{
+  "ok": true,
+  "binary_id": "467a43b75d95c826",
+  "rev": 1,
+  "session": "cli",
+  "analysis": {
+    "state": "complete",
+    "rev": 1
+  },
+  "partial": false,
+  "data": {
+    "items": [
+      {
+        "from": "0x10a1",
+        "from_func": {
+          "id": "fn:0x1080",
+          "name": "main"
+        },
+        "to": "0x1060",
+        "to_name": "puts@plt",
+        "kind": "unconditional_call",
+        "via": "plt",
+        "op_index": 0,
+        "source": "analysis"
+      },
+      {
+        "from": "0x10b7",
+        "from_func": {
+          "id": "fn:0x1080",
+          "name": "main"
+        },
+        "to": "0x1060",
+        "to_name": "puts@plt",
+        "kind": "unconditional_call",
+        "via": "plt",
+        "op_index": 0,
+        "source": "analysis"
+      },
+      {
+        "from": "0x10c7",
+        "from_func": {
+          "id": "fn:0x1080",
+          "name": "main"
+        },
+        "to": "0x1060",
+        "to_name": "puts@plt",
+        "kind": "unconditional_call",
+        "via": "plt",
+        "op_index": 0,
+        "source": "analysis"
+      }
+    ],
+    "basis": {
+      "complete": false,
+      "unresolved": [
+        "0x1014",
+        "0x112f",
+        "0x1170"
+      ]
+    }
+  },
+  "page": {
+    "returned": 3,
+    "total": 3,
+    "truncated": false
+  }
+}

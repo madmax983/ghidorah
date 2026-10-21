@@ -1,0 +1,164 @@
+{"golden":"generator=tools_examples version=1 fixture=crackme.gcc-O2 fixture_sha256=467a43b75d95c826daba8cb216d01d7fd386aa96c5ef5a95c2effffe1780de8f"}
+{
+  "ok": true,
+  "binary_id": "467a43b75d95c826",
+  "rev": 1,
+  "session": "cli",
+  "analysis": {
+    "state": "complete",
+    "rev": 1
+  },
+  "partial": false,
+  "data": {
+    "state": "complete",
+    "steps_used": 1104,
+    "resume": false,
+    "analyzers": [
+      {
+        "name": "Entry",
+        "priority": 100,
+        "pending": 0,
+        "runs": 1
+      },
+      {
+        "name": "Symbols",
+        "priority": 110,
+        "pending": 0,
+        "runs": 1
+      },
+      {
+        "name": "ImportStubs",
+        "priority": 120,
+        "pending": 0,
+        "runs": 1
+      },
+      {
+        "name": "FdeSeeds",
+        "priority": 150,
+        "pending": 0,
+        "runs": 1
+      },
+      {
+        "name": "PdataSeeds",
+        "priority": 155,
+        "pending": 0,
+        "runs": 1
+      },
+      {
+        "name": "Overrides",
+        "priority": 160,
+        "pending": 0,
+        "runs": 1
+      },
+      {
+        "name": "Disasm",
+        "priority": 300,
+        "pending": 0,
+        "runs": 21
+      },
+      {
+        "name": "NoReturnKnown",
+        "priority": 301,
+        "pending": 0,
+        "runs": 4
+      },
+      {
+        "name": "NoReturnDiscovered",
+        "priority": 302,
+        "pending": 0,
+        "runs": 4
+      },
+      {
+        "name": "CallTargets",
+        "priority": 400,
+        "pending": 0,
+        "runs": 3
+      },
+      {
+        "name": "IatThunks",
+        "priority": 405,
+        "pending": 0,
+        "runs": 3
+      },
+      {
+        "name": "JumpTables",
+        "priority": 410,
+        "pending": 0,
+        "runs": 2
+      },
+      {
+        "name": "TailCallsAndParts",
+        "priority": 420,
+        "pending": 0,
+        "runs": 3
+      },
+      {
+        "name": "MainDiscovery",
+        "priority": 430,
+        "pending": 0,
+        "runs": 2
+      },
+      {
+        "name": "EndbrSeeds",
+        "priority": 440,
+        "pending": 0,
+        "runs": 1
+      },
+      {
+        "name": "DataPtrSeeds",
+        "priority": 450,
+        "pending": 0,
+        "runs": 1
+      },
+      {
+        "name": "AddrTakenSeeds",
+        "priority": 460,
+        "pending": 0,
+        "runs": 1
+      },
+      {
+        "name": "GapComponents",
+        "priority": 470,
+        "pending": 0,
+        "runs": 1
+      },
+      {
+        "name": "References",
+        "priority": 600,
+        "pending": 0,
+        "runs": 1
+      },
+      {
+        "name": "Strings",
+        "priority": 650,
+        "pending": 0,
+        "runs": 1
+      },
+      {
+        "name": "StackFrames",
+        "priority": 700,
+        "pending": 0,
+        "runs": 1
+      },
+      {
+        "name": "CallingConvention",
+        "priority": 800,
+        "pending": 0,
+        "runs": 1
+      },
+      {
+        "name": "Syscalls",
+        "priority": 810,
+        "pending": 0,
+        "runs": 1
+      }
+    ],
+    "changed": {
+      "functions": 12,
+      "refs": 54,
+      "strings": 4,
+      "jumptables": 2
+    }
+  },
+  "noop": false
+}

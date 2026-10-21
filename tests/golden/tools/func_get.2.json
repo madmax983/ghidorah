@@ -1,0 +1,117 @@
+{"golden":"generator=tools_examples version=1 fixture=crackme.gcc-O2 fixture_sha256=467a43b75d95c826daba8cb216d01d7fd386aa96c5ef5a95c2effffe1780de8f"}
+{
+  "ok": true,
+  "binary_id": "467a43b75d95c826",
+  "rev": 1,
+  "session": "cli",
+  "analysis": {
+    "state": "complete",
+    "rev": 1
+  },
+  "partial": false,
+  "data": {
+    "id": "fn:0x1080",
+    "name": "main",
+    "entry": "0x1080",
+    "size": 83,
+    "parts": [
+      {
+        "start": "0x1080",
+        "size": "0x53",
+        "kind": "main"
+      }
+    ],
+    "signature": null,
+    "start_reason": "symbol",
+    "confidence": 100,
+    "flags": [],
+    "caveats": [],
+    "disasm": {
+      "rows": [
+        {
+          "a": "0x1080",
+          "n": 4,
+          "b": "f30f1efa",
+          "m": "endbr64",
+          "t": "endbr64",
+          "f": "seq"
+        },
+        {
+          "a": "0x1084",
+          "n": 4,
+          "b": "4883ec08",
+          "m": "sub",
+          "t": "sub rsp, 0x8",
+          "f": "seq"
+        },
+        {
+          "a": "0x1088",
+          "n": 3,
+          "b": "83ff01",
+          "m": "cmp",
+          "t": "cmp edi, 0x1",
+          "f": "seq"
+        },
+        {
+          "a": "0x108b",
+          "n": 2,
+          "b": "7e33",
+          "m": "jle",
+          "t": "jle 0x10c0",
+          "f": "jcc"
+        },
+        {
+          "a": "0x108d",
+          "n": 4,
+          "b": "488b7e08",
+          "m": "mov",
+          "t": "mov rdi, qword ptr [rsi+0x8]",
+          "f": "seq"
+        },
+        {
+          "a": "0x1091",
+          "n": 5,
+          "b": "e84a010000",
+          "m": "call",
+          "t": "call check_password",
+          "f": "call"
+        },
+        {
+          "a": "0x1096",
+          "n": 2,
+          "b": "85c0",
+          "m": "test",
+          "t": "test eax, eax",
+          "f": "seq"
+        },
+        {
+          "a": "0x1098",
+          "n": 2,
+          "b": "7516",
+          "m": "jne",
+          "t": "jne 0x10b0",
+          "f": "jcc"
+        }
+      ],
+      "next_cursor": "0104009c288bc1bf1375b60100000000000000000002008010000000000000009810000000000000172957c2"
+    },
+    "callees": [
+      {
+        "id": "fn:0x11e0",
+        "name": "check_password",
+        "sites": [
+          "0x1091"
+        ]
+      },
+      {
+        "id": "imp:puts",
+        "name": "puts",
+        "sites": [
+          "0x10a1",
+          "0x10b7",
+          "0x10c7"
+        ]
+      }
+    ]
+  }
+}

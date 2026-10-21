@@ -1,0 +1,566 @@
+{"golden":"generator=tools_examples version=1 fixture=crackme.gcc-O2 fixture_sha256=467a43b75d95c826daba8cb216d01d7fd386aa96c5ef5a95c2effffe1780de8f"}
+{
+  "ok": true,
+  "binary_id": "467a43b75d95c826",
+  "rev": 1,
+  "session": "cli",
+  "analysis": {
+    "state": "complete",
+    "rev": 1
+  },
+  "partial": false,
+  "data": {
+    "identity": {
+      "file_name": "demo.elf",
+      "sha256": "467a43b75d95c826daba8cb216d01d7fd386aa96c5ef5a95c2effffe1780de8f",
+      "format": "elf64-le",
+      "arch": "x86_64",
+      "bits": 64,
+      "kind": "dyn",
+      "image_base": "0x0",
+      "entry": "0x10e0",
+      "size": 16112,
+      "build_id": "eff2012c44affa52f66e0e37d87fa2ec64c41d1b",
+      "interp": {
+        "text": "/lib64/ld-linux-x86-64.so.2",
+        "hex": "2f6c696236342f6c642d6c696e75782d7838362d36342e736f2e32",
+        "len": 27,
+        "src": "binary"
+      }
+    },
+    "protections": {
+      "pie": true,
+      "nx": true,
+      "relro": "full",
+      "canary": false,
+      "fortify": false,
+      "ibt": true,
+      "shstk": true,
+      "rpath": false,
+      "runpath": false,
+      "stripped": false
+    },
+    "segments": {
+      "total": 13,
+      "items": [
+        {
+          "id": "seg:0",
+          "kind": "phdr",
+          "start": "0x40",
+          "size": "0x2d8",
+          "perms": "r--"
+        },
+        {
+          "id": "seg:1",
+          "kind": "interp",
+          "start": "0x318",
+          "size": "0x1c",
+          "perms": "r--"
+        },
+        {
+          "id": "seg:2",
+          "kind": "load",
+          "start": "0x0",
+          "size": "0x660",
+          "perms": "r--"
+        },
+        {
+          "id": "seg:3",
+          "kind": "load",
+          "start": "0x1000",
+          "size": "0x239",
+          "perms": "r-x"
+        },
+        {
+          "id": "seg:4",
+          "kind": "load",
+          "start": "0x2000",
+          "size": "0x150",
+          "perms": "r--"
+        },
+        {
+          "id": "seg:5",
+          "kind": "load",
+          "start": "0x3db0",
+          "size": "0x268",
+          "perms": "rw-"
+        }
+      ],
+      "omitted": {
+        "count": 7,
+        "next": {
+          "tool": "search",
+          "args": {
+            "kind": "segment"
+          },
+          "why": "List the items that the survey leaves out."
+        }
+      }
+    },
+    "sections": {
+      "total": 30,
+      "items": [
+        {
+          "id": "sec:1:.interp",
+          "name": ".interp",
+          "start": "0x318",
+          "size": "0x1c"
+        },
+        {
+          "id": "sec:2:.note.gnu.property",
+          "name": ".note.gnu.property",
+          "start": "0x338",
+          "size": "0x30"
+        },
+        {
+          "id": "sec:3:.note.gnu.build-id",
+          "name": ".note.gnu.build-id",
+          "start": "0x368",
+          "size": "0x24"
+        },
+        {
+          "id": "sec:4:.note.ABI-tag",
+          "name": ".note.ABI-tag",
+          "start": "0x38c",
+          "size": "0x20"
+        },
+        {
+          "id": "sec:5:.gnu.hash",
+          "name": ".gnu.hash",
+          "start": "0x3b0",
+          "size": "0x24"
+        },
+        {
+          "id": "sec:6:.dynsym",
+          "name": ".dynsym",
+          "start": "0x3d8",
+          "size": "0xc0"
+        },
+        {
+          "id": "sec:7:.dynstr",
+          "name": ".dynstr",
+          "start": "0x498",
+          "size": "0x94"
+        },
+        {
+          "id": "sec:8:.gnu.version",
+          "name": ".gnu.version",
+          "start": "0x52c",
+          "size": "0x10"
+        },
+        {
+          "id": "sec:9:.gnu.version_r",
+          "name": ".gnu.version_r",
+          "start": "0x540",
+          "size": "0x30"
+        },
+        {
+          "id": "sec:10:.rela.dyn",
+          "name": ".rela.dyn",
+          "start": "0x570",
+          "size": "0xc0"
+        },
+        {
+          "id": "sec:11:.rela.plt",
+          "name": ".rela.plt",
+          "start": "0x630",
+          "size": "0x30"
+        },
+        {
+          "id": "sec:12:.init",
+          "name": ".init",
+          "start": "0x1000",
+          "size": "0x1b"
+        },
+        {
+          "id": "sec:13:.plt",
+          "name": ".plt",
+          "start": "0x1020",
+          "size": "0x30"
+        }
+      ],
+      "omitted": {
+        "count": 17,
+        "next": {
+          "tool": "search",
+          "args": {
+            "kind": "section"
+          },
+          "why": "List the items that the survey leaves out."
+        }
+      }
+    },
+    "imports": {
+      "total": 7,
+      "libraries": [
+        "libc.so.6"
+      ],
+      "items": [
+        {
+          "id": "imp:__cxa_finalize",
+          "name": "__cxa_finalize",
+          "category": "process"
+        },
+        {
+          "id": "imp:__libc_start_main",
+          "name": "__libc_start_main",
+          "category": "process"
+        },
+        {
+          "id": "imp:strlen",
+          "name": "strlen",
+          "category": "string"
+        },
+        {
+          "id": "imp:puts",
+          "name": "puts",
+          "category": "io"
+        },
+        {
+          "id": "imp:_ITM_deregisterTMCloneTable",
+          "name": "_ITM_deregisterTMCloneTable",
+          "category": "other"
+        },
+        {
+          "id": "imp:_ITM_registerTMCloneTable",
+          "name": "_ITM_registerTMCloneTable",
+          "category": "other"
+        },
+        {
+          "id": "imp:__gmon_start__",
+          "name": "__gmon_start__",
+          "category": "other"
+        }
+      ]
+    },
+    "exports": {
+      "total": 0,
+      "items": []
+    },
+    "strings": {
+      "total": 4,
+      "items": [
+        {
+          "id": "str:0x2004",
+          "text": {
+            "text": "usage: crackme <password>",
+            "hex": "75736167653a20637261636b6d65203c70617373776f72643e",
+            "len": 25,
+            "src": "binary"
+          },
+          "ref_count": 1,
+          "funcs": [
+            "main"
+          ]
+        },
+        {
+          "id": "str:0x201e",
+          "text": {
+            "text": "Access granted",
+            "hex": "416363657373206772616e746564",
+            "len": 14,
+            "src": "binary"
+          },
+          "ref_count": 1,
+          "funcs": [
+            "main"
+          ]
+        },
+        {
+          "id": "str:0x202d",
+          "text": {
+            "text": "Access denied",
+            "hex": "4163636573732064656e696564",
+            "len": 13,
+            "src": "binary"
+          },
+          "ref_count": 1,
+          "funcs": [
+            "main"
+          ]
+        },
+        {
+          "id": "str:0x2040",
+          "text": {
+            "text": ")i9(i.w1i#",
+            "hex": "29693928692e77316923",
+            "len": 10,
+            "src": "binary"
+          },
+          "ref_count": 1,
+          "funcs": [
+            "check_password"
+          ]
+        }
+      ]
+    },
+    "entries": {
+      "total": 5,
+      "items": [
+        {
+          "addr": "0x1000",
+          "kind": "init",
+          "name": "_init"
+        },
+        {
+          "addr": "0x10e0",
+          "kind": "entry",
+          "name": "_start"
+        },
+        {
+          "addr": "0x1180",
+          "kind": "fini_array",
+          "name": "__do_global_dtors_aux"
+        },
+        {
+          "addr": "0x11c0",
+          "kind": "init_array",
+          "name": "frame_dummy"
+        },
+        {
+          "addr": "0x122c",
+          "kind": "fini",
+          "name": "_fini"
+        }
+      ]
+    },
+    "functions": {
+      "total": 12,
+      "named": 12,
+      "by_reason": [
+        {
+          "reason": "call",
+          "count": 1
+        },
+        {
+          "reason": "entry",
+          "count": 5
+        },
+        {
+          "reason": "plt_stub",
+          "count": 3
+        },
+        {
+          "reason": "symbol",
+          "count": 2
+        },
+        {
+          "reason": "tail_call",
+          "count": 1
+        }
+      ],
+      "top": [
+        {
+          "id": "fn:0x1080",
+          "name": "main",
+          "size": 83,
+          "callers": 0
+        },
+        {
+          "id": "fn:0x1060",
+          "name": "puts@plt",
+          "size": 10,
+          "callers": 1
+        },
+        {
+          "id": "fn:0x11e0",
+          "name": "check_password",
+          "size": 73,
+          "callers": 1
+        },
+        {
+          "id": "fn:0x1140",
+          "name": "register_tm_clones",
+          "size": 51,
+          "callers": 0
+        },
+        {
+          "id": "fn:0x1180",
+          "name": "__do_global_dtors_aux",
+          "size": 54,
+          "callers": 0
+        },
+        {
+          "id": "fn:0x1110",
+          "name": "deregister_tm_clones",
+          "size": 34,
+          "callers": 1
+        },
+        {
+          "id": "fn:0x1050",
+          "name": "__cxa_finalize@plt",
+          "size": 10,
+          "callers": 1
+        },
+        {
+          "id": "fn:0x1070",
+          "name": "strlen@plt",
+          "size": 10,
+          "callers": 1
+        },
+        {
+          "id": "fn:0x11c0",
+          "name": "frame_dummy",
+          "size": 9,
+          "callers": 0
+        },
+        {
+          "id": "fn:0x10e0",
+          "name": "_start",
+          "size": 38,
+          "callers": 0
+        },
+        {
+          "id": "fn:0x1000",
+          "name": "_init",
+          "size": 27,
+          "callers": 0
+        },
+        {
+          "id": "fn:0x122c",
+          "name": "_fini",
+          "size": 13,
+          "callers": 0
+        }
+      ]
+    },
+    "syscalls": {
+      "total": 0,
+      "items": []
+    },
+    "notes": {
+      "total": 3,
+      "items": [
+        {
+          "name": "GNU",
+          "kind": 5,
+          "desc": "020000c0040000000300000000000000028000c0040000000100000000000000",
+          "desc_size": 32
+        },
+        {
+          "name": "GNU",
+          "kind": 3,
+          "desc": "eff2012c44affa52f66e0e37d87fa2ec64c41d1b",
+          "desc_size": 20
+        },
+        {
+          "name": "GNU",
+          "kind": 1,
+          "desc": "00000000030000000200000000000000",
+          "desc_size": 16
+        }
+      ]
+    },
+    "coverage": {
+      "functions": 12,
+      "analyzed": 12,
+      "visited": 0,
+      "named": 12,
+      "typed": 0,
+      "commented": 0,
+      "pct": 0,
+      "worklist": {
+        "total": 4,
+        "items": [
+          {
+            "kind": "unresolved_call",
+            "at": "0x1014",
+            "func": "fn:0x1000",
+            "remedy": {
+              "tool": "func_edit",
+              "args": {
+                "action": "set_call_targets",
+                "at": "0x1014",
+                "targets": [
+                  "imp:__gmon_start__"
+                ]
+              },
+              "why": "Set the targets."
+            }
+          },
+          {
+            "kind": "unresolved_jump",
+            "at": "0x112f",
+            "func": "fn:0x1110",
+            "remedy": {
+              "tool": "func_edit",
+              "args": {
+                "action": "set_call_targets",
+                "at": "0x112f",
+                "targets": [
+                  "imp:_ITM_deregisterTMCloneTable"
+                ]
+              },
+              "why": "Set the targets."
+            }
+          },
+          {
+            "kind": "unresolved_jump",
+            "at": "0x1170",
+            "func": "fn:0x1140",
+            "remedy": {
+              "tool": "func_edit",
+              "args": {
+                "action": "set_call_targets",
+                "at": "0x1170",
+                "targets": [
+                  "imp:_ITM_registerTMCloneTable"
+                ]
+              },
+              "why": "Set the targets."
+            }
+          },
+          {
+            "kind": "gap",
+            "at": "0x11d0",
+            "remedy": {
+              "tool": "func_edit",
+              "args": {
+                "action": "create",
+                "target": "0x11d0"
+              },
+              "why": "Make a function at the gap."
+            }
+          }
+        ]
+      }
+    },
+    "languages": {
+      "total": 0,
+      "items": []
+    },
+    "diagnostics": {
+      "total": 1,
+      "items": [
+        {
+          "code": "E_CFA_OPCODE",
+          "count": 1,
+          "places": [
+            {
+              "path": "elf.eh_frame[0x30].cfa",
+              "offset": "0x20cf"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "next": [
+    {
+      "tool": "func_list",
+      "args": {
+        "binary_id": "467a43b75d95c826",
+        "sort": "priority"
+      },
+      "why": "List the functions in priority order."
+    },
+    {
+      "tool": "func_get",
+      "args": {
+        "binary_id": "467a43b75d95c826",
+        "target": "fn:0x1080"
+      },
+      "why": "Read the main function."
+    }
+  ]
+}

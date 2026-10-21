@@ -1,0 +1,81 @@
+{
+  "id": "ab-understand-03",
+  "question": "q-understand-03",
+  "pair": "understand-03",
+  "turns": [
+    {
+      "call": {
+        "tool": "binary_load",
+        "args": {
+          "path": "fixtures/bin/recursion.gcc-O0"
+        }
+      }
+    },
+    {
+      "batch": {
+        "steps": [
+          {
+            "id": "s1",
+            "tool": "func_list",
+            "args": {
+              "filter": {
+                "start_reason": [
+                  "symbol"
+                ]
+              }
+            }
+          },
+          {
+            "id": "s2",
+            "tool": "xref_list",
+            "args": {
+              "targets": {
+                "$ref": "s1",
+                "ptr": "/data/items/*/id"
+              },
+              "kinds": [
+                "call"
+              ],
+              "direction": "from"
+            }
+          }
+        ],
+        "return": [
+          "s2"
+        ]
+      }
+    }
+  ],
+  "answer": {
+    "turn": 1,
+    "ptr": "/data/steps/1/data/items",
+    "steps": [
+      {
+        "op": "same",
+        "a": "/from_func/name",
+        "b": "/to_name"
+      },
+      {
+        "op": "pick",
+        "ptr": "/to_name"
+      },
+      {
+        "op": "unique"
+      },
+      {
+        "op": "sort"
+      }
+    ]
+  },
+  "provenance": {
+    "/turns/0/call/args/path": "question:binaries/0",
+    "/turns/1/batch/steps/0/args/filter/start_reason/0": "schema:func_list.filter.start_reason",
+    "/turns/1/batch/steps/1/args/kinds/0": "schema:xref_list.kinds",
+    "/turns/1/batch/steps/1/args/direction": "schema:xref_list.direction"
+  },
+  "budgets": {
+    "max_calls": 2,
+    "max_chars": 3800,
+    "max_peak_chars": 3000
+  }
+}

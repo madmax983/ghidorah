@@ -1,0 +1,61 @@
+{
+  "id": "understand-04",
+  "question": "q-understand-04",
+  "turns": [
+    {
+      "call": {
+        "tool": "binary_load",
+        "args": {
+          "path": "fixtures/bin/struct_access.gcc-O2"
+        }
+      }
+    },
+    {
+      "call": {
+        "tool": "func_get",
+        "args": {
+          "target": "bump_count",
+          "include": [
+            "decomp"
+          ]
+        }
+      }
+    }
+  ],
+  "answer": {
+    "turn": 1,
+    "ptr": "/data/decomp/text",
+    "steps": [
+      {
+        "op": "lines"
+      },
+      {
+        "op": "grep",
+        "glob": "*param_1 + 0x*"
+      },
+      {
+        "op": "first"
+      },
+      {
+        "op": "after",
+        "text": "param_1 + "
+      },
+      {
+        "op": "token"
+      },
+      {
+        "op": "int"
+      }
+    ]
+  },
+  "provenance": {
+    "/turns/0/call/args/path": "question:binaries/0",
+    "/turns/1/call/args/target": "question",
+    "/turns/1/call/args/include/0": "instructions"
+  },
+  "budgets": {
+    "max_calls": 2,
+    "max_chars": 2500,
+    "max_peak_chars": 1700
+  }
+}

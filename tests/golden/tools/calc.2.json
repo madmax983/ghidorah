@@ -1,0 +1,41 @@
+{"golden":"generator=tools_examples version=1 fixture=crackme.gcc-O2 fixture_sha256=467a43b75d95c826daba8cb216d01d7fd386aa96c5ef5a95c2effffe1780de8f"}
+{
+  "ok": true,
+  "binary_id": "467a43b75d95c826",
+  "rev": 0,
+  "session": "cli",
+  "analysis": {
+    "state": "none"
+  },
+  "partial": true,
+  "data": {
+    "value": "0x40100",
+    "unsigned": "262400",
+    "signed": "262400",
+    "views": {
+      "u8": "0",
+      "u16": "256",
+      "u32": "262400",
+      "u64": "262400",
+      "i8": "0",
+      "i16": "256",
+      "i32": "262400",
+      "i64": "262400"
+    },
+    "address": {
+      "mapped": false,
+      "region": null,
+      "file_offset": null,
+      "func": null
+    }
+  },
+  "next": [
+    {
+      "tool": "analysis_run",
+      "args": {
+        "binary_id": "467a43b75d95c826"
+      },
+      "why": "Finish the analysis of the binary."
+    }
+  ]
+}

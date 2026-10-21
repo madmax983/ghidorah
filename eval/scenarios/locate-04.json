@@ -1,0 +1,69 @@
+{
+  "id": "locate-04",
+  "question": "q-locate-04",
+  "turns": [
+    {
+      "call": {
+        "tool": "binary_load",
+        "args": {
+          "path": "fixtures/bin/crackme.gcc-O2.stripped"
+        }
+      }
+    },
+    {
+      "call": {
+        "tool": "binary_survey",
+        "args": {
+          "include": [
+            "coverage"
+          ]
+        }
+      }
+    },
+    {
+      "call": {
+        "tool": "mem_read",
+        "args": {
+          "target": {
+            "$turn": 1,
+            "ptr": "/data/coverage/worklist/items",
+            "steps": [
+              {
+                "op": "where",
+                "ptr": "/kind",
+                "eq": "gap"
+              },
+              {
+                "op": "pick",
+                "ptr": "/at"
+              },
+              {
+                "op": "first"
+              }
+            ]
+          },
+          "as": "insn",
+          "count": 2
+        }
+      }
+    }
+  ],
+  "answer": {
+    "turn": 2,
+    "ptr": "/data/rows/0/t"
+  },
+  "provenance": {
+    "/turns/0/call/args/path": "question:binaries/0",
+    "/turns/1/call/args/include/0": "schema:binary_survey.include",
+    "/turns/2/call/args/as": "schema:mem_read.as",
+    "/turns/2/call/args/count": "schema:mem_read.count"
+  },
+  "budgets": {
+    "max_calls": 3,
+    "max_chars": 2700,
+    "max_peak_chars": 1300
+  },
+  "evidence": [
+    "mov eax, 0x1337"
+  ]
+}

@@ -1,0 +1,16 @@
+{"golden":"generator=tools_examples version=1"}
+{
+  "ok": true,
+  "binary_id": "b1",
+  "rev": 7,
+  "session": "test",
+  "analysis": {
+    "state": "complete",
+    "rev": 7
+  },
+  "partial": false,
+  "data": {
+    "used": 10,
+    "cancelled": false
+  }
+}

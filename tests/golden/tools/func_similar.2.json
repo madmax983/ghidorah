@@ -1,0 +1,251 @@
+{"golden":"generator=tools_examples version=1 fixture=crackme.gcc-O2 fixture_sha256=467a43b75d95c826daba8cb216d01d7fd386aa96c5ef5a95c2effffe1780de8f"}
+{
+  "ok": true,
+  "binary_id": "467a43b75d95c826",
+  "rev": 1,
+  "session": "cli",
+  "analysis": {
+    "state": "complete",
+    "rev": 1
+  },
+  "partial": false,
+  "data": {
+    "items": [
+      {
+        "query": {
+          "id": "fn:0x1080",
+          "binary_id": "467a43b75d95c826",
+          "name": "main",
+          "features": 126
+        },
+        "matches": [
+          {
+            "id": "fn:0x11e0",
+            "binary_id": "467a43b75d95c826",
+            "name": "check_password",
+            "score": 440,
+            "shared": 62,
+            "total": 213,
+            "top_features": [
+              {
+                "kind": "opcode",
+                "text": "op1:Trunc.32",
+                "weight": 30
+              },
+              {
+                "kind": "opcode",
+                "text": "op2:Get.gpr,Trunc.32",
+                "weight": 30
+              },
+              {
+                "kind": "opcode",
+                "text": "op1:Get.gpr",
+                "weight": 20
+              },
+              {
+                "kind": "opcode",
+                "text": "op1:Put.gpr",
+                "weight": 17
+              },
+              {
+                "kind": "opcode",
+                "text": "op1:Flags.32",
+                "weight": 14
+              },
+              {
+                "kind": "opcode",
+                "text": "op2:Flags.32,Put.flags",
+                "weight": 14
+              },
+              {
+                "kind": "opcode",
+                "text": "op2:Trunc.32,Get.gpr",
+                "weight": 12
+              },
+              {
+                "kind": "opcode",
+                "text": "op3:Get.gpr,Trunc.32,Get.gpr",
+                "weight": 12
+              }
+            ]
+          },
+          {
+            "id": "fn:0x10e0",
+            "binary_id": "467a43b75d95c826",
+            "name": "_start",
+            "score": 366,
+            "shared": 36,
+            "total": 178,
+            "top_features": [
+              {
+                "kind": "opcode",
+                "text": "op1:Trunc.32",
+                "weight": 37
+              },
+              {
+                "kind": "opcode",
+                "text": "op2:Get.gpr,Trunc.32",
+                "weight": 37
+              },
+              {
+                "kind": "opcode",
+                "text": "op1:Get.gpr",
+                "weight": 23
+              },
+              {
+                "kind": "opcode",
+                "text": "op1:Put.gpr",
+                "weight": 19
+              },
+              {
+                "kind": "opcode",
+                "text": "op1:Flags.32",
+                "weight": 16
+              },
+              {
+                "kind": "opcode",
+                "text": "op2:Flags.32,Put.flags",
+                "weight": 16
+              },
+              {
+                "kind": "opcode",
+                "text": "op2:Trunc.32,Get.gpr",
+                "weight": 16
+              },
+              {
+                "kind": "opcode",
+                "text": "op3:Get.gpr,Trunc.32,Get.gpr",
+                "weight": 16
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "query": {
+          "id": "fn:0x11e0",
+          "binary_id": "467a43b75d95c826",
+          "name": "check_password",
+          "features": 149
+        },
+        "matches": [
+          {
+            "id": "fn:0x10e0",
+            "binary_id": "467a43b75d95c826",
+            "name": "_start",
+            "score": 548,
+            "shared": 45,
+            "total": 192,
+            "top_features": [
+              {
+                "kind": "opcode",
+                "text": "op1:Trunc.32",
+                "weight": 34
+              },
+              {
+                "kind": "opcode",
+                "text": "op2:Get.gpr,Trunc.32",
+                "weight": 34
+              },
+              {
+                "kind": "opcode",
+                "text": "op1:Get.gpr",
+                "weight": 22
+              },
+              {
+                "kind": "opcode",
+                "text": "op1:ZExt.64",
+                "weight": 21
+              },
+              {
+                "kind": "opcode",
+                "text": "op2:ZExt.64,Put.gpr",
+                "weight": 21
+              },
+              {
+                "kind": "opcode",
+                "text": "op3:ZExt.64,Put.gpr,Get.gpr",
+                "weight": 20
+              },
+              {
+                "kind": "opcode",
+                "text": "op1:Flags.32",
+                "weight": 19
+              },
+              {
+                "kind": "opcode",
+                "text": "op2:Flags.32,Put.flags",
+                "weight": 19
+              }
+            ]
+          },
+          {
+            "id": "fn:0x1080",
+            "binary_id": "467a43b75d95c826",
+            "name": "main",
+            "score": 440,
+            "shared": 62,
+            "total": 213,
+            "top_features": [
+              {
+                "kind": "opcode",
+                "text": "op1:Trunc.32",
+                "weight": 30
+              },
+              {
+                "kind": "opcode",
+                "text": "op2:Get.gpr,Trunc.32",
+                "weight": 30
+              },
+              {
+                "kind": "opcode",
+                "text": "op1:Get.gpr",
+                "weight": 20
+              },
+              {
+                "kind": "opcode",
+                "text": "op1:Put.gpr",
+                "weight": 17
+              },
+              {
+                "kind": "opcode",
+                "text": "op1:Flags.32",
+                "weight": 14
+              },
+              {
+                "kind": "opcode",
+                "text": "op2:Flags.32,Put.flags",
+                "weight": 14
+              },
+              {
+                "kind": "opcode",
+                "text": "op2:Trunc.32,Get.gpr",
+                "weight": 12
+              },
+              {
+                "kind": "opcode",
+                "text": "op3:Get.gpr,Trunc.32,Get.gpr",
+                "weight": 12
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "renames": [],
+    "corpus": {
+      "binaries": 1,
+      "functions": 12
+    }
+  },
+  "next": [
+    {
+      "tool": "func_get",
+      "args": {
+        "binary_id": "467a43b75d95c826",
+        "target": "fn:0x11e0"
+      },
+      "why": "Read the best match."
+    }
+  ]
+}

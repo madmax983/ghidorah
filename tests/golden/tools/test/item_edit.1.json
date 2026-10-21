@@ -1,0 +1,20 @@
+{"golden":"generator=tools_examples version=1"}
+{
+  "ok": true,
+  "binary_id": "b1",
+  "rev": 8,
+  "session": "test",
+  "analysis": {
+    "state": "complete",
+    "rev": 7
+  },
+  "partial": false,
+  "data": {
+    "action": "create",
+    "target": "0x402000",
+    "old": "func_0256",
+    "new": "main"
+  },
+  "tx": "tx:8",
+  "noop": false
+}

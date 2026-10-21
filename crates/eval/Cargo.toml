@@ -1,0 +1,29 @@
+[package]
+name = "ghidorah-eval"
+description = "Offline agent-quality harness: scenarios, metrics, robots, lints, discoverability, recall and the scorecard."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# Unit tests live in `tests.rs` files. The AC tests live in `tests/ac.rs`.
+[lib]
+name = "ghidorah_eval"
+path = "src/lib.rs"
+
+# `xtask eval` runs this binary. It prints the scorecard or blesses the baselines.
+[[bin]]
+name = "ghidorah-eval"
+path = "src/main.rs"
+
+[dependencies]
+# The harness calls the dispatcher of the tools crate in process.
+ghidorah-tools = { path = "../tools" }
+ghidorah-json = { path = "../json" }
+
+[dev-dependencies]
+ghidorah-testkit = { path = "../testkit" }
+
+[lints]
+workspace = true

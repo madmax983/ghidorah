@@ -1,0 +1,45 @@
+# golden: generator=xtask-fixtures version=1 binutils=2.42 fixture=syscall_only.clang-O2 fixture_sha256=5a9804666bfbbfcc725332d70a7a38a3a7a18dcec9dfa114201d5d495cfac9c7
+
+syscall_only.clang-O2:     file format elf64-x86-64
+
+
+Disassembly of section .text:
+
+0000000000401000 <emit_banner>:
+  401000:	48 8d 35 f9 0f 00 00 	lea    rsi,[rip+0xff9]        # 402000 <banner>
+  401007:	b8 01 00 00 00       	mov    eax,0x1
+  40100c:	bf 01 00 00 00       	mov    edi,0x1
+  401011:	ba 0d 00 00 00       	mov    edx,0xd
+  401016:	0f 05                	syscall
+  401018:	c3                   	ret
+  401019:	0f 1f 80 00 00 00 00 	nop    DWORD PTR [rax+0x0]
+
+0000000000401020 <emit_status>:
+  401020:	48 8d 35 e7 0f 00 00 	lea    rsi,[rip+0xfe7]        # 40200e <status>
+  401027:	b8 01 00 00 00       	mov    eax,0x1
+  40102c:	bf 02 00 00 00       	mov    edi,0x2
+  401031:	ba 0b 00 00 00       	mov    edx,0xb
+  401036:	0f 05                	syscall
+  401038:	c3                   	ret
+  401039:	0f 1f 80 00 00 00 00 	nop    DWORD PTR [rax+0x0]
+
+0000000000401040 <get_pid>:
+  401040:	b8 27 00 00 00       	mov    eax,0x27
+  401045:	0f 05                	syscall
+  401047:	c3                   	ret
+  401048:	0f 1f 84 00 00 00 00 00 	nop    DWORD PTR [rax+rax*1+0x0]
+
+0000000000401050 <exit_ok>:
+  401050:	b8 3c 00 00 00       	mov    eax,0x3c
+  401055:	31 ff                	xor    edi,edi
+  401057:	0f 05                	syscall
+  401059:	0f 1f 80 00 00 00 00 	nop    DWORD PTR [rax+0x0]
+
+0000000000401060 <_start>:
+  401060:	50                   	push   rax
+  401061:	e8 9a ff ff ff       	call   401000 <emit_banner>
+  401066:	e8 d5 ff ff ff       	call   401040 <get_pid>
+  40106b:	48 85 c0             	test   rax,rax
+  40106e:	7e 05                	jle    401075 <_start+0x15>
+  401070:	e8 ab ff ff ff       	call   401020 <emit_status>
+  401075:	e8 d6 ff ff ff       	call   401050 <exit_ok>

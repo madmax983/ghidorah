@@ -1,0 +1,7 @@
+LIBRARY pe_dll.dll
+EXPORTS
+dll_add @1
+dll_mul @2
+dll_secret @7 NONAME
+ExitNow = kernel32.ExitProcess @3
+AlphaFive = alpha.#5 @4

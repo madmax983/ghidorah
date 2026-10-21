@@ -1,0 +1,73 @@
+{
+  "claims": [
+    {
+      "args": [
+        "connect_to",
+        "socket"
+      ],
+      "rel": "calls"
+    },
+    {
+      "args": [
+        "connect_to",
+        "connect"
+      ],
+      "rel": "calls"
+    },
+    {
+      "args": [
+        "main",
+        "connect_to"
+      ],
+      "rel": "calls"
+    },
+    {
+      "args": [
+        "send_hello",
+        "send"
+      ],
+      "rel": "calls"
+    }
+  ],
+  "constants": {
+    "port": "8080"
+  },
+  "program": "socket_client",
+  "strings": [
+    {
+      "text": "127.0.0.1"
+    },
+    {
+      "text": "HELLO ghidorah\r\n"
+    },
+    {
+      "text": "connect failed"
+    }
+  ],
+  "survey_facts": [
+    {
+      "kind": "import",
+      "value": "socket"
+    },
+    {
+      "kind": "import",
+      "value": "connect"
+    },
+    {
+      "kind": "import",
+      "value": "send"
+    },
+    {
+      "kind": "import",
+      "value": "recv"
+    },
+    {
+      "kind": "import",
+      "value": "inet_pton"
+    },
+    {
+      "kind": "string",
+      "value": "127.0.0.1"
+    }
+  ]
+}

@@ -1,0 +1,289 @@
+{
+  "binaries": [
+    {
+      "name": "func_ptrs.gcc-O2",
+      "sha256": "b32bdf353c42c2cdb74fee4cb0de0109a167534d6d03ffc9e855bcdc760b3e6b",
+      "variant": "none"
+    },
+    {
+      "name": "func_ptrs.gcc-O2.noeh",
+      "sha256": "959292af38682e1a1dc1f450bd870b1020797a6d999c5f1d6097b114aed3df13",
+      "variant": "noeh"
+    },
+    {
+      "name": "func_ptrs.gcc-O2.stripped",
+      "sha256": "22c7d20c4c2a6d4f42b54eac44860392ecf4f4b11e967270e28f016085164667",
+      "variant": "stripped"
+    }
+  ],
+  "build": {
+    "cflags": ["-O2"],
+    "compiler": "gcc 13.3.0",
+    "id": "gcc-O2",
+    "ldflags": []
+  },
+  "call_edges": [
+    ["__do_global_dtors_aux","__cxa_finalize"],
+    ["__do_global_dtors_aux","deregister_tm_clones"],
+    ["_start","__libc_start_main"],
+    ["frame_dummy","register_tm_clones"],
+    ["log_event","__printf_chk"],
+    ["main","__printf_chk"],
+    ["main","__stack_chk_fail"],
+    ["main","fire"],
+    ["main","op_mod"],
+    ["main","qsort"],
+    ["main","run_op"],
+    ["main","set_callback"],
+    ["main","strtol"]
+  ],
+  "cold_parts": [],
+  "duplicate_names": {},
+  "elf": {
+    "entry": "0x11b0",
+    "image_base": "0x0",
+    "interp": true,
+    "type": "DYN"
+  },
+  "facts": {
+    "abstain": [
+      {
+        "answer": "unknown",
+        "claim": {
+          "args": ["run_op","op_mod"],
+          "rel": "calls"
+        },
+        "id": "run_op_reaches_op_mod",
+        "reason": "run_op calls through a table with an index from the input"
+      },
+      {
+        "answer": "unknown",
+        "claim": {
+          "args": ["fire","log_event"],
+          "rel": "calls"
+        },
+        "id": "fire_calls_log_event",
+        "reason": "fire calls through a callback slot that changes at run time"
+      }
+    ],
+    "claims": [
+      {
+        "args": ["main","op_mod"],
+        "rel": "calls"
+      },
+      {
+        "args": ["main","set_callback"],
+        "rel": "calls"
+      },
+      {
+        "args": ["main","qsort"],
+        "rel": "calls"
+      }
+    ],
+    "indirect_calls": [
+      {
+        "func": "run_op",
+        "targets": ["op_add","op_sub","op_mul","op_div"]
+      },
+      {
+        "func": "fire",
+        "targets": ["log_event"]
+      }
+    ]
+  },
+  "fixture": "func_ptrs.gcc-O2",
+  "function_count": 18,
+  "functions": [
+    {
+      "addr": "0x1000",
+      "insns": 8,
+      "name": "_init",
+      "size": 0
+    },
+    {
+      "addr": "0x10c0",
+      "insns": 54,
+      "name": "main",
+      "size": 229
+    },
+    {
+      "addr": "0x11b0",
+      "insns": 13,
+      "name": "_start",
+      "size": 38
+    },
+    {
+      "addr": "0x11e0",
+      "insns": 11,
+      "name": "deregister_tm_clones",
+      "size": 0
+    },
+    {
+      "addr": "0x1210",
+      "insns": 16,
+      "name": "register_tm_clones",
+      "size": 0
+    },
+    {
+      "addr": "0x1250",
+      "insns": 16,
+      "name": "__do_global_dtors_aux",
+      "size": 0
+    },
+    {
+      "addr": "0x1290",
+      "insns": 3,
+      "name": "frame_dummy",
+      "size": 0
+    },
+    {
+      "addr": "0x12a0",
+      "insns": 3,
+      "name": "op_add",
+      "size": 9
+    },
+    {
+      "addr": "0x12b0",
+      "insns": 4,
+      "name": "op_sub",
+      "size": 11
+    },
+    {
+      "addr": "0x12c0",
+      "insns": 4,
+      "name": "op_mul",
+      "size": 12
+    },
+    {
+      "addr": "0x12d0",
+      "insns": 9,
+      "name": "op_div",
+      "size": 24
+    },
+    {
+      "addr": "0x12f0",
+      "insns": 9,
+      "name": "cmp_long",
+      "size": 25
+    },
+    {
+      "addr": "0x1310",
+      "insns": 6,
+      "name": "log_event",
+      "size": 25
+    },
+    {
+      "addr": "0x1330",
+      "insns": 9,
+      "name": "op_mod",
+      "size": 24
+    },
+    {
+      "addr": "0x1350",
+      "insns": 7,
+      "name": "run_op",
+      "size": 25
+    },
+    {
+      "addr": "0x1370",
+      "insns": 3,
+      "name": "set_callback",
+      "size": 12
+    },
+    {
+      "addr": "0x1380",
+      "insns": 7,
+      "name": "fire",
+      "size": 25
+    },
+    {
+      "addr": "0x139c",
+      "insns": 4,
+      "name": "_fini",
+      "size": 0
+    }
+  ],
+  "gaps": [],
+  "generator": {
+    "name": "xtask-fixtures",
+    "version": "1"
+  },
+  "imports": ["__cxa_finalize","__libc_start_main","__printf_chk","__stack_chk_fail","qsort","strtol"],
+  "jump_tables": [],
+  "leaf_functions": [],
+  "libraries": ["libc.so.6"],
+  "network_imports": [],
+  "program": "func_ptrs",
+  "protections": {
+    "build_id": "05e3a2ad4d1228928a4d63facce474ebaf0f0717",
+    "canary": true,
+    "fortify": true,
+    "ibt": true,
+    "nx": true,
+    "pie": true,
+    "relro": "full",
+    "rpath": false,
+    "runpath": false,
+    "shstk": true
+  },
+  "self_calls": [],
+  "strings": [
+    {
+      "addr": "0x2004",
+      "encoding": "bytes",
+      "hex": "6576656e742025640a",
+      "len": 9,
+      "text": "event %d\n"
+    }
+  ],
+  "survey_facts": [
+    {
+      "kind": "function",
+      "value": "run_op"
+    },
+    {
+      "kind": "import",
+      "value": "qsort"
+    },
+    {
+      "kind": "library",
+      "value": "libc.so.6"
+    },
+    {
+      "kind": "protection",
+      "value": "canary"
+    },
+    {
+      "kind": "protection",
+      "value": "fortify"
+    },
+    {
+      "kind": "protection",
+      "value": "ibt"
+    },
+    {
+      "kind": "protection",
+      "value": "nx"
+    },
+    {
+      "kind": "protection",
+      "value": "pie"
+    },
+    {
+      "kind": "protection",
+      "value": "shstk"
+    }
+  ],
+  "syscall_names": [],
+  "syscalls": [],
+  "tail_calls": [
+    ["frame_dummy","register_tm_clones"],
+    ["log_event","__printf_chk"]
+  ],
+  "tier": "T1",
+  "variant_protections": {
+    "noeh": {
+      "relro": "none"
+    }
+  }
+}

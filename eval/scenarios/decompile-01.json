@@ -1,0 +1,57 @@
+{
+  "id": "decompile-01",
+  "question": "q-decompile-01",
+  "turns": [
+    {
+      "call": {
+        "tool": "binary_load",
+        "args": {
+          "path": "fixtures/bin/switch.gcc-O2"
+        }
+      }
+    },
+    {
+      "call": {
+        "tool": "func_get",
+        "args": {
+          "target": "apply_op",
+          "include": [
+            "decomp"
+          ]
+        }
+      }
+    }
+  ],
+  "answer": {
+    "turn": 1,
+    "ptr": "/data/decomp/text",
+    "steps": [
+      {
+        "op": "split",
+        "on": "case "
+      },
+      {
+        "op": "drop",
+        "count": 1
+      },
+      {
+        "op": "grep",
+        "glob": "*:*break;*",
+        "not": true
+      },
+      {
+        "op": "count"
+      }
+    ]
+  },
+  "provenance": {
+    "/turns/0/call/args/path": "question:binaries/0",
+    "/turns/1/call/args/target": "question",
+    "/turns/1/call/args/include/0": "instructions"
+  },
+  "budgets": {
+    "max_calls": 2,
+    "max_chars": 5000,
+    "max_peak_chars": 4200
+  }
+}

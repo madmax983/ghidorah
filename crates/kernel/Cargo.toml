@@ -1,0 +1,22 @@
+[package]
+name = "ghidorah-kernel"
+description = "Verus-verified leaf crate: bounded reader, checked range math, RangeSet, budget fit and provenance order."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# The kernel has no unit tests. All its tests are in the test binary `tests/kernel/main.rs`,
+# so the coverage run sees one copy of each kernel function.
+[lib]
+test = false
+
+[dependencies]
+ghidorah-spec = { path = "../spec" }
+
+[dev-dependencies]
+ghidorah-testkit = { path = "../testkit" }
+
+[lints]
+workspace = true

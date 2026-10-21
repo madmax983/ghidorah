@@ -1,0 +1,295 @@
+//! AC-068a and AC-068b: flag fusion against the semantic module and the interpreter.
+
+#![allow(
+    clippy::expect_used,
+    clippy::panic,
+    reason = "test helpers fail the test with a message"
+)]
+
+use ghidorah_ir::{
+    Arg, Cc, Config, FlagOp, Loc, NoImage, Opc, Pred, StopReason, Val, eval, fuse, pred_opc,
+    undefined_mask, x86_cond, x86_flags,
+};
+use ghidorah_testkit::pbt::Gen;
+use ghidorah_testkit::rng::{Rng, Xoshiro256ss};
+
+use crate::common::{program, run};
+
+const A: Arg = Arg::V(Val(0));
+const B: Arg = Arg::V(Val(1));
+
+const PREDS: [Pred; 12] = [
+    Pred::Eq,
+    Pred::Ne,
+    Pred::ULt,
+    Pred::ULe,
+    Pred::UGt,
+    Pred::UGe,
+    Pred::SLt,
+    Pred::SLe,
+    Pred::SGt,
+    Pred::SGe,
+    Pred::TestZ,
+    Pred::TestNZ,
+];
+
+/// Gives the value of a fused argument: `A` is `a`, `B` is `b` and a constant is itself.
+fn resolve(arg: Arg, a: u64, b: u64) -> u128 {
+    match arg {
+        A => u128::from(a),
+        B => u128::from(b),
+        Arg::K(k) => u128::from(k.get()),
+        other => panic!("fuse gives the argument {other:?}"),
+    }
+}
+
+/// The count of fused `(op, cc)` pairs when `b` is a value, then when `b` is a constant.
+fn fused_pair_counts() -> (usize, usize) {
+    let mut counts = (0, 0);
+    for op in FlagOp::ALL {
+        for cc in (0..16).filter_map(Cc::x86) {
+            counts.0 += usize::from(fuse(*op, cc, 64, A, B).is_some());
+            counts.1 += usize::from(fuse(*op, cc, 64, A, Arg::k(7)).is_some());
+        }
+    }
+    counts
+}
+
+/// Gives each fused `(op, cc)` pair with the kind of `b`: `true` for a constant `b`.
+fn fused_triples() -> Vec<(FlagOp, Cc, bool)> {
+    let mut out = Vec::new();
+    for op in FlagOp::ALL {
+        for cc in (0..16).filter_map(Cc::x86) {
+            for const_b in [false, true] {
+                let probe = if const_b { Arg::k(7) } else { B };
+                if fuse(*op, cc, 64, A, probe).is_some() {
+                    out.push((*op, cc, const_b));
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Checks the fused compare of one pair at the width `w` against `x86_cond` for both
+/// carry inputs. Gives the count of checks.
+fn check_pair(op: FlagOp, cc: Cc, const_b: bool, width: u8, a: u64, b: u64) -> u64 {
+    let b_arg = if const_b { Arg::k(b) } else { B };
+    let (opc, lhs, rhs) = fuse(op, cc, width, A, b_arg).expect("the pair fuses");
+    assert!(opc.is_compare(), "{op:?} {}: {opc}", cc.name());
+    let (left, right) = (resolve(lhs, a, b), resolve(rhs, a, b));
+    let got = eval(opc, width, 0, left, right, 0).expect("a compare");
+    for carry in [0, 1] {
+        let flags = x86_flags(op, width, a, b, carry);
+        let want = x86_cond(cc, flags);
+        assert_eq!(
+            got == 1,
+            want,
+            "{op:?} {} w={width} const_b={const_b} a={a:#x} b={b:#x} c={carry}",
+            cc.name()
+        );
+        let flipped = flags ^ undefined_mask(op);
+        assert_eq!(
+            x86_cond(cc, flipped),
+            want,
+            "{op:?} {} reads an undefined flag",
+            cc.name()
+        );
+    }
+    2
+}
+
+/// Gives the edge values of the width `w`: 0, 1, 2, the sign bit and its neighbours, and
+/// the two largest values.
+fn edges(w: u8) -> [u64; 8] {
+    let max = u64::MAX >> (64 - u32::from(w));
+    let sign = 1u64 << (w - 1);
+    [0, 1, 2, sign - 1, sign, sign + 1, max - 1, max]
+}
+
+/// The random draws of each pair at each wide width.
+const WIDE_DRAWS: u64 = 2_000;
+
+#[test]
+fn ac_068a_fusion_exhaustive_8bit() {
+    let triples = fused_triples();
+    let mut checked = 0u64;
+    for &(op, cc, const_b) in &triples {
+        for a in 0..=0xffu64 {
+            for b in 0..=0xffu64 {
+                checked += check_pair(op, cc, const_b, 8, a, b);
+            }
+        }
+    }
+    // Sub 10, Logic 4, Neg 10, Dec 6 and Inc 2 pairs fuse. Add fuses 2 more with a constant.
+    assert_eq!(fused_pair_counts(), (32, 34));
+    assert_eq!(triples.len(), 66);
+    assert_eq!(checked, 66 * 65_536 * 2);
+    // The Add row, the constant 1 of Inc and the Neg and Dec reductions are glue outside K5.
+    // Random and edge inputs at 16, 32 and 64 bits check them at the width of the Flags op.
+    // The draws keep the high bits, so the compare must read only the low bits.
+    let mut rng = Xoshiro256ss::seed_from_u64(0x068a);
+    let mut draw = Gen::random(0x068a);
+    let mut wide = 0u64;
+    for w in [16u8, 32, 64] {
+        for &(op, cc, const_b) in &triples {
+            for a in edges(w) {
+                for b in edges(w) {
+                    wide += check_pair(op, cc, const_b, w, a, b);
+                }
+            }
+            for _ in 0..WIDE_DRAWS {
+                let (a, b) = (operand(&mut rng, &mut draw), operand(&mut rng, &mut draw));
+                wide += check_pair(op, cc, const_b, w, a, b);
+            }
+        }
+    }
+    assert_eq!(wide, 3 * 66 * (64 + WIDE_DRAWS) * 2);
+}
+
+#[test]
+fn fuse_rows() {
+    let code = |n| Cc::x86(n).expect("a valid code");
+    assert_eq!(
+        fuse(FlagOp::X86Sub, code(4), 64, A, B),
+        Some((Opc::Eq, A, B))
+    );
+    assert_eq!(
+        fuse(FlagOp::X86Sub, code(7), 64, A, B),
+        Some((Opc::ULt, B, A))
+    );
+    assert_eq!(
+        fuse(FlagOp::X86Sub, code(13), 64, A, B),
+        Some((Opc::SLe, B, A))
+    );
+    assert_eq!(fuse(FlagOp::X86Sub, code(8), 64, A, B), None);
+    assert_eq!(fuse(FlagOp::X86Add, code(4), 64, A, B), None);
+    assert_eq!(
+        fuse(FlagOp::X86Add, code(5), 64, A, Arg::k(1)),
+        Some((Opc::Ne, A, Arg::k(u64::MAX)))
+    );
+    assert_eq!(
+        fuse(FlagOp::X86Logic, code(6), 64, A, B),
+        Some((Opc::TestZ, A, B))
+    );
+    assert_eq!(
+        fuse(FlagOp::X86Neg, code(2), 64, A, Arg::Nil),
+        Some((Opc::ULt, Arg::k(0), A))
+    );
+    assert_eq!(
+        fuse(FlagOp::X86Dec, code(5), 64, A, Arg::Nil),
+        Some((Opc::Ne, A, Arg::k(1)))
+    );
+    assert_eq!(fuse(FlagOp::X86Dec, code(2), 64, A, Arg::Nil), None);
+    assert_eq!(
+        fuse(FlagOp::X86Inc, code(4), 64, A, Arg::Nil),
+        Some((Opc::Eq, A, Arg::k(u64::MAX)))
+    );
+    // The constant of the Add row is `-b` at the width of the Flags op.
+    for (w, minus_one) in [(8, 0xff), (16, 0xffff), (32, 0xffff_ffff), (64, u64::MAX)] {
+        assert_eq!(
+            fuse(FlagOp::X86Add, code(5), w, A, Arg::k(1)),
+            Some((Opc::Ne, A, Arg::k(minus_one))),
+            "w={w}"
+        );
+        assert_eq!(
+            fuse(FlagOp::X86Inc, code(4), w, A, Arg::Nil),
+            Some((Opc::Eq, A, Arg::k(minus_one))),
+            "w={w}"
+        );
+    }
+    assert_eq!(
+        fuse(FlagOp::X86Add, code(4), 16, A, Arg::k(0x1_0000_0005)),
+        Some((Opc::Eq, A, Arg::k(0xfffb))),
+        "the high bits of the constant go"
+    );
+    assert_eq!(
+        fuse(FlagOp::X86Add, code(5), 32, A, Arg::k(0x1_0000_0005)),
+        Some((Opc::Ne, A, Arg::k(0xffff_fffb))),
+        "the high bits of the constant go"
+    );
+    for op in [
+        FlagOp::X86Adc,
+        FlagOp::X86Shl,
+        FlagOp::X86UMul,
+        FlagOp::Copy,
+    ] {
+        for cc in (0..16).filter_map(Cc::x86) {
+            assert_eq!(fuse(op, cc, 64, A, B), None, "{op:?} {}", cc.name());
+        }
+    }
+}
+
+#[test]
+fn pred_opc_is_total() {
+    let want = [
+        (Opc::Eq, false),
+        (Opc::Ne, false),
+        (Opc::ULt, false),
+        (Opc::ULe, false),
+        (Opc::ULt, true),
+        (Opc::ULe, true),
+        (Opc::SLt, false),
+        (Opc::SLe, false),
+        (Opc::SLt, true),
+        (Opc::SLe, true),
+        (Opc::TestZ, false),
+        (Opc::TestNZ, false),
+    ];
+    for (p, (opc, swap)) in PREDS.into_iter().zip(want) {
+        let args = if swap { (B, A) } else { (A, B) };
+        assert_eq!(pred_opc(p, A, B), (opc, args.0, args.1), "{p:?}");
+    }
+}
+
+/// Draws an operand with many edge values.
+fn operand(rng: &mut Xoshiro256ss, g: &mut Gen) -> u64 {
+    if rng.next_u64().is_multiple_of(2) {
+        g.u64()
+    } else {
+        let shift = rng.next_u64() % 64;
+        (1u64 << shift)
+            .wrapping_add(rng.next_u64() % 3)
+            .wrapping_sub(1)
+    }
+}
+
+#[test]
+fn ac_068b_pred_opc_all_widths() {
+    let mut rng = Xoshiro256ss::seed_from_u64(0x068b);
+    let mut draw = Gen::random(0x068b);
+    for p in PREDS {
+        for w in [8u8, 16, 32, 64] {
+            let arena = program(|b| {
+                b.begin(0x1000, 4)?;
+                let lhs = b.get(Loc::RDI)?;
+                let rhs = b.get(Loc::RSI)?;
+                let (opc, left, right) = pred_opc(p, lhs.into(), rhs.into());
+                let bit = b.binary(opc, w, left, right)?;
+                let wide = b.extend(false, 64, 1, bit.into())?;
+                b.put(Loc::RAX, wide.into())?;
+                b.flow(Opc::Ret, Arg::Nil, Arg::Nil)
+            });
+            for _ in 0..10_000 {
+                let (a, bv) = (operand(&mut rng, &mut draw), operand(&mut rng, &mut draw));
+                let setup = [
+                    (Loc::RDI, u128::from(a)),
+                    (Loc::RSI, u128::from(bv)),
+                    (Loc::RAX, 0xdead),
+                ];
+                let (stop, out) = run(
+                    &arena,
+                    &NoImage,
+                    Config::default(),
+                    &setup,
+                    0x1000,
+                    100,
+                    &[Loc::RAX],
+                );
+                assert_eq!(stop.reason, StopReason::Returned);
+                let want = ghidorah_kernel::eval_pred(p, a, bv, u32::from(w));
+                assert_eq!(out, [u128::from(want)], "{p:?} w={w} a={a:#x} b={bv:#x}");
+            }
+        }
+    }
+}

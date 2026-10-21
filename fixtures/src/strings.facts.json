@@ -1,0 +1,68 @@
+{
+  "claims": [
+    {
+      "args": [
+        "main",
+        "show_banner"
+      ],
+      "rel": "calls"
+    },
+    {
+      "args": [
+        "show_banner",
+        "puts"
+      ],
+      "rel": "calls"
+    },
+    {
+      "args": [
+        "find_keyword",
+        "strstr"
+      ],
+      "rel": "calls"
+    }
+  ],
+  "program": "strings",
+  "runs": [
+    {
+      "args": [],
+      "exit": 0,
+      "stdout": "Welcome to the string fixture\nCaf\u00e9 na\u00efve r\u00e9sum\u00e9\n22 0\n"
+    }
+  ],
+  "strings": [
+    {
+      "text": "Welcome to the string fixture"
+    },
+    {
+      "text": "Caf\u00e9 na\u00efve r\u00e9sum\u00e9"
+    },
+    {
+      "text": "unused configuration banner"
+    },
+    {
+      "text": "password"
+    },
+    {
+      "text": "no secret here"
+    },
+    {
+      "encoding": "utf16le",
+      "text": "Wide hello from UTF-16"
+    }
+  ],
+  "survey_facts": [
+    {
+      "kind": "string",
+      "value": "Welcome to the string fixture"
+    },
+    {
+      "kind": "string",
+      "value": "password"
+    },
+    {
+      "kind": "import",
+      "value": "strstr"
+    }
+  ]
+}

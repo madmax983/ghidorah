@@ -1,0 +1,52 @@
+# golden: generator=xtask-fixtures version=1 binutils=2.42 fixture=syscall_only.gcc-O2 fixture_sha256=9bc269247f3ef1fb6941f141b9ef72dfb29203bbfc3116373206a395f450a2e2
+
+syscall_only.gcc-O2:     file format elf64-x86-64
+
+
+Disassembly of section .text:
+
+0000000000401000 <emit_banner>:
+  401000:	f3 0f 1e fa          	endbr64
+  401004:	b8 01 00 00 00       	mov    eax,0x1
+  401009:	48 8d 35 00 10 00 00 	lea    rsi,[rip+0x1000]        # 402010 <banner>
+  401010:	ba 0d 00 00 00       	mov    edx,0xd
+  401015:	48 89 c7             	mov    rdi,rax
+  401018:	0f 05                	syscall
+  40101a:	c3                   	ret
+  40101b:	0f 1f 44 00 00       	nop    DWORD PTR [rax+rax*1+0x0]
+
+0000000000401020 <emit_status>:
+  401020:	f3 0f 1e fa          	endbr64
+  401024:	b8 01 00 00 00       	mov    eax,0x1
+  401029:	bf 02 00 00 00       	mov    edi,0x2
+  40102e:	ba 0b 00 00 00       	mov    edx,0xb
+  401033:	48 8d 35 c6 0f 00 00 	lea    rsi,[rip+0xfc6]        # 402000 <status>
+  40103a:	0f 05                	syscall
+  40103c:	c3                   	ret
+  40103d:	0f 1f 00             	nop    DWORD PTR [rax]
+
+0000000000401040 <get_pid>:
+  401040:	f3 0f 1e fa          	endbr64
+  401044:	b8 27 00 00 00       	mov    eax,0x27
+  401049:	0f 05                	syscall
+  40104b:	c3                   	ret
+  40104c:	0f 1f 40 00          	nop    DWORD PTR [rax+0x0]
+
+0000000000401050 <exit_ok>:
+  401050:	f3 0f 1e fa          	endbr64
+  401054:	b8 3c 00 00 00       	mov    eax,0x3c
+  401059:	31 ff                	xor    edi,edi
+  40105b:	0f 05                	syscall
+  40105d:	0f 1f 00             	nop    DWORD PTR [rax]
+
+0000000000401060 <_start>:
+  401060:	f3 0f 1e fa          	endbr64
+  401064:	50                   	push   rax
+  401065:	58                   	pop    rax
+  401066:	48 83 ec 08          	sub    rsp,0x8
+  40106a:	e8 91 ff ff ff       	call   401000 <emit_banner>
+  40106f:	e8 cc ff ff ff       	call   401040 <get_pid>
+  401074:	48 85 c0             	test   rax,rax
+  401077:	7e 05                	jle    40107e <_start+0x1e>
+  401079:	e8 a2 ff ff ff       	call   401020 <emit_status>
+  40107e:	e8 cd ff ff ff       	call   401050 <exit_ok>

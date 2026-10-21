@@ -1,0 +1,258 @@
+{
+  "binaries": [
+    {
+      "name": "switch.clang-O2nv",
+      "sha256": "d6675f978b1040f695db19b1c58baed78b43f1b4da6781ff9079c600bd34dd5c",
+      "variant": "none"
+    }
+  ],
+  "build": {
+    "cflags": ["-O2","-fno-vectorize","-fno-slp-vectorize"],
+    "compiler": "clang 18.1.3",
+    "id": "clang-O2nv",
+    "ldflags": []
+  },
+  "call_edges": [
+    ["__do_global_dtors_aux","__cxa_finalize"],
+    ["__do_global_dtors_aux","deregister_tm_clones"],
+    ["_start","__libc_start_main"],
+    ["frame_dummy","register_tm_clones"],
+    ["main","apply_op"],
+    ["main","printf"],
+    ["main","run_command"],
+    ["main","sparse_code"],
+    ["main","strtol"],
+    ["run_command","puts"]
+  ],
+  "cold_parts": [],
+  "duplicate_names": {},
+  "elf": {
+    "entry": "0x1070",
+    "image_base": "0x0",
+    "interp": true,
+    "type": "DYN"
+  },
+  "facts": {
+    "claims": [
+      {
+        "args": ["main","run_command"],
+        "rel": "calls"
+      },
+      {
+        "args": ["run_command","puts"],
+        "rel": "calls"
+      }
+    ],
+    "switches": [
+      {
+        "case_count": 8,
+        "cases": [0,1,2,3,4,5,6,8],
+        "func": "apply_op"
+      },
+      {
+        "case_count": 6,
+        "cases": [0,1,2,3,4,5],
+        "func": "run_command"
+      },
+      {
+        "case_count": 4,
+        "cases": [3,100,4096,65535],
+        "func": "sparse_code"
+      }
+    ]
+  },
+  "fixture": "switch.clang-O2nv",
+  "function_count": 11,
+  "functions": [
+    {
+      "addr": "0x1000",
+      "insns": 8,
+      "name": "_init",
+      "size": 0
+    },
+    {
+      "addr": "0x1070",
+      "insns": 13,
+      "name": "_start",
+      "size": 38
+    },
+    {
+      "addr": "0x10a0",
+      "insns": 11,
+      "name": "deregister_tm_clones",
+      "size": 0
+    },
+    {
+      "addr": "0x10d0",
+      "insns": 16,
+      "name": "register_tm_clones",
+      "size": 0
+    },
+    {
+      "addr": "0x1110",
+      "insns": 16,
+      "name": "__do_global_dtors_aux",
+      "size": 0
+    },
+    {
+      "addr": "0x1150",
+      "insns": 3,
+      "name": "frame_dummy",
+      "size": 0
+    },
+    {
+      "addr": "0x1160",
+      "insns": 24,
+      "name": "apply_op",
+      "size": 75
+    },
+    {
+      "addr": "0x11b0",
+      "insns": 20,
+      "name": "sparse_code",
+      "size": 64
+    },
+    {
+      "addr": "0x11f0",
+      "insns": 9,
+      "name": "run_command",
+      "size": 38
+    },
+    {
+      "addr": "0x1220",
+      "insns": 30,
+      "name": "main",
+      "size": 92
+    },
+    {
+      "addr": "0x127c",
+      "insns": 4,
+      "name": "_fini",
+      "size": 0
+    }
+  ],
+  "gaps": [],
+  "generator": {
+    "name": "xtask-fixtures",
+    "version": "1"
+  },
+  "imports": ["__cxa_finalize","__libc_start_main","printf","puts","strtol"],
+  "jump_tables": [
+    {
+      "entries": 9,
+      "func": "apply_op",
+      "kind": "rel32",
+      "lea": "0x1168",
+      "table": "0x2004",
+      "targets": ["0x1178","0x1184","0x1194","0x119d","0x11a3","0x117e","0x1189","0x11aa","0x118e"]
+    }
+  ],
+  "leaf_functions": [
+    {
+      "name": "apply_op",
+      "sig": "u64(u64,u64)",
+      "vectors": "tests/golden/semantics/leaf/switch.clang-O2nv.jsonl"
+    },
+    {
+      "name": "sparse_code",
+      "sig": "u32(u32)",
+      "vectors": "tests/golden/semantics/leaf/switch.clang-O2nv.jsonl"
+    }
+  ],
+  "libraries": ["libc.so.6"],
+  "network_imports": [],
+  "program": "switch",
+  "protections": {
+    "build_id": "7f6bd82c5ce654bbc17eb2ff65c69312bef410c7",
+    "canary": false,
+    "fortify": false,
+    "ibt": false,
+    "nx": true,
+    "pie": true,
+    "relro": "partial",
+    "rpath": false,
+    "runpath": false,
+    "shstk": false
+  },
+  "self_calls": [],
+  "strings": [
+    {
+      "addr": "0x2040",
+      "encoding": "bytes",
+      "hex": "7374617274",
+      "len": 5,
+      "text": "start"
+    },
+    {
+      "addr": "0x2046",
+      "encoding": "bytes",
+      "hex": "73746f70",
+      "len": 4,
+      "text": "stop"
+    },
+    {
+      "addr": "0x204b",
+      "encoding": "bytes",
+      "hex": "7061757365",
+      "len": 5,
+      "text": "pause"
+    },
+    {
+      "addr": "0x2051",
+      "encoding": "bytes",
+      "hex": "726573756d65",
+      "len": 6,
+      "text": "resume"
+    },
+    {
+      "addr": "0x2058",
+      "encoding": "bytes",
+      "hex": "737461747573",
+      "len": 6,
+      "text": "status"
+    },
+    {
+      "addr": "0x205f",
+      "encoding": "bytes",
+      "hex": "7265736574",
+      "len": 5,
+      "text": "reset"
+    },
+    {
+      "addr": "0x2065",
+      "encoding": "bytes",
+      "hex": "756e6b6e6f776e20636f6d6d616e64",
+      "len": 15,
+      "text": "unknown command"
+    }
+  ],
+  "survey_facts": [
+    {
+      "kind": "import",
+      "value": "puts"
+    },
+    {
+      "kind": "library",
+      "value": "libc.so.6"
+    },
+    {
+      "kind": "protection",
+      "value": "nx"
+    },
+    {
+      "kind": "protection",
+      "value": "pie"
+    },
+    {
+      "kind": "string",
+      "value": "unknown command"
+    }
+  ],
+  "syscall_names": [],
+  "syscalls": [],
+  "tail_calls": [
+    ["frame_dummy","register_tm_clones"],
+    ["run_command","puts"]
+  ],
+  "tier": "T1"
+}

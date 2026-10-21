@@ -1,0 +1,83 @@
+{"golden":"generator=tools_examples version=1 fixture=crackme.gcc-O2 fixture_sha256=467a43b75d95c826daba8cb216d01d7fd386aa96c5ef5a95c2effffe1780de8f"}
+{
+  "ok": true,
+  "binary_id": "467a43b75d95c826",
+  "rev": 1,
+  "session": "cli",
+  "analysis": {
+    "state": "complete",
+    "rev": 1
+  },
+  "partial": false,
+  "data": {
+    "steps": [
+      {
+        "id": "s1",
+        "tool": "symbol_rename",
+        "ok": true,
+        "chars": 303,
+        "fuel": 0,
+        "data": {
+          "items": [
+            {
+              "target": "fn:0x11e0",
+              "id": "fn:0x11e0",
+              "old": "check_password",
+              "new": "verify_password",
+              "source": "agent",
+              "noop": false
+            }
+          ],
+          "rev": 2,
+          "tx": "tx:2"
+        }
+      }
+    ],
+    "budget_used": {
+      "chars": 303,
+      "fuel": 0,
+      "steps": 1
+    }
+  },
+  "noop": true,
+  "diff": [
+    {
+      "op": "SetName",
+      "key": {
+        "k": "symbol",
+        "addr": "0x11e0",
+        "key": 0
+      },
+      "old": {
+        "op": "SetName",
+        "addr": "0x11e0",
+        "key": 0,
+        "kind": "function",
+        "primary": true,
+        "name": {
+          "value": "check_password",
+          "source": "imported",
+          "tx": 0,
+          "session": "load",
+          "force": false
+        },
+        "evidence": []
+      },
+      "new": {
+        "op": "SetName",
+        "addr": "0x11e0",
+        "key": null,
+        "kind": "function",
+        "primary": true,
+        "name": {
+          "value": "verify_password",
+          "source": "agent",
+          "tx": 2,
+          "session": "cli",
+          "force": true
+        },
+        "evidence": []
+      }
+    }
+  ]
+}

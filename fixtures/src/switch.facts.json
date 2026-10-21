@@ -1,0 +1,101 @@
+{
+  "claims": [
+    {
+      "args": [
+        "main",
+        "run_command"
+      ],
+      "rel": "calls"
+    },
+    {
+      "args": [
+        "run_command",
+        "puts"
+      ],
+      "rel": "calls"
+    }
+  ],
+  "program": "switch",
+  "runs": [
+    {
+      "args": [],
+      "exit": 0,
+      "stdout": "start\n48 99\n"
+    },
+    {
+      "args": [
+        "3"
+      ],
+      "exit": 0,
+      "stdout": "resume\n328 30\n"
+    }
+  ],
+  "strings": [
+    {
+      "text": "start"
+    },
+    {
+      "text": "stop"
+    },
+    {
+      "text": "pause"
+    },
+    {
+      "text": "resume"
+    },
+    {
+      "text": "status"
+    },
+    {
+      "text": "reset"
+    },
+    {
+      "text": "unknown command"
+    }
+  ],
+  "survey_facts": [
+    {
+      "kind": "string",
+      "value": "unknown command"
+    },
+    {
+      "kind": "import",
+      "value": "puts"
+    }
+  ],
+  "switches": [
+    {
+      "cases": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        8
+      ],
+      "func": "apply_op"
+    },
+    {
+      "cases": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "func": "run_command"
+    },
+    {
+      "cases": [
+        3,
+        100,
+        4096,
+        65535
+      ],
+      "func": "sparse_code"
+    }
+  ]
+}

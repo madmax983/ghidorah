@@ -1,0 +1,65 @@
+{
+  "id": "annotate-02",
+  "question": "q-annotate-02",
+  "turns": [
+    {
+      "call": {
+        "tool": "binary_load",
+        "args": {
+          "path": "fixtures/bin/crackme.gcc-O2.stripped"
+        }
+      }
+    },
+    {
+      "call": {
+        "tool": "binary_survey",
+        "args": {
+          "include": [
+            "strings"
+          ]
+        }
+      }
+    },
+    {
+      "call": {
+        "tool": "symbol_rename",
+        "args": {
+          "target": {
+            "$turn": 1,
+            "ptr": "/data/strings/items/3/funcs/0"
+          },
+          "name": "check_password"
+        }
+      }
+    },
+    {
+      "call": {
+        "tool": "comment_set",
+        "args": {
+          "target": {
+            "$turn": 2,
+            "ptr": "/data/items/0/id"
+          },
+          "kind": "pre",
+          "text": "Compares the input with the encoded password."
+        }
+      }
+    }
+  ],
+  "answer": {
+    "turn": 3,
+    "ptr": "/data/items/0/addr"
+  },
+  "provenance": {
+    "/turns/0/call/args/path": "question:binaries/0",
+    "/turns/1/call/args/include/0": "schema:binary_survey.include",
+    "/turns/2/call/args/name": "question",
+    "/turns/3/call/args/kind": "schema:comment_set.kind",
+    "/turns/3/call/args/text": "new_text"
+  },
+  "budgets": {
+    "max_calls": 4,
+    "max_chars": 2900,
+    "max_peak_chars": 1300
+  }
+}

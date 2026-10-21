@@ -1,0 +1,88 @@
+{
+  "id": "resume-01",
+  "question": "q-resume-01",
+  "turns": [
+    {
+      "call": {
+        "tool": "binary_load",
+        "args": {
+          "path": "fixtures/bin/crackme.gcc-O2.stripped"
+        }
+      }
+    },
+    {
+      "call": {
+        "tool": "binary_survey",
+        "args": {
+          "include": [
+            "strings"
+          ]
+        }
+      }
+    },
+    {
+      "call": {
+        "tool": "symbol_rename",
+        "args": {
+          "target": {
+            "$turn": 1,
+            "ptr": "/data/strings/items/3/funcs/0"
+          },
+          "name": "check_password"
+        }
+      }
+    },
+    {
+      "call": {
+        "tool": "session_brief",
+        "args": {}
+      },
+      "restart": true
+    },
+    {
+      "call": {
+        "tool": "binary_load",
+        "args": {
+          "binary_id": {
+            "$turn": 3,
+            "ptr": "/data/projects/0/binary_id"
+          }
+        }
+      }
+    },
+    {
+      "call": {
+        "tool": "session_brief",
+        "args": {}
+      }
+    }
+  ],
+  "answer": {
+    "turn": 5,
+    "ptr": "/data/recent_edits",
+    "steps": [
+      {
+        "op": "where",
+        "ptr": "/kind",
+        "eq": "name"
+      },
+      {
+        "op": "pick",
+        "ptr": "/addr"
+      },
+      {
+        "op": "first"
+      }
+    ]
+  },
+  "provenance": {
+    "/turns/0/call/args/path": "question:binaries/0",
+    "/turns/1/call/args/include/0": "schema:binary_survey.include",
+    "/turns/2/call/args/name": "new_name"
+  },
+  "budgets": {
+    "max_calls": 6,
+    "max_chars": 5300,
+    "max_peak_chars": 1600
+  }
+}

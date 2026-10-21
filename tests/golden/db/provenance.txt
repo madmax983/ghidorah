@@ -1,0 +1,58 @@
+# golden: generator=db_provenance version=1
+# The ranks of design Section 3.6. Persisted numbers never change.
+rank default 1
+rank analysis 2
+rank agent 3
+rank imported 4
+rank user 5
+# old new force -> verdict
+default default plain -> allowed
+default default force -> allowed
+default analysis plain -> allowed
+default analysis force -> allowed
+default agent plain -> allowed
+default agent force -> allowed
+default imported plain -> allowed
+default imported force -> allowed
+default user plain -> allowed
+default user force -> allowed
+analysis default plain -> blocked
+analysis default force -> blocked
+analysis analysis plain -> allowed
+analysis analysis force -> allowed
+analysis agent plain -> allowed
+analysis agent force -> allowed
+analysis imported plain -> allowed
+analysis imported force -> allowed
+analysis user plain -> allowed
+analysis user force -> allowed
+agent default plain -> blocked
+agent default force -> blocked
+agent analysis plain -> blocked
+agent analysis force -> blocked
+agent agent plain -> allowed
+agent agent force -> allowed
+agent imported plain -> allowed
+agent imported force -> allowed
+agent user plain -> allowed
+agent user force -> allowed
+imported default plain -> blocked
+imported default force -> blocked
+imported analysis plain -> blocked
+imported analysis force -> blocked
+imported agent plain -> blocked force_applies
+imported agent force -> forced
+imported imported plain -> allowed
+imported imported force -> allowed
+imported user plain -> allowed
+imported user force -> allowed
+user default plain -> blocked
+user default force -> blocked
+user analysis plain -> blocked
+user analysis force -> blocked
+user agent plain -> blocked
+user agent force -> blocked
+user imported plain -> blocked
+user imported force -> blocked
+user user plain -> allowed
+user user force -> allowed

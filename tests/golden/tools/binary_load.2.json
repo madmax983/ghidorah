@@ -1,0 +1,53 @@
+{"golden":"generator=tools_examples version=1 fixture=crackme.gcc-O2 fixture_sha256=467a43b75d95c826daba8cb216d01d7fd386aa96c5ef5a95c2effffe1780de8f"}
+{
+  "ok": true,
+  "binary_id": "10b91ebce0f0230f",
+  "rev": 0,
+  "session": "cli",
+  "analysis": {
+    "state": "none"
+  },
+  "partial": true,
+  "data": {
+    "binary_id": "10b91ebce0f0230f",
+    "sha256": "10b91ebce0f0230f73449e6330a6b74b649116df5ebc3f5c70dc9e9a63c14de3",
+    "file_name": "two_helpers.gcc-O2",
+    "format": "elf64-le",
+    "arch": "x86_64",
+    "kind": "dyn",
+    "entry": "0x10a0",
+    "size": 16144,
+    "already_loaded": false,
+    "read_only": false,
+    "analysis": {
+      "state": "none",
+      "steps_used": 0
+    },
+    "diagnostics": {
+      "total": 1,
+      "by_code": [
+        {
+          "code": "E_CFA_OPCODE",
+          "count": 1
+        }
+      ]
+    }
+  },
+  "next": [
+    {
+      "tool": "binary_survey",
+      "args": {
+        "binary_id": "10b91ebce0f0230f"
+      },
+      "why": "Survey the binary that the call loaded."
+    },
+    {
+      "tool": "analysis_run",
+      "args": {
+        "binary_id": "10b91ebce0f0230f"
+      },
+      "why": "Finish the analysis of the binary."
+    }
+  ],
+  "noop": false
+}

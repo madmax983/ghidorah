@@ -1,0 +1,4 @@
+LIBRARY alpha.dll
+EXPORTS
+alpha_named @1
+alpha_five @5 NONAME

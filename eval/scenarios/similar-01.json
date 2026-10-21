@@ -1,0 +1,50 @@
+{
+  "id": "similar-01",
+  "question": "q-similar-01",
+  "turns": [
+    {
+      "call": {
+        "tool": "binary_load",
+        "args": {
+          "path": "fixtures/bin/large.gcc-O2.stripped"
+        }
+      }
+    },
+    {
+      "call": {
+        "tool": "binary_load",
+        "args": {
+          "path": "fixtures/bin/large.gcc-O2"
+        }
+      }
+    },
+    {
+      "call": {
+        "tool": "func_similar",
+        "args": {
+          "binary_id": {
+            "$turn": 0,
+            "ptr": "/data/binary_id"
+          },
+          "target": "0x98d0",
+          "scope": "open"
+        }
+      }
+    }
+  ],
+  "answer": {
+    "turn": 2,
+    "ptr": "/data/items/0/matches/0/name"
+  },
+  "provenance": {
+    "/turns/0/call/args/path": "question:binaries/0",
+    "/turns/1/call/args/path": "question:binaries/1",
+    "/turns/2/call/args/target": "question",
+    "/turns/2/call/args/scope": "schema:func_similar.scope"
+  },
+  "budgets": {
+    "max_calls": 3,
+    "max_chars": 7200,
+    "max_peak_chars": 5600
+  }
+}

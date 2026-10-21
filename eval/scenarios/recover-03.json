@@ -1,0 +1,52 @@
+{
+  "id": "recover-03",
+  "question": "q-recover-03",
+  "turns": [
+    {
+      "call": {
+        "tool": "binary_load",
+        "args": {
+          "path": "fixtures/bin/switch.gcc-O2.noeh"
+        }
+      }
+    },
+    {
+      "call": {
+        "tool": "search",
+        "args": {
+          "kind": "string",
+          "query": "command"
+        }
+      }
+    },
+    {
+      "call": {
+        "tool": "func_get",
+        "args": {
+          "target": {
+            "$turn": 1,
+            "ptr": "/data/items/0/func"
+          },
+          "include": [
+            "jumptables"
+          ]
+        }
+      }
+    }
+  ],
+  "answer": {
+    "turn": 2,
+    "ptr": "/data/jumptables/0/count"
+  },
+  "provenance": {
+    "/turns/0/call/args/path": "question:binaries/0",
+    "/turns/1/call/args/kind": "schema:search.kind",
+    "/turns/1/call/args/query": "question",
+    "/turns/2/call/args/include/0": "schema:func_get.include"
+  },
+  "budgets": {
+    "max_calls": 3,
+    "max_chars": 2500,
+    "max_peak_chars": 1100
+  }
+}
