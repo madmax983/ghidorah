@@ -112,9 +112,9 @@ pub(crate) const fn info(code: ErrorCode) -> CodeInfo {
             C,
             false,
             "The name matches more than one entity. The server does not pick a match. Use a candidate value.",
-            "Each candidate value is a sym: form or a name@0x form.",
+            "Each candidate value is a name@0x form, an ID or an address.",
         )
-        .with_plain("Send the name as a sym: form or a name@0x form."),
+        .with_plain("Send a name@0x form, an ID or an address of one match."),
         E::NotFound => row(
             code,
             "NOT_FOUND",
