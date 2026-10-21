@@ -143,7 +143,7 @@ pub fn is_scalar_into(name: IntrinsicId) -> bool {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct BlockUse {
     pub(crate) uses: BTreeSet<Loc>,
-    defs: BTreeSet<Loc>,
+    pub(crate) defs: BTreeSet<Loc>,
     pub(crate) free: Vec<(OpId, BTreeSet<Loc>)>,
 }
 
@@ -287,8 +287,9 @@ pub(crate) fn summaries(fir: &FuncIr, conv: &CallConv, any_push: bool) -> Vec<Bl
     blocks
 }
 
-/// Gives the live-in registers of the entry block over the block summaries `blocks`.
-pub(crate) fn flow(fir: &FuncIr, blocks: &[BlockUse]) -> BTreeSet<Loc> {
+/// Gives the live-in registers of the entry block over the block summaries `blocks`. Block
+/// `i` also reads the registers of `extra[i]` before its writes.
+pub(crate) fn flow(fir: &FuncIr, blocks: &[BlockUse], extra: &[BTreeSet<Loc>]) -> BTreeSet<Loc> {
     let order: Vec<Node> = rpo(&fir.body.cfg).into_iter().rev().collect();
     let mut live: BTreeMap<Node, BTreeSet<Loc>> = BTreeMap::new();
     let rounds = order.len().saturating_mul(4).saturating_add(8);
@@ -304,6 +305,7 @@ pub(crate) fn flow(fir: &FuncIr, blocks: &[BlockUse]) -> BTreeSet<Loc> {
             }
             set.retain(|l| !b.defs.contains(l));
             set.extend(b.uses.iter().copied());
+            set.extend(extra.get(node.index()).into_iter().flatten().copied());
             if live.get(node) != Some(&set) {
                 live.insert(*node, set);
                 changed = true;
@@ -329,7 +331,7 @@ pub fn obeys(fir: &FuncIr, conv: &CallConv) -> bool {
         .filter_map(|n| loc_of(n))
         .collect();
     allowed.extend(loc_of("rsp"));
-    let live = flow(fir, &summaries(fir, conv, true));
+    let live = flow(fir, &summaries(fir, conv, true), &[]);
     live.iter().all(|l| allowed.contains(l))
 }
 
@@ -434,7 +436,7 @@ fn stack_slots(frame: &crate::stack::Frame, first: i64) -> BTreeSet<i64> {
 /// argument register here: [`params`] adds the reads of the callees.
 #[must_use]
 pub fn recover(fir: &FuncIr, conv: &CallConv) -> Params {
-    from_live(fir, conv, &flow(fir, &summaries(fir, conv, false)))
+    from_live(fir, conv, &flow(fir, &summaries(fir, conv, false), &[]))
 }
 
 /// Gives the parameters of `fir` with the live-in registers `live`.

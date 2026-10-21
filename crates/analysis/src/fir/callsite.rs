@@ -23,13 +23,7 @@
 //! drops no argument that the caller sets.
 //!
 //! [`solve`] recovers the parameters of a function with the reads of its calls and tail
-//! calls. A call reads each argument register of its callee that holds its entry value at the
-//! call:
-//!
-//! 1. The solve takes the function, then each callee with no parameter fact that a call can
-//!    pass an entry value to, depth first. It stops at [`MAX_SOLVE`] functions.
-//! 2. It recovers the functions callees first, in that fixed order, until no count changes. A
-//!    recursion takes more rounds. Each step takes one unit of fuel.
+//! calls (the `solve` module).
 //!
 //! A callee is a direct call target or the target of a tail jump out of the body. An indirect
 //! call can load its target from an import slot. Then the slot is the callee. The same is true
@@ -42,9 +36,13 @@ use ghidorah_db::{Program, Types};
 use ghidorah_ir::{Arena, Arg, Loc, OpId, Opc};
 use ghidorah_types::{CallConv, Sig};
 
+use super::FuncIr;
 use super::l1::ssa_opts;
-use super::{FirError, FuncIr, Opts};
-use crate::cc::{self, BlockUse, ParamSource, Params, loc_of, params};
+use crate::cc::{ParamSource, Params, loc_of, params};
+
+mod solve;
+
+pub use solve::{MAX_SOLVE, solve};
 
 /// The largest count of stack arguments of one call.
 pub const MAX_STACK_ARGS: i64 = 16;
@@ -261,204 +259,4 @@ pub fn arg_regs(conv: &CallConv, p: &Params, live: Option<&BTreeSet<Loc>>) -> Ve
     let mut out: Vec<Loc> = ints.into_iter().take(n).collect();
     out.extend(floats.into_iter().take(usize::from(p.float)));
     out
-}
-
-/// The largest count of functions of one [`solve`].
-pub const MAX_SOLVE: usize = 32;
-
-/// What the facts say about the callee of a call.
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum Callee {
-    /// The callee reads these registers.
-    Fixed(Vec<Loc>),
-    /// A function with no parameter fact. The solve recovers it.
-    Func(u64),
-    /// A target with no facts. The call reads no register.
-    Unknown,
-}
-
-/// Gives the callee at the target `addr`: an import stub or slot, or a function entry.
-fn callee_of(program: &Program, conv: &CallConv, addr: u64) -> Callee {
-    let at = Address::ram(addr);
-    if let Some(row) = program
-        .imports()
-        .values()
-        .find(|r| r.stub == Some(at) || r.slot == Some(at))
-    {
-        return row
-            .id
-            .name()
-            .and_then(Types::prototype)
-            .map_or(Callee::Unknown, |p| {
-                Callee::Fixed(arg_regs(conv, &from_sig(&p.sig), None))
-            });
-    }
-    if program.func(FuncId(at)).is_none() {
-        return Callee::Unknown;
-    }
-    match fixed(program, FuncId(at)) {
-        Some((p, _)) => Callee::Fixed(arg_regs(conv, &p, None)),
-        None => Callee::Func(addr),
-    }
-}
-
-/// One function of a solve.
-struct Node {
-    /// The L0 IR.
-    ir: FuncIr,
-    /// The use summary of each block.
-    blocks: Vec<BlockUse>,
-    /// The callee of each call and tail jump.
-    callees: BTreeMap<OpId, Callee>,
-    /// The live-in registers so far.
-    live: BTreeSet<Loc>,
-    /// The parameters so far.
-    params: Params,
-}
-
-impl Node {
-    /// Makes the node of `ir`. Its first parameters take the reads of the fixed callees.
-    fn new(program: &Program, conv: &CallConv, ir: FuncIr) -> Self {
-        let blocks = cc::summaries(&ir, conv, false);
-        let callees: BTreeMap<OpId, Callee> = call_targets(&ir)
-            .into_iter()
-            .map(|(id, t)| (id, callee_of(program, conv, t)))
-            .collect();
-        let mut node = Self {
-            ir,
-            blocks,
-            callees,
-            live: BTreeSet::new(),
-            params: Params::default(),
-        };
-        node.live = node.live_with(&node.reads(conv, &BTreeMap::new()));
-        node.params = cc::from_live(&node.ir, conv, &node.live);
-        node
-    }
-
-    /// Gives the live-in registers when each call op of `reads` reads its registers. A call
-    /// reads only the registers that its block does not write before it.
-    fn live_with(&self, reads: &BTreeMap<OpId, Vec<Loc>>) -> BTreeSet<Loc> {
-        let mut blocks = self.blocks.clone();
-        for b in &mut blocks {
-            for (id, free) in &b.free {
-                let regs = reads.get(id).into_iter().flatten();
-                b.uses.extend(regs.filter(|r| free.contains(r)));
-            }
-        }
-        cc::flow(&self.ir, &blocks)
-    }
-
-    /// Gives the reads of the calls: the fixed callees, and the callees in `nodes`.
-    fn reads(&self, conv: &CallConv, nodes: &BTreeMap<u64, Self>) -> BTreeMap<OpId, Vec<Loc>> {
-        let mut out = BTreeMap::new();
-        for (id, c) in &self.callees {
-            let regs = match c {
-                Callee::Fixed(r) => r.clone(),
-                Callee::Func(t) => match nodes.get(t) {
-                    Some(n) => arg_regs(conv, &n.params, Some(&n.live)),
-                    None => continue,
-                },
-                Callee::Unknown => continue,
-            };
-            out.insert(*id, regs);
-        }
-        out
-    }
-
-    /// Gives the callees with no parameter fact that a call can pass an entry value to. A read
-    /// of every argument register at their calls adds a live-in register.
-    fn children(&self, conv: &CallConv) -> Vec<u64> {
-        let names = conv.int_args.iter().chain(conv.float_args.iter());
-        let all: Vec<Loc> = names.filter_map(|n| loc_of(n)).collect();
-        let fixed = self.reads(conv, &BTreeMap::new());
-        let funcs: BTreeSet<u64> = self
-            .callees
-            .values()
-            .filter_map(|c| match c {
-                Callee::Func(t) => Some(*t),
-                _ => None,
-            })
-            .collect();
-        funcs
-            .into_iter()
-            .filter(|t| {
-                let mut reads = fixed.clone();
-                for (id, c) in &self.callees {
-                    if *c == Callee::Func(*t) {
-                        reads.insert(*id, all.clone());
-                    }
-                }
-                self.live_with(&reads) != self.live
-            })
-            .collect()
-    }
-}
-
-/// Recovers the parameters of the published function `id` with the reads of its calls and
-/// tail calls (see the module doc).
-///
-/// # Errors
-///
-/// Returns the [`FirError`] of the function IR of `id`. A callee whose IR does not build
-/// reads no register.
-pub fn solve(
-    program: &Program,
-    id: FuncId,
-    conv: &CallConv,
-    fuel: &mut Fuel,
-) -> Result<Params, FirError> {
-    let root = id.0.off;
-    let first = Node::new(
-        program,
-        conv,
-        super::build(program, id, &Opts::DEFAULT, fuel)?,
-    );
-    let mut stack = vec![(root, first.children(conv), 0usize)];
-    let mut nodes = BTreeMap::from([(root, first)]);
-    let mut order = Vec::new();
-    while let Some(top) = stack.last_mut() {
-        let Some(&t) = top.1.get(top.2) else {
-            order.push(top.0);
-            stack.pop();
-            continue;
-        };
-        top.2 = top.2.saturating_add(1);
-        if nodes.contains_key(&t) || nodes.len() >= MAX_SOLVE {
-            continue;
-        }
-        let at = FuncId(Address::ram(t));
-        let Ok(ir) = super::build(program, at, &Opts::DEFAULT, fuel) else {
-            continue;
-        };
-        let node = Node::new(program, conv, ir);
-        stack.push((t, node.children(conv), 0));
-        nodes.insert(t, node);
-    }
-    let rounds = order.len().saturating_mul(4).saturating_add(4);
-    'rounds: for _ in 0..rounds {
-        let mut changed = false;
-        for u in &order {
-            if fuel.tick().is_err() {
-                break 'rounds;
-            }
-            let Some(node) = nodes.get(u) else {
-                continue;
-            };
-            let live = node.live_with(&node.reads(conv, &nodes));
-            if live == node.live {
-                continue;
-            }
-            let params = cc::from_live(&node.ir, conv, &live);
-            if let Some(n) = nodes.get_mut(u) {
-                n.live = live;
-                n.params = params;
-                changed = true;
-            }
-        }
-        if !changed {
-            break;
-        }
-    }
-    Ok(nodes.get(&root).map_or_else(Params::default, |n| n.params))
 }

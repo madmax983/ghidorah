@@ -1,12 +1,20 @@
 //! Parameter recovery and the varargs prologue (design Section 7.10, AC-090a).
 
+use std::time::{Duration, Instant};
+
 use ghidorah_analysis::cc::{self, ParamSource, Params};
+use ghidorah_analysis::fir::{self, Opts};
 use ghidorah_base::Fuel;
+use ghidorah_db::Program;
 use ghidorah_ir::{Loc, Opc};
 use ghidorah_json::Value;
+use ghidorah_loader::LoadOpts;
+use ghidorah_testkit::elf::{ElfBuilder, Section};
 use ghidorah_types::cc::SYSV_X86_64;
 
-use crate::support::{cached, fid, fir_of, fixtures, list, named, truth, truth_funcs};
+use crate::support::{
+    analyze, cached, fid, fir_of, fixtures, list, named, program_of, truth, truth_funcs,
+};
 
 /// The prototypes of the calling-convention fixture: name, count and varargs.
 fn prototypes(t: &Value) -> Vec<(String, u32, bool)> {
@@ -149,5 +157,65 @@ fn regress_forwarded_param_counts() {
         cc::recover(&ir, &SYSV_X86_64).count(),
         0,
         "recover reads no callee"
+    );
+}
+
+/// Gives an analyzed executable whose entry `F` makes `n` calls, one to each function `g_i`.
+/// Each `g_i` is a lone `ret` with no signature. Gives the program and the address of `F`.
+fn fan_out(n: usize) -> (Program, u64) {
+    let body = n * 5 + 1;
+    let mut text = Vec::new();
+    for i in 0..n {
+        let next = i64::try_from(i * 5 + 5).expect("small");
+        let target = i64::try_from(body + i * 2).expect("small");
+        let rel = i32::try_from(target - next).expect("a near call");
+        text.push(0xe8);
+        text.extend_from_slice(&rel.to_le_bytes());
+    }
+    text.push(0xc3);
+    for _ in 0..n {
+        text.extend_from_slice(&[0xc3, 0xcc]);
+    }
+    let (bytes, layout) = ElfBuilder::exec()
+        .section(Section::code(".text", &text))
+        .build_with_layout();
+    let mut p = program_of(&bytes, &LoadOpts::AUTO);
+    let _ = analyze(&mut p);
+    let f = layout.section(".text").expect("the code section").addr;
+    (p, f)
+}
+
+/// `solve` found the callees of a function in one pass of the data flow for each callee, with
+/// no fuel. So 4,000 calls to functions with no signature took 26 s. The fuel of the caller
+/// did not see the work (r3-robust-01). The work now takes fuel for each block and each call
+/// op. It grows linearly with the call count.
+#[test]
+fn regress_solve_children_linear() {
+    let mut used = Vec::new();
+    for n in [400usize, 800] {
+        let (p, f) = fan_out(n);
+        assert_eq!(p.funcs().len(), n + 1, "F and each g_i are functions");
+        let mut build = Fuel::unlimited();
+        let _ = fir::build(&p, fid(f), &Opts::DEFAULT, &mut build).expect("the IR of F");
+        let started = Instant::now();
+        let mut fuel = Fuel::unlimited();
+        let (params, source) = cc::params(&p, fid(f), &mut fuel).expect("the params of F");
+        let took = started.elapsed();
+        assert_eq!(
+            (params, source),
+            (Params::default(), ParamSource::Recovered)
+        );
+        let extra = fuel.used() - build.used();
+        let calls = u64::try_from(n).expect("small");
+        assert!(
+            extra >= calls,
+            "{n} calls: the solve takes {extra} units after the build"
+        );
+        assert!(took < Duration::from_secs(5), "{n} calls: {took:?}");
+        used.push(fuel.used());
+    }
+    assert!(
+        used[1] * 2 <= used[0] * 5,
+        "the fuel is not linear: {used:?}"
     );
 }
