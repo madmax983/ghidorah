@@ -87,6 +87,19 @@ fn width_edge(w: u16, i: usize) -> Option<u128> {
     [0, 1, sign, ones].get(i).copied()
 }
 
+/// Puts the edge value of case `i` in each data register of `values`: each register but
+/// `pc`, the flags and `rsp`. The pointer registers take their buffer address after this.
+fn put_edge(form: &Form, i: usize, values: &mut [u128]) {
+    let Some(edge) = width_edge(form.w, i) else {
+        return;
+    };
+    for (r, v) in form.regs.iter().zip(values) {
+        if !matches!(r, R::Pc | R::Flags | R::Rsp) {
+            *v = edge;
+        }
+    }
+}
+
 /// The inputs of one vector before the run.
 struct Inputs {
     values: Vec<u128>,
@@ -233,13 +246,7 @@ pub(super) fn vector(form: &Form, i: usize) -> Vector {
         };
         x.values.push(v);
     }
-    if let Some(edge) = width_edge(form.w, i) {
-        for (r, v) in form.regs.iter().zip(&mut x.values) {
-            if !matches!(r, R::Pc | R::Flags | R::Rsp) {
-                *v = edge;
-            }
-        }
-    }
+    put_edge(form, i, &mut x.values);
     for (r, off) in form.ptrs {
         x.set(form, *r, VBASE + u64::from(*off));
     }
