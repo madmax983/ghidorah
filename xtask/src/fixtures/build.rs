@@ -32,6 +32,9 @@ pub const WORK_DIR: &str = "target/fixtures-work";
 /// The output root of `--check`, relative to the workspace root.
 pub const CHECK_DIR: &str = "target/fixtures-check";
 
+/// The `binaries` rows, the build sha256 and the parsed `readelf` text of each variant.
+type Emitted = (Vec<Value>, String, Vec<(&'static str, ElfInfo)>);
+
 /// The state of one build run.
 struct Run<'a> {
     root: &'a Path,
@@ -232,8 +235,9 @@ fn variant_bytes(dir: &Path, name: &str, variant: Variant) -> Result<Vec<u8>, Er
 }
 
 impl Run<'_> {
-    /// Writes one fixture binary, its loader goldens and its manifest entry.
-    fn emit(&mut self, fixture: &Fixture, bytes: &[u8]) -> Result<String, Error> {
+    /// Writes one fixture binary, its loader goldens and its manifest entry. Gives the sha256
+    /// and the `readelf` text of the binary.
+    fn emit(&mut self, fixture: &Fixture, bytes: &[u8]) -> Result<(String, String), Error> {
         let name = fixture.name();
         let rel_bin = format!("{BIN_DIR}/{name}");
         self.put(&rel_bin, bytes)?;
@@ -278,7 +282,7 @@ impl Run<'_> {
             ldflags,
             truth: truth::path(&fixture.truth_name()),
         });
-        Ok(sha)
+        Ok((sha, readelf))
     }
 
     /// Writes the objdump and frames goldens of a build output. Gives the objdump text.
@@ -308,17 +312,19 @@ impl Run<'_> {
         Ok(listing)
     }
 
-    /// Writes the build output and its variants. Gives the `binaries` rows and the build sha256.
+    /// Writes the build output and its variants. Gives the `binaries` rows, the build sha256
+    /// and the parsed `readelf` text of each variant.
     fn emit_all(
         &mut self,
         program: &Program,
         build: &Build,
         dir: &Path,
         bytes: &[u8],
-    ) -> Result<(Vec<Value>, String), Error> {
+    ) -> Result<Emitted, Error> {
         let name = spec::build_name(program, build);
         let mut binaries = Vec::new();
         let mut sha = String::new();
+        let mut variants = Vec::new();
         let fixtures = spec::fixtures()
             .into_iter()
             .filter(|f| f.program.name == program.name && f.build.id == build.id);
@@ -327,9 +333,10 @@ impl Run<'_> {
                 None => bytes.to_vec(),
                 Some(v) => variant_bytes(dir, &name, v)?,
             };
-            let fixture_sha = self.emit(&fixture, &out)?;
-            if fixture.variant.is_none() {
-                sha.clone_from(&fixture_sha);
+            let (fixture_sha, readelf) = self.emit(&fixture, &out)?;
+            match fixture.variant {
+                None => sha.clone_from(&fixture_sha),
+                Some(v) => variants.push((v.suffix(), elfinfo::parse(&readelf))),
             }
             let variant = fixture.variant.map_or("none", Variant::suffix);
             binaries.push(Value::object([
@@ -338,7 +345,7 @@ impl Run<'_> {
                 ("variant", Value::from(variant)),
             ]));
         }
-        Ok((binaries, sha))
+        Ok((binaries, sha, variants))
     }
 
     /// Runs the leaf driver of a build and writes its vector golden.
@@ -436,7 +443,7 @@ impl Run<'_> {
         let (objects, map) = compile(&dir, program, build, &name, &self.tools.gcc_dir)?;
         check_runs(&dir.join(&name), facts_in)?;
         let bytes = read_file(&dir.join(&name))?;
-        let (binaries, sha) = self.emit_all(program, build, &dir, &bytes)?;
+        let (binaries, sha, variants) = self.emit_all(program, build, &dir, &bytes)?;
         let listing_text = self.code_goldens(&name, &sha)?;
         let leafs: &[LeafFn] = if build.leaf_vectors { fns } else { &[] };
         if !leafs.is_empty() {
@@ -455,6 +462,7 @@ impl Run<'_> {
             tables: &tables,
             facts: facts_in,
             leafs,
+            variants: &variants,
         };
         let value =
             assemble::assemble(&inputs).map_err(|errs| Error::data(&name, errs.join("; ")))?;

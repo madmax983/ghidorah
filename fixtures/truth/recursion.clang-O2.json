@@ -228,5 +228,10 @@
     ["is_odd","is_even"],
     ["print_node","printf"]
   ],
-  "tier": "T1"
+  "tier": "T1",
+  "variant_protections": {
+    "noeh": {
+      "relro": "none"
+    }
+  }
 }

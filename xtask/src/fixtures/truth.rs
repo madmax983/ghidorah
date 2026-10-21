@@ -1,7 +1,10 @@
 //! The truth files `fixtures/truth/<build>.json` and their schema check.
 //!
 //! One truth file serves a build and every variant of it (the stripped twin, `noeh` and
-//! `noshdr`), because a variant keeps the code and the addresses of its build.
+//! `noshdr`), because a variant keeps the code and the addresses of its build. A variant can
+//! have other protections: `objcopy` drops `PT_GNU_RELRO` in a `noeh` variant. The member
+//! `variant_protections` holds the fields of each such variant that differ from
+//! `protections`. A variant that it does not name has the `protections` of its build.
 //! [`super::assemble`] writes the files. Addresses are `0x` hex text. Sizes and counts are
 //! integers.
 //!
@@ -14,6 +17,7 @@
 //! | `elf` | `{ type, entry, image_base, interp }` |
 //! | `libraries`, `imports`, `network_imports` | `[text]` |
 //! | `protections` | `{ pie, nx, relro, canary, fortify, ibt, shstk, rpath, runpath, build_id }` |
+//! | `variant_protections` | optional `{ <variant>: { <protections key>: value } }` |
 //! | `functions` | `[{ name, addr, size, insns }]` in address order |
 //! | `function_count` | integer |
 //! | `cold_parts` | `[{ name, addr, size, parent }]` |
@@ -194,6 +198,46 @@ const PROTECTIONS: &[(&str, Ty)] = &[
     ("runpath", Ty::Bool),
 ];
 
+/// Checks the optional `variant_protections` member. Each key is a variant of `binaries`.
+/// Each value holds only protection fields, with their types, that differ from `protections`.
+fn check_variants(found: &mut Vec<String>, truth: &Value, value: &Value) {
+    let Some(map) = value.as_object() else {
+        found.push("`variant_protections` is not an object".to_owned());
+        return;
+    };
+    let variants: Vec<&str> = truth
+        .get("binaries")
+        .and_then(Value::as_array)
+        .unwrap_or(&[])
+        .iter()
+        .filter_map(|b| b.get("variant").and_then(Value::as_str))
+        .filter(|v| *v != "none")
+        .collect();
+    let base = truth.get("protections");
+    for (variant, own) in map {
+        let at = format!("variant_protections.{variant}");
+        if !variants.contains(&variant.as_str()) {
+            found.push(format!("{at}: `{variant}` is not a variant of `binaries`"));
+        }
+        let Some(own) = own.as_object().filter(|m| !m.is_empty()) else {
+            found.push(format!("{at}: not an object with a field"));
+            continue;
+        };
+        for (key, v) in own {
+            let ok = match PROTECTIONS.iter().find(|(k, _)| k == key) {
+                Some((_, ty)) => is(v, *ty),
+                None => key == "build_id" && (is(v, Ty::Text) || *v == Value::Null),
+            };
+            if !ok {
+                found.push(format!("{at}: `{key}` is unknown or has the wrong type"));
+            }
+            if base.and_then(|b| b.get(key)) == Some(v) {
+                found.push(format!("{at}: `{key}` equals `protections`"));
+            }
+        }
+    }
+}
+
 fn fields(found: &mut Vec<String>, at: &str, value: &Value, rows: &[(&str, Ty)]) {
     for (key, ty) in rows {
         if !value.get(key).is_some_and(|v| is(v, *ty)) {
@@ -226,6 +270,9 @@ pub fn check_value(name: &str, truth: &Value) -> Vec<String> {
     }
     if let Some(p) = truth.get("protections") {
         fields(&mut found, "protections", p, PROTECTIONS);
+    }
+    if let Some(v) = truth.get("variant_protections") {
+        check_variants(&mut found, truth, v);
     }
     let funcs = truth
         .get("functions")

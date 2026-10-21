@@ -222,5 +222,10 @@
     ["frame_dummy","register_tm_clones"],
     ["report_error","fprintf"]
   ],
-  "tier": "T1"
+  "tier": "T1",
+  "variant_protections": {
+    "noeh": {
+      "relro": "none"
+    }
+  }
 }

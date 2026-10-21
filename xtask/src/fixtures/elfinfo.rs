@@ -321,6 +321,9 @@ pub fn parse(text: &str) -> ElfInfo {
     info
 }
 
+/// The protection fields that come from the imports of `.dynsym`.
+const IMPORT_FIELDS: [&str; 2] = ["canary", "fortify"];
+
 impl ElfInfo {
     /// Gives the section with a name.
     #[must_use]
@@ -422,6 +425,23 @@ impl ElfInfo {
             self.build_id.clone().map_or(Value::Null, Value::from),
         );
         Value::Object(map)
+    }
+
+    /// Gives the protection fields of this variant text that differ from `base`, the
+    /// protections of its build, in key order.
+    ///
+    /// A variant keeps the `.dynsym` of its build. The text of a file with no section headers
+    /// lists no symbol table, so such a text keeps the import fields of `base`.
+    #[must_use]
+    pub fn variant_protections(&self, base: &Value) -> BTreeMap<String, Value> {
+        let lists_imports = self.symbols.iter().any(|s| s.table == ".dynsym");
+        let Value::Object(own) = self.protections() else {
+            return BTreeMap::new();
+        };
+        own.into_iter()
+            .filter(|(k, _)| lists_imports || !IMPORT_FIELDS.contains(&k.as_str()))
+            .filter(|(k, v)| base.get(k) != Some(v))
+            .collect()
     }
 }
 
