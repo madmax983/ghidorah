@@ -495,8 +495,8 @@ fn execute(
     rows: &[AcRow],
     selected: &[AcRow],
     tier2: bool,
+    commit: &str,
 ) -> Result<(Vec<acrun::Outcome>, Vec<table::Row>), Error> {
-    let commit = table::head_commit(root)?;
     let old = table::read(root)?;
     let ran: BTreeSet<String> = selected.iter().map(|r| r.id.clone()).collect();
     let (first, last) = acrun::split_self(selected);
@@ -504,7 +504,7 @@ fn execute(
     let xtask = acrun::XtaskProgram::Cargo;
     let mut outcomes = acrun::run_rows(root, &first, tier2, &xtask)?;
     let to_rows = |list: &[acrun::Outcome]| -> Vec<table::Row> {
-        list.iter().map(|o| table::Row::new(o, &commit)).collect()
+        list.iter().map(|o| table::Row::new(o, commit)).collect()
     };
     table::write(root, &table::merge(&old, &ran, &to_rows(&outcomes), rows))?;
     outcomes.extend(acrun::run_rows(root, &last, tier2, &xtask)?);
@@ -515,7 +515,8 @@ fn execute(
 /// Runs `xtask ac [--run] [--tier2] [AC...]`.
 ///
 /// Without `--run`, the command checks the grammar, the Needs order and missing evidence. It
-/// also reports `failed` from the evidence table, with each record item checked again. A stale
+/// also reports `failed`, `stale` and `not_passed` from the evidence table, with each record
+/// item checked again. These lists do not change `ok`. A stale
 /// proof record gives `skipped` and a warning, and `fail` under `GHIDORAH_REQUIRE_PROOFS=1`
 /// (design Section 13.3). With `--run`, it also runs the evidence and writes
 /// `docs/ac-evidence.json`. A list of ACs runs only those ACs and replaces only their rows of
@@ -556,24 +557,25 @@ pub fn run(root: &Path, args: &[String]) -> Result<Value, Error> {
             Value::from(absent.into_iter().map(Value::from).collect::<Vec<_>>()),
         ),
     ];
-    if execute_items {
+    let (table_rows, commit) = if execute_items {
+        let commit = table::head_commit(root)?;
         let selected: Vec<AcRow> = rows
             .iter()
             .filter(|r| only.is_empty() || only.contains(&r.id))
             .cloned()
             .collect();
-        let (outcomes, table_rows) = execute(root, &rows, &selected, tier2)?;
+        let (outcomes, table_rows) = execute(root, &rows, &selected, tier2, &commit)?;
         ok &= outcomes.iter().all(|o| o.status != acrun::Status::Fail);
         report.push(("evidence", table::write(root, &table_rows)?));
-        report.push(("failed", table::failed(&table_rows)));
+        (table_rows, commit)
     } else {
         let commit = table::head_commit(root).unwrap_or_default();
         let require_proofs = std::env::var(record::REQUIRE_PROOFS).is_ok_and(|v| v == "1");
-        report.push((
-            "failed",
-            table::failed(&checked_rows(root, &rows, &commit, require_proofs)?),
-        ));
-    }
+        (checked_rows(root, &rows, &commit, require_proofs)?, commit)
+    };
+    report.push(("failed", table::failed(&table_rows)));
+    report.push(("stale", table::stale(&table_rows, &rows, &commit)));
+    report.push(("not_passed", table::not_passed(&table_rows, &rows)));
     report.push(("ok", Value::from(ok)));
     Ok(Value::object(report))
 }

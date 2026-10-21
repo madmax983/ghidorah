@@ -381,6 +381,100 @@ fn regress_acrun_requires_proofs() {
     }
 }
 
+/// Checks the `not_passed` list of AC-018b: a row that is not `pass` and an item without a row.
+fn check_not_passed(design: &[AcRow], merged: &[Row]) {
+    // A skipped tier-1 test row does not pass. A skipped record row on another host is no gap.
+    let mut skipped = merged.to_vec();
+    for row in &mut skipped {
+        row.status = Status::Skipped;
+    }
+    assert_eq!(
+        json::write(&table::not_passed(&skipped, design)),
+        concat!(
+            r#"[{"ac":"AC-001","kind":"test","status":"skipped","tier":"T1"},"#,
+            r#"{"ac":"AC-002","kind":"test","status":"skipped","tier":"T1"}]"#
+        )
+    );
+    // A design item without a row does not pass. The rows match the items by kind and tier.
+    let short: Vec<Row> = merged
+        .iter()
+        .filter(|r| r.ac != "AC-002" || r.kind != "test")
+        .cloned()
+        .collect();
+    assert_eq!(
+        json::write(&table::not_passed(&short, design)),
+        r#"[{"ac":"AC-002","kind":"test","status":"missing","tier":"T1"}]"#
+    );
+    let no_record: Vec<Row> = merged
+        .iter()
+        .filter(|r| r.kind != "record")
+        .cloned()
+        .collect();
+    assert_eq!(
+        json::write(&table::not_passed(&no_record, design)),
+        r#"[{"ac":"AC-002","kind":"record","status":"missing","tier":"T2"}]"#
+    );
+    // An `xtask:ac` item reads the table of its own run, so its row never counts.
+    let own = Evidence::Xtask {
+        sub: "ac".to_owned(),
+        pointer: "/stale".to_owned(),
+        op: Op::Eq,
+        value: "[]".to_owned(),
+    };
+    let ci = Evidence::Xtask {
+        sub: "ci".to_owned(),
+        pointer: "/ok".to_owned(),
+        op: Op::Eq,
+        value: "true".to_owned(),
+    };
+    let with_self = vec![
+        gate_row("AC-018b", vec![own.clone()]),
+        gate_row("AC-020", vec![ci, own]),
+    ];
+    let xtask_row = |id: &str, status: Status, commit: &str| {
+        let item = Outcome {
+            tier: Tier::T2,
+            ..outcome(id, "xtask", status)
+        };
+        Row::new(&item, commit)
+    };
+    // During the run, the table holds no row of an `xtask:ac` item.
+    let during = vec![xtask_row("AC-020", Status::Pass, "c2")];
+    assert_eq!(
+        table::not_passed(&during, &with_self),
+        Value::Array(Vec::new())
+    );
+    assert_eq!(
+        table::stale(&during, &with_self, "c2"),
+        Value::Array(Vec::new())
+    );
+    // After an older run, the rows of the `xtask:ac` items come last and do not count.
+    let after = vec![
+        xtask_row("AC-018b", Status::Fail, "c1"),
+        xtask_row("AC-020", Status::Pass, "c2"),
+        xtask_row("AC-020", Status::Fail, "c1"),
+    ];
+    assert_eq!(
+        table::not_passed(&after, &with_self),
+        Value::Array(Vec::new())
+    );
+    assert_eq!(
+        table::stale(&after, &with_self, "c2"),
+        Value::Array(Vec::new())
+    );
+    let failed_ci = vec![xtask_row("AC-020", Status::Fail, "c1")];
+    assert_eq!(
+        json::write(&table::not_passed(&failed_ci, &with_self)),
+        r#"[{"ac":"AC-020","kind":"xtask","status":"fail","tier":"T2"}]"#
+    );
+    assert_eq!(
+        table::stale(&failed_ci, &with_self, "c2")
+            .as_array()
+            .map(<[Value]>::len),
+        Some(1)
+    );
+}
+
 #[test]
 fn ac_018b_evidence_passes() {
     // The record check of each named input.
@@ -417,9 +511,19 @@ fn ac_018b_evidence_passes() {
     );
 
     // The failed list and the merge of a partial run.
+    let test_item = |func: &str| Evidence::Test {
+        krate: "xtask".to_owned(),
+        func: func.to_owned(),
+        tier: Tier::T1,
+    };
+    let record_item = Evidence::Record {
+        file: "verify/results.json".to_owned(),
+        pointer: "/kernels/K1".to_owned(),
+        input: "tree".to_owned(),
+    };
     let design = vec![
-        gate_row("AC-001", Vec::new()),
-        gate_row("AC-002", Vec::new()),
+        gate_row("AC-001", vec![test_item("ac_001_a")]),
+        gate_row("AC-002", vec![test_item("ac_002_a"), record_item.clone()]),
     ];
     let old = vec![
         Row::new(&outcome("AC-002", "test", Status::Fail), "c1"),
@@ -431,9 +535,13 @@ fn ac_018b_evidence_passes() {
         r#"[{"ac":"AC-002","kind":"test","tier":"T1"}]"#
     );
     let ran: BTreeSet<String> = std::iter::once("AC-002".to_owned()).collect();
+    let recorded = Outcome {
+        tier: Tier::T2,
+        ..outcome("AC-002", "record", Status::Recorded)
+    };
     let new = vec![
         Row::new(&outcome("AC-002", "test", Status::Pass), "c2"),
-        Row::new(&outcome("AC-002", "record", Status::Recorded), "c2"),
+        Row::new(&recorded, "c2"),
     ];
     let merged = table::merge(&old, &ran, &new, &design);
     let ids: Vec<(&str, &str)> = merged
@@ -442,6 +550,22 @@ fn ac_018b_evidence_passes() {
         .collect();
     assert_eq!(ids, [("AC-001", "c1"), ("AC-002", "c2"), ("AC-002", "c2")]);
     assert_eq!(table::failed(&merged), Value::Array(Vec::new()));
+    // The partial run at HEAD c2 keeps the AC-001 row of c1. That row is stale.
+    assert_eq!(
+        json::write(&table::stale(&merged, &design, "c2")),
+        r#"[{"ac":"AC-001","commit":"c1","kind":"test","tier":"T1"}]"#
+    );
+    assert_eq!(
+        table::stale(&merged, &design, "c1")
+            .as_array()
+            .map(<[Value]>::len),
+        Some(2)
+    );
+    assert_eq!(
+        table::not_passed(&merged, &design),
+        Value::Array(Vec::new())
+    );
+    check_not_passed(&design, &merged);
     let text = format!(
         "[\n{}\n]\n",
         merged

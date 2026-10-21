@@ -710,6 +710,13 @@ fn ac_018b_failed_is_empty() {
         Some(&Value::Array(Vec::new())),
         "{report}"
     );
+    // The committed rows come from an earlier commit, so the test reads only the list form.
+    for list in ["/stale", "/not_passed"] {
+        assert!(
+            report.pointer(list).and_then(Value::as_array).is_some(),
+            "{list}: {report}"
+        );
+    }
 }
 
 /// A proof record of the kernel K1 and a host record of bash. Every claim holds.
