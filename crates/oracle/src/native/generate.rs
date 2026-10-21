@@ -78,6 +78,15 @@ const fn mask(w: u8) -> u64 {
     if w >= 64 { u64::MAX } else { (1 << w) - 1 }
 }
 
+/// Gives the edge value of case `i` at the width `w` in bits: 0, 1, the sign bit and the
+/// all-ones mask for the cases 0 to 3. The data registers of these cases take that value
+/// before the input rule. The table [`EDGES`] holds each of them for 8 to 64 bits.
+fn width_edge(w: u16, i: usize) -> Option<u128> {
+    let ones = u128::MAX.checked_shr(128u32.saturating_sub(u32::from(w)))?;
+    let sign = 1u128.checked_shl(u32::from(w).checked_sub(1)?)?;
+    [0, 1, sign, ones].get(i).copied()
+}
+
 /// The inputs of one vector before the run.
 struct Inputs {
     values: Vec<u128>,
@@ -223,6 +232,13 @@ pub(super) fn vector(form: &Form, i: usize) -> Vector {
             _ => u128::from(rng.pick(i, k)),
         };
         x.values.push(v);
+    }
+    if let Some(edge) = width_edge(form.w, i) {
+        for (r, v) in form.regs.iter().zip(&mut x.values) {
+            if !matches!(r, R::Pc | R::Flags | R::Rsp) {
+                *v = edge;
+            }
+        }
     }
     for (r, off) in form.ptrs {
         x.set(form, *r, VBASE + u64::from(*off));
