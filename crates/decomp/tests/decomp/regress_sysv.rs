@@ -196,7 +196,9 @@ fn signature_call_line() -> String {
     );
     let out = print::print(&d, &SigEnv("f", sig), &NoNames, "g");
     out.lines
-        .get(2)
+        .iter()
+        .filter(|l| l.kind != print::LineKind::Decl)
+        .nth(2)
         .map(|l| l.text.trim().to_owned())
         .unwrap_or_default()
 }
@@ -225,8 +227,8 @@ fn blob(bytes: &[u8]) -> Program {
     p
 }
 
-/// Gives the text lines of the function at `entry` of `p`.
-fn lines_at(p: &Program, entry: u64) -> Vec<String> {
+/// Gives the lines of the function at `entry` of `p`, with the declaration lines.
+fn all_lines_at(p: &Program, entry: u64) -> Vec<print::Line> {
     ghidorah_decomp::render(
         p,
         fid(entry),
@@ -236,9 +238,15 @@ fn lines_at(p: &Program, entry: u64) -> Vec<String> {
     )
     .unwrap_or_else(|e| panic!("{entry:#x}: {e}"))
     .lines
-    .into_iter()
-    .map(|l| l.text)
-    .collect()
+}
+
+/// Gives the text lines of the function at `entry` of `p`, without the declaration lines.
+fn lines_at(p: &Program, entry: u64) -> Vec<String> {
+    all_lines_at(p, entry)
+        .into_iter()
+        .filter(|l| l.kind != print::LineKind::Decl)
+        .map(|l| l.text)
+        .collect()
 }
 
 /// Gives the text lines of the function `name` of `fixture`.
@@ -332,6 +340,20 @@ fn regress_tail_calls_of_void_function() {
         main.iter().any(|l| l.trim().starts_with("run_command(")),
         "{main:?}"
     );
+}
+
+/// `main` of `switch` named `v9` and `v10` with no declaration. Now the declarations come
+/// first, with the lattice type when one exists.
+#[test]
+fn regress_main_declares_its_locals() {
+    let p = program("switch.gcc-O2");
+    let lines: Vec<String> = all_lines_at(p, entry_of(p, "main"))
+        .into_iter()
+        .map(|l| l.text)
+        .collect();
+    assert_eq!(lines[1], "{", "{lines:?}");
+    assert_eq!(lines[2], "    long v9;", "{lines:?}");
+    assert_eq!(lines[3], "    uint64_t v10;", "{lines:?}");
 }
 
 /// An environment that knows only the return value of [`CALLEE`].

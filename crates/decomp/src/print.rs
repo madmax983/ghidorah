@@ -34,6 +34,8 @@
 //!   head gives the type of the signature, else `float` or `double`.
 //! - Default variable names: `param_N`, `local_<hex>` for a stack slot and `v<N>` for a
 //!   register value. An agent name wins.
+//! - Each variable that the text names, other than a parameter, has a declaration line after
+//!   the `{` of the function, in view order: `uint64_t v9;`.
 //! - Comments: a PLATE comment comes before the function, a PRE comment before the first line
 //!   of its address, a POST comment after the last line of its address and an EOL comment at
 //!   the end of the first line of its address.
@@ -152,6 +154,8 @@ pub enum LineKind {
     Close,
     /// A statement.
     Stmt,
+    /// The declaration of a variable, for example `uint64_t v9;`.
+    Decl,
     /// A label: `L_<addr>:`.
     Label,
     /// A `goto` of the structure.
@@ -460,6 +464,9 @@ pub fn print(
     let head = p.head(name);
     p.push(&head, LineKind::Head, 0, Buf::default());
     p.push("{", LineKind::Open, 0, Buf::default());
+    for decl in p.decls() {
+        p.push(&decl, LineKind::Decl, 1, Buf::default());
+    }
     p.lines.extend(body);
     p.push("}", LineKind::Close, 0, Buf::default());
     let lines = comments::insert(

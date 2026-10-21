@@ -281,7 +281,14 @@ pub fn call_then_store(env: &dyn PrintEnv, stored: &[u32]) -> (Vec<String>, Vec<
     );
     let out = print::print(&d, env, &NoNames, "f");
     let rows = out.vars.into_iter().map(|r| (r.name, r.ty)).collect();
-    (out.lines.into_iter().map(|l| l.text).collect(), rows)
+    (
+        out.lines
+            .into_iter()
+            .filter(|l| l.kind != print::LineKind::Decl)
+            .map(|l| l.text)
+            .collect(),
+        rows,
+    )
 }
 
 /// A callee whose signature returns a `double` gives its result in `xmm0`. The result gets
@@ -402,7 +409,11 @@ fn float_fn(
     );
     d.view.float_ret = kind;
     let out = print::print(&d, env, &NoNames, "f");
-    out.lines.into_iter().map(|l| l.text).collect()
+    out.lines
+        .into_iter()
+        .filter(|l| l.kind != print::LineKind::Decl)
+        .map(|l| l.text)
+        .collect()
 }
 
 /// A floating return reads `xmm0`. The result of a call in `xmm0` and the entry value of
@@ -572,7 +583,9 @@ fn printf_line(al: Expr, set: &[Loc]) -> String {
     );
     let out = print::print(&d, &printf_env(), &NoNames, "f");
     out.lines
-        .get(2)
+        .iter()
+        .filter(|l| l.kind != print::LineKind::Decl)
+        .nth(2)
         .map(|l| l.text.trim().to_owned())
         .unwrap_or_default()
 }
