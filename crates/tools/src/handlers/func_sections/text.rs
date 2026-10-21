@@ -1,9 +1,10 @@
 //! Text renderers: names, binary text, addresses, budgets and the per-item results of a list
 //! input.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
+use std::collections::BTreeMap;
 
-use ghidorah_base::{Address, BinText, Caps, ErrorCode, Rendered, WarningCode};
+use ghidorah_base::{Address, BinText, BinaryId, Caps, ErrorCode, Rendered, WarningCode};
 use ghidorah_db::Program;
 use ghidorah_json::{Object, Value};
 
@@ -36,10 +37,49 @@ pub fn is_mangled(name: &str) -> bool {
     name.starts_with("_Z") || name.starts_with("_R") || name.starts_with('?')
 }
 
+/// The program names of one binary that hold the escaped text of a loader name that is not
+/// UTF-8: each `(address, escaped text)` with the text of its loader bytes, escaped once.
+type Escaped = BTreeMap<(Address, String), String>;
+
 /// Renders names for one result and keeps its mangled-name flag (design Section 9.6).
+///
+/// The program keeps a loader name that is not UTF-8 as its escaped text. The namer shows
+/// such a name from its loader bytes, so each escape shows once ([`Namer::at`]).
 #[derive(Debug, Default)]
 pub struct Namer {
     mangled: Cell<bool>,
+    /// The escaped names of each binary. The first name with a backslash builds the map.
+    escaped: RefCell<BTreeMap<BinaryId, Escaped>>,
+}
+
+/// Gives the escaped program names of `program`: the table symbols, and the import names at
+/// their EXTERNAL address, their `@got` slot and their `@plt` stub.
+fn escaped(program: &Program) -> Escaped {
+    let mut out = Escaped::new();
+    let mut add = |addr: Address, bytes: Vec<u8>| {
+        let name = BinText::new(bytes);
+        if name.as_str().is_none() {
+            let key = name.render(Caps::DETAILED).text;
+            out.insert((addr, key), name.render(Caps::new(NAME_CHARS, 0)).text);
+        }
+    };
+    for s in &program.binary().symbols {
+        add(Address::ram(s.addr), s.name.as_bytes().to_vec());
+    }
+    for row in program.imports().values() {
+        let import = program.binary().imports.get(row.index);
+        let Some(name) = import.and_then(|i| i.name.as_ref()).map(BinText::as_bytes) else {
+            continue;
+        };
+        add(row.ext, name.to_vec());
+        if let Some(slot) = row.slot {
+            add(slot, [name, b"@got"].concat());
+        }
+        if let Some(stub) = row.stub {
+            add(stub, [name, b"@plt"].concat());
+        }
+    }
+    out
 }
 
 impl Namer {
@@ -49,21 +89,59 @@ impl Namer {
         Self::default()
     }
 
-    /// Gives the output text of the name `raw` and notes a mangled name.
-    #[must_use]
-    pub fn text(&self, raw: &str) -> String {
+    /// Notes a mangled name.
+    fn note(&self, raw: &str) {
         if is_mangled(raw) {
             self.mangled.set(true);
         }
+    }
+
+    /// Gives the output text of the name `raw` and notes a mangled name.
+    #[must_use]
+    pub fn text(&self, raw: &str) -> String {
+        self.note(raw);
         safe(raw)
     }
 
+    /// Gives the output text of the loader name `name`: the escapes of `BinText` once, at most
+    /// [`NAME_CHARS`] characters. Notes a mangled name.
+    #[must_use]
+    pub fn bin(&self, name: &BinText) -> String {
+        let shown = name.render(Caps::new(NAME_CHARS, 0)).text;
+        self.note(&shown);
+        shown
+    }
+
+    /// Gives the output text of the program name `name` at `addr` and notes a mangled name.
+    ///
+    /// A name that holds the escaped text of a loader name that is not UTF-8 shows from its
+    /// loader bytes, so each escape shows once. Every other name shows through
+    /// [`Namer::text`].
+    #[must_use]
+    pub fn at(&self, program: &Program, addr: Address, name: &str) -> String {
+        if !name.contains('\\') {
+            return self.text(name);
+        }
+        let mut maps = self.escaped.borrow_mut();
+        let map = maps
+            .entry(program.meta().binary_id)
+            .or_insert_with(|| escaped(program));
+        match map.get(&(addr, name.to_owned())) {
+            Some(shown) => {
+                self.note(shown);
+                shown.clone()
+            }
+            None => self.text(name),
+        }
+    }
+
     /// Gives the name of `addr`: the primary symbol, else the default name, else the address.
+    /// A loader name escapes once ([`Namer::at`]).
     #[must_use]
     pub fn of(&self, program: &Program, addr: Address) -> String {
         program
             .name(addr)
-            .map_or_else(|| addr.to_string(), |n| self.text(&n.text))
+            .map_or_else(|| addr.to_string(), |n| self.at(program, addr, &n.text))
     }
 
     /// Tells if the result holds a mangled name.

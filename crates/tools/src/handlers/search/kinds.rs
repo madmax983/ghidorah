@@ -39,7 +39,7 @@ pub fn names(items: &mut Items<'_>, m: &Matcher, namer: &Namer, fuel: &mut Fuel)
         if m.matches(&name.text) {
             let mut new = New::item("function", id.to_string());
             new.addr = Some(id.0);
-            new.text = Some(Value::from(namer.text(&name.text)));
+            new.text = Some(Value::from(namer.at(p, id.0, &name.text)));
             new.func = Some(id);
             taken.insert((id.0, name.text.clone()));
             items.push(new, None);
@@ -54,7 +54,7 @@ pub fn names(items: &mut Items<'_>, m: &Matcher, namer: &Namer, fuel: &mut Fuel)
         if m.matches(name) {
             let mut new = New::item("import", row.id.to_string());
             new.addr = Some(row.stub.or(row.slot).unwrap_or(row.ext));
-            new.text = Some(Value::from(namer.text(name)));
+            new.text = Some(Value::from(namer.at(p, row.ext, name)));
             items.push(new, None);
         }
     }
@@ -67,7 +67,10 @@ pub fn names(items: &mut Items<'_>, m: &Matcher, namer: &Namer, fuel: &mut Fuel)
         if m.matches(name) {
             let mut new = New::item("export", row.id.to_string());
             new.addr = row.addr;
-            new.text = Some(Value::from(namer.text(name)));
+            let text = row
+                .addr
+                .map_or_else(|| namer.text(name), |a| namer.at(p, a, name));
+            new.text = Some(Value::from(text));
             items.push(new, None);
         }
     }
@@ -88,7 +91,7 @@ pub fn names(items: &mut Items<'_>, m: &Matcher, namer: &Namer, fuel: &mut Fuel)
                 };
                 let mut new = New::item("symbol", id);
                 new.addr = Some(*a);
-                new.text = Some(Value::from(namer.text(name)));
+                new.text = Some(Value::from(namer.at(p, *a, name)));
                 new.func = p.owner_of(*a);
                 items.push(new, None);
             }

@@ -1,9 +1,12 @@
 //! `addr_info` and the per-item results of list inputs (AC-144).
 
 use ghidorah_json::Value;
+use ghidorah_testkit::elf::{ElfBuilder, Loc, Section, Symbol};
+use ghidorah_testkit::pe::{Dll, ExportItem, Exports, PeBuilder, Section as PeSection, Thunk};
 
 use crate::support::{
-    all_items, call, call_value, code, data, demo, fixture, items, json, str_of, text_at,
+    all_items, call, call_value, code, data, demo, fixture, items, json, load_bytes, str_of,
+    text_at,
 };
 
 #[test]
@@ -228,4 +231,115 @@ fn regress_section_name_escaped_once() {
         .unwrap_or_default();
     let names: Vec<String> = notes.iter().map(|n| str_of(n, "name")).collect();
     assert!(names.iter().any(|n| n == r"a\\b"), "{survey}");
+}
+
+/// Writes `with` over each copy of `marker` in `bytes`, and gives the number of copies.
+fn patch(bytes: &mut [u8], marker: &[u8], with: &[u8]) -> usize {
+    let mut count = 0;
+    let mut at = 0;
+    while let Some(off) = bytes
+        .get(at..)
+        .and_then(|rest| rest.windows(marker.len()).position(|w| w == marker))
+    {
+        let start = at + off;
+        bytes[start..start + with.len()].copy_from_slice(with);
+        count += 1;
+        at = start + marker.len();
+    }
+    count
+}
+
+/// Gives the `text` of each `search` item of `kind` whose `text` starts with `head`.
+fn texts(session: &mut ghidorah_tools::Session, kind: &str, head: &str) -> Vec<String> {
+    let args = Value::object([("kind", Value::from(kind))]);
+    all_items(session, "search", &args, 50)
+        .iter()
+        .map(|i| str_of(i, "text"))
+        .filter(|t| t.starts_with(head))
+        .collect()
+}
+
+/// A binary name that is not UTF-8 escapes once, the same as a section name (r3-surface-08,
+/// k3-04). The symbol bytes `6e ff fe 78` show as `n\xff\xfex` in `search` kinds `symbol`
+/// and `name` and in `addr_info`. The section bytes `73 ff fe 63` show as `s\xff\xfec`. An
+/// ELF library, a PE library, a PE import library and a PE export forwarder escape once too.
+/// The IDs still parse back.
+#[test]
+fn regress_binary_names_escaped_once() {
+    let b = ElfBuilder::exec()
+        .section(Section::code(".text", &[0xc3; 4]))
+        .section(Section::rodata("sQQc", &[1, 2, 3, 4]))
+        .symbol(Symbol::func("main", Loc::section(".text", 0), 1))
+        .symbol(Symbol::func("nQQx", Loc::section(".text", 1), 1))
+        .needed("lQQb.so")
+        .entry(Loc::symbol("main"));
+    let mut bytes = b.build();
+    for (marker, with) in [
+        (&b"nQQx"[..], &b"n\xff\xfex"[..]),
+        (b"sQQc", b"s\xff\xfec"),
+        (b"lQQb", b"l\xff\xfeb"),
+    ] {
+        assert!(patch(&mut bytes, marker, with) > 0, "{marker:?}");
+    }
+    let (mut s, load) = load_bytes("names_escaped_once", &bytes, "full");
+    assert_eq!(code(&load), "", "{load}");
+    assert_eq!(texts(&mut s, "section", "s"), [r"s\xff\xfec"]);
+    assert_eq!(texts(&mut s, "library", "l"), [r"l\xff\xfeb.so"]);
+    let want = r"n\xff\xfex";
+    assert_eq!(texts(&mut s, "symbol", "n"), [want]);
+    let named = all_items(
+        &mut s,
+        "search",
+        &json(r#"{"kind":"name","query":"xfex"}"#),
+        50,
+    );
+    let shown: Vec<String> = named.iter().map(|i| str_of(i, "text")).collect();
+    assert_eq!(shown, [want], "{named:?}");
+    let listed = all_items(&mut s, "search", &json(r#"{"kind":"symbol"}"#), 50);
+    for item in listed.iter().chain(&named) {
+        let args = Value::object([("target", Value::from(str_of(item, "id")))]);
+        let info = call_value(&mut s, "addr_info", args);
+        assert_eq!(code(&info), "", "{item}: {info}");
+        assert_eq!(
+            text_at(data(&info), "/addr"),
+            str_of(item, "addr"),
+            "{info}"
+        );
+        if str_of(item, "text") == want {
+            assert_eq!(text_at(data(&info), "/symbol/name"), want, "{info}");
+        }
+    }
+
+    let pe = PeBuilder::dll()
+        .section(PeSection::code(".text", 0x1000, &[0xc3; 0x40]))
+        .section(PeSection::data(".data", 0x2000, &[0x11; 0x40]))
+        .import(Dll::new("dQQ.dll", vec![Thunk::name("Beep", 1)]))
+        .exports(Exports {
+            dll: "t.dll".to_owned(),
+            base: 1,
+            items: vec![
+                ExportItem::Code(0x1000),
+                ExportItem::Forward("fQQ.Fn".to_owned()),
+            ],
+            names: vec![("run".to_owned(), 0), ("fwd".to_owned(), 1)],
+            number_of_names: None,
+            number_of_functions: None,
+        });
+    let mut bytes = pe.build();
+    for (marker, with) in [(&b"dQQ"[..], &b"d\xff\xfe"[..]), (b"fQQ", b"f\xff\xfe")] {
+        assert!(patch(&mut bytes, marker, with) > 0, "{marker:?}");
+    }
+    let (mut s, load) = load_bytes("names_escaped_once_pe", &bytes, "full");
+    assert_eq!(code(&load), "", "{load}");
+    assert_eq!(texts(&mut s, "library", "d"), [r"d\xff\xfe.dll"]);
+    let imports = all_items(&mut s, "search", &json(r#"{"kind":"import"}"#), 50);
+    let libs: Vec<String> = imports.iter().map(|i| text_at(i, "/extra/lib")).collect();
+    assert_eq!(libs, [r"d\xff\xfe.dll"], "{imports:?}");
+    let exports = all_items(&mut s, "search", &json(r#"{"kind":"export"}"#), 50);
+    let forwarders: Vec<String> = exports
+        .iter()
+        .map(|i| text_at(i, "/extra/forwarder"))
+        .filter(|f| !f.is_empty())
+        .collect();
+    assert_eq!(forwarders, [r"f\xff\xfe.Fn"], "{exports:?}");
 }

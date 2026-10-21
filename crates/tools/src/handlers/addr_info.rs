@@ -294,7 +294,7 @@ fn info(
         out.push(
             "symbol",
             Value::object([
-                ("name", Value::from(namer.text(&symbol.name.value))),
+                ("name", Value::from(namer.at(p, addr, &symbol.name.value))),
                 ("source", Value::from(symbol.name.source.name())),
                 ("kind", Value::from(symbol.kind.name())),
             ]),
