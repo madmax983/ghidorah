@@ -62,6 +62,9 @@ fn ac_179a_bad_refs() {
         text_at(&envelope, "/error/field_path"),
         "/steps/1/args/expr"
     );
+    let found = error_candidates(&envelope, None);
+    assert!(!found.is_empty(), "{envelope}");
+    assert!(found.iter().all(|c| c.starts_with("/data")), "{found:?}");
 
     // A star reference into an argument that is not a list.
     let envelope = batch(
@@ -111,6 +114,9 @@ fn ac_179a_bad_refs() {
         ]}"#,
     );
     assert_eq!(step_code(&envelope, 1), "BAD_REFERENCE", "{envelope}");
+    let found = error_candidates(&envelope, Some(1));
+    assert!(!found.is_empty(), "{envelope}");
+    assert!(found.iter().all(|c| c.starts_with("/data")), "{found:?}");
 
     // A reference never becomes null, and a good reference takes the value.
     let envelope = batch(
@@ -208,6 +214,68 @@ fn ac_179c_truncated_source() {
         .and_then(Value::as_array)
         .map(<[Value]>::len);
     assert_eq!(items, Some(2), "{envelope}");
+}
+
+/// Gives the candidate values of the error of a batch, or of its step entry `step`.
+fn error_candidates(envelope: &Value, step: Option<usize>) -> Vec<String> {
+    let error = match step {
+        Some(i) => steps(envelope)
+            .get(i)
+            .and_then(|s| s.get("error").cloned())
+            .unwrap_or_default(),
+        None => envelope.get("error").cloned().unwrap_or_default(),
+    };
+    candidates(&error)
+}
+
+/// A type mismatch gives the paths of the source data as candidates, before the run and at
+/// run time (found by the round 4 review).
+#[test]
+fn regress_type_mismatch_ref_has_candidates() {
+    let mut s = demo();
+    let envelope = batch(
+        &mut s,
+        r#"{"steps":[
+            {"id":"s1","tool":"func_list","args":{"limit":3}},
+            {"id":"s2","tool":"calc","args":{"expr":{"$ref":"s1","ptr":"/data/items/0/size"}}}
+        ]}"#,
+    );
+    assert_eq!(code(&envelope), "BAD_REFERENCE", "{envelope}");
+    let found = error_candidates(&envelope, None);
+    assert!(!found.is_empty(), "{envelope}");
+    assert!(found.iter().all(|c| c.starts_with("/data")), "{found:?}");
+    // The paths that fit a string argument come first, and they need no star.
+    assert!(
+        found.contains(&"/data/items/0/name".to_owned()),
+        "{found:?}"
+    );
+    assert!(!found.iter().any(|c| c.contains('*')), "{found:?}");
+    // A star pointer into a list argument keeps the star in its candidates.
+    let envelope = batch(
+        &mut s,
+        r#"{"steps":[
+            {"id":"s1","tool":"func_list","args":{"limit":3}},
+            {"id":"s2","tool":"func_get","args":{"targets":{"$ref":"s1","ptr":"/data/items/*/visited"}}}
+        ]}"#,
+    );
+    assert_eq!(code(&envelope), "BAD_REFERENCE", "{envelope}");
+    let found = error_candidates(&envelope, None);
+    assert!(found.contains(&"/data/items/*/id".to_owned()), "{found:?}");
+    let envelope = batch(
+        &mut s,
+        r#"{"steps":[
+            {"id":"s1","tool":"tool_search","args":{"name":"calc","level":"full"}},
+            {"id":"s2","tool":"calc","args":{"expr":{"$ref":"s1","ptr":"/data/items/0/schema"}}}
+        ]}"#,
+    );
+    assert_eq!(step_code(&envelope, 1), "BAD_REFERENCE", "{envelope}");
+    let found = error_candidates(&envelope, Some(1));
+    assert!(!found.is_empty(), "{envelope}");
+    assert!(found.iter().all(|c| c.starts_with("/data")), "{found:?}");
+    assert!(
+        found.contains(&"/data/items/0/name".to_owned()),
+        "{found:?}"
+    );
 }
 
 /// The repair call of `PLUCK_TOO_LONG` runs: the source step gets a limit, and the reference
