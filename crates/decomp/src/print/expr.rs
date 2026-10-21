@@ -5,11 +5,12 @@
 
 use std::fmt::Write as _;
 
+use ghidorah_analysis::fir::ret::RetValue;
 use ghidorah_base::{BinText, Caps};
 use ghidorah_ir::{Cc, FlagOp, Loc, OpId, Opc};
 
 use super::{Buf, Printer, width_type};
-use crate::expr::{Callee, Expr, Stmt, VarIdx};
+use crate::expr::{Expr, Stmt, VarIdx};
 use crate::lattice;
 use crate::precedence::{self, ATOM, EQ, POSTFIX, TERNARY, UNARY};
 
@@ -148,12 +149,10 @@ impl Printer<'_> {
             Stmt::Call(c) => {
                 let text = self.call_text(c, buf);
                 if c.tail {
-                    let void = match c.callee {
-                        Callee::Direct(t) => self.env.signature(t).is_some_and(|s| s.ret.is_none()),
-                        _ => false,
-                    };
-                    if !void {
-                        self.rets.push(64);
+                    match self.callee_value(c) {
+                        Some(RetValue::Void) => return format!("{text};"),
+                        Some(RetValue::Float(k)) => self.tail_float = Some(k),
+                        Some(RetValue::Int) | None => self.rets.push(64),
                     }
                     return format!("return {text};");
                 }

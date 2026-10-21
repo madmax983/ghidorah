@@ -52,10 +52,10 @@ const PE_CC_FLOATS: [u64; 7] = [
 ];
 
 /// The address of the callee of the hand-made calls.
-const CALLEE: u64 = 0x2000;
+pub const CALLEE: u64 = 0x2000;
 
 /// Gives the register `xmm0`.
-fn xmm0() -> Loc {
+pub fn xmm0() -> Loc {
     Loc::xmm(0).expect("the register xmm0")
 }
 
@@ -155,7 +155,7 @@ fn assert_summed(text: &str, callees: &[u64]) {
 }
 
 /// Gives the count of the words `word` in `text`.
-fn word_count(text: &str, word: &str) -> usize {
+pub fn word_count(text: &str, word: &str) -> usize {
     text.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
         .filter(|w| *w == word)
         .count()
@@ -208,7 +208,7 @@ fn regress_ms_x64_xmm_kept_across_calls() {
 }
 
 /// An environment with one name and one signature for [`CALLEE`].
-struct SigEnv(&'static str, Signature);
+pub struct SigEnv(pub &'static str, pub Signature);
 
 impl ghidorah_decomp::Env for SigEnv {
     fn callee_name(&self, addr: u64) -> Option<String> {
@@ -246,7 +246,7 @@ fn returns_like(proto: &'static str) -> SigEnv {
 
 /// Gives the text lines and the variable rows of `rax = v0, xmm0 = v1` after a call of
 /// [`CALLEE`]. A store reads each def in `stored`. The return reads `v0`.
-fn call_then_store(env: &dyn PrintEnv, stored: &[u32]) -> (Vec<String>, Vec<(String, String)>) {
+pub fn call_then_store(env: &dyn PrintEnv, stored: &[u32]) -> (Vec<String>, Vec<(String, String)>) {
     let call = Call {
         callee: Callee::Direct(CALLEE),
         args: Vec::new(),
@@ -333,7 +333,7 @@ fn regress_rax_read_keeps_rax_result() {
 
 /// Gives the output of the function at `entry` of `fixture`, or of the function `name` when
 /// `entry` is 0.
-fn render_of(fixture: &str, entry: u64, name: &str) -> ghidorah_decomp::Output {
+pub fn render_of(fixture: &str, entry: u64, name: &str) -> ghidorah_decomp::Output {
     let p = program(fixture);
     let at = if entry == 0 {
         crate::fixtures::entry_of(p, name)
@@ -460,7 +460,7 @@ fn float_return_reads_xmm0() {
 }
 
 /// Gives the argument texts of the first call of `name` in `text`.
-fn call_args(text: &str, name: &str) -> Vec<String> {
+pub fn call_args(text: &str, name: &str) -> Vec<String> {
     let start = text
         .find(&format!("{name}("))
         .unwrap_or_else(|| panic!("no call of {name}:\n{text}"));

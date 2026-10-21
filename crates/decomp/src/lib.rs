@@ -292,7 +292,7 @@ impl Env for ProgramEnv<'_> {
     }
 
     fn param_slots(&self, addr: u64) -> Option<Vec<ghidorah_ir::Loc>> {
-        cache::param_slots(self.0, &self.param_facts(addr)?)
+        cache::param_slots(self.0, addr, &self.param_facts(addr)?)
     }
 
     fn param_info(&self, addr: u64) -> Option<ParamInfo> {

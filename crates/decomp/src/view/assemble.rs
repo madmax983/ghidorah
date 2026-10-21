@@ -403,6 +403,7 @@ pub(crate) fn shape(f: &Facts<'_>, raws: &mut [Raw], assigned: &Assigned, entry:
         effects: f.effects(),
         sources: sources(f),
         float_ret: None,
+        params: None,
     }
 }
 

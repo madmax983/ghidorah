@@ -6,9 +6,11 @@
 //! |---|---|
 //! | an agent type on the `var:` ID | the type of the fact. It always wins. |
 //! | a parameter of the function signature | the type of the parameter |
-//! | a variable that is an argument of a call | the parameter type of the callee signature or prototype |
+//! | a variable that is an argument of a call | the parameter type of the callee signature or prototype, by the register of its class ([`sig_slots`]) |
 //! | the result of a call: the `rax` def, or the `xmm0` def for a floating return type | the return type of the callee |
+//! | the `xmm0` def of a call of a callee with no signature and a recovered floating return | `float` or `double` |
 //! | a variable that a floating return of the function gives | the return type of the signature, else `float` or `double` ([`View::float_ret`]) |
+//! | a parameter that holds the entry value of an XMM register, when the function has no signature | `float` when each scalar op that reads it reads `float` values, else `double` |
 //!
 //! The pass spreads a type over each copy `d = s` in statement order. Two different types
 //! for one variable are a conflict, and the variable gets no type.
@@ -20,8 +22,11 @@
 use std::collections::BTreeSet;
 
 use ghidorah_analysis::cc::loc_of;
+use ghidorah_analysis::fir::callsite::sig_slots;
+use ghidorah_analysis::fir::ret::{FloatRet, RetValue, operand_kind};
 use ghidorah_base::Storage;
-use ghidorah_types::{DataModel, Prim, Tier0, Type, TypeId, TypeStore, layout};
+use ghidorah_ir::Loc;
+use ghidorah_types::{CallConv, DataModel, Prim, Tier0, Type, TypeId, TypeStore, layout};
 
 use crate::expr::{Call, Callee, Expr, Stmt, VarIdx};
 use crate::print::{PrintEnv, Signature, ret_loc};
@@ -102,6 +107,25 @@ impl Stores<'_> {
                 .is_some_and(|s| s.size.saturating_mul(8) == u64::from(bits))
     }
 
+    /// Gives the floating kind of `ty`: `float` for a `float`, `double` for a `double` or a
+    /// `long double` of 8 bytes. Another type gives `None`.
+    #[must_use]
+    pub fn float_kind(&self, ty: Ty) -> Option<FloatRet> {
+        let Some((_, Type::Prim(p))) = self.resolved(ty) else {
+            return None;
+        };
+        match p {
+            Prim::Float => Some(FloatRet::Float),
+            Prim::Double => Some(FloatRet::Double),
+            Prim::LongDouble => self
+                .model()
+                .prim(*p)
+                .filter(|s| s.size == 8)
+                .map(|_| FloatRet::Double),
+            _ => None,
+        }
+    }
+
     /// Tells if `ty` is a `float`, a `double` or a `long double` of 8 bytes. A call returns
     /// such a value in the first floating return register.
     #[must_use]
@@ -137,20 +161,45 @@ impl Seeds {
     }
 }
 
-/// Adds the seeds of one call: its argument variables and its result variable. The result
-/// is in the register of [`ret_loc`].
+/// Gives the location of each parameter of the signature `sig` in the convention `conv`: the
+/// next register of its class, or a stack slot ([`sig_slots`]). A parameter has the floating
+/// class when [`Stores::is_float`] tells so.
+#[must_use]
+pub(crate) fn sig_regs(sig: &Signature, stores: &Stores<'_>, conv: &CallConv) -> Vec<Loc> {
+    let floats: Vec<bool> = sig.params.iter().map(|t| stores.is_float(*t)).collect();
+    sig_slots(conv, &floats)
+}
+
+/// Adds the seeds of one call: its argument variables and its result variable. An argument
+/// is in the register of the class of its parameter. The result is in the register of
+/// [`ret_loc`].
 fn call_seeds(call: &Call, env: &dyn PrintEnv, stores: &Stores<'_>, seeds: &mut Seeds) {
     let Callee::Direct(target) = call.callee else {
         return;
     };
+    let conv = env.conv();
     let Some(sig) = env.signature(target) else {
+        let xmm0 = conv.float_ret.first().and_then(|n| loc_of(n));
+        if let (Some(RetValue::Float(k)), Some(tier0)) = (env.ret_value(target), stores.tier0)
+            && let Some((_, v)) = call.rets.iter().find(|(l, _)| Some(*l) == xmm0)
+        {
+            let id = tier0.store().prim(k.prim());
+            seeds.add(
+                *v,
+                Ty {
+                    store: Store::Tier0,
+                    id,
+                },
+            );
+        }
         return;
     };
-    let conv = env.conv();
-    for (i, ty) in sig.params.iter().enumerate() {
-        let Some(loc) = conv.int_args.get(i).and_then(|n| loc_of(n)) else {
-            break;
-        };
+    let regs = sig_regs(&sig, stores, conv);
+    for (ty, loc) in sig.params.iter().zip(regs) {
+        // A stack slot of the callee has no location of the caller.
+        if matches!(loc, Loc::Stack(_)) {
+            continue;
+        }
         if let Some((_, Expr::Var { var, .. })) = call.args.iter().find(|(l, _)| *l == loc) {
             seeds.add(*var, *ty);
         }
@@ -175,6 +224,31 @@ fn float_ret_type(view: &View, sig: Option<&Signature>, stores: &Stores<'_>) -> 
         store: Store::Tier0,
         id: tier0.store().prim(kind.prim()),
     })
+}
+
+/// Gives the kind of the floating parameter `var` of `view`: `float` when each scalar op that
+/// reads it reads `float` values, else `double`.
+fn param_kind(view: &View, var: VarIdx) -> FloatRet {
+    let reads = |e: &Expr| {
+        e.preorder()
+            .into_iter()
+            .any(|x| matches!(x, Expr::Var { var: y, .. } if *y == var))
+    };
+    let mut kinds = BTreeSet::new();
+    for s in view.nodes.iter().flat_map(|n| &n.stmts) {
+        for c in calls_of(s) {
+            if let Callee::Intrinsic(id) = c.callee
+                && c.args.iter().any(|(_, e)| reads(e))
+            {
+                kinds.extend(operand_kind(id));
+            }
+        }
+    }
+    if kinds.len() == 1 && kinds.contains(&FloatRet::Float) {
+        FloatRet::Float
+    } else {
+        FloatRet::Double
+    }
 }
 
 /// Gives the calls of a statement: the call statement and the calls in its expressions.
@@ -220,6 +294,22 @@ pub fn infer(view: &View, env: &dyn PrintEnv, stores: &Stores<'_>) -> Vec<Option
                 && let Some(ty) = sig.params.get(usize::from(p))
             {
                 seeds.add(VarIdx(u32::try_from(i).unwrap_or(u32::MAX)), *ty);
+            }
+        }
+    } else if let Some(tier0) = stores.tier0 {
+        for (i, v) in view.vars.iter().enumerate() {
+            let float =
+                matches!(v.id.storage, Storage::Param(_)) && v.input.is_some_and(Loc::is_xmm);
+            if float {
+                let var = VarIdx(u32::try_from(i).unwrap_or(u32::MAX));
+                let id = tier0.store().prim(param_kind(view, var).prim());
+                seeds.add(
+                    var,
+                    Ty {
+                        store: Store::Tier0,
+                        id,
+                    },
+                );
             }
         }
     }

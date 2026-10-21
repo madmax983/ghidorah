@@ -2,9 +2,10 @@
 
 use std::time::{Duration, Instant};
 
+use ghidorah_analysis::fir::callsite::Memo;
 use ghidorah_analysis::fir::l1;
-use ghidorah_analysis::fir::ret::{self, FloatRet};
-use ghidorah_base::Address;
+use ghidorah_analysis::fir::ret::{self, FloatRet, RetValue};
+use ghidorah_base::{Address, Fuel};
 use ghidorah_db::{Edit, Program, SessionLabel, Source, SymKind};
 use ghidorah_ir::Loc;
 use ghidorah_types::Prim;
@@ -232,4 +233,102 @@ fn regress_float_return_walk_is_linear() {
     let took = start.elapsed();
     assert_eq!(got, Some(FloatRet::Double));
     assert!(took < Duration::from_secs(1), "the walk took {took:?}");
+}
+
+/// A `ret` that returns the entry value of `rax` gives no value. A read of `rax` is no write.
+/// A write of `rax` or a call before the `ret` gives an integer value. A floating return gives
+/// a floating value. A `void` signature gives no value, and an integer signature an integer
+/// value.
+#[test]
+fn return_value_is_recovered() {
+    let value = |bytes: &[u8]| ret::recover_value(&fir_of(&blob(bytes), BASE));
+    // ret
+    assert_eq!(value(&[RET]), RetValue::Void);
+    // mov [rdi], esi; ret
+    assert_eq!(value(&[0x89, 0x37, RET]), RetValue::Void);
+    // test eax, eax; ret
+    assert_eq!(value(&[0x85, 0xc0, RET]), RetValue::Void);
+    // mov eax, 1; ret
+    assert_eq!(value(&[0xb8, 1, 0, 0, 0, RET]), RetValue::Int);
+    // call +0; ret
+    assert_eq!(value(&[0xe8, 0, 0, 0, 0, RET]), RetValue::Int);
+    // addsd xmm0, xmm1; ret
+    let mut float_body = ADDSD.to_vec();
+    float_body.push(RET);
+    assert_eq!(value(&float_body), RetValue::Float(FloatRet::Double));
+    let sig = |text: &'static str| move |tx: &mut ghidorah_db::Tx<'_>| sig_edit(tx, text);
+    let p = with_sig_program(&[0xb8, 1, 0, 0, 0, RET], sig("void f(int x)"));
+    assert_eq!(
+        ret::ret_value(&p, fid(BASE), &fir_of(&p, BASE)),
+        RetValue::Void
+    );
+    let p = with_sig_program(&[RET], sig("long f(void)"));
+    assert_eq!(
+        ret::ret_value(&p, fid(BASE), &fir_of(&p, BASE)),
+        RetValue::Int
+    );
+}
+
+/// Gives the analyzed blob `bytes` after one edit of its function.
+fn with_sig_program(bytes: &[u8], make: impl FnOnce(&mut ghidorah_db::Tx<'_>) -> Edit) -> Program {
+    let mut p = blob(bytes);
+    let label = SessionLabel::new("test").expect("a label");
+    let mut tx = p.begin("edit", Source::User, label).expect("a transaction");
+    let edit = make(&mut tx);
+    tx.apply(edit).expect("the edit applies");
+    tx.commit().expect("the commit");
+    p
+}
+
+/// `ret_value_in` gives the return value of a callee: the Tier-0 prototype of an import
+/// stub, else the recovery over the solve memo. Another address gives `None`.
+#[test]
+fn callee_return_values() {
+    let p = cached("fixtures/bin/hello.gcc-O2");
+    let mut memo = Memo::default();
+    let mut fuel = Fuel::new(10_000_000);
+    let mut at = |name: &str| {
+        let entry = named(p, name);
+        ret::ret_value_in(p, entry, &mut memo, &mut fuel)
+    };
+    assert_eq!(at("__cxa_finalize@plt"), Some(RetValue::Void));
+    assert_eq!(at("puts@plt"), Some(RetValue::Int));
+    assert_eq!(at("greet"), Some(RetValue::Int));
+    assert_eq!(ret::ret_value_in(p, 0x3, &mut memo, &mut fuel), None);
+    let slot = p
+        .imports()
+        .values()
+        .find(|r| r.id.name() == Some("puts"))
+        .and_then(|r| r.slot)
+        .expect("the slot of puts");
+    assert_eq!(
+        ret::ret_value_in(p, slot.off, &mut memo, &mut fuel),
+        Some(RetValue::Int)
+    );
+}
+
+/// A direct call whose callee returns a floating value is a floating write of its kind. `g`
+/// calls `f` and returns, and `f` converts `edi` to a `double` in `xmm0`. The L0 body of `g`
+/// alone gives no floating return. An indirect call is no evidence.
+#[test]
+fn float_return_follows_float_callee() {
+    // 0x00 g: sub rsp, 8; call f; add rsp, 8; ret. 0x10 f: cvtsi2sd xmm0, edi; ret.
+    let mut bytes = vec![0xcc; 0x15];
+    bytes[..0x0e].copy_from_slice(&[
+        0x48, 0x83, 0xec, 0x08, 0xe8, 0x07, 0, 0, 0, 0x48, 0x83, 0xc4, 0x08, RET,
+    ]);
+    bytes[0x10..0x15].copy_from_slice(&[0xf2, 0x0f, 0x2a, 0xc7, RET]);
+    let p = blob(&bytes);
+    let g = fir_of(&p, BASE);
+    assert_eq!(ret::recover(&g), None);
+    assert_eq!(ret::float_ret(&p, fid(BASE), &g), Some(FloatRet::Double));
+    assert_eq!(
+        ret::ret_value(&p, fid(BASE + 0x10), &fir_of(&p, BASE + 0x10)),
+        RetValue::Float(FloatRet::Double)
+    );
+    // sub rsp, 8; call rax; add rsp, 8; ret
+    let ind = blob(&[
+        0x48, 0x83, 0xec, 0x08, 0xff, 0xd0, 0x48, 0x83, 0xc4, 0x08, RET,
+    ]);
+    assert_eq!(ret::float_ret(&ind, fid(BASE), &fir_of(&ind, BASE)), None);
 }

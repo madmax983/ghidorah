@@ -8,6 +8,7 @@
 //! | `string_bytes` | the bytes of the string fact |
 //! | `call_targets` | the targets of the call references from the site |
 //! | `syscall_name` | the x86-64 syscall table |
+//! | `ret_value` | the return value of a callee: its Tier-0 prototype, else the recovery ([`ret_value_in`]) |
 //!
 //! The register of the result of a call comes from these facts too:
 //!
@@ -16,6 +17,8 @@
 //! | a signature with a `float`, a `double` or an 8-byte `long double` return type | the floating return register, `xmm0` |
 //! | a signature with another return type | `rax` |
 //! | a signature with no return value | none |
+//! | no signature, and the recovery gives no return value | none |
+//! | no signature, and the recovery gives a floating return value | `xmm0` |
 //! | no signature: the caller reads the `xmm0` def, and reads the `rax` def only as a return value | `xmm0` |
 //! | no signature, another caller | `rax` |
 //!
@@ -28,7 +31,9 @@
 use std::collections::BTreeSet;
 
 use ghidorah_analysis::cc::{conv_of, loc_of};
-use ghidorah_base::{Address, FuncId, VarId};
+use ghidorah_analysis::fir::callsite::Memo;
+use ghidorah_analysis::fir::ret::{RetValue, ret_value_in};
+use ghidorah_base::{Address, Fuel, FuncId, VarId};
 use ghidorah_db::{CommentKind, Types};
 use ghidorah_ir::Loc;
 use ghidorah_types::{CallConv, DataModel, Prim, Sig, Type, TypeId, TypeStore};
@@ -210,5 +215,10 @@ impl PrintEnv for ProgramEnv<'_> {
 
     fn conv(&self) -> &'static CallConv {
         conv_of(self.0)
+    }
+
+    fn ret_value(&self, addr: u64) -> Option<RetValue> {
+        let mut fuel = Fuel::new(crate::PARAM_FUEL);
+        ret_value_in(self.0, addr, &mut Memo::default(), &mut fuel)
     }
 }

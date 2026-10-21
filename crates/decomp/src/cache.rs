@@ -15,6 +15,7 @@ use std::sync::Arc;
 
 use ghidorah_analysis::cc::conv_of;
 use ghidorah_analysis::fir::callsite::{self, Memo, ParamFacts};
+use ghidorah_analysis::fir::ret::{RetValue, ret_value_in};
 use ghidorah_base::{Address, Fnv1a64, Fuel, FuncId, Rev, VarId};
 use ghidorah_db::{CommentKind, Program};
 use ghidorah_ir::{IntrinsicNames, Loc};
@@ -177,9 +178,9 @@ impl Cache {
 /// The largest fuel of the parameter queries of one render.
 const PARAM_FUEL: u64 = 1_000_000;
 
-/// Gives the count of the parameter slots of `facts` (see [`Env::param_count`]). A function
-/// with no count gives `None`: it passes its registers on to an import with no Tier-0
-/// prototype in a tail jump, as a thunk does.
+/// Gives the count of the integer and stack parameter slots of `facts` (see
+/// [`Env::param_count`]). A function with no count gives `None`: it passes its registers on to
+/// an import with no Tier-0 prototype in a tail jump, as a thunk does.
 pub(crate) fn slot_count(program: &Program, facts: &ParamFacts) -> Option<u8> {
     let p = facts.params;
     let conv = conv_of(program);
@@ -198,15 +199,33 @@ pub(crate) fn slot_count(program: &Program, facts: &ParamFacts) -> Option<u8> {
     })
 }
 
-/// Gives the argument register of each parameter slot of `facts`: the choice of the recovery
-/// ([`callsite::arg_regs`]). A signature, a prototype or a function with no count gives `None`.
-pub(crate) fn param_slots(program: &Program, facts: &ParamFacts) -> Option<Vec<Loc>> {
-    let live = facts.live.as_ref().filter(|_| !facts.open)?;
-    Some(callsite::arg_regs(
-        conv_of(program),
-        &facts.params,
-        Some(live),
-    ))
+/// Gives the slot of each parameter of the function at `addr` with the facts `facts`, in
+/// slot order (see [`Env::param_slots`]). A function with no count gives `None`.
+///
+/// - A positional convention gives the register of each register slot that the recovery
+///   chose ([`callsite::arg_regs`]). A signature or a prototype gives `None`.
+/// - Another convention (`SysV`) gives the integer registers, then the floating registers,
+///   then the stack slots of the recovery. A signature or a prototype gives the slots of its
+///   parameter classes ([`callsite::fixed_slots`]).
+pub(crate) fn param_slots(program: &Program, addr: u64, facts: &ParamFacts) -> Option<Vec<Loc>> {
+    if facts.open {
+        return None;
+    }
+    let conv = conv_of(program);
+    let Some(live) = facts.live.as_ref() else {
+        return (!conv.positional)
+            .then(|| callsite::fixed_slots(program, FuncId(Address::ram(addr))))
+            .flatten();
+    };
+    let mut out = callsite::arg_regs(conv, &facts.params, Some(live));
+    if !conv.positional {
+        let first = i64::from(conv.stack_arg_offset);
+        out.extend((0..i64::from(facts.params.stack)).filter_map(|j| {
+            let k = first.checked_add(j.checked_mul(8)?)?;
+            i32::try_from(k).ok().map(Loc::Stack)
+        }));
+    }
+    Some(out)
 }
 
 /// Gives the parameter count of `facts` with its source and its varargs flag.
@@ -241,6 +260,8 @@ pub(crate) struct RenderEnv<'a> {
     memo: RefCell<Memo>,
     /// The parameter facts of each function so far.
     facts: RefCell<BTreeMap<u64, Option<ParamFacts>>>,
+    /// The return value of each callee so far.
+    rets: RefCell<BTreeMap<u64, Option<RetValue>>>,
     /// The fuel of the parameter queries.
     fuel: RefCell<Fuel>,
 }
@@ -252,6 +273,7 @@ impl<'a> RenderEnv<'a> {
             env: ProgramEnv(program),
             memo: RefCell::new(Memo::default()),
             facts: RefCell::new(BTreeMap::new()),
+            rets: RefCell::new(BTreeMap::new()),
             fuel: RefCell::new(Fuel::new(fuel.remaining().min(PARAM_FUEL))),
         }
     }
@@ -314,7 +336,8 @@ impl Env for RenderEnv<'_> {
     }
 
     fn param_slots(&self, addr: u64) -> Option<Vec<Loc>> {
-        self.facts(addr).and_then(|f| param_slots(self.env.0, &f))
+        self.facts(addr)
+            .and_then(|f| param_slots(self.env.0, addr, &f))
     }
 
     fn jumptable_unresolved(&self, site: u64) -> bool {
@@ -357,5 +380,19 @@ impl PrintEnv for RenderEnv<'_> {
 
     fn conv(&self) -> &'static CallConv {
         self.env.conv()
+    }
+
+    fn ret_value(&self, addr: u64) -> Option<RetValue> {
+        if let Some(found) = self.rets.borrow().get(&addr) {
+            return *found;
+        }
+        let found = ret_value_in(
+            self.env.0,
+            addr,
+            &mut self.memo.borrow_mut(),
+            &mut self.fuel.borrow_mut(),
+        );
+        self.rets.borrow_mut().insert(addr, found);
+        found
     }
 }

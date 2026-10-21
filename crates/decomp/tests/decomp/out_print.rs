@@ -201,6 +201,7 @@ pub fn decomp(specs: Vec<Spec>, vars: Vec<Var>, tree: Tree) -> Decomp {
             effects: std::collections::BTreeSet::new(),
             sources: std::collections::BTreeMap::new(),
             float_ret: None,
+            params: None,
         },
         tree,
         mode: Mode::Structured,

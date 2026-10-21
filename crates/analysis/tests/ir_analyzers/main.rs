@@ -26,6 +26,7 @@ mod pe;
 mod pipeline;
 mod reanalysis;
 mod ret;
+mod slots;
 mod stack;
 mod support;
 mod syscalls;
