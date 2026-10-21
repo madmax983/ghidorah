@@ -74,8 +74,11 @@ struct Step {
     after: StateHash,
 }
 
-#[test]
-fn ac_116a_undo_redo_model() {
+/// Runs the random undo and redo model of AC-116a with its fixed seed. Each sequence commits
+/// random edits, undoes all of them and redoes all of them. Each step must give the state hash
+/// before or after its commit. Returns the number of applied edits of each kind of
+/// [`EditKind::ALL`] over all the sequences.
+fn undo_redo_model() -> [usize; 15] {
     let mut start = seeded();
     let fn_type = func_type(&mut start);
     let pools = Pools::of(&start, fn_type);
@@ -146,63 +149,27 @@ fn ac_116a_undo_redo_model() {
             other => Err(format!("a full redo leaves entries: {other:?}")),
         }
     });
-    let counts = counts.into_inner();
-    assert!(counts.iter().sum::<usize>() > 0, "no edit applied");
+    counts.into_inner()
+}
+
+/// Makes sure that each edit kind occurs at least 20 times in `counts`.
+fn assert_coverage(counts: &[usize; 15]) {
+    for (kind, n) in EditKind::ALL.iter().zip(counts) {
+        assert!(*n >= 20, "{kind} occurs {n} times");
+    }
+}
+
+#[test]
+fn ac_116a_undo_redo_model() {
+    let counts = undo_redo_model();
+    assert_coverage(&counts);
 }
 
 #[test]
 fn ac_116b_edit_coverage() {
-    let mut start = seeded();
-    let fn_type = func_type(&mut start);
-    let pools = Pools::of(&start, fn_type);
-    let sets = [analysis_set(&start, 0), analysis_set(&start, 1)];
-    let counts = RefCell::new([0usize; 15]);
-    check("ac_116b_edit_coverage", 48, |g| {
-        let mut p = start.clone();
-        let mut h = History::new();
-        let mut before = Vec::new();
-        for kind in 0..15 {
-            let start_hash = hash(&p);
-            let source = if kind == 14 {
-                Source::Analysis
-            } else {
-                Source::Agent
-            };
-            let mut tx = p.begin("coverage", source, session("mcp-1")).unwrap();
-            for _ in 0..3 {
-                let edit = if kind == 14 {
-                    analysis_edit(g, &sets)
-                } else {
-                    base_edit(g, &tx, &pools, kind)
-                };
-                let _ = tx.apply(edit);
-            }
-            let commit = tx.commit().map_err(|e| e.to_string())?;
-            if commit.noop {
-                continue;
-            }
-            for a in &commit.edits {
-                let i = EditKind::ALL
-                    .iter()
-                    .position(|k| *k == a.edit.kind())
-                    .unwrap_or(0);
-                counts.borrow_mut()[i] += 1;
-            }
-            h.record(&TxLine::of_commit(&commit));
-            before.push(start_hash);
-        }
-        for want in before.iter().rev() {
-            apply(&mut p, &mut h, &request(Scope::All, false)).map_err(|e| e.to_string())?;
-            if hash(&p) != *want {
-                return Err("an undo does not restore the state".to_owned());
-            }
-        }
-        Ok(())
-    });
-    let counts = counts.into_inner();
-    for (kind, n) in EditKind::ALL.iter().zip(counts) {
-        assert!(n >= 20, "{kind} occurs {n} times");
-    }
+    // The coverage is over the random undo and redo sequences of AC-116a.
+    let counts = undo_redo_model();
+    assert_coverage(&counts);
 }
 
 #[test]
