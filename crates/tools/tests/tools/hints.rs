@@ -3,10 +3,11 @@
 use ghidorah_base::{ErrorCode, WarningCode};
 use ghidorah_json::Value;
 use ghidorah_tools::args::parse_strict;
+use ghidorah_tools::errors::Inactive;
 use ghidorah_tools::hints::{HintError, MAX_NEXT, check, keep_valid};
 use ghidorah_tools::{
-    AnalysisInfo, AnalysisState, Args, Call, Ctx, Payload, Registry, Request, ToolError, ToolSpec,
-    Warning, dispatch_with,
+    AnalysisInfo, AnalysisState, Args, Call, Candidate, Ctx, Payload, Registry, Request, ToolError,
+    ToolSpec, Warning, dispatch_with,
 };
 
 use crate::common::{json, run_on, text};
@@ -216,4 +217,23 @@ fn hint_check_reasons() {
             .contains("INVALID_ARGUMENT")
     );
     assert!(!HintError::NotInProfile.to_string().is_empty());
+}
+
+/// Each hint and each plain hint of the catalog keeps a sentence when every registry tool is
+/// inactive. So a `--tools` list never gives an empty hint (r3-surface-05).
+#[test]
+fn regress_hint_has_tool_free_sentence() {
+    let shipped = ghidorah_tools::registry::shipped();
+    let none = Inactive::of(&shipped, &|_: &str| false);
+    let mut empty = Vec::new();
+    for code in ErrorCode::ALL {
+        let hinted = ToolError::new(code).candidates(vec![Candidate::text("x", "x")]);
+        let plain = ToolError::new(code).plain_hint();
+        for (what, error, has_next) in [("hint", &hinted, true), ("plain hint", &plain, false)] {
+            if error.hint_in(has_next, &none).is_empty() {
+                empty.push(format!("{} {what}", code.name()));
+            }
+        }
+    }
+    assert!(empty.is_empty(), "these hints are empty: {empty:?}");
 }
