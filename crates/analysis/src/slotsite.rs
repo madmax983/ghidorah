@@ -21,7 +21,7 @@
 //! `mov eax, 0`. The walk then gives 0 ([`SiteTarget::Null`]). The guard skips the site, and
 //! a jump or a call to address 0 has no target.
 //!
-//! `JumpTables` (band 410) records each such site ([`crate::irfacts`] field `slot_sites`).
+//! `JumpTables` (band 410) records each such site in the `slot_sites` field of its IR facts.
 //! Then `Disasm` handles a slot site like `jmp [rip + slot]`: a reference to the EXTERNAL
 //! address of the import, a slot exit or a slot call, and the noreturn flag of the import. A
 //! null site gets [`crate::ctx::UNIT_NULL_TARGET`]: no reference and no CFG edge.
