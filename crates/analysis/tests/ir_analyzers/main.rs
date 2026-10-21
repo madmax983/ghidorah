@@ -4,7 +4,8 @@
 //!
 //! The derived views (function IR, stack frames, method A, parameters, syscall sites, call
 //! arguments and the start call) run over the published facts of the analyzers. The pipeline
-//! tests run the shipped analyzer list, with the WP-19 rows of the registry.
+//! tests run the shipped analyzer list, with the WP-19 rows of the registry. The `cfg` module
+//! checks the CFG invariants on every fixture function.
 
 #![allow(
     clippy::expect_used,
@@ -15,6 +16,7 @@
 mod blob;
 mod callargs;
 mod cc;
+mod cfg;
 mod codeptr;
 mod fir;
 mod gapcomp;

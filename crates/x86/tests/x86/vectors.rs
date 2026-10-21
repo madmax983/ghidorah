@@ -37,6 +37,8 @@ pub struct Form {
     pub bytes: Vec<u8>,
     pub kind: String,
     pub regs: Vec<String>,
+    /// The registers that point into the buffer.
+    pub ptrs: Vec<String>,
     pub mem: usize,
     pub ip: u64,
     pub base: u64,
@@ -77,6 +79,12 @@ fn parse_file(file: &str, text: &str) -> Vec<Form> {
                     .arr()
                     .iter()
                     .map(|r| r.str().to_owned())
+                    .collect(),
+                ptrs: v
+                    .get("ptrs")
+                    .arr()
+                    .iter()
+                    .map(|p| p.arr()[0].str().to_owned())
                     .collect(),
                 mem: usize::try_from(v.get("mem").u64()).expect("size"),
                 ip: u64::try_from(v.get("ip").hex()).expect("ip"),
@@ -290,6 +298,99 @@ fn template_of(row: &str) -> Option<Template> {
     lift::row(Mnem::from_name(row)?).map(|r| r.template)
 }
 
+/// The widths of the forms of each row in the vector files. A row with a form missing at a
+/// width fails AC-069a.
+const WIDTHS: &[(&[u64], &[&str])] = &[
+    (
+        &[8],
+        &[
+            "lahf", "sahf", "seta", "setae", "setb", "setbe", "sete", "setg", "setge", "setl",
+            "setle", "setne", "setno", "setnp", "setns", "seto", "setp", "sets",
+        ],
+    ),
+    (
+        &[8, 16, 32, 64],
+        &[
+            "adc", "add", "and", "cmp", "cmpxchg", "dec", "div", "idiv", "imul", "inc", "mov",
+            "mul", "neg", "not", "or", "rol", "ror", "sar", "sbb", "shl", "shr", "sub", "test",
+            "xadd", "xchg", "xor",
+        ],
+    ),
+    (&[8, 32, 64], &["movs"]),
+    (&[8, 64], &["cmps", "lods", "scas", "stos"]),
+    (&[16], &["cbw", "clc", "cld", "cmc", "cwd", "stc"]),
+    (
+        &[16, 32, 64],
+        &[
+            "bsf", "bsr", "bt", "btc", "btr", "bts", "cmova", "cmovae", "cmovb", "cmovbe", "cmove",
+            "cmovg", "cmovge", "cmovl", "cmovle", "cmovne", "cmovno", "cmovnp", "cmovns", "cmovo",
+            "cmovp", "cmovs", "lea", "lzcnt", "movsx", "movzx", "popcnt", "shld", "shrd", "tzcnt",
+        ],
+    ),
+    (&[16, 64], &["pop", "push"]),
+    (&[32], &["cdq", "cwde", "movd", "movss"]),
+    (&[32, 64], &["bswap"]),
+    (
+        &[64],
+        &[
+            "call", "cdqe", "cqo", "endbr64", "ja", "jae", "jb", "jbe", "je", "jecxz", "jg", "jge",
+            "jl", "jle", "jmp", "jne", "jno", "jnp", "jns", "jo", "jp", "jrcxz", "js", "leave",
+            "loop", "loope", "loopne", "movabs", "movq", "movsd", "movsxd", "nop", "pause", "popf",
+            "pushf", "ret",
+        ],
+    ),
+    (
+        &[128],
+        &[
+            "movapd", "movaps", "movdqa", "movdqu", "movupd", "movups", "pxor", "xorpd", "xorps",
+        ],
+    ),
+];
+
+/// Gives the AFL edge values at the width `w`: 0, 1, the sign bit and the all-ones mask.
+fn edges(w: u64) -> [u128; 4] {
+    let bits = u32::try_from(w).expect("a width");
+    let ones = u128::MAX >> (128 - bits);
+    [0, 1, 1 << (bits - 1), ones]
+}
+
+/// Gives the indexes of the data inputs of a form: the registers that are not the flags,
+/// `pc`, `rsp` or a buffer pointer.
+fn data_inputs(form: &Form) -> Vec<usize> {
+    form.regs
+        .iter()
+        .enumerate()
+        .filter(|(_, r)| !matches!(r.as_str(), "flags" | "pc" | "rsp") && !form.ptrs.contains(*r))
+        .map(|(i, _)| i)
+        .collect()
+}
+
+/// Gives the (row, width) groups whose data inputs miss an edge value, with the missing
+/// values.
+fn missing_edges(forms: &[Form]) -> Vec<String> {
+    let mut seen: BTreeMap<(&str, u64), BTreeSet<u128>> = BTreeMap::new();
+    for form in forms {
+        let data = data_inputs(form);
+        if data.is_empty() {
+            continue;
+        }
+        let mask = edges(form.w)[3];
+        let values = seen.entry((form.row.as_str(), form.w)).or_default();
+        for v in &form.vectors {
+            values.extend(data.iter().map(|i| v.inputs[*i] & mask));
+        }
+    }
+    seen.iter()
+        .filter_map(|((row, w), values)| {
+            let lack: Vec<u128> = edges(*w)
+                .into_iter()
+                .filter(|e| !values.contains(e))
+                .collect();
+            (!lack.is_empty()).then(|| format!("{row} at {w} bits: {lack:#x?}"))
+        })
+        .collect()
+}
+
 #[test]
 fn ac_069a_semantic_vectors() {
     let forms = forms();
@@ -311,6 +412,17 @@ fn ac_069a_semantic_vectors() {
         small.is_empty(),
         "rows with fewer than 64 vectors at a width: {small:?}"
     );
+    let lack = missing_edges(forms);
+    assert!(lack.is_empty(), "groups without an edge value: {lack:#?}");
+    let mut widths: BTreeMap<&str, BTreeSet<u64>> = BTreeMap::new();
+    for (row, w) in counts.keys() {
+        widths.entry(row.as_str()).or_default().insert(*w);
+    }
+    let want: BTreeMap<&str, BTreeSet<u64>> = WIDTHS
+        .iter()
+        .flat_map(|(ws, rows)| rows.iter().map(|r| (*r, ws.iter().copied().collect())))
+        .collect();
+    assert_eq!(widths, want, "the widths of each row");
 }
 
 #[test]

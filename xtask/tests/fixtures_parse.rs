@@ -112,6 +112,40 @@ fn readelf_text_parses() {
     assert_eq!(elfinfo::hex("0x1f"), Some(31));
 }
 
+#[test]
+fn variant_protections_hold_the_fields_that_differ() {
+    let base = elfinfo::parse(READELF).protections();
+    assert!(
+        elfinfo::parse(READELF)
+            .variant_protections(&base)
+            .is_empty()
+    );
+    // `objcopy` drops PT_GNU_RELRO and the execute bit of the stack changes.
+    let noeh = READELF
+        .replace(
+            "  GNU_RELRO      0x002db8 0x0000000000003db8 0x0000000000003db8 0x000248 0x000248 R   0x1\n",
+            "",
+        )
+        .replace("0x000000 RW  0x10", "0x000000 RWE 0x10");
+    let own = elfinfo::parse(&noeh).variant_protections(&base);
+    let keys: Vec<&str> = own.keys().map(String::as_str).collect();
+    assert_eq!(keys, ["nx", "relro"]);
+    assert_eq!(own.get("relro").and_then(Value::as_str), Some("none"));
+    assert_eq!(own.get("nx").and_then(Value::as_bool), Some(false));
+    // A text with no symbol table keeps the import fields of the build.
+    let start = READELF
+        .find("Symbol table '.dynsym'")
+        .expect("the dynsym part");
+    let end = READELF.find("Displaying notes").expect("the notes part");
+    let noshdr = format!("{}{}", &READELF[..start], &READELF[end..]);
+    assert!(elfinfo::parse(&noshdr).imports().is_empty());
+    assert!(
+        elfinfo::parse(&noshdr)
+            .variant_protections(&base)
+            .is_empty()
+    );
+}
+
 const OBJDUMP: &str = "hello.gcc-O2:     file format elf64-x86-64
 
 
@@ -420,6 +454,38 @@ fn truth_schema_reports_faults() {
     broken.insert("function_count".to_owned(), Value::from(1u64));
     let found = truth::check_value("hello.gcc-O2", &Value::Object(broken));
     assert!(found.iter().any(|m| m.contains("`functions`")), "{found:?}");
+    // `variant_protections` names variants of `binaries` with fields that differ.
+    let own = good
+        .get("variant_protections")
+        .expect("the noeh variant of hello.gcc-O2 has no PT_GNU_RELRO");
+    assert_eq!(
+        own.pointer("/noeh/relro").and_then(Value::as_str),
+        Some("none")
+    );
+    for (bad, message) in [
+        (r#"{"debug":{"relro":"none"}}"#, "not a variant"),
+        (r#"{"noeh":{}}"#, "not an object with a field"),
+        (r#"{"noeh":{"relro":1}}"#, "wrong type"),
+        (r#"{"noeh":{"color":true}}"#, "unknown"),
+        (r#"{"noeh":{"pie":true}}"#, "equals `protections`"),
+        (r#"{"noeh":{"build_id":null}}"#, ""),
+        ("[]", "not an object"),
+    ] {
+        let mut t = good.as_object().cloned().expect("object");
+        t.insert(
+            "variant_protections".to_owned(),
+            json::parse(bad).expect("json"),
+        );
+        let found = truth::check_value("hello.gcc-O2", &Value::Object(t));
+        if message.is_empty() {
+            assert!(found.is_empty(), "{bad}: {found:?}");
+        } else {
+            assert!(
+                found.iter().any(|m| m.contains(message)),
+                "{bad}: {found:?}"
+            );
+        }
+    }
 }
 
 #[test]

@@ -9,7 +9,9 @@
 //!   entry and the variable facts,
 //! - the address facts in its body: references from the body, flow overrides, jump tables,
 //!   data definitions, names and comments,
-//! - the record of each callee: a call reference from the body names it.
+//! - the record of each callee: a call reference or a jump reference from the body names
+//!   it. A tail jump to the entry of another function is a jump reference. The record at
+//!   each other jump target counts too, so a new function there changes the epoch.
 //!
 //! The listing, function, symbol, reference, string, comment and variable tables merge the
 //! analysis layer. So their epoch is at least the epoch of the analysis table.
@@ -37,6 +39,7 @@ use ghidorah_kernel::RangeSet;
 use crate::edit::Edit;
 use crate::events::Event;
 use crate::program::Program;
+use crate::refs::RefType;
 use crate::why::FactKey;
 
 /// A table with an epoch.
@@ -313,7 +316,10 @@ impl Program {
             let units = self.analysis().listing().units_in(*range);
             for (off, _) in units.chain(self.base().listing().units_in(*range)) {
                 for r in self.refs_from(Address::ram(off)) {
-                    if r.value.key.kind.is_call() {
+                    let kind = r.value.key.kind;
+                    let jump =
+                        matches!(kind, RefType::UnconditionalJump | RefType::ConditionalJump);
+                    if kind.is_call() || jump {
                         best = best.max(e.func(FuncId(r.value.key.to)));
                     }
                 }

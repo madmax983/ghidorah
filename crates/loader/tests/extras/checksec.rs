@@ -1,5 +1,7 @@
 //! AC-058: the protections of each fixture equal its truth file.
 
+use std::collections::{BTreeMap, BTreeSet};
+
 use ghidorah_base::BinText;
 use ghidorah_loader::checksec::{elf, protections};
 use ghidorah_loader::{ElfProtections, Protections, Relro};
@@ -7,7 +9,7 @@ use ghidorah_testkit::elf::consts::{DT_FLAGS, DT_FLAGS_1};
 use ghidorah_testkit::elf::{ElfBuilder, ImportKind, Loc, Section, Symbol};
 
 use crate::json;
-use crate::support::{fixture, golden_body, has_fixture, load_ok, root};
+use crate::support::{fixture, has_fixture, load_ok, root};
 
 fn relro_name(r: Relro) -> &'static str {
     match r {
@@ -34,30 +36,51 @@ fn render(p: &ElfProtections, build_id: Option<&str>) -> String {
     )
 }
 
-/// Renders the truth fields. `relro_seen` is `false` when the readelf golden of the file
-/// has no `PT_GNU_RELRO`. `objcopy` drops that header in the `noeh` variants, so the golden
-/// decides RELRO for such a file.
-fn render_truth(t: &json::Json, relro_seen: bool) -> String {
-    let id = match t.get("build_id") {
-        json::Json::Str(s) => s.clone(),
-        _ => "null".to_string(),
+/// The truth fields in the key order of [`render`].
+const KEYS: [&str; 10] = [
+    "build_id", "canary", "fortify", "ibt", "nx", "pie", "relro", "rpath", "runpath", "shstk",
+];
+
+/// Gives the truth protections of one `variant` of a build. The fields of
+/// `variant_protections` for that variant replace the fields of the `protections` block.
+fn truth_protections(truth: &json::Json, variant: &str) -> BTreeMap<String, json::Json> {
+    let json::Json::Obj(base) = truth.get("protections") else {
+        panic!("the protections block is an object");
     };
-    format!(
-        "build_id={id} canary={} fortify={} ibt={} nx={} pie={} relro={} rpath={} runpath={} shstk={}",
-        t.get("canary").bool(),
-        t.get("fortify").bool(),
-        t.get("ibt").bool(),
-        t.get("nx").bool(),
-        t.get("pie").bool(),
-        if relro_seen {
-            t.get("relro").text()
+    let mut out = base.clone();
+    if let json::Json::Obj(top) = truth
+        && let Some(json::Json::Obj(all)) = top.get("variant_protections")
+        && let Some(json::Json::Obj(own)) = all.get(variant)
+    {
+        out.extend(own.clone());
+    }
+    out
+}
+
+/// Renders the truth fields in the form of [`render`].
+fn render_truth(p: &BTreeMap<String, json::Json>) -> String {
+    let field = |key: &str| match p.get(key) {
+        Some(json::Json::Str(s)) => format!("{key}={s}"),
+        Some(b @ json::Json::Bool(_)) => format!("{key}={}", b.bool()),
+        Some(json::Json::Null) => format!("{key}=null"),
+        other => panic!("truth field {key}: {other:?}"),
+    };
+    KEYS.map(field).join(" ")
+}
+
+/// Records the value of each field of a rendered line. A build ID counts as `id`.
+fn note(seen: &mut BTreeMap<String, BTreeSet<String>>, line: &str) {
+    for pair in line.split(' ') {
+        let (key, value) = pair.split_once('=').expect("a key and a value");
+        let value = if key == "build_id" && value != "null" {
+            "id"
         } else {
-            "none"
-        },
-        t.get("rpath").bool(),
-        t.get("runpath").bool(),
-        t.get("shstk").bool()
-    )
+            value
+        };
+        seen.entry(key.to_owned())
+            .or_default()
+            .insert(value.to_owned());
+    }
 }
 
 #[test]
@@ -65,6 +88,7 @@ fn ac_058_protections() {
     let dir = root().join("fixtures/truth");
     let mut checked = 0;
     let mut problems = Vec::new();
+    let mut seen = BTreeMap::new();
     let mut paths: Vec<_> = std::fs::read_dir(&dir)
         .expect("truth dir")
         .map(|e| e.expect("entry").path())
@@ -79,14 +103,14 @@ fn ac_058_protections() {
                 continue;
             }
             checked += 1;
-            let readelf = golden_body("loader", &format!("{name}.readelf.txt")).expect("golden");
-            let want = render_truth(truth.get("protections"), readelf.contains("GNU_RELRO"));
+            let want = render_truth(&truth_protections(&truth, bin.get("variant").text()));
             let (b, _) = load_ok(&fixture(name));
             let Some(Protections::Elf(p)) = b.protections.clone() else {
                 problems.push(format!("{name}: protections {:?}", b.protections));
                 continue;
             };
             let got = render(&p, b.identity.build_id.as_deref());
+            note(&mut seen, &got);
             if got != want {
                 problems.push(format!("{name}:\n  got  {got}\n  want {want}"));
             }
@@ -104,6 +128,23 @@ fn ac_058_protections() {
     }
     assert!(checked >= 130, "only {checked} binaries");
     assert!(problems.is_empty(), "{}", problems.join("\n"));
+    // The fixtures never give some values, for example NX off or a RUNPATH. The builder
+    // cases give them.
+    for line in builder_cases() {
+        note(&mut seen, &line);
+    }
+    for key in KEYS {
+        let want: &[&str] = match key {
+            "build_id" => &["id", "null"],
+            "relro" => &["full", "none", "partial"],
+            _ => &["false", "true"],
+        };
+        let got: Vec<&str> = seen
+            .get(key)
+            .map(|s| s.iter().map(String::as_str).collect())
+            .unwrap_or_default();
+        assert_eq!(got, want, "the values of {key}");
+    }
 }
 
 fn base() -> ElfBuilder {
@@ -114,9 +155,16 @@ fn base() -> ElfBuilder {
         .entry(Loc::symbol("_start"))
 }
 
-#[test]
-fn builder_protections() {
-    let get = |b: ElfBuilder| elf(&load_ok(&b.build()).0);
+/// Checks the protections of the `ElfBuilder` cases: each value of each field. Gives the
+/// rendered protections of each case.
+fn builder_cases() -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut get = |b: ElfBuilder| {
+        let (bin, _) = load_ok(&b.build());
+        let p = elf(&bin);
+        lines.push(render(&p, bin.identity.build_id.as_deref()));
+        p
+    };
     let plain = get(base());
     assert!(!plain.pie, "ET_DYN without PT_INTERP or DF_1_PIE");
     assert!(!plain.nx && !plain.canary && !plain.fortify && !plain.ibt && !plain.shstk);
@@ -162,6 +210,7 @@ fn builder_protections() {
     assert_eq!(paths.runpath, Some(BinText::new(b"/rp".to_vec())));
     assert!(get(base().strip_section_headers()).stripped);
     let _ = (DT_FLAGS, DT_FLAGS_1);
+    lines
 }
 
 #[test]

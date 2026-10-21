@@ -8,6 +8,7 @@
 //! | `call_edges`, `tail_calls`, `self_calls` | direct calls and jumps of the objdump listing |
 //! | `jump_tables` | the object relocations and the link map ([`super::jumptab`]) |
 //! | `elf`, `libraries`, `imports`, `protections` | the `readelf` text |
+//! | `variant_protections` | the `readelf` text of each variant: the protection fields that differ |
 //! | `strings`, `syscalls`, `gaps` | the source facts, placed in the binary |
 //! | `leaf_functions` | the `LEAF` lines of the sources |
 //! | `facts`, `survey_facts` | the source facts that hold in the build |
@@ -56,6 +57,8 @@ pub struct Inputs<'a> {
     pub facts: &'a Value,
     /// The leaf functions with vectors in this build.
     pub leafs: &'a [LeafFn],
+    /// The `readelf` text of each variant of the build, by variant name.
+    pub variants: &'a [(&'static str, ElfInfo)],
 }
 
 /// The imports that the truth counts as network functions (`network_imports`).
@@ -350,7 +353,7 @@ pub fn assemble(inp: &Inputs<'_>) -> Result<Value, Vec<String>> {
             ),
         ),
         ("imports", strs(imports)),
-        ("protections", protections),
+        ("protections", protections.clone()),
         (
             "functions",
             Value::from(
@@ -377,6 +380,18 @@ pub fn assemble(inp: &Inputs<'_>) -> Result<Value, Vec<String>> {
     ];
     for (k, v) in rest {
         map.insert(k.to_owned(), v);
+    }
+    let variants: BTreeMap<String, Value> = inp
+        .variants
+        .iter()
+        .map(|(name, info)| {
+            let own = info.variant_protections(&protections);
+            ((*name).to_owned(), Value::Object(own))
+        })
+        .filter(|(_, v)| v.as_object().is_some_and(|m| !m.is_empty()))
+        .collect();
+    if !variants.is_empty() {
+        map.insert("variant_protections".to_owned(), Value::Object(variants));
     }
     Ok(Value::Object(map))
 }

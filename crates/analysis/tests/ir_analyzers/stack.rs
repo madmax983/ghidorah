@@ -1,8 +1,11 @@
 //! Stack tracking, frames, the CFA cross-check (AC-091) and the escape rule (AC-207).
 
+use ghidorah_analysis::FuncIr;
+use ghidorah_analysis::code::decode_at;
 use ghidorah_analysis::stack::{self, Sp};
-use ghidorah_db::{FlowKind, StartReason};
+use ghidorah_db::{FlowKind, Program, StartReason};
 use ghidorah_ir::{Loc, Opc};
+use ghidorah_x86::{Mnem, Operand, Reg};
 
 use crate::blob::load;
 use crate::support::{cached, fid, fir_of, fixtures};
@@ -52,17 +55,39 @@ fn stack_offsets_of_a_frame() {
     assert!(frame.low() <= -16);
 }
 
+/// The CFA cross-check over the call sites of the fixture functions.
+#[derive(Debug, Default)]
+struct CfaSites {
+    /// The call sites with a CFA row.
+    with_row: usize,
+    /// The call sites with a CFA row and a tracked offset.
+    compared: usize,
+    /// The sites where the tracked offset differs from the CFA.
+    mismatches: Vec<String>,
+    /// The sites with a CFA row and no tracked offset, after a dynamic realign of `rsp`.
+    realigned: usize,
+    /// The other sites with a CFA row and no tracked offset.
+    untracked: Vec<String>,
+}
+
+/// Tells if `site` comes after an `and rsp, imm` of the function: a dynamic realign. The
+/// tracked offset of `rsp` is then `Top`. The CFA rows of `_start` do not show the realign.
+fn after_realign(p: &Program, ir: &FuncIr, site: u64) -> bool {
+    ir.units.range(..site).any(|(at, _)| {
+        decode_at(p, *at).is_some_and(|insn| {
+            insn.mnem() == Mnem::And
+                && matches!(insn.op(0), Some(Operand::Reg { reg, .. }) if reg == Reg::RSP)
+                && matches!(insn.op(1), Some(Operand::Imm { .. }))
+        })
+    })
+}
+
 /// Compares the tracked offsets with the CFA rows at the call sites of every function of the
-/// `none` and `stripped` fixtures. `skip_fde_only` skips the functions that only an FDE starts
+/// T1 and T2 fixtures. A `noeh` variant has no FDE. `skip_fde_only` skips the functions that only an FDE starts
 /// and the functions with a `.cold` name.
-/// Gives the count of compared sites and the mismatches.
-fn cfa_mismatches(skip_fde_only: bool) -> (usize, Vec<String>) {
-    let mut checked = 0usize;
-    let mut bad = Vec::new();
+fn cfa_sites(skip_fde_only: bool) -> CfaSites {
+    let mut out = CfaSites::default();
     for f in fixtures() {
-        if !matches!(f.variant.as_str(), "none" | "stripped") {
-            continue;
-        }
         let p = cached(&f.path);
         for view in p.funcs() {
             let cold_name = p
@@ -85,30 +110,71 @@ fn cfa_mismatches(skip_fde_only: bool) -> (usize, Vec<String>) {
                     })
                     .map(|(at, _)| *at)
                     .collect();
-                for m in stack::cfa_check(frame, fde, &calls) {
-                    bad.push(format!("{}: {}: {m:x?}", f.path, fid(entry)));
+                let report = stack::cfa_check(frame, fde, &calls);
+                let where_ = format!("{}: {}", f.path, fid(entry));
+                out.mismatches.extend(
+                    report
+                        .mismatches
+                        .iter()
+                        .map(|m| format!("{where_}: {m:x?}")),
+                );
+                for u in &report.untracked {
+                    if u.value == Some(Sp::Top) && after_realign(p, &ir, u.site) {
+                        out.realigned += 1;
+                    } else {
+                        out.untracked.push(format!("{where_}: {u:x?}"));
+                    }
                 }
-                checked += calls.len();
+                out.compared += report.compared;
+                out.with_row += calls
+                    .iter()
+                    .filter(|c| stack::cfa_rule(fde, **c).is_some())
+                    .count();
             }
         }
     }
-    (checked, bad)
+    out
 }
 
 #[test]
 fn ac_091_sp_vs_cfa() {
-    let (checked, bad) = cfa_mismatches(false);
-    assert!(checked > 2_000, "call sites with a CFA row: {checked}");
-    assert!(bad.is_empty(), "{} of {checked}: {bad:#?}", bad.len());
+    let s = cfa_sites(false);
+    assert!(s.compared > 2_000, "compared call sites: {}", s.compared);
+    assert!(
+        s.mismatches.is_empty(),
+        "{} of {}: {:#?}",
+        s.mismatches.len(),
+        s.compared,
+        s.mismatches
+    );
+    assert!(
+        s.untracked.is_empty(),
+        "{} of {}: {:#?}",
+        s.untracked.len(),
+        s.with_row,
+        s.untracked
+    );
+    assert_eq!(
+        s.compared + s.realigned,
+        s.with_row,
+        "each site with a CFA row is compared, or comes after a realign"
+    );
+    // Each `_start` of a fixture realigns `rsp` before its call of `__libc_start_main`.
+    assert!(
+        s.realigned * 20 < s.with_row,
+        "realigned sites: {} of {}",
+        s.realigned,
+        s.with_row
+    );
 }
 
 #[test]
 fn cfa_rows_outside_cold_parts() {
     // Before the cold-part merge, an FDE-only function can be a cold part that runs on the
     // frame of its parent. The pipeline test checks those functions too.
-    let (checked, bad) = cfa_mismatches(true);
-    assert!(checked > 1_000, "call sites with a CFA row: {checked}");
-    assert!(bad.is_empty(), "{} of {checked}: {bad:#?}", bad.len());
+    let s = cfa_sites(true);
+    assert!(s.compared > 1_000, "compared call sites: {}", s.compared);
+    assert!(s.mismatches.is_empty(), "{:#?}", s.mismatches);
 }
 
 #[test]
@@ -126,7 +192,7 @@ fn regress_vzeroupper_keeps_stack_height() {
 }
 
 /// The ops of the instruction at `addr` of the IR of the blob function.
-fn opcodes(ir: &ghidorah_analysis::FuncIr, addr: u64) -> Vec<Opc> {
+fn opcodes(ir: &FuncIr, addr: u64) -> Vec<Opc> {
     let span = ir.insn(addr).expect("an instruction");
     ir.arena
         .span_ops(span)

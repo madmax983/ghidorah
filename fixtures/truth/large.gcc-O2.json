@@ -6119,5 +6119,10 @@
     ["frame_dummy","register_tm_clones"],
     ["lg_fail","__fprintf_chk"]
   ],
-  "tier": "T2"
+  "tier": "T2",
+  "variant_protections": {
+    "noeh": {
+      "relro": "none"
+    }
+  }
 }

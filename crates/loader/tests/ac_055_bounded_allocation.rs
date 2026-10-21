@@ -223,8 +223,8 @@ fn regress_pe_shared_ilt_import_cap() {
         let (result, stats) =
             ALLOC.measure(|| load(&bytes, &LoadOpts::AUTO, &Limits::DEFAULT).map(|(b, _)| b));
         let b = result.expect("the load");
-        // The import cap of the loader is file size / 16 + 32,768, below this bound.
-        let cap = bytes.len() / 8 + 65_536;
+        // The import cap of Section 4.11 is file size / 16 + 32,768.
+        let cap = bytes.len() / 16 + 32_768;
         assert!(
             b.imports.len() <= cap,
             "{name}: {} imports above {cap}",
@@ -237,6 +237,8 @@ fn regress_pe_shared_ilt_import_cap() {
             .filter(|d| d.code.name() == "E_LIMIT")
             .collect();
         assert_eq!(limits.len(), 1, "{name}: {limits:?}");
+        // The loader hits the cap, so it keeps exactly the cap of imports.
+        assert_eq!(b.imports.len(), cap, "{name}: the cap is full");
         let limit = bound(bytes.len());
         assert!(
             stats.peak_bytes <= limit,

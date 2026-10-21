@@ -10,7 +10,7 @@ use ghidorah_db::{CommentKind, JtMethod, PartKind, Source, StartReason};
 use ghidorah_json::Value;
 
 use crate::blob::{BASE, load};
-use crate::support::{analyze, cached, fid, fixtures, hex, list, truth, truth_funcs};
+use crate::support::{analyze, cached, fid, fixtures, hex, list, root, truth, truth_funcs};
 
 /// The function-start counts of a set of fixtures: true positives, false positives and false
 /// negatives, with the misses of each fixture.
@@ -208,11 +208,18 @@ fn ac_084_no_merged_functions() {
     assert!(checked > 2_000, "{checked}");
 }
 
+/// Tells if the ELF file at `path` has the type `ET_DYN`.
+fn is_pie(path: &str) -> bool {
+    let bytes = std::fs::read(root().join(path)).expect("the fixture bytes");
+    bytes.get(16..18) == Some(&[3, 0][..])
+}
+
 #[test]
 fn ac_088_main_discovery() {
     let mut found = 0;
     for f in fixtures() {
-        if f.variant != "stripped" {
+        // A stripped PIE file has no symbol of `main`: the stripped, noeh and noshdr variants.
+        if !matches!(f.variant.as_str(), "stripped" | "noeh" | "noshdr") || !is_pie(&f.path) {
             continue;
         }
         let t = truth(&f.truth);
@@ -230,7 +237,7 @@ fn ac_088_main_discovery() {
         assert_eq!(name.source, Source::Analysis);
         found += 1;
     }
-    assert!(found >= 50, "the stripped fixtures with main: {found}");
+    assert!(found >= 70, "the stripped PIE fixtures with main: {found}");
     // An unstripped file keeps its imported name.
     let p = cached("fixtures/bin/hello.gcc-O2");
     let main = crate::support::named(p, "main");

@@ -137,10 +137,8 @@ fn ac_246_imports_exports_golden() {
     );
     let (b, _) = load_fixture("pe_dll.dll");
     assert_eq!(text(b.identity.soname.as_ref()), "pe_dll.dll");
-}
-
-#[test]
-fn null_ilt_uses_iat() {
+    // No fixture has a null ILT, so a `PeBuilder` variant gives that form.
+    // The loader reads the names and hints from the IAT.
     let layout = pe::builder("null_ilt").expect("variant").layout();
     let (b, _) = load_variant("null_ilt");
     let got: Vec<Row> = b.imports.iter().map(row).collect();

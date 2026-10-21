@@ -11,8 +11,9 @@ fn insn(text: &str) -> Insn {
     dec(&hex(text), 0x1000).unwrap_or_else(|e| panic!("{text}: {e}"))
 }
 
+/// AC-067: an `Insn` record fits in 64 bytes.
 #[test]
-fn insn_fits_64_bytes() {
+fn ac_067_insn_fits_64_bytes() {
     assert!(
         size_of::<Insn>() <= 64,
         "Insn has {} bytes",
