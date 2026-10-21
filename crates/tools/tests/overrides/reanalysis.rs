@@ -2,8 +2,8 @@
 //! stale reads, start bands, call targets and orphans.
 
 use ghidorah_analysis::orphans::{OrphanKind, find};
-use ghidorah_base::{Address, BinaryId, Fuel, FuncId, Id};
-use ghidorah_db::{RefKey, RefType, Source};
+use ghidorah_base::{Address, BinaryId, Fuel, FuncId, Id, JumpTableId};
+use ghidorah_db::{FlowOverride, RefKey, RefType, Source};
 use ghidorah_json::Value;
 
 use crate::support::{
@@ -16,30 +16,31 @@ fn demo_id() -> BinaryId {
     BinaryId::parse(DEMO_ID).expect("the ID parses")
 }
 
-#[test]
-fn ac_163a_override_persists() {
-    let dir = tmp("persist");
-    let args = r#"{"action":"set_noreturn","target":"fn:0x11e0","noreturn":false}"#;
-    {
-        let mut s = session_with(config_in(&dir));
-        load_demo(&mut s);
-        let envelope = call(&mut s, "func_edit", args);
-        let out = data(&envelope);
-        assert_eq!(text_at(out, "/analysis/state"), "complete", "{envelope}");
-        assert!(
-            out.pointer("/analysis/steps_used")
-                .and_then(Value::as_u64)
-                .is_some_and(|n| n > 0),
-            "the edit starts a re-analysis: {envelope}"
-        );
-        assert!(envelope.get("tx").and_then(Value::as_str).is_some());
-        let rows = items(&call(&mut s, "history_list", r#"{"since_rev":1}"#));
-        assert!(
-            rows.iter().any(|r| text_at(r, "/kind") == "noreturn"),
-            "{rows:?}"
-        );
+/// Runs the `func_edit` example `args` on the demo in the project `dir`, after the example
+/// that makes its fact. The edit must start a re-analysis that completes.
+fn edit_in_project(dir: &std::path::Path, args: &str) {
+    let mut s = session_with(config_in(dir));
+    load_demo(&mut s);
+    if let Some(setup) = ghidorah_tools::handlers::func_edit::setup_of(args) {
+        data(&call(&mut s, "func_edit", setup));
     }
-    let mut s = session_with(config_in(&dir));
+    let envelope = call(&mut s, "func_edit", args);
+    let out = data(&envelope);
+    assert_eq!(text_at(out, "/analysis/state"), "complete", "{envelope}");
+    assert!(
+        out.pointer("/analysis/steps_used")
+            .and_then(Value::as_u64)
+            .is_some_and(|n| n > 0),
+        "{args}: the edit starts a re-analysis: {envelope}"
+    );
+    assert!(envelope.get("tx").and_then(Value::as_str).is_some());
+    let rows = items(&call(&mut s, "history_list", r#"{"since_rev":1}"#));
+    assert!(!rows.is_empty(), "{args}: a history row");
+}
+
+/// Opens the demo again from the project `dir` with `binary_load { binary_id }`.
+fn reopen(dir: &std::path::Path) -> ghidorah_tools::Session {
+    let mut s = session_with(config_in(dir));
     let reopen = call(
         &mut s,
         "binary_load",
@@ -51,13 +52,83 @@ fn ac_163a_override_persists() {
         "complete",
         "the analysis of the project is current: {reopen}"
     );
-    let fact = program(&s)
-        .base()
-        .funcs()
-        .get(FuncId(Address::ram(0x11e0)))
-        .and_then(|f| f.flags.noreturn.clone())
-        .expect("the override persists");
-    assert_eq!((fact.value, fact.source), (false, Source::Agent));
+    s
+}
+
+/// Tells if the program has the agent reference of the `add_ref` example.
+fn agent_ref(p: &ghidorah_db::Program) -> bool {
+    p.refs_from(Address::ram(0x10f8)).iter().any(|r| {
+        r.source == Source::Agent
+            && r.value.key.to == Address::ram(0x11d0)
+            && r.value.key.kind == RefType::Data
+    })
+}
+
+/// Checks the fact of the `func_edit` action `action` after a reopen: it holds with the source
+/// `agent`, or for `delete` and `remove_ref` it stays absent.
+fn check_persisted(action: &str, p: &ghidorah_db::Program) {
+    let b = p.base();
+    let at = |a: u64| Address::ram(a);
+    match action {
+        "create" => {
+            let f = b
+                .funcs()
+                .get(FuncId(at(0x11d0)))
+                .expect("the agent function");
+            assert_eq!(f.source, Source::Agent);
+            assert!(p.func(FuncId(at(0x11d0))).is_some());
+        }
+        "delete" => {
+            assert!(
+                b.funcs().get(FuncId(at(0x11d0))).is_none(),
+                "the record stays gone"
+            );
+            assert!(
+                p.func(FuncId(at(0x11d0))).is_none(),
+                "the function stays gone"
+            );
+        }
+        "set_noreturn" => {
+            let fact = b
+                .funcs()
+                .get(FuncId(at(0x11e0)))
+                .and_then(|f| f.flags.noreturn.clone())
+                .expect("the override");
+            assert_eq!((fact.value, fact.source), (false, Source::Agent));
+        }
+        "set_jumptable" => {
+            let table = b
+                .jumptables()
+                .get(JumpTableId(at(0x1170)))
+                .expect("the agent table");
+            assert_eq!(table.source, Source::Agent);
+            assert_eq!(table.value.targets, vec![at(0x1178)]);
+        }
+        "set_flow" | "set_call_targets" => {
+            let (site, want) = if action == "set_flow" {
+                (0x10c7, FlowOverride::CallAsJump)
+            } else {
+                (0x1014, FlowOverride::IndirectTargets(vec![at(0x11c0)]))
+            };
+            let fact = b.overrides().get(at(site)).expect("the flow override");
+            assert_eq!((&fact.value, fact.source), (&want, Source::Agent));
+        }
+        "add_ref" => assert!(agent_ref(p), "the agent reference"),
+        "remove_ref" => assert!(!agent_ref(p), "the reference stays gone"),
+        other => panic!("no check for the action {other}"),
+    }
+}
+
+#[test]
+fn ac_163a_override_persists() {
+    let actions = ghidorah_tools::handlers::func_edit::SPEC.actions;
+    assert_eq!(actions.len(), 8);
+    for action in actions {
+        let dir = tmp(&format!("persist_{}", action.value));
+        edit_in_project(&dir, action.example);
+        let s = reopen(&dir);
+        check_persisted(action.value, program(&s));
+    }
 }
 
 #[test]
