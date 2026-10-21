@@ -20,6 +20,7 @@
 //! | [`orphans`] | The agent facts that lost their anchor: `W_FACT_ORPHANED` | Section 3.9 |
 //! | [`facts`] | The relation catalog, claim verdicts with an absence basis and why trees | Section 11.8, ADR-0023 |
 //! | [`jumptable`] | `JumpTables` (410): method A | Section 7.8 |
+//! | [`slotsite`] | Indirect sites through a register that holds an import slot | Section 7.8 |
 //! | [`tailcall`] | `TailCallsAndParts` (420): FETCH tail calls and cold parts | Section 7.3 |
 //! | [`main_discovery`] | `MainDiscovery` (430) | Section 7.11 |
 //! | [`cc`] | `CallingConvention` (800): parameters and varargs | Section 7.10 |
@@ -49,6 +50,7 @@ pub mod publish;
 pub mod registry;
 pub mod sched;
 pub mod similar;
+pub mod slotsite;
 pub mod spec;
 pub mod stack;
 pub mod syscalls;

@@ -84,10 +84,17 @@
           "start": "0x3db0",
           "size": "0x268",
           "perms": "rw-"
+        },
+        {
+          "id": "seg:6",
+          "kind": "dynamic",
+          "start": "0x3dc0",
+          "size": "0x1f0",
+          "perms": "rw-"
         }
       ],
       "omitted": {
-        "count": 7,
+        "count": 6,
         "next": {
           "tool": "search",
           "args": {
@@ -177,10 +184,16 @@
           "name": ".plt",
           "start": "0x1020",
           "size": "0x30"
+        },
+        {
+          "id": "sec:14:.plt.got",
+          "name": ".plt.got",
+          "start": "0x1050",
+          "size": "0x10"
         }
       ],
       "omitted": {
-        "count": 17,
+        "count": 16,
         "next": {
           "tool": "search",
           "args": {
@@ -460,56 +473,8 @@
       "commented": 0,
       "pct": 0,
       "worklist": {
-        "total": 4,
+        "total": 1,
         "items": [
-          {
-            "kind": "unresolved_call",
-            "at": "0x1014",
-            "func": "fn:0x1000",
-            "remedy": {
-              "tool": "func_edit",
-              "args": {
-                "action": "set_call_targets",
-                "at": "0x1014",
-                "targets": [
-                  "imp:__gmon_start__"
-                ]
-              },
-              "why": "Set the targets."
-            }
-          },
-          {
-            "kind": "unresolved_jump",
-            "at": "0x112f",
-            "func": "fn:0x1110",
-            "remedy": {
-              "tool": "func_edit",
-              "args": {
-                "action": "set_call_targets",
-                "at": "0x112f",
-                "targets": [
-                  "imp:_ITM_deregisterTMCloneTable"
-                ]
-              },
-              "why": "Set the targets."
-            }
-          },
-          {
-            "kind": "unresolved_jump",
-            "at": "0x1170",
-            "func": "fn:0x1140",
-            "remedy": {
-              "tool": "func_edit",
-              "args": {
-                "action": "set_call_targets",
-                "at": "0x1170",
-                "targets": [
-                  "imp:_ITM_registerTMCloneTable"
-                ]
-              },
-              "why": "Set the targets."
-            }
-          },
           {
             "kind": "gap",
             "at": "0x11d0",

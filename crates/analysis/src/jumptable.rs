@@ -28,8 +28,9 @@ use ghidorah_kernel::RangeSet;
 use crate::code::{decode_at, is_exec, slot_of};
 use crate::ctx::AnalysisCtx;
 use crate::fir::{FuncIr, Image};
-use crate::irfacts::{Conflict, TableRec, func_key, work_ir};
+use crate::irfacts::{Conflict, SlotSite, TableRec, func_key, work_ir};
 use crate::registry::AnalyzerId;
+use crate::slotsite::{SlotMemory, site_target};
 use crate::spec::{AnalyzerSpec, Grain, Opt, Step, Trigger};
 use crate::why::{Rule, Why};
 
@@ -315,6 +316,9 @@ fn conflict_remedy(count: usize) -> String {
 }
 
 /// Runs one step over `ranges`: each function that the ranges touch gets its tables again.
+///
+/// An indirect jump or call through a register that holds an import slot or 0 gets a slot
+/// site ([`crate::slotsite`]) and no table. An agent fact at the site wins.
 pub fn run(ctx: &mut AnalysisCtx<'_>, ranges: &RangeSet) -> Step {
     let program = ctx.program();
     if !program.meta().arch.is_x86_64() {
@@ -323,20 +327,42 @@ pub fn run(ctx: &mut AnalysisCtx<'_>, ranges: &RangeSet) -> Step {
     let mut work = 1u64;
     for entry in ctx.touching(ranges) {
         work = work.saturating_add(1);
-        let sites = indirect_jumps(ctx, entry);
+        let sites = indirect_sites(ctx, entry, FlowKind::IJmp);
+        let calls = indirect_sites(ctx, entry, FlowKind::ICall);
         let mut tables = BTreeMap::new();
         let mut conflicts = BTreeSet::new();
-        if !sites.is_empty()
+        let mut slots = BTreeMap::new();
+        if !(sites.is_empty() && calls.is_empty())
             && let Ok(ir) = work_ir(ctx, entry, &mut Fuel::new(SITE_FUEL))
         {
             work = work.saturating_add(u64::try_from(ir.units.len()).unwrap_or(u64::MAX));
+            let is_slot = |a: u64| ctx.slot_target(a).is_some();
+            let image = Image(program);
+            let mem = SlotMemory {
+                image: &image,
+                is_slot: &is_slot,
+            };
+            let all = sites.iter().map(|s| (*s, Opc::JumpInd));
+            for (site, opc) in all.chain(calls.iter().map(|s| (*s, Opc::CallInd))) {
+                if agent_targets(program, site).is_none()
+                    && let Some(target) = site_target(&ir, &mem, site, opc)
+                {
+                    slots.insert(
+                        site,
+                        SlotSite {
+                            owner: entry,
+                            target,
+                        },
+                    );
+                }
+            }
             let region = |at: u64| program.mem().region_at(at).map(|r| r.va);
             let accept = |t: u64| {
                 is_exec(program, t)
                     && region(t) == region(entry)
                     && ctx.foreign_extent(entry, t).is_none()
             };
-            for site in sites {
+            for site in sites.into_iter().filter(|s| !slots.contains_key(s)) {
                 let result = method_a(
                     &ir,
                     &Image(program),
@@ -361,7 +387,7 @@ pub fn run(ctx: &mut AnalysisCtx<'_>, ranges: &RangeSet) -> Step {
                 }
             }
         }
-        update(ctx, entry, tables, conflicts);
+        update(ctx, entry, tables, conflicts, slots);
     }
     Step { work }
 }
@@ -397,13 +423,14 @@ fn record(entry: u64, site: u64, result: Result<Resolved, Failure>) -> TableRec 
     }
 }
 
-/// Puts the tables and the conflicts of the function `entry` in place of its old ones. A
-/// change of the cases queues `Disasm` for the function.
+/// Puts the tables, the conflicts and the slot sites of the function `entry` in place of its
+/// old ones. A change of the cases or of the slot sites queues `Disasm` for the function.
 fn update(
     ctx: &mut AnalysisCtx<'_>,
     entry: u64,
     tables: BTreeMap<u64, TableRec>,
     conflicts: BTreeSet<Conflict>,
+    slots: BTreeMap<u64, SlotSite>,
 ) {
     let old: BTreeMap<u64, TableRec> = ctx
         .ir()
@@ -413,7 +440,15 @@ fn update(
         .map(|(s, r)| (*s, r.clone()))
         .collect();
     let old_conflicts = ctx.ir().conflicts.get(&entry).cloned().unwrap_or_default();
-    if old == tables && old_conflicts == conflicts {
+    let old_slots: BTreeMap<u64, SlotSite> = ctx
+        .ir()
+        .slot_sites
+        .iter()
+        .filter(|(_, r)| r.owner == entry)
+        .map(|(s, r)| (*s, *r))
+        .collect();
+    let slots_changed = old_slots != slots;
+    if old == tables && old_conflicts == conflicts && !slots_changed {
         return;
     }
     let cases_changed = old.len() != tables.len()
@@ -423,23 +458,25 @@ fn update(
     let ir = ctx.ir_mut();
     ir.tables.retain(|_, r| r.owner != entry);
     ir.tables.extend(tables);
+    ir.slot_sites.retain(|_, r| r.owner != entry);
+    ir.slot_sites.extend(slots);
     if conflicts.is_empty() {
         ir.conflicts.remove(&entry);
     } else {
         ir.conflicts.insert(entry, conflicts);
     }
-    if cases_changed {
+    if cases_changed || slots_changed {
         ctx.requeue(AnalyzerId::Disasm, Range::single(entry));
     }
 }
 
-/// Gives the indirect jumps of the function `entry` in the work state that do not go through
-/// an import slot.
-fn indirect_jumps(ctx: &AnalysisCtx<'_>, entry: u64) -> Vec<u64> {
+/// Gives the indirect sites of the flow `flow` (`IJmp` or `ICall`) of the function `entry` in
+/// the work state. A site that reads an import slot in its own instruction is not in the list.
+fn indirect_sites(ctx: &AnalysisCtx<'_>, entry: u64, flow: FlowKind) -> Vec<u64> {
     let program = ctx.program();
     ctx.units_of(entry)
         .into_iter()
-        .filter(|(_, u)| u.flow == FlowKind::IJmp)
+        .filter(|(_, u)| u.flow == flow)
         .filter(|(at, _)| decode_at(program, *at).as_ref().and_then(slot_of).is_none())
         .map(|(at, _)| at)
         .collect()

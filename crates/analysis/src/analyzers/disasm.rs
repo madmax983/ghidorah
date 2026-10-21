@@ -9,10 +9,12 @@
 //! | code of a function with a lower entry | an exit: the lower entry keeps shared code |
 //! | an address outside executable memory, bad bytes, a jump into an instruction | `unknown` |
 //! | the address after a call to a noreturn function | no edge: the site gets [`UNIT_NORETURN_CALL`] |
+//! | an indirect jump or call to the constant 0 | the site gets [`UNIT_NULL_TARGET`] |
 //!
 //! Each instruction becomes a code unit with `R_DISASM_FLOW`. Each direct call and jump gives
 //! a flow reference with `R_FLOW_REF`. A call or a jump through an import slot gives a
-//! reference to the EXTERNAL address of the import.
+//! reference to the EXTERNAL address of the import. The slot is the memory operand, or the
+//! slot in a register that `JumpTables` finds ([`crate::slotsite`]).
 
 use std::collections::BTreeSet;
 
@@ -22,9 +24,12 @@ use ghidorah_kernel::RangeSet;
 use ghidorah_x86::{Flow, Insn};
 
 use crate::code::{decode_at, flow_kind, is_exec, is_mapped, slot_of};
-use crate::ctx::{AnalysisCtx, Body, UNIT_NORETURN_ASSUMED, UNIT_NORETURN_CALL, UnitRec};
+use crate::ctx::{
+    AnalysisCtx, Body, UNIT_NORETURN_ASSUMED, UNIT_NORETURN_CALL, UNIT_NULL_TARGET, UnitRec,
+};
 use crate::overrides::SiteFlow;
 use crate::registry::AnalyzerId;
+use crate::slotsite::SiteTarget;
 use crate::spec::{AnalyzerSpec, Grain, Opt, Step, Trigger};
 use crate::why::{Rule, Why};
 
@@ -158,10 +163,25 @@ impl<'c, 'a> Walk<'c, 'a> {
         self.body.refs.insert(key, why);
     }
 
-    /// Gives the import slot of an indirect site and the EXTERNAL address of its import.
-    fn slot(&self, insn: &Insn) -> Option<(u64, Address)> {
-        let slot = slot_of(insn)?;
+    /// Gives the import slot of the indirect site `insn` at `at` and the EXTERNAL address of
+    /// its import. The slot is the memory operand, else the slot site of `JumpTables` for a
+    /// register that holds the slot ([`crate::slotsite`]).
+    fn slot(&self, at: u64, insn: &Insn) -> Option<(u64, Address)> {
+        let site = || match self.ctx.ir().slot_sites.get(&at)?.target {
+            SiteTarget::Slot(s) => Some(s),
+            SiteTarget::Null => None,
+        };
+        let slot = slot_of(insn).or_else(site)?;
         self.ctx.slot_target(slot).map(|(_, ext)| (slot, ext))
+    }
+
+    /// Tells if the indirect site at `at` is a null site of `JumpTables`.
+    fn null_site(&self, at: u64) -> bool {
+        self.ctx
+            .ir()
+            .slot_sites
+            .get(&at)
+            .is_some_and(|s| s.target == SiteTarget::Null)
     }
 
     /// Handles a direct call at `at`. Gives the site flags.
@@ -236,7 +256,7 @@ impl<'c, 'a> Walk<'c, 'a> {
                 }
             }
             Flow::Call => return self.call(at, next, insn.target()),
-            Flow::ICall => match self.slot(insn) {
+            Flow::ICall => match self.slot(at, insn) {
                 Some((slot, ext)) => {
                     self.body.summary.slot_calls.insert(at, slot);
                     self.reference(at, ext, RefType::UnconditionalCall);
@@ -245,13 +265,18 @@ impl<'c, 'a> Walk<'c, 'a> {
                     }
                     self.follow(next);
                 }
+                None if self.null_site(at) => {
+                    self.follow(next);
+                    return UNIT_NULL_TARGET;
+                }
                 None => self.follow(next),
             },
-            Flow::IJmp => match self.slot(insn) {
+            Flow::IJmp => match self.slot(at, insn) {
                 Some((slot, ext)) => {
                     self.body.summary.slot_exits.insert(slot);
                     self.reference(at, ext, RefType::UnconditionalJump);
                 }
+                None if self.null_site(at) => return UNIT_NULL_TARGET,
                 None => self.body.summary.unknown = true,
             },
             Flow::Ret => self.body.summary.ret = true,
