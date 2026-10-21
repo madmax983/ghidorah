@@ -8,10 +8,13 @@
 //! first relocation in table order wins. A stub or a `call [rip+slot]` site gets its name
 //! through this map, never through its position.
 //!
+//! The slot map finds the import of a relocation by the symbol name: the first import with
+//! that name. So the order of [`Binary::imports`] does not change the import of a slot.
+//!
 //! The slot of an [`Import`] is its first `JUMP_SLOT` slot in address order, else its first
 //! `GLOB_DAT` slot. Only x86-64 files have slots.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use ghidorah_base::{BinText, Limits};
 
@@ -28,7 +31,8 @@ pub const R_X86_64_JUMP_SLOT: RelocType = RelocType(7);
 /// One import slot.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Slot {
-    /// The index of the import in [`Binary::imports`].
+    /// The index in [`Binary::imports`] of the first import with the name of the relocation
+    /// symbol.
     pub import: usize,
     /// The relocation type: `JUMP_SLOT` or `GLOB_DAT`.
     pub kind: RelocType,
@@ -55,16 +59,22 @@ fn is_import(s: &Sym) -> bool {
         && !matches!(s.kind, SymKind::Section | SymKind::File)
 }
 
-/// Gives the import index of each import symbol by its `.dynsym` index.
-fn by_symbol(binary: &Binary) -> BTreeMap<u32, usize> {
+/// Gives the import index of each import symbol by its `.dynsym` index. The index is the
+/// place in `imports` of the first import with the name of the symbol. An import with no name
+/// has no symbol.
+fn by_symbol(binary: &Binary, imports: &[Import]) -> BTreeMap<u32, usize> {
     let mut names: BTreeMap<&[u8], usize> = BTreeMap::new();
-    let mut out = BTreeMap::new();
-    for s in binary.symbols.iter().filter(|s| is_import(s)) {
-        let next = names.len();
-        let import = *names.entry(s.name.as_bytes()).or_insert(next);
-        out.insert(s.index, import);
+    for (index, import) in imports.iter().enumerate() {
+        if let Some(name) = import.name.as_ref().filter(|n| !n.is_empty()) {
+            names.entry(name.as_bytes()).or_insert(index);
+        }
     }
-    out
+    binary
+        .symbols
+        .iter()
+        .filter(|s| is_import(s))
+        .filter_map(|s| Some((s.index, *names.get(s.name.as_bytes())?)))
+        .collect()
 }
 
 /// Gives the slot map from the relocations, with the import indexes of `by_symbol`.
@@ -93,10 +103,10 @@ fn slot_map(binary: &Binary, by_symbol: &BTreeMap<u32, usize>) -> BTreeMap<u64, 
 
 /// Gives the imports and adds the diagnostics of the text cap to `diags`.
 pub(crate) fn load(binary: &Binary, budget: &mut Budget, diags: &mut Diags) -> Vec<Import> {
-    let by_symbol = by_symbol(binary);
+    let mut seen: BTreeSet<&[u8]> = BTreeSet::new();
     let mut out: Vec<Import> = Vec::new();
     for s in binary.symbols.iter().filter(|s| is_import(s)) {
-        if by_symbol.get(&s.index) != Some(&out.len()) {
+        if !seen.insert(s.name.as_bytes()) {
             continue;
         }
         let bytes = s.name.as_bytes();
@@ -117,7 +127,7 @@ pub(crate) fn load(binary: &Binary, budget: &mut Budget, diags: &mut Diags) -> V
             delay: false,
         });
     }
-    let slots = slot_map(binary, &by_symbol);
+    let slots = slot_map(binary, &by_symbol(binary, &out));
     for kind in [R_X86_64_JUMP_SLOT, R_X86_64_GLOB_DAT] {
         for (addr, slot) in slots.iter().filter(|(_, s)| s.kind == kind) {
             if let Some(i) = out.get_mut(slot.import)
@@ -131,8 +141,10 @@ pub(crate) fn load(binary: &Binary, budget: &mut Budget, diags: &mut Diags) -> V
     out
 }
 
-/// Gives the import slot map: the slot address to its import.
+/// Gives the import slot map: the slot address to its import. The import of a slot is the
+/// first import of [`Binary::imports`] with the name of the relocation symbol, in any order of
+/// the list.
 #[must_use]
 pub fn slots(binary: &Binary) -> BTreeMap<u64, Slot> {
-    slot_map(binary, &by_symbol(binary))
+    slot_map(binary, &by_symbol(binary, &binary.imports))
 }

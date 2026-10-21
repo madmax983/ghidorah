@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use ghidorah_base::{DiagCode, Limits};
 use ghidorah_loader::imports::{R_X86_64_GLOB_DAT, R_X86_64_JUMP_SLOT, slots};
-use ghidorah_loader::stubs::{Stub, StubKind, find, label};
+use ghidorah_loader::stubs::{Stub, StubKind, find, label, name_stubs};
 use ghidorah_loader::{Binary, MemoryMap, RelocType};
 use ghidorah_testkit::elf::{ElfBuilder, ImportKind, Layout, Malformed, PltStyle, Section};
 
@@ -310,6 +310,45 @@ fn builder_stub_forms() {
                 }
             }
         }
+    }
+}
+
+#[test]
+fn regress_slot_import_by_name_not_list_order() {
+    // A binary model with the import list in reverse order. A slot that names its import by
+    // its place in the symbol order gives another import.
+    let (bytes, _) = four_imports(PltStyle::Lazy, false);
+    let (b, map) = load_ok(&bytes);
+    let mut rev = b.clone();
+    rev.imports.reverse();
+    let names = |b: &Binary| -> BTreeMap<u64, String> {
+        slots(b)
+            .into_iter()
+            .map(|(at, s)| (at, import_name(b, s.import)))
+            .collect()
+    };
+    assert_eq!(names(&b).len(), 4, "{:?}", names(&b));
+    assert_eq!(names(&rev), names(&b), "the slots keep their imports");
+    let labels = |b: &Binary| -> Vec<(u64, String)> {
+        scan(b, &map)
+            .iter()
+            .map(|s| {
+                (
+                    s.addr,
+                    String::from_utf8_lossy(label(b, s).as_bytes()).into_owned(),
+                )
+            })
+            .collect()
+    };
+    assert!(labels(&b).iter().any(|(_, l)| l == "puts@plt"));
+    assert_eq!(labels(&rev), labels(&b), "the stubs keep their names");
+    let stub_of = |b: &Binary, name: &str| b.imports[import_index(b, name)].stub;
+    for i in &mut rev.imports {
+        i.stub = None;
+    }
+    let _ = name_stubs(&mut rev, &map, &Limits::DEFAULT);
+    for name in ["puts", "free", "abort", "gfree"] {
+        assert_eq!(stub_of(&rev, name), stub_of(&b, name), "{name}");
     }
 }
 

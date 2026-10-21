@@ -12,7 +12,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use ghidorah_base::{Address, ImportId, Range};
+use ghidorah_base::{Address, BinText, ImportId, Range};
 use ghidorah_db::{FlowKind, Program, RefKey, StartReason, StrInfo};
 use ghidorah_kernel::RangeSet;
 
@@ -134,15 +134,26 @@ pub(crate) struct Work {
 
 /// Gives the import of each import slot of `program`: the ELF slot map, then the slots of
 /// the import rows.
+///
+/// The ELF slot map gives the import of a slot by its name. The row of that name gives the
+/// import ID, so the order of the import list does not change the import of a slot.
 pub(crate) fn import_slots(program: &Program) -> BTreeMap<u64, SlotImport> {
-    let by_index: BTreeMap<usize, SlotImport> = program
+    let imports = &program.binary().imports;
+    let name_of = |index: usize| {
+        imports
+            .get(index)
+            .and_then(|i| i.name.as_ref())
+            .map(BinText::as_bytes)
+    };
+    let by_name: BTreeMap<&[u8], SlotImport> = program
         .imports()
         .values()
-        .map(|row| (row.index, (row.id.clone(), row.ext)))
+        .filter(|row| row.id.lib().is_none())
+        .filter_map(|row| Some((name_of(row.index)?, (row.id.clone(), row.ext))))
         .collect();
     let mut out = BTreeMap::new();
     for (slot, s) in ghidorah_loader::imports::slots(program.binary()) {
-        if let Some(import) = by_index.get(&s.import) {
+        if let Some(import) = name_of(s.import).and_then(|n| by_name.get(n)) {
             out.insert(slot, import.clone());
         }
     }

@@ -67,6 +67,10 @@ fn import_name(id: &ImportId) -> String {
 }
 
 /// Gives the import rows. Each import gets `ext:` and its index plus 1.
+///
+/// The index is the place of the import in the list of the binary model. So that order sets
+/// the EXTERNAL addresses, and a project snapshot stores them. A slot and a stub find their
+/// import by its name, so their facts do not depend on that order.
 fn import_rows(binary: &Binary) -> BTreeMap<ImportId, ImportRow> {
     let mut rows = BTreeMap::new();
     for (index, import) in binary.imports.iter().enumerate() {
