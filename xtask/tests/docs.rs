@@ -646,6 +646,8 @@ fn git(dir: &Path, args: &[&str]) -> Option<String> {
         ])
         .args(args)
         .current_dir(dir)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
         .env_remove("GIT_DIR")
         .env_remove("GIT_WORK_TREE")
         .env_remove("GIT_INDEX_FILE")
