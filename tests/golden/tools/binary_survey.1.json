@@ -171,10 +171,16 @@
           "name": ".init",
           "start": "0x1000",
           "size": "0x1b"
+        },
+        {
+          "id": "sec:13:.plt",
+          "name": ".plt",
+          "start": "0x1020",
+          "size": "0x30"
         }
       ],
       "omitted": {
-        "count": 18,
+        "count": 17,
         "next": {
           "tool": "search",
           "args": {
@@ -469,7 +475,7 @@
                   "imp:__gmon_start__"
                 ]
               },
-              "why": "Set the targets of the indirect jump or call. Make sure that each target is correct."
+              "why": "Set the targets."
             }
           },
           {
@@ -485,7 +491,7 @@
                   "imp:_ITM_deregisterTMCloneTable"
                 ]
               },
-              "why": "Set the targets of the indirect jump or call. Make sure that each target is correct."
+              "why": "Set the targets."
             }
           },
           {
@@ -501,7 +507,7 @@
                   "imp:_ITM_registerTMCloneTable"
                 ]
               },
-              "why": "Set the targets of the indirect jump or call. Make sure that each target is correct."
+              "why": "Set the targets."
             }
           },
           {
@@ -513,7 +519,7 @@
                 "action": "create",
                 "target": "0x11d0"
               },
-              "why": "Make a function at the start of the gap. Make sure that the code is a function entry."
+              "why": "Make a function at the gap."
             }
           }
         ]

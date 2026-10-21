@@ -231,8 +231,8 @@ fn shape_of(path: &str) -> String {
         .join("/")
 }
 
-/// Gives the problems of the hints of one envelope (AC-143), and adds the pointers of the
-/// hint members below the top level to `nested`, with `*` for each index. Each member named
+/// Gives the problems of the hints of one envelope (AC-143). Adds the pointers of the hint
+/// members below the top level to `nested`, with `*` for each index. Each member named
 /// `next` or `remedy` at any depth is one call or a list of at most 3 calls. Each call names
 /// a tool of the active profile, passes the strict parser of the tool and has a `why`.
 fn hint_problems(
@@ -390,6 +390,8 @@ fn regress_survey_worklist_remedies_parse() {
             remedies += 1;
             let why = text_at(remedy, "/why");
             assert!(!why.is_empty(), "{} {remedy}", profile.as_str());
+            // A worklist holds up to 5 remedies, so each why is short.
+            assert!(why.chars().count() <= 32, "{} {remedy}", profile.as_str());
             let found = ghidorah_tools::Call::new(
                 &text_at(remedy, "/tool"),
                 remedy.get("args").cloned().unwrap_or_default(),

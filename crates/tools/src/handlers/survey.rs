@@ -98,22 +98,25 @@ pub const WHY_MAIN: &str = "Read the main function.";
 /// The `why` of a `search` call that lists the rest of a cut section.
 pub const WHY_REST: &str = "List the items that the survey leaves out.";
 
+/// The `why` of a `func_edit` call that sets the targets of an unresolved site. A worklist
+/// can hold 5 remedies, so the text is short.
+pub const WHY_TARGETS: &str = "Set the targets.";
+
 /// The `why` of a `func_edit` call that makes a function at the start of a gap.
-pub const WHY_CREATE: &str =
-    "Make a function at the start of the gap. Make sure that the code is a function entry.";
+pub const WHY_CREATE: &str = "Make a function at the gap.";
 
 /// The `why` of a `func_get` call on the function of an unresolved site.
-pub const WHY_READ_SITE: &str =
-    "Read the instructions of the function. Find the targets of the indirect jump or call.";
+pub const WHY_READ_SITE: &str = "Find the targets of the site.";
 
 /// The `why` of a `mem_read` call at the start of a gap.
-pub const WHY_READ_GAP: &str = "Read the first instructions of the gap.";
+pub const WHY_READ_GAP: &str = "Read the code of the gap.";
 
 /// Every fixed text of the handler that an agent reads.
 pub const TEXTS: &[&str] = &[
     WHY_PRIORITY,
     WHY_MAIN,
     WHY_REST,
+    WHY_TARGETS,
     WHY_CREATE,
     WHY_READ_SITE,
     WHY_READ_GAP,
@@ -319,15 +322,21 @@ fn read_func(func: FuncId, include: &[&str]) -> Call {
     )
 }
 
+/// Gives the `func_edit` call that sets the targets of the site `at` of `func` from the table
+/// of the site. Gives `None` when the site has no table with targets.
+fn set_targets(p: &Program, func: FuncId, at: u64, jump: bool) -> Option<Call> {
+    remedy::site(p, func, at, jump).map(|call| Call::new(&call.tool, call.args, WHY_TARGETS))
+}
+
 /// Gives the calls that can fix the worklist item `w`, the best call first (see the module
 /// table).
 fn work_calls(p: &Program, w: &metrics::WorkItem) -> Vec<Call> {
     match (w.remedy, w.func) {
-        (Some(metrics::Remedy::SetJumpTable(at)), Some(f)) => remedy::site(p, f, at, true)
+        (Some(metrics::Remedy::SetJumpTable(at)), Some(f)) => set_targets(p, f, at, true)
             .into_iter()
             .chain([read_func(f, &["jumptables", "disasm"])])
             .collect(),
-        (Some(metrics::Remedy::SetCallTargets(at)), Some(f)) => remedy::site(p, f, at, false)
+        (Some(metrics::Remedy::SetCallTargets(at)), Some(f)) => set_targets(p, f, at, false)
             .into_iter()
             .chain([read_func(f, &["disasm"])])
             .collect(),
