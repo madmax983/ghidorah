@@ -24,6 +24,7 @@
 //! the flags ends the chain. [`Fusion`] counts the flag reads and the fused reads (AC-070).
 //!
 //! The submodule [`l1`] makes the L1 form: SSA, the L1 passes and the calling convention.
+//! The submodule [`ret`] tells if a function returns a floating value.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -38,6 +39,7 @@ use ghidorah_loader::Perms;
 pub mod callsite;
 mod fusion;
 pub mod l1;
+pub mod ret;
 
 use self::fusion::{count_reads, fuse_flags};
 use crate::code::decode_at;

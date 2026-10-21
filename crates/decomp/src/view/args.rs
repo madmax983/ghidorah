@@ -10,6 +10,10 @@
 //! A phi is a new value when one of its arguments is one. The register that holds the target
 //! of an indirect call is not an argument. The printer counts the arguments of a call with
 //! no known argument count from this set.
+//!
+//! A register that an op reads after its last L0 `Put` in the block of the call is a staging
+//! register, not an argument. An example is `rdx` in `mov rdx,[rbp-0x18]; mov rsi,rdx` of
+//! `-O0` code.
 
 use std::collections::BTreeSet;
 
@@ -85,6 +89,44 @@ impl Ex<'_> {
         set
     }
 
+    /// Tells if an L0 op reads `loc` after its last `Put` in the block of the call op `call`
+    /// (see the module doc).
+    fn staged(&self, call: u32, loc: Loc) -> bool {
+        let Some(block) = self.f.ssa.block_of_op(call) else {
+            return false;
+        };
+        let range = self
+            .f
+            .ops
+            .get(&block)
+            .map(Vec::as_slice)
+            .unwrap_or_default();
+        let before = range
+            .iter()
+            .take_while(|&&i| i != call)
+            .filter(|&&i| self.f.ssa.is_insn_op(i));
+        let (mut put, mut read) = (false, false);
+        for &i in before {
+            let Some(op) = self.l0.op(i) else {
+                continue;
+            };
+            let reads = match op.opc {
+                Opc::Get => op.a[0].as_loc() == Some(loc),
+                Opc::Intrinsic | Opc::Syscall => {
+                    self.l0.effect(op).is_some_and(|e| e.uses.contains(loc))
+                }
+                _ => false,
+            };
+            match op.opc {
+                Opc::Call | Opc::CallInd => (put, read) = (false, false),
+                Opc::Put if op.a[0].as_loc() == Some(loc) => (put, read) = (true, false),
+                _ if reads && put => read = true,
+                _ => {}
+            }
+        }
+        read
+    }
+
     /// Gives the argument registers that the caller sets for the call op `i` (see the module
     /// doc). The uses are the location uses of the op.
     pub(crate) fn set_args(&self, i: u32, op: &Op, uses: &[(Loc, Arg)]) -> LocSet {
@@ -97,7 +139,8 @@ impl Ex<'_> {
             if matches!(loc, Loc::Stack(_)) || target == Some(self.f.ssa.root(arg)) {
                 continue;
             }
-            if self.new_value(arg, loc) || self.written_before(i, loc) {
+            let set = self.new_value(arg, loc) || self.written_before(i, loc);
+            if set && !self.staged(i, loc) {
                 let _ = out.insert(loc);
             }
         }

@@ -13,9 +13,9 @@
 //!
 //! | Op | Locations |
 //! |---|---|
-//! | `Ret` reads | the first integer return register |
+//! | `Ret` reads | the first floating return register when the function returns a `float` or a `double` ([`ret`]), else the first integer return register |
 //! | A call reads | the integer and floating argument registers, the varargs register when the callee can take a variable argument list, and its stack arguments ([`callsite`]) |
-//! | A call writes | each general register that the callee does not keep, each XMM register and the flags |
+//! | A call writes | each general and XMM register that the callee does not keep, and the flags. MS x64 keeps `xmm6` .. `xmm15`. `SysV` keeps no XMM register. |
 //! | A call pops | 8 bytes from `rsp` on return: the return address that the call pushes |
 //!
 //! The result is derived data: the journal never holds it.
@@ -30,6 +30,7 @@ use ghidorah_ir::ssa::{self, Ssa, SsaError};
 use ghidorah_ir::{Arg, Loc, LocSet, Node, Opc};
 use ghidorah_types::CallConv;
 
+use super::ret::{self, FloatRet};
 use super::{FirError, FuncIr, Opts, callsite};
 use crate::cc::{conv_of, loc_of};
 use crate::jumptable::{self, GuardInfo};
@@ -47,6 +48,8 @@ pub struct L1Ir {
     pub tail_calls: BTreeSet<u64>,
     /// The guard of each indirect jump with a jump table, by the address of the jump.
     pub guards: BTreeMap<u64, GuardInfo>,
+    /// The kind of the floating return. Then each `Ret` reads the floating return register.
+    pub float_ret: Option<FloatRet>,
 }
 
 /// The error of [`lift`] and [`build`].
@@ -86,6 +89,19 @@ fn regs(names: &[&str]) -> LocSet {
     names.iter().filter_map(|n| loc_of(n)).collect()
 }
 
+/// Gives the location sets of the flow ops under `conv` with the floating return `float`.
+///
+/// A floating return makes each `Ret` read the first floating return register in place of
+/// the first integer return register.
+#[must_use]
+pub fn ret_opts(conv: &CallConv, float: Option<FloatRet>) -> ssa::Opts {
+    let mut opts = ssa_opts(conv);
+    if float.is_some() {
+        opts.ret_uses = regs(conv.float_ret.get(..1).unwrap_or_default());
+    }
+    opts
+}
+
 /// Gives the location sets of the flow ops for the convention `conv` (see the module table).
 #[must_use]
 pub fn ssa_opts(conv: &CallConv) -> ssa::Opts {
@@ -96,9 +112,9 @@ pub fn ssa_opts(conv: &CallConv) -> ssa::Opts {
     let kept = regs(conv.callee_saved);
     let mut call_defs: LocSet = (0..16u8)
         .filter_map(Loc::gpr)
+        .chain((0..16u8).filter_map(Loc::xmm))
         .filter(|l| !kept.contains(*l))
         .collect();
-    call_defs = call_defs.union((0..16u8).filter_map(Loc::xmm).collect());
     let _ = call_defs.insert(Loc::Flags);
     ssa::Opts {
         ret_uses,
@@ -169,14 +185,15 @@ pub fn lift(
     switches: &Switches,
     fuel: &mut Fuel,
 ) -> Result<L1Ir, L1Error> {
-    lift_with(l0, conv, &|_| None, &BTreeSet::new(), switches, fuel)
+    lift_with(l0, conv, &|_| None, &BTreeSet::new(), None, switches, fuel)
 }
 
 /// Makes the L1 form like [`lift`], with the arity facts of the callees.
 ///
 /// `callee` gives the arity of the direct callee at an address. A call of a callee with an
 /// arity reads only its argument registers ([`callsite::uses`]). `imports` holds the
-/// addresses of the indirect jumps that are tail calls of an import.
+/// addresses of the indirect jumps that are tail calls of an import. With `float_ret`, each
+/// `Ret` reads the floating return register ([`ret_opts`]).
 ///
 /// # Errors
 ///
@@ -186,12 +203,14 @@ pub fn lift_with(
     conv: &CallConv,
     callee: &dyn Fn(u64) -> Option<callsite::Arity>,
     imports: &BTreeSet<u64>,
+    float_ret: Option<FloatRet>,
     switches: &Switches,
     fuel: &mut Fuel,
 ) -> Result<L1Ir, L1Error> {
     let (arena, tail_calls) = rewrite_tail_jumps(&l0, imports);
     let calls = callsite::uses(&l0, &arena, conv, callee);
-    let mut ssa = ssa::build_with(arena, l0.body.clone(), &ssa_opts(conv), &calls, fuel)?;
+    let opts = ret_opts(conv, float_ret);
+    let mut ssa = ssa::build_with(arena, l0.body.clone(), &opts, &calls, fuel)?;
     for (&index, &from) in &l0.fused_from {
         ssa.note_fused(index, from);
     }
@@ -206,10 +225,12 @@ pub fn lift_with(
         report,
         tail_calls,
         guards,
+        float_ret,
     })
 }
 
-/// Builds the L1 form of the published function `id` with the convention of its format.
+/// Builds the L1 form of the published function `id` with the convention of its format. The
+/// floating return comes from [`ret::float_ret`].
 ///
 /// # Errors
 ///
@@ -255,11 +276,13 @@ pub fn build_in(
         }
     }
     let imports = crate::tailcall::import_jumps(program, id, &l0);
+    let float_ret = ret::float_ret(program, id, &l0);
     lift_with(
         l0,
         conv,
         &|t| arity.get(&t).copied(),
         &imports,
+        float_ret,
         switches,
         fuel,
     )

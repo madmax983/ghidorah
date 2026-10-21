@@ -7,13 +7,19 @@
 //! A slot of a positional convention prints its floating register when the caller sets only
 //! that register of the slot. Else it prints its integer register.
 //!
+//! A variadic call of a convention with a varargs register (`al` in `SysV`) passes its
+//! floating arguments in the floating argument registers. They follow the integer arguments in
+//! the text. A constant `al`, or the low byte of a `mov al, k`, gives their count. Else the
+//! count is the floating argument registers that the caller sets. The text keeps no order
+//! between the integer and the floating arguments.
+//!
 //! The result of a call is a def of the register that the `env` module gives: `rax`, or
 //! `xmm0` for a floating result. The result of an opaque instruction is its `rax` def, else
 //! its first def.
 
 use ghidorah_analysis::cc::loc_of;
 use ghidorah_base::WarningCode;
-use ghidorah_ir::Loc;
+use ghidorah_ir::{Loc, Opc};
 
 use super::expr::{safe, wrap};
 use super::{Arity, Buf, CallRow, CallTarget, Printer, env};
@@ -24,6 +30,26 @@ use crate::precedence::UNARY;
 
 /// The registers of the arguments of a system call in order.
 const SYSCALL_ARGS: [&str; 6] = ["rdi", "rsi", "rdx", "r10", "r8", "r9"];
+
+/// Gives the low byte of the value `e` of the varargs register. A constant gives it. So does
+/// a constant that a `mov al, k` writes to the low byte. Another value gives `None`.
+fn low_byte(e: &Expr) -> Option<u8> {
+    let value = match e {
+        Expr::Const { value, .. } => *value,
+        Expr::Ite {
+            op: Opc::Insert,
+            sub: 8,
+            b,
+            c,
+            ..
+        } => match (b.as_ref(), c.as_ref()) {
+            (Expr::Const { value, .. }, Expr::Const { value: 0, .. }) => *value,
+            _ => return None,
+        },
+        _ => return None,
+    };
+    Some(value.to_le_bytes()[0])
+}
 
 /// Tells if a name is a mangled C++ or Rust name.
 fn is_mangled(name: &str) -> bool {
@@ -52,25 +78,37 @@ impl Printer<'_> {
     }
 
     /// Gives the variable that gets the result of a call statement. A direct callee whose
-    /// signature has no return value gives `None`. Its `rax` holds no result. So a later read
-    /// of the variable reads a value with no def.
+    /// signature has no return value gives `None`. Its `rax` holds no result: a return of it
+    /// gives no value ([`Self::mark_call_values`]).
     pub(super) fn result_var(&self, c: &Call) -> Option<VarIdx> {
         let loc = self.result_loc(c)?;
         c.rets.iter().find(|(l, _)| *l == loc).map(|(_, v)| *v)
     }
 
-    /// Adds the `rax` def of each call with a result in another register to the values that a
-    /// call leaves behind. So a return of that def gives no value.
-    pub(super) fn leave_rax_defs(&mut self) {
+    /// Updates the values that a call leaves behind.
+    ///
+    /// The `rax` def of each call with no result in `rax` is such a value. Examples are a call
+    /// with a result in another register and a call of a `void` callee. A return of that def
+    /// gives no value, and the head gets no return type from it. The result of a call is no
+    /// such value, so a floating return of it gives the result.
+    pub(super) fn mark_call_values(&mut self) {
         let mut left = Vec::new();
+        let mut results = Vec::new();
         let calls = self.view().nodes.iter().flat_map(|n| &n.stmts);
         for c in calls.flat_map(calls_of) {
-            if self.result_loc(c).is_some_and(|l| l != Loc::RAX) {
+            if matches!(c.callee, Callee::Intrinsic(_)) {
+                continue;
+            }
+            if self.result_loc(c) != Some(Loc::RAX) {
                 let rax = c.rets.iter().filter(|(l, _)| *l == Loc::RAX);
                 left.extend(rax.map(|(_, v)| *v));
             }
+            results.extend(self.result_var(c));
         }
         self.clobbers.extend(left);
+        for v in results {
+            self.clobbers.remove(&v);
+        }
     }
 
     /// Gives the printed name of the callee `t` and adds a mangled-name warning at `site`.
@@ -102,9 +140,9 @@ impl Printer<'_> {
                 variadic: s.variadic,
             })
             .or_else(|| {
-                self.env.param_count(t).map(|n| Arity {
-                    named: usize::from(n),
-                    variadic: false,
+                self.env.param_info(t).map(|i| Arity {
+                    named: usize::from(i.count),
+                    variadic: i.varargs,
                 })
             });
         self.arity.insert(t, found);
@@ -125,6 +163,23 @@ impl Printer<'_> {
                 _ => int,
             })
             .collect()
+    }
+
+    /// Gives the floating argument registers of the variadic call `c` (see the module doc). A
+    /// convention with no varargs register gives none.
+    fn vararg_floats(&self, c: &Call) -> Vec<Loc> {
+        let conv = self.env.conv();
+        let Some(al) = conv.varargs_reg.and_then(loc_of) else {
+            return Vec::new();
+        };
+        let floats: Vec<Loc> = conv.float_args.iter().filter_map(|n| loc_of(n)).collect();
+        let known = c
+            .args
+            .iter()
+            .find(|(l, _)| *l == al)
+            .and_then(|(_, e)| low_byte(e));
+        let count = known.map_or_else(|| Self::set_count(c, &floats), usize::from);
+        floats.into_iter().take(count).collect()
     }
 
     /// Gives the count of the argument registers that the caller sets: one more than the
@@ -240,7 +295,11 @@ impl Printer<'_> {
                     target: CallTarget::Addr(*t),
                     name: name.clone(),
                 });
-                let args = self.args(c, &regs, (count, stack), buf);
+                let mut list: Vec<Loc> = regs.iter().take(count).copied().collect();
+                if arity.is_some_and(|a| a.variadic) {
+                    list.extend(self.vararg_floats(c));
+                }
+                let args = self.args(c, &list, (list.len(), stack), buf);
                 format!("{name}({args})")
             }
             Callee::Indirect(target) => {

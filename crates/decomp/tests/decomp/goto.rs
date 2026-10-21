@@ -38,6 +38,7 @@ fn ac_108_computed_goto() {
         tail_calls: &tails,
         conv: None,
         guards: &std::collections::BTreeMap::new(),
+        float_ret: None,
     };
     let d = ghidorah_decomp::from_input(&input, &NoEnv, &Opts::default(), &mut Fuel::unlimited())
         .expect("the decompile");

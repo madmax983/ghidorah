@@ -200,6 +200,7 @@ pub fn decomp(specs: Vec<Spec>, vars: Vec<Var>, tree: Tree) -> Decomp {
             insns: addrs.into_iter().map(|a| (a, 4)).collect(),
             effects: std::collections::BTreeSet::new(),
             sources: std::collections::BTreeMap::new(),
+            float_ret: None,
         },
         tree,
         mode: Mode::Structured,

@@ -1,9 +1,11 @@
-//! The L0 function IR builder (design Section 7.12) and the fusion rate (AC-070).
+//! The L0 function IR builder (design Section 7.12), the fusion rate (AC-070) and the call
+//! defs of L1.
 
 use ghidorah_analysis::cfg::{self, EdgeKind};
-use ghidorah_analysis::fir::{self, FirError, Opts};
+use ghidorah_analysis::fir::{self, FirError, Opts, l1};
 use ghidorah_base::{Fuel, OutOfFuel};
-use ghidorah_ir::{Node, Opc};
+use ghidorah_ir::{Loc, Node, Opc};
+use ghidorah_types::cc::{MS_X64, SYSV_X86_64};
 
 use crate::support::{cached, fid, fir_of, fixtures, truth, truth_funcs};
 
@@ -134,4 +136,22 @@ fn ac_070_fusion_rate() {
     assert!(reads > 1_000, "the functions read flags: {reads}");
     let rate = fused * 1_000 / reads;
     assert!(rate >= 980, "fusion covers {fused} of {reads} flag reads");
+}
+
+/// A call writes each register that the convention does not keep. MS x64 keeps `xmm6` ..
+/// `xmm15`, and `SysV` keeps no XMM register. L1 took each XMM register as a call def, so a
+/// value in `xmm6` of a PE caller had no def after a call.
+#[test]
+fn regress_ms_x64_xmm_kept_across_calls() {
+    let xmm = |n: u8| Loc::xmm(n).expect("an XMM register");
+    let ms = l1::ssa_opts(&MS_X64).call_defs;
+    let sysv = l1::ssa_opts(&SYSV_X86_64).call_defs;
+    for n in 0..16u8 {
+        assert_eq!(ms.contains(xmm(n)), n < 6, "MS x64 xmm{n}");
+        assert!(sysv.contains(xmm(n)), "SysV xmm{n}");
+    }
+    for l in [Loc::RSI, Loc::RDI] {
+        assert!(!ms.contains(l) && sysv.contains(l), "{l:?}");
+    }
+    assert!(ms.contains(Loc::Flags) && sysv.contains(Loc::Flags));
 }

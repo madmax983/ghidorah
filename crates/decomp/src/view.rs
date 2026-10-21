@@ -21,6 +21,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use ghidorah_analysis::cc::ParamSource;
+use ghidorah_analysis::fir::ret::FloatRet;
 use ghidorah_analysis::jumptable::GuardInfo;
 use ghidorah_base::{Fuel, VarId};
 use ghidorah_ir::ssa::Ssa;
@@ -153,6 +154,10 @@ pub struct Input<'a> {
     pub conv: Option<&'a CallConv>,
     /// The guard of each indirect jump with a jump table, by the address of the jump.
     pub guards: &'a BTreeMap<u64, GuardInfo>,
+    /// The kind of the floating return of the function ([`L1Ir::float_ret`]).
+    ///
+    /// [`L1Ir::float_ret`]: ghidorah_analysis::fir::l1::L1Ir::float_ret
+    pub float_ret: Option<FloatRet>,
 }
 
 /// The kind of a variable.
@@ -231,6 +236,8 @@ pub struct View {
     /// The flag thunk op of each fused compare op. A line that shows the compare shows the
     /// instruction of the thunk too, for example the `cmp` of a `jne`.
     pub sources: BTreeMap<OpId, OpId>,
+    /// The kind of the floating return of the function. Then each return reads `xmm0`.
+    pub float_ret: Option<FloatRet>,
 }
 
 impl View {
@@ -341,7 +348,8 @@ pub fn build(
         assemble::remap_raw(raw, &assigned.of);
         warnings.append(&mut raw.warnings);
     }
-    let view = assemble::shape(&f, &mut raws, &assigned, entry);
+    let mut view = assemble::shape(&f, &mut raws, &assigned, entry);
+    view.float_ret = input.float_ret;
     let reached: BTreeSet<Node> = f.reach.iter().copied().collect();
     let elided = (0..ssa.blocks().len())
         .filter_map(|i| u32::try_from(i).ok().map(Node))

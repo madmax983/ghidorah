@@ -19,8 +19,11 @@
 //! | no signature: the caller reads the `xmm0` def, and reads the `rax` def only as a return value | `xmm0` |
 //! | no signature, another caller | `rax` |
 //!
-//! Each return of L1 reads `rax`. So a return of the `rax` def of a call tells nothing about
-//! the callee.
+//! The `rax` def of a call with no `rax` result is a value that the call leaves behind. A
+//! return of it gives no value, so the path prints `return;`.
+//!
+//! Each return of L1 with no floating return reads `rax`. So a return of the `rax` def of a
+//! call tells nothing about the callee.
 
 use std::collections::BTreeSet;
 
@@ -31,7 +34,7 @@ use ghidorah_ir::Loc;
 use ghidorah_types::{CallConv, DataModel, Prim, Sig, Type, TypeId, TypeStore};
 
 use super::{PrintEnv, Signature, body_units};
-use crate::expr::{Call, Expr, Stmt, VarIdx};
+use crate::expr::{Call, Callee, Expr, Stmt, VarIdx};
 use crate::lattice::{Store, Stores, Ty};
 use crate::view::View;
 use crate::{Env, ProgramEnv};
@@ -61,7 +64,7 @@ fn signature(sig: &Sig, store: &TypeStore, which: Store) -> Signature {
 }
 
 /// Gives the first floating return register of `conv`: `xmm0` in each convention.
-fn float_ret(conv: &CallConv) -> Option<Loc> {
+pub(super) fn float_ret(conv: &CallConv) -> Option<Loc> {
     conv.float_ret.first().and_then(|n| loc_of(n))
 }
 
@@ -85,32 +88,57 @@ pub(crate) fn caller_ret_loc(c: &Call, reads: &BTreeSet<VarIdx>, conv: &CallConv
     }
 }
 
+/// Gives the inputs of the call `c` that the text can show. The `rax` value of a direct or an
+/// indirect call is its varargs count, and the text never shows it.
+fn shown_inputs(c: &Call) -> Vec<&Expr> {
+    if !matches!(c.callee, Callee::Direct(_) | Callee::Indirect(_)) {
+        return c.inputs();
+    }
+    let mut out = Vec::new();
+    if let Callee::Indirect(t) = &c.callee {
+        out.push(t);
+    }
+    out.extend(
+        c.args
+            .iter()
+            .filter(|(l, _)| *l != Loc::RAX)
+            .map(|(_, e)| e),
+    );
+    out.extend(c.mem.iter());
+    out
+}
+
 /// Gives the variables that the statements, conditions and switch values of `view` read. A
-/// variable that is the full value of a return is not a read of that return.
+/// variable that is the full value of a return is not a read of that return. The varargs
+/// count of a call is no read ([`shown_inputs`]).
 #[must_use]
 pub(crate) fn reads(view: &View) -> BTreeSet<VarIdx> {
-    let mut roots: Vec<&Expr> = Vec::new();
+    let mut stack: Vec<&Expr> = Vec::new();
     for n in &view.nodes {
-        roots.extend([&n.cond, &n.target, &n.index].into_iter().flatten());
+        stack.extend([&n.cond, &n.target, &n.index].into_iter().flatten());
         for s in &n.stmts {
             match s {
-                Stmt::Return { uses, .. } => roots.extend(
+                Stmt::Return { uses, .. } => stack.extend(
                     uses.iter()
                         .map(|(_, e)| e)
                         .filter(|e| !matches!(e, Expr::Var { .. })),
                 ),
-                _ => roots.extend(s.exprs()),
+                Stmt::Call(c) => stack.extend(shown_inputs(c)),
+                _ => stack.extend(s.exprs()),
             }
         }
     }
-    roots
-        .into_iter()
-        .flat_map(Expr::preorder)
-        .filter_map(|x| match x {
-            Expr::Var { var, .. } => Some(*var),
-            _ => None,
-        })
-        .collect()
+    let mut out = BTreeSet::new();
+    while let Some(e) = stack.pop() {
+        match e {
+            Expr::Var { var, .. } => {
+                out.insert(*var);
+            }
+            Expr::Call(c) => stack.extend(shown_inputs(c)),
+            _ => stack.extend(e.inputs()),
+        }
+    }
+    out
 }
 
 impl PrintEnv for ProgramEnv<'_> {

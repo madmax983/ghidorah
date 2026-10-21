@@ -8,6 +8,7 @@
 //! | a parameter of the function signature | the type of the parameter |
 //! | a variable that is an argument of a call | the parameter type of the callee signature or prototype |
 //! | the result of a call: the `rax` def, or the `xmm0` def for a floating return type | the return type of the callee |
+//! | a variable that a floating return of the function gives | the return type of the signature, else `float` or `double` ([`View::float_ret`]) |
 //!
 //! The pass spreads a type over each copy `d = s` in statement order. Two different types
 //! for one variable are a conflict, and the variable gets no type.
@@ -23,7 +24,7 @@ use ghidorah_base::Storage;
 use ghidorah_types::{DataModel, Prim, Tier0, Type, TypeId, TypeStore, layout};
 
 use crate::expr::{Call, Callee, Expr, Stmt, VarIdx};
-use crate::print::{PrintEnv, ret_loc};
+use crate::print::{PrintEnv, Signature, ret_loc};
 use crate::view::View;
 
 /// The store of a lattice type.
@@ -162,6 +163,20 @@ fn call_seeds(call: &Call, env: &dyn PrintEnv, stores: &Stores<'_>, seeds: &mut 
     }
 }
 
+/// Gives the type of the floating return of `view`: the floating return type of the
+/// signature `sig`, else the Tier-0 type of [`View::float_ret`].
+fn float_ret_type(view: &View, sig: Option<&Signature>, stores: &Stores<'_>) -> Option<Ty> {
+    let kind = view.float_ret?;
+    if let Some(ret) = sig.and_then(|s| s.ret).filter(|t| stores.is_float(*t)) {
+        return Some(ret);
+    }
+    let tier0 = stores.tier0?;
+    Some(Ty {
+        store: Store::Tier0,
+        id: tier0.store().prim(kind.prim()),
+    })
+}
+
 /// Gives the calls of a statement: the call statement and the calls in its expressions.
 pub(crate) fn calls_of(s: &Stmt) -> Vec<&Call> {
     let mut out = Vec::new();
@@ -198,7 +213,8 @@ pub fn infer(view: &View, env: &dyn PrintEnv, stores: &Stores<'_>) -> Vec<Option
             });
         }
     }
-    if let Some(sig) = env.signature(view.entry) {
+    let sig = env.signature(view.entry);
+    if let Some(sig) = &sig {
         for (i, v) in view.vars.iter().enumerate() {
             if let Storage::Param(p) = v.id.storage
                 && let Some(ty) = sig.params.get(usize::from(p))
@@ -208,6 +224,17 @@ pub fn infer(view: &View, env: &dyn PrintEnv, stores: &Stores<'_>) -> Vec<Option
         }
     }
     let stmts: Vec<&Stmt> = view.nodes.iter().flat_map(|n| &n.stmts).collect();
+    if let Some(ty) = float_ret_type(view, sig.as_ref(), stores) {
+        for s in &stmts {
+            if let Stmt::Return { uses, .. } = s {
+                for (_, e) in uses.iter().filter(|(l, _)| l.is_xmm()) {
+                    if let Expr::Var { var, .. } = e {
+                        seeds.add(*var, ty);
+                    }
+                }
+            }
+        }
+    }
     for s in &stmts {
         for c in calls_of(s) {
             call_seeds(c, env, stores, &mut seeds);
