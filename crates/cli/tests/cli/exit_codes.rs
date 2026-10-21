@@ -79,7 +79,10 @@ fn ac_150_cli_exit_codes() {
     for line in &lines {
         let envelope = json(line);
         assert!(
-            envelope.get("ok").and_then(|v| v.as_bool()).is_some(),
+            envelope
+                .get("ok")
+                .and_then(ghidorah_json::Value::as_bool)
+                .is_some(),
             "an envelope line: {line}"
         );
     }
