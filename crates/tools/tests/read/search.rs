@@ -228,16 +228,22 @@ fn search_names_strings_and_bytes() {
 }
 
 /// The symbol names of [`hostile`]: a name that starts with a quote, a backslash, a terminal
-/// escape with a bidi mark and a name above the 256 characters of a display name.
-pub fn hostile_names() -> [String; 5] {
+/// escape with a bidi mark, a name above the 256 characters of a display name, and names with
+/// a space at the end or at the start.
+pub fn hostile_names() -> [String; 7] {
     [
         "main".to_owned(),
         "\"main\"".to_owned(),
         "back\\slash".to_owned(),
         "\x1b[2J\u{202e}evil".to_owned(),
         format!("long_{}", "x".repeat(303)),
+        "foo ".to_owned(),
+        " bar".to_owned(),
     ]
 }
+
+/// The name of the section of [`hostile`] with a space at the end.
+pub const SPACE_SECTION: &str = "sp ";
 
 /// The name of the two data symbols of [`hostile`]: a name with a bidi mark (U+202E).
 pub const EVIL: &str = "evil\u{202e}x";
@@ -249,14 +255,15 @@ pub const SOFT_SECTION: &str = ".x\u{ad}y";
 pub const NOTE_NAME: &str = "a\\b";
 
 /// Loads an ELF file with the names of [`hostile_names`], one `ret` function each, the
-/// sections `"q` and [`SOFT_SECTION`], a note of the owner [`NOTE_NAME`] and two data symbols
-/// [`EVIL`] in `"q`.
+/// sections `"q`, [`SOFT_SECTION`] and [`SPACE_SECTION`], a note of the owner [`NOTE_NAME`]
+/// and two data symbols [`EVIL`] in `"q`.
 pub fn hostile(test: &str) -> ghidorah_tools::Session {
     let at = |off| Loc::section(".text", off);
     let mut b = ElfBuilder::exec()
         .section(Section::code(".text", &[0xc3; 8]))
         .section(Section::rodata("\"q", &[1, 2, 3, 4]))
         .section(Section::rodata(SOFT_SECTION, &[5, 6, 7, 8]))
+        .section(Section::rodata(SPACE_SECTION, &[9, 10, 11, 12]))
         .note(ElfNote {
             section: ".note.test".to_owned(),
             name: NOTE_NAME.to_owned(),
@@ -320,7 +327,8 @@ fn dead_ids(session: &mut ghidorah_tools::Session, kind: &str) -> Vec<String> {
 ///
 /// Each `search` item of the kinds `symbol` and `name` has an ID that resolves to the item.
 /// A name of two symbols, a file symbol, an undefined versioned import and a linker symbol
-/// outside the memory map give no `NOT_FOUND` and no `AMBIGUOUS_NAME` (r3-surface-03).
+/// outside the memory map give no `NOT_FOUND` and no `AMBIGUOUS_NAME` (r3-surface-03). A
+/// symbol or section name with a space at its start or end keeps the space (r3-surface-02).
 #[test]
 fn regress_emitted_ids_round_trip() {
     let mut session = hostile("regress_emitted_ids_round_trip");
@@ -407,7 +415,7 @@ fn regress_emitted_ids_round_trip() {
             ids.insert(sec.name().to_owned());
         }
     }
-    for name in ["\"q", SOFT_SECTION, ".text"] {
+    for name in ["\"q", SOFT_SECTION, SPACE_SECTION, ".text"] {
         assert!(ids.contains(name), "{name:?} in {sections:?}");
     }
 }

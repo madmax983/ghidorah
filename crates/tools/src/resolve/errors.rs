@@ -158,10 +158,16 @@ pub(super) fn base_ambiguous(
     )
 }
 
-/// Tells if the binary name `name` is hostile: it starts with `"` or holds a character that
-/// `BinText` escapes. A candidate never shows such a name raw.
+/// Tells if the binary name `name` is hostile: it starts with `"`, holds a character that
+/// `BinText` escapes, or starts or ends with ASCII white space. The resolver trims outer
+/// white space, so such a name does not resolve raw. A candidate never shows a hostile name
+/// raw.
 fn hostile(name: &str) -> bool {
-    name.starts_with('"') || name.chars().any(escapes)
+    let outer = |c: Option<char>| c.is_some_and(|c| c.is_ascii_whitespace());
+    name.starts_with('"')
+        || outer(name.chars().next())
+        || outer(name.chars().next_back())
+        || name.chars().any(escapes)
 }
 
 /// Gives `AMBIGUOUS_NAME` for a symbol name with the addresses `addrs` in address order.

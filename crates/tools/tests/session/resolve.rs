@@ -159,17 +159,22 @@ fn targets(p: &Program, value: &str) -> Vec<Address> {
 
 /// The `NOT_FOUND` and `AMBIGUOUS_NAME` candidates of a hostile binary name hold escaped text.
 /// Each candidate value resolves to a matching item (AC-146a, r2-surface-03).
+///
+/// A name with a space at its start or end is hostile too: the resolver trims outer white
+/// space, so its candidate value is the quoted `sym:` ID (r3-surface-02).
 #[test]
 fn regress_hostile_candidates_escape_and_resolve() {
     let evil = "\x1b[2J\u{202e}evil";
     let hidden = "\u{200b}hidden";
     let at = |off| Loc::section(".text", off);
     let b = ElfBuilder::exec()
-        .section(Section::code(".text", &[0xc3; 4]))
+        .section(Section::code(".text", &[0xc3; 8]))
         .section(Section::rodata(hidden, &[1, 2, 3, 4]))
         .symbol(Symbol::func("main", at(0), 1))
         .symbol(Symbol::func(evil, at(1), 1))
         .symbol(Symbol::func(evil, at(2), 1).local())
+        .symbol(Symbol::func("foo ", at(3), 1))
+        .symbol(Symbol::func(" bar", at(4), 1))
         .entry(Loc::symbol("main"));
     let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("session_hostile_candidates");
     let _ = std::fs::remove_dir_all(&dir);
@@ -194,10 +199,16 @@ fn regress_hostile_candidates_escape_and_resolve() {
         .filter_map(|sec| sec.va.map(|va| Address::ram(va.first)))
         .collect();
     assert_eq!(hidden_at.len(), 1, "{load}");
+    let foo_at = p.addrs_named("foo ");
+    let bar_at = p.addrs_named(" bar");
+    assert_eq!((foo_at.len(), bar_at.len()), (1, 1), "{load}");
     let cases = [
         (&evil[..evil.len() - 1], "NOT_FOUND", &evil_at),
         (evil, "AMBIGUOUS_NAME", &evil_at),
         (&hidden[..hidden.len() - 1], "NOT_FOUND", &hidden_at),
+        ("foo", "NOT_FOUND", &foo_at),
+        ("foo ", "NOT_FOUND", &foo_at),
+        ("bar", "NOT_FOUND", &bar_at),
     ];
     for (input, want, items) in cases {
         let args = Value::object([("target", Value::from(input))]);
