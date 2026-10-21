@@ -1,21 +1,27 @@
 //! The item lists of the `search` kinds of the loader model: imports, exports, sections,
 //! segments, libraries and symbols.
 
-use ghidorah_base::{Address, Caps};
+use ghidorah_base::{Address, BinText, Caps, ImportId};
+use ghidorah_db::Program;
 use ghidorah_json::Value;
-use ghidorah_loader::{SymBind, SymKind, SymTable};
+use ghidorah_loader::elf::consts::SHN_UNDEF;
+use ghidorah_loader::{Sym, SymBind, SymKind, SymTable};
 
 use super::filter::{Items, Matcher, New};
 use crate::handlers::addr_info;
 use crate::handlers::func_sections::{self as fs, Namer};
 
-/// Gives the text of binary text in the escapes of `BinText`, with no cap.
-fn full(text: &ghidorah_base::BinText) -> String {
+/// Gives the text of binary text in the escapes of `BinText`, with no cap: the program text of
+/// a loader name. The matcher and the IDs use it. Output text uses [`addr_info::shown`] or
+/// [`Namer::bin`], so each escape shows once.
+fn full(text: &BinText) -> String {
     text.as_str()
         .map_or_else(|| text.render(Caps::DETAILED).text, str::to_owned)
 }
 
-/// Adds the imports of the loader model whose name matches.
+/// Adds the imports of the loader model whose name matches. The name and the DLL show from
+/// their loader bytes, so each escape shows once. The DLL is in ASCII lower case, the same as
+/// its `imp:` ID.
 pub fn imports(items: &mut Items<'_>, m: &Matcher, namer: &Namer) {
     let p = items.program;
     for row in p.imports().values() {
@@ -28,9 +34,18 @@ pub fn imports(items: &mut Items<'_>, m: &Matcher, namer: &Namer) {
         }
         let mut new = New::item("import", row.id.to_string());
         new.addr = Some(row.stub.or(row.slot).unwrap_or(row.ext));
-        new.text = Some(Value::from(namer.text(&name)));
+        new.text = Some(Value::from(namer.at(p, row.ext, &name)));
         if let Some(lib) = row.id.lib() {
-            new.extra.push("lib", Value::from(fs::safe(lib)));
+            let bytes = p
+                .binary()
+                .imports
+                .get(row.index)
+                .and_then(|i| i.lib.as_ref());
+            let shown = bytes.map_or_else(
+                || fs::safe(lib),
+                |b| addr_info::shown(&BinText::new(b.as_bytes().to_ascii_lowercase())),
+            );
+            new.extra.push("lib", Value::from(shown));
         }
         if let Some(slot) = row.slot {
             new.extra.push("slot", fs::addr(slot));
@@ -44,7 +59,8 @@ pub fn imports(items: &mut Items<'_>, m: &Matcher, namer: &Namer) {
     }
 }
 
-/// Adds the exports of the loader model whose name matches.
+/// Adds the exports of the loader model whose name matches. The name and the forwarder show
+/// from their loader bytes, so each escape shows once.
 pub fn exports(items: &mut Items<'_>, m: &Matcher, namer: &Namer) {
     let p = items.program;
     for row in p.exports().values() {
@@ -57,11 +73,14 @@ pub fn exports(items: &mut Items<'_>, m: &Matcher, namer: &Namer) {
         }
         let mut new = New::item("export", row.id.to_string());
         new.addr = row.addr;
-        new.text = Some(Value::from(namer.text(&name)));
         let export = p.binary().exports.get(row.index);
+        let text = export
+            .and_then(|e| e.name.as_ref())
+            .map_or_else(|| namer.text(&name), |n| namer.bin(n));
+        new.text = Some(Value::from(text));
         if let Some(fwd) = export.and_then(|e| e.forwarder.as_ref()) {
             new.extra
-                .push("forwarder", Value::from(fs::safe(&full(fwd))));
+                .push("forwarder", Value::from(addr_info::shown(fwd)));
         }
         items.push(new, None);
     }
@@ -119,7 +138,7 @@ pub fn segments(items: &mut Items<'_>, m: &Matcher) {
     }
 }
 
-/// Adds the libraries of the loader model whose name matches.
+/// Adds the libraries of the loader model whose name matches. Each name escapes once.
 pub fn libraries(items: &mut Items<'_>, m: &Matcher) {
     let list: Vec<New> = items
         .program
@@ -128,7 +147,7 @@ pub fn libraries(items: &mut Items<'_>, m: &Matcher) {
         .iter()
         .zip(0u64..)
         .filter_map(|(lib, seq)| {
-            let name = fs::safe(&full(lib));
+            let name = addr_info::shown(lib);
             if !m.matches(&name) {
                 return None;
             }
@@ -177,7 +196,25 @@ fn sym_names(
     (kind, bind, table)
 }
 
+/// Gives the `imp:` ID of the undefined ELF symbol `s` with the name `raw`. The import has
+/// this name, else the name before its first `@`. A versioned name such as
+/// `puts@GLIBC_2.2.5` gives `imp:puts`. Another symbol gives `None`.
+fn import_of(program: &Program, s: &Sym, raw: &str) -> Option<String> {
+    let elf = matches!(s.table, SymTable::Symtab | SymTable::Dynsym);
+    if !elf || s.shndx != SHN_UNDEF {
+        return None;
+    }
+    let base = raw.split('@').next().unwrap_or(raw);
+    [raw, base].into_iter().find_map(|name| {
+        let id = ImportId::elf(name).ok()?;
+        program.imports().contains_key(&id).then(|| id.to_string())
+    })
+}
+
 /// Adds the named symbols of the symbol tables of the loader model whose name matches.
+///
+/// The ID of each item resolves to the item ([`addr_info::symbol_id`], then [`import_of`]).
+/// A symbol with no such ID, for example a file symbol at 0, gives no item.
 pub fn symbols(items: &mut Items<'_>, m: &Matcher, namer: &Namer) {
     let program = items.program;
     let list: Vec<New> = program
@@ -191,8 +228,9 @@ pub fn symbols(items: &mut Items<'_>, m: &Matcher, namer: &Namer) {
             if !m.matches(&raw) {
                 return None;
             }
-            let name = namer.text(&raw);
-            let id = addr_info::symbol_id(program, &raw, Address::ram(s.addr));
+            let id = addr_info::symbol_id(program, &raw, Address::ram(s.addr))
+                .or_else(|| import_of(program, s, &raw))?;
+            let name = namer.bin(&s.name);
             let mut new = New::item("symbol", id);
             new.addr = (s.addr != 0).then(|| Address::ram(s.addr));
             new.text = Some(Value::from(name));

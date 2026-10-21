@@ -15,6 +15,7 @@ use crate::api::Host;
 use crate::args::Args;
 use crate::batch::MAX_FUEL;
 use crate::dispatch::Ctx;
+use crate::errors::Inactive;
 use crate::hints::Call;
 use crate::session::Session;
 
@@ -139,7 +140,7 @@ pub fn render(view: &View<'_>, items: &[Item], ctx: &Ctx) -> Object {
     let room = fs::room(ctx);
     let mut omitted = 0u64;
     loop {
-        let out = assemble(view, items, &lists, &renames, omitted);
+        let out = assemble(view, items, (&lists, &renames), omitted, &ctx.inactive);
         let size = fs::chars(ctx, &Value::Object(out.clone()));
         let mut excess = size.saturating_sub(room);
         if excess == 0 {
@@ -163,13 +164,14 @@ pub fn render(view: &View<'_>, items: &[Item], ctx: &Ctx) -> Object {
     }
 }
 
-/// Gives the data object of the items with the match lists `lists`.
+/// Gives the data object of the items with the match lists `lists`. The hint of an item
+/// error names no tool of `inactive`.
 fn assemble(
     view: &View<'_>,
     items: &[Item],
-    lists: &[Vec<Value>],
-    renames: &[Value],
+    (lists, renames): (&[Vec<Value>], &[Value]),
     omitted: u64,
+    inactive: &Inactive,
 ) -> Object {
     let list: Vec<Value> = items
         .iter()
@@ -184,9 +186,10 @@ fn assemble(
                 }
                 Value::Object(o)
             }
-            Item::Bad { input, error } => {
-                Value::object([("input", input.clone()), ("error", error.to_json())])
-            }
+            Item::Bad { input, error } => Value::object([
+                ("input", input.clone()),
+                ("error", error.item_json(inactive)),
+            ]),
         })
         .collect();
     let mut out = Object::new();

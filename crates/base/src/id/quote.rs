@@ -1,9 +1,12 @@
 //! The quoted form of a name part in an ID (ADR-0008, amendment 2026-10-20).
 //!
-//! A name part shows in the quoted form when it holds a character that
-//! [`BinText`](crate::BinText) escapes, or when it starts with a double quote. The quoted form
-//! is a double quote, the name with escapes and a closing double quote. Every other name shows
-//! its exact text.
+//! A name part shows in the quoted form in three cases. It holds a character that
+//! [`BinText`](crate::BinText) escapes. It starts with a double quote. Its first or last
+//! character is ASCII white space: the address parser trims outer white space, so only the
+//! quoted form keeps it.
+//!
+//! The quoted form is a double quote, the name with escapes and a closing double quote. Every
+//! other name shows its exact text.
 //!
 //! | Character | Escape |
 //! |---|---|
@@ -21,9 +24,14 @@ use std::str::CharIndices;
 
 use crate::bintext::escapes;
 
-/// Tells if `name` shows in the quoted form.
+/// Tells if `name` shows in the quoted form: it starts with `"`, holds a character that
+/// `BinText` escapes, or starts or ends with ASCII white space.
 pub(crate) fn needs_quotes(name: &str) -> bool {
-    name.starts_with('"') || name.chars().any(escapes)
+    let outer = |c: Option<char>| c.is_some_and(|c| c.is_ascii_whitespace());
+    name.starts_with('"')
+        || outer(name.chars().next())
+        || outer(name.chars().next_back())
+        || name.chars().any(escapes)
 }
 
 /// One name part for `Display`: the exact text or the quoted form.

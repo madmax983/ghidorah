@@ -306,6 +306,7 @@ fn run(session: &mut Session, args: &Args, ctx: &mut Ctx) -> Result<Payload, Too
     let confidence = args.str("confidence");
     let namer = Namer::new();
     let none = Value::Null;
+    let inactive = ctx.inactive.clone();
     let (mut out, committed) = edits::commit(session, args, ctx, |tx| {
         if single {
             let r = Rename {
@@ -321,7 +322,7 @@ fn run(session: &mut Session, args: &Args, ctx: &mut Ctx) -> Result<Payload, Too
             return Ok(out);
         }
         let inputs = args.list("items").unwrap_or_default();
-        Ok(fs::per_item("items", inputs, |i, input| {
+        Ok(fs::per_item(&inactive, "items", inputs, |i, input| {
             let r = Rename {
                 target: input.get("target").unwrap_or(&none),
                 name: input

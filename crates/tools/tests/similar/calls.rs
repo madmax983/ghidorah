@@ -388,6 +388,45 @@ fn regress_similar_time_stop_names_max_ms() {
         .cloned()
         .unwrap_or_default();
     assert_eq!(text_at(&resend, "/tool"), "func_similar", "{envelope}");
-    assert_eq!(resend.get("args"), Some(&json(args)), "{envelope}");
+    let rest = json(r#"{"targets":["fn:0x11e0"],"min_score":0,"max_ms":1}"#);
+    assert_eq!(resend.get("args"), Some(&rest), "{envelope}");
+    assert_eq!(stop.get("remedy"), Some(&resend), "{envelope}");
     assert!(text_at(&resend, "/why").contains("max_ms"), "{envelope}");
+}
+
+/// A `max_ms` stop makes progress (r3-surface-04). The guard starts after the index pass and
+/// lets the first target run, so each call gives at least one item. `next[0]` sends only the
+/// targets after the stop. Following `next[0]` ends with each target done once, in order.
+#[test]
+fn regress_similar_time_stop_makes_progress() {
+    let targets = ["main", "fn:0x11e0", "main"];
+    let mut args = json(r#"{"min_score":0,"max_ms":1}"#);
+    if let Value::Object(object) = &mut args {
+        object.push(
+            "targets",
+            Value::Array(targets.iter().map(|t| Value::from(*t)).collect()),
+        );
+    }
+    let mut s = slow_session(false);
+    let mut done: Vec<String> = Vec::new();
+    for _ in 0..=targets.len() {
+        let envelope = call_value(&mut s, "func_similar", args.clone());
+        let items = list_at(data(&envelope), "/items");
+        assert!(!items.is_empty(), "a call with no item: {envelope}");
+        done.extend(items.iter().map(|i| text_at(i, "/query/id")));
+        if text_at(data(&envelope), "/stopped_by").is_empty() {
+            let main = done.first().cloned().unwrap_or_default();
+            assert_eq!(done, [main.as_str(), "fn:0x11e0", main.as_str()]);
+            return;
+        }
+        let resend = list_at(&envelope, "/next")
+            .first()
+            .cloned()
+            .unwrap_or_default();
+        assert_eq!(text_at(&resend, "/tool"), "func_similar", "{envelope}");
+        let left = list_at(&resend, "/args/targets");
+        assert_eq!(left.len() + done.len(), targets.len(), "{envelope}");
+        args = resend.get("args").cloned().unwrap_or_default();
+    }
+    panic!("the resends of next[0] do not end: {done:?}");
 }

@@ -31,7 +31,7 @@ pub use parse::atom;
 
 use crate::args::Args;
 use crate::dispatch::{Ctx, Payload};
-use crate::errors::ToolError;
+use crate::errors::{Inactive, ToolError};
 use crate::handlers::func_sections as fs;
 use crate::hints::Call;
 use crate::outshape::{Field, OutputShape};
@@ -256,18 +256,21 @@ pub const SPEC: ToolSpec<Session> = ToolSpec {
 /// resolve gives `{ claim, error }`. On a partial analysis, `refuted` changes to `unknown`.
 ///
 /// The `claim` guards of `batch_run` use the same function, so a guard and a direct call give
-/// the same verdict.
+/// the same verdict. A guard reads only the verdict, so the hint of an error entry names only
+/// tools of every profile ([`Inactive::any_profile`]).
 #[must_use]
 pub fn check_claim(checker: &mut Checker<'_>, claim: &Value, path: &str, partial: bool) -> Value {
-    check_one(checker, claim, path, partial).0
+    check_one(checker, claim, path, partial, &Inactive::any_profile()).0
 }
 
-/// Checks one claim. Gives the verdict entry and the outcome of a claim that resolves.
+/// Checks one claim. Gives the verdict entry and the outcome of a claim that resolves. The
+/// hint of an error entry names no tool of `inactive`.
 fn check_one(
     checker: &mut Checker<'_>,
     claim: &Value,
     path: &str,
     partial: bool,
+    inactive: &Inactive,
 ) -> (Value, Option<Outcome>) {
     match atom(checker.program(), claim, path) {
         Ok(a) => {
@@ -277,7 +280,7 @@ fn check_one(
             }
             (render::verdict(claim, &out, partial), Some(out))
         }
-        Err(e) => (render::error("claim", claim, &e), None),
+        Err(e) => (render::error("claim", claim, &e, inactive), None),
     }
 }
 
@@ -300,8 +303,14 @@ fn explain_error(e: &ExplainError, path: &str) -> ToolError {
     }
 }
 
-/// Gives the trees of the fact IDs `ids` and the rules of the trees.
-fn trees(p: &Program, ids: &[Value], depth: u32, max_nodes: usize) -> (Vec<Value>, Value) {
+/// Gives the trees of the fact IDs `ids` and the rules of the trees. The hint of an error
+/// entry names no tool of `inactive`.
+fn trees(
+    p: &Program,
+    ids: &[Value],
+    (depth, max_nodes): (u32, usize),
+    inactive: &Inactive,
+) -> (Vec<Value>, Value) {
     let mut rules = BTreeMap::new();
     let mut nodes = max_nodes;
     let mut out = Vec::with_capacity(ids.len());
@@ -313,7 +322,7 @@ fn trees(p: &Program, ids: &[Value], depth: u32, max_nodes: usize) -> (Vec<Value
                 &explain(p, &key, depth, &mut nodes),
                 &mut rules,
             )),
-            Err(e) => out.push(render::error("id", id, &explain_error(&e, &path))),
+            Err(e) => out.push(render::error("id", id, &explain_error(&e, &path), inactive)),
         }
     }
     (out, render::rules(&rules))
@@ -338,7 +347,8 @@ fn run(session: &mut Session, args: &Args, ctx: &mut Ctx) -> Result<Payload, Too
     let mut verdicts = Vec::new();
     let mut gap = None;
     for (i, claim) in args.list("claims").unwrap_or_default().iter().enumerate() {
-        let (entry, out) = check_one(&mut checker, claim, &format!("/claims/{i}"), partial);
+        let path = format!("/claims/{i}");
+        let (entry, out) = check_one(&mut checker, claim, &path, partial, &ctx.inactive);
         if gap.is_none() {
             gap = out.as_ref().and_then(first_gap);
         }
@@ -355,8 +365,8 @@ fn run(session: &mut Session, args: &Args, ctx: &mut Ctx) -> Result<Payload, Too
     let (explanations, rules) = trees(
         p,
         args.list("explain").unwrap_or_default(),
-        depth,
-        max_nodes,
+        (depth, max_nodes),
+        &ctx.inactive,
     );
     if let Some(at) = gap {
         ctx.hint(Call::new(

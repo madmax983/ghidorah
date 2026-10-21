@@ -135,24 +135,29 @@ pub(crate) fn shown(name: &BinText) -> String {
     name.render(Caps::new(fs::NAME_CHARS, 0)).text
 }
 
-/// Gives the ID of the symbol `name` at `addr`: the [`SymId`] text of the exact name. So the
-/// ID parses back to the symbol.
+/// Gives the ID of the symbol `name` at `addr` (design Section 3.5). Each ID resolves to
+/// `addr`.
 ///
-/// When [`SymId`] refuses the name, the ID is the function ID at `addr`, else the address.
-/// An ID never holds a cut name.
+/// | Case | ID |
+/// |---|---|
+/// | `addrs_named(name)` is exactly `[addr]` | the [`SymId`] text of the exact name |
+/// | a function starts at `addr` | the function ID |
+/// | `addr` is not 0 | the address |
+/// | else | `None` |
+///
+/// The caller gives the `imp:` ID of an undefined import symbol for `None`. An ID never
+/// holds a cut name.
 #[must_use]
-pub(crate) fn symbol_id(p: &Program, name: &str, addr: Address) -> String {
-    SymId::new(name).map_or_else(
-        |_| {
-            let func = FuncId(addr);
-            if p.func(func).is_some() {
-                func.to_string()
-            } else {
-                addr.to_string()
-            }
-        },
-        |id| id.to_string(),
-    )
+pub(crate) fn symbol_id(p: &Program, name: &str, addr: Address) -> Option<String> {
+    let only = p.addrs_named(name).as_slice() == [addr];
+    if let Some(id) = only.then(|| SymId::new(name).ok()).flatten() {
+        return Some(id.to_string());
+    }
+    let func = FuncId(addr);
+    if p.func(func).is_some() {
+        return Some(func.to_string());
+    }
+    (addr.off != 0).then(|| addr.to_string())
 }
 
 /// Gives the section that holds `addr`: `{ id, name }`, or `null`.
@@ -289,7 +294,7 @@ fn info(
         out.push(
             "symbol",
             Value::object([
-                ("name", Value::from(namer.text(&symbol.name.value))),
+                ("name", Value::from(namer.at(p, addr, &symbol.name.value))),
                 ("source", Value::from(symbol.name.source.name())),
                 ("kind", Value::from(symbol.kind.name())),
             ]),
@@ -331,7 +336,7 @@ fn run(session: &mut Session, args: &Args, ctx: &mut Ctx) -> Result<Payload, Too
     };
     let namer = Namer::new();
     let out = if let Some(targets) = args.list("targets") {
-        fs::per_item("targets", targets, |i, input| {
+        fs::per_item(&ctx.inactive, "targets", targets, |i, input| {
             info(p, input, &fs::item_path("targets", i), parts, &namer)
         })
     } else {

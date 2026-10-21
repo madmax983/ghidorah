@@ -11,7 +11,7 @@ use ghidorah_db::{CodeUnit, Program, Ref, RefKey, RefType};
 use ghidorah_json::Value;
 use ghidorah_loader::Format;
 
-use crate::errors::ToolError;
+use crate::errors::{Inactive, ToolError};
 use crate::handlers::func_sections as fs;
 use crate::resolve::{self, Family, Rule, Target, table};
 
@@ -170,9 +170,10 @@ pub struct Targets {
     pub resolved: Vec<Value>,
 }
 
-/// Resolves each target of `inputs` for `family`. A bad target goes to `errors`.
+/// Resolves each target of `inputs` for `family`. A bad target goes to `errors`, with the
+/// hint for the active tools: no tool of `inactive`.
 #[must_use]
-pub fn resolve_all(p: &Program, inputs: &[Value], family: Family) -> Targets {
+pub fn resolve_all(p: &Program, inputs: &[Value], family: Family, inactive: &Inactive) -> Targets {
     let mut out = Targets::default();
     for (i, input) in inputs.iter().enumerate() {
         let path = fs::item_path("targets", i);
@@ -216,7 +217,7 @@ pub fn resolve_all(p: &Program, inputs: &[Value], family: Family) -> Targets {
                 out.errors.push(Value::object([
                     ("input", input.clone()),
                     ("index", Value::from(i)),
-                    ("error", error.to_json()),
+                    ("error", error.item_json(inactive)),
                 ]));
             }
         }

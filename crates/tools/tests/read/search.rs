@@ -24,6 +24,39 @@ fn listing(session: &mut ghidorah_tools::Session, kind: &str) -> Vec<String> {
     out
 }
 
+/// Gives the ID of the loader symbol `s` with the name `name` in `search` (r3-surface-03):
+///
+/// 1. The `sym:` ID when the name has exactly the one address of `s`.
+/// 2. Else the function ID at the address, else the address when it is not 0.
+/// 3. Else the `imp:` ID of an undefined ELF symbol: its name, or its name before `@`.
+///
+/// A symbol with no such ID, for example a file symbol at 0, gives `None`.
+fn symbol_id(p: &ghidorah_db::Program, s: &ghidorah_loader::Sym, name: &str) -> Option<String> {
+    let addr = ghidorah_base::Address::ram(s.addr);
+    if p.addrs_named(name) == [addr]
+        && let Ok(id) = SymId::new(name)
+    {
+        return Some(id.to_string());
+    }
+    if p.func(ghidorah_base::FuncId(addr)).is_some() {
+        return Some(ghidorah_base::FuncId(addr).to_string());
+    }
+    if s.addr != 0 {
+        return Some(addr.to_string());
+    }
+    let undefined = s.shndx == 0
+        && matches!(
+            s.table,
+            ghidorah_loader::SymTable::Symtab | ghidorah_loader::SymTable::Dynsym
+        );
+    let base = name.split('@').next().unwrap_or(name);
+    [name, base]
+        .into_iter()
+        .filter_map(|n| ghidorah_base::ImportId::elf(n).ok())
+        .find(|i| undefined && p.imports().contains_key(i))
+        .map(|i| i.to_string())
+}
+
 #[test]
 fn ac_217_search_listing() {
     for name in [
@@ -87,11 +120,12 @@ fn ac_217_search_listing() {
         let mut want: Vec<String> = b.libraries.iter().map(text).collect();
         want.sort();
         assert_eq!(libraries, want, "{name} libraries");
+        let p = program(&session, &id);
         let mut symbols: Vec<String> = b
             .symbols
             .iter()
             .filter(|s| !s.name.is_empty())
-            .map(|s| SymId::new(&text(&s.name)).expect("a symbol ID").to_string())
+            .filter_map(|s| symbol_id(p, s, &text(&s.name)))
             .collect();
         symbols.sort();
         assert_eq!(listing(&mut session, "symbol"), symbols, "{name} symbols");
@@ -194,16 +228,25 @@ fn search_names_strings_and_bytes() {
 }
 
 /// The symbol names of [`hostile`]: a name that starts with a quote, a backslash, a terminal
-/// escape with a bidi mark and a name above the 256 characters of a display name.
-pub fn hostile_names() -> [String; 5] {
+/// escape with a bidi mark, a name above the 256 characters of a display name, and names with
+/// a space at the end or at the start.
+pub fn hostile_names() -> [String; 7] {
     [
         "main".to_owned(),
         "\"main\"".to_owned(),
         "back\\slash".to_owned(),
         "\x1b[2J\u{202e}evil".to_owned(),
         format!("long_{}", "x".repeat(303)),
+        "foo ".to_owned(),
+        " bar".to_owned(),
     ]
 }
+
+/// The name of the section of [`hostile`] with a space at the end.
+pub const SPACE_SECTION: &str = "sp ";
+
+/// The name of the two data symbols of [`hostile`]: a name with a bidi mark (U+202E).
+pub const EVIL: &str = "evil\u{202e}x";
 
 /// The name of the section of [`hostile`] with a soft hyphen (U+00AD).
 pub const SOFT_SECTION: &str = ".x\u{ad}y";
@@ -211,14 +254,16 @@ pub const SOFT_SECTION: &str = ".x\u{ad}y";
 /// The owner name of the ELF note of [`hostile`]: a name with a backslash.
 pub const NOTE_NAME: &str = "a\\b";
 
-/// Loads an ELF file with the names of [`hostile_names`], one `ret` function each, the
-/// sections `"q` and [`SOFT_SECTION`] and a note of the owner [`NOTE_NAME`].
+/// Loads an ELF file with the names of [`hostile_names`], one `ret` function each. The file
+/// also has the sections `"q`, [`SOFT_SECTION`] and [`SPACE_SECTION`], a note of the owner
+/// [`NOTE_NAME`] and two data symbols [`EVIL`] in `"q`.
 pub fn hostile(test: &str) -> ghidorah_tools::Session {
     let at = |off| Loc::section(".text", off);
     let mut b = ElfBuilder::exec()
         .section(Section::code(".text", &[0xc3; 8]))
         .section(Section::rodata("\"q", &[1, 2, 3, 4]))
         .section(Section::rodata(SOFT_SECTION, &[5, 6, 7, 8]))
+        .section(Section::rodata(SPACE_SECTION, &[9, 10, 11, 12]))
         .note(ElfNote {
             section: ".note.test".to_owned(),
             name: NOTE_NAME.to_owned(),
@@ -228,6 +273,9 @@ pub fn hostile(test: &str) -> ghidorah_tools::Session {
         });
     for (name, off) in hostile_names().iter().zip(0u64..) {
         b = b.symbol(Symbol::func(name, at(off), 1));
+    }
+    for off in 0..2 {
+        b = b.symbol(Symbol::object(EVIL, Loc::section("\"q", off), 1));
     }
     let (session, load) = load_bytes(test, &b.entry(Loc::symbol("main")).build(), "full");
     assert_eq!(code(&load), "", "{load}");
@@ -246,23 +294,88 @@ fn round_trip(session: &mut ghidorah_tools::Session, id: &str, addr: &str) -> Va
     d
 }
 
+/// Gives the `search` items of `kind` whose `id` does not resolve through `addr_info`: an
+/// error, or an address other than the `addr` of the item. An `imp:` ID resolves to the
+/// entry of its import, so only its code counts. An address ID outside the memory map
+/// resolves, and `addr_info` gives `ADDRESS_UNMAPPED` for it.
+fn dead_ids(session: &mut ghidorah_tools::Session, kind: &str) -> Vec<String> {
+    let args = Value::object([("kind", Value::from(kind))]);
+    let mut bad = Vec::new();
+    for item in all_items(session, "search", &args, 7) {
+        let (id, addr) = (str_of(&item, "id"), str_of(&item, "addr"));
+        let args = Value::object([("target", Value::from(id.as_str()))]);
+        let envelope = call_value(session, "addr_info", args);
+        let failed = code(&envelope);
+        let outside = failed == "ADDRESS_UNMAPPED" && id == addr;
+        let moved = !addr.is_empty()
+            && !id.starts_with("imp:")
+            && failed.is_empty()
+            && text_at(&envelope, "/data/addr") != addr;
+        if (!failed.is_empty() && !outside) || moved {
+            bad.push(format!(
+                "{item} -> {failed} {}",
+                text_at(&envelope, "/data/addr")
+            ));
+        }
+    }
+    bad
+}
+
 /// The IDs of `search`, `binary_survey` and `addr_info` parse back to their item. A name that
 /// starts with a quote, holds an escaped character or is long keeps its exact text in the ID
 /// (r2-surface-01, known-02).
+///
+/// Each `search` item of the kinds `symbol` and `name` has an ID that resolves to the item.
+/// These IDs give no `NOT_FOUND` and no `AMBIGUOUS_NAME` (r3-surface-03). The cases are a
+/// name of two symbols, a file symbol, an undefined versioned import and a linker symbol
+/// outside the memory map. A symbol or section name with a space at its start or end keeps the
+/// space (r3-surface-02).
 #[test]
 fn regress_emitted_ids_round_trip() {
     let mut session = hostile("regress_emitted_ids_round_trip");
+    for kind in ["symbol", "name"] {
+        let bad = dead_ids(&mut session, kind);
+        assert!(bad.is_empty(), "{kind}: {bad:#?}");
+    }
+    let (mut gcc, _) = fixture("adversarial_names.gcc-O2");
+    let bad = dead_ids(&mut gcc, "symbol");
+    assert!(bad.is_empty(), "{bad:#?}");
+    let listed = all_items(&mut gcc, "search", &json(r#"{"kind":"symbol"}"#), 50);
+    let id_of = |text: &str| -> Vec<String> {
+        listed
+            .iter()
+            .filter(|i| str_of(i, "text") == text)
+            .map(|i| str_of(i, "id"))
+            .collect()
+    };
+    assert_eq!(
+        id_of("__libc_start_main@GLIBC_2.34"),
+        ["imp:__libc_start_main"]
+    );
+    assert_eq!(id_of("_end"), ["0x4018"]);
+    assert_eq!(
+        id_of("crtstuff.c"),
+        Vec::<String>::new(),
+        "a file symbol has no ID"
+    );
+
     let args = Value::object([("kind", Value::from("symbol"))]);
-    let symbols: Vec<Value> = all_items(&mut session, "search", &args, 7)
-        .into_iter()
-        .filter(|i| i.pointer("/extra/kind").and_then(Value::as_str) == Some("func"))
+    let symbols = all_items(&mut session, "search", &args, 7);
+    let evil: BTreeSet<String> = symbols
+        .iter()
+        .filter(|i| str_of(i, "text") == r"evil\u{202e}x")
+        .map(|i| str_of(i, "id"))
         .collect();
+    assert_eq!(evil.len(), 2, "two IDs for two symbols: {symbols:?}");
     let mut found = BTreeSet::new();
     for item in &symbols {
         let id = str_of(item, "id");
+        let Ok(ghidorah_base::Id::Sym(sym)) = ghidorah_base::Id::parse(&id) else {
+            continue;
+        };
         let d = round_trip(&mut session, &id, &str_of(item, "addr"));
-        assert_eq!(text_at(&d, "/symbol/name"), str_of(item, "text"), "{d}");
-        if let Ok(ghidorah_base::Id::Sym(sym)) = ghidorah_base::Id::parse(&id) {
+        if item.pointer("/extra/kind").and_then(Value::as_str) == Some("func") {
+            assert_eq!(text_at(&d, "/symbol/name"), str_of(item, "text"), "{d}");
             found.insert(sym.as_str().to_owned());
         }
     }
@@ -303,7 +416,7 @@ fn regress_emitted_ids_round_trip() {
             ids.insert(sec.name().to_owned());
         }
     }
-    for name in ["\"q", SOFT_SECTION, ".text"] {
+    for name in ["\"q", SOFT_SECTION, SPACE_SECTION, ".text"] {
         assert!(ids.contains(name), "{name:?} in {sections:?}");
     }
 }

@@ -716,3 +716,31 @@ fn regress_hostile_name_id_is_escaped() {
         assert_eq!(Id::parse(&id.to_string()), Ok(id));
     }
 }
+
+/// A name with ASCII white space at its start or end shows in the quoted form. The address
+/// parser trims outer white space, so only the quoted form keeps the name (r3-surface-02).
+/// White space inside a name keeps the exact text.
+#[test]
+fn regress_outer_space_name_is_quoted() {
+    for (name, text) in [
+        ("foo ", r#"sym:"foo ""#),
+        (" bar", r#"sym:" bar""#),
+        (" ", r#"sym:" ""#),
+    ] {
+        let id = SymId::new(name).unwrap();
+        assert_eq!(id.to_string(), text, "{name:?}");
+        assert_eq!(Id::parse(text), Ok(Id::Sym(id.clone())), "{text}");
+        assert_eq!(
+            ghidorah_base::addr_expr::parse(text),
+            Ok(ghidorah_base::AddrExpr::Id(Id::Sym(id))),
+            "{text}"
+        );
+    }
+    let section = SectionId::new(2, "sp ").unwrap();
+    assert_eq!(section.to_string(), r#"sec:2:"sp ""#);
+    assert_eq!(
+        ghidorah_base::addr_expr::parse(&section.to_string()),
+        Ok(ghidorah_base::AddrExpr::Id(Id::Section(section)))
+    );
+    assert_eq!(SymId::new("a b").unwrap().to_string(), "sym:a b");
+}

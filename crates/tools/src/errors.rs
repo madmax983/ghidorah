@@ -8,7 +8,12 @@
 //! The message comes from the template of the code in `base::ErrorCode`. The hint and the
 //! retry flag come from the same catalog row. The object is at most [`ERROR_CAP`] characters,
 //! with at most [`MAX_CANDIDATES`] candidates plus `candidates_total` (AC-134).
+//!
+//! The error object of a call drops each hint sentence that names a tool of the [`Inactive`]
+//! set of the call ([`ToolError::to_json_in`]). The error of an item of a list input takes
+//! the same set ([`ToolError::item_json`]).
 
+use std::collections::BTreeSet;
 use std::fmt;
 use std::ops::{Deref, DerefMut};
 
@@ -32,6 +37,44 @@ pub const MAX_TEXT_CHARS: usize = 256;
 
 /// The largest `field_path` in characters.
 pub const MAX_PATH_CHARS: usize = 512;
+
+/// The registered tools outside the active profile of one call (design Section 10.8).
+///
+/// An error object drops each hint sentence that names a tool of this set. The empty set
+/// keeps every sentence.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Inactive(BTreeSet<&'static str>);
+
+impl Inactive {
+    /// Gives the tools of `registry` that `in_profile` does not hold.
+    #[must_use]
+    pub fn of<S: 'static>(registry: &Registry<S>, in_profile: &dyn Fn(&str) -> bool) -> Self {
+        Self(
+            registry
+                .names()
+                .into_iter()
+                .filter(|name| !in_profile(name))
+                .collect(),
+        )
+    }
+
+    /// Gives the shipped tools that a shipped profile leaves out. An error object outside a
+    /// call takes this set, so its hint names only tools of every profile.
+    #[must_use]
+    pub fn any_profile() -> Self {
+        let tools = crate::registry::shipped().tools();
+        let partial = tools
+            .iter()
+            .filter(|t| !Profile::ALL.iter().all(|p| t.profiles.contains(p)));
+        Self(partial.map(|t| t.name).collect())
+    }
+
+    /// Tells if `word` is the name of a tool of the set.
+    #[must_use]
+    pub fn names(&self, word: &str) -> bool {
+        self.0.contains(word)
+    }
+}
 
 /// One choice of an error: `{ value, label, id?, addr?, kind? }`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -201,7 +244,14 @@ impl ToolError {
             .collect()
     }
 
-    /// Gives the hint of the error object.
+    /// Gives the hint of the error object outside a call: each sentence that names a tool
+    /// outside a shipped profile drops out ([`Inactive::any_profile`]).
+    #[must_use]
+    pub fn hint(&self, has_next: bool) -> String {
+        self.hint_in(has_next, &Inactive::any_profile())
+    }
+
+    /// Gives the hint of the error object for the active tools.
     ///
     /// The plain hint of the code replaces the hint in three cases:
     ///
@@ -209,20 +259,11 @@ impl ToolError {
     /// - The hint names `next[0]`, and `has_next` is `false`.
     /// - The hint names the candidates, and the error has none.
     ///
-    /// The template values fill the placeholders.
+    /// A sentence that names a tool of `inactive` drops out. So the hint sends the agent to
+    /// no tool outside the profile. A catalog text that names a tool also has a sentence that
+    /// names no tool. The template values fill the placeholders.
     #[must_use]
-    pub fn hint(&self, has_next: bool) -> String {
-        self.hint_in(has_next, &|_| false)
-    }
-
-    /// Gives the hint of the error object for the active tools.
-    ///
-    /// The text is the text of [`ToolError::hint`], but a sentence that names an inactive
-    /// tool drops out. So the hint sends the agent to no tool outside the profile. `inactive`
-    /// tells if a word of the catalog text names a tool outside the active tools. A catalog
-    /// text that names a tool also has a sentence that names no tool.
-    #[must_use]
-    pub fn hint_in(&self, has_next: bool, inactive: &dyn Fn(&str) -> bool) -> String {
+    pub fn hint_in(&self, has_next: bool, inactive: &Inactive) -> String {
         let info = self.code.info();
         let plain = self.plain
             || (info.hint_names_next() && !has_next)
@@ -243,27 +284,33 @@ impl ToolError {
         render(self.code.info().message, &pairs)
     }
 
-    /// Gives the frozen error object, cut to [`ERROR_CAP`] characters.
+    /// Gives the frozen error object outside a call, for example the error of a request line
+    /// that names no tool. Each hint sentence that names a tool outside a shipped profile
+    /// drops out ([`Inactive::any_profile`]).
     ///
-    /// The hint counts the repair calls of the error as `next`. The cut drops `details`
-    /// first, then candidates from the end. `candidates_total` keeps the count of all
-    /// candidates.
+    /// The error object of a call uses the [`Inactive`] set of the call instead
+    /// ([`ToolError::to_json_in`] and [`ToolError::item_json`]). So an error object that
+    /// skips the set of its call still names no tool outside a profile.
     #[must_use]
     pub fn to_json(&self) -> Value {
-        self.to_json_with(!self.next.is_empty())
+        self.to_json_in(!self.next.is_empty(), &Inactive::any_profile())
     }
 
-    /// Gives the frozen error object of an envelope. `has_next` tells if the envelope has
-    /// valid `next` calls.
+    /// Gives the error object of one item of a list input with the hint for the active tools
+    /// (AC-144). The hint counts the repair calls of the error as `next`.
     #[must_use]
-    pub fn to_json_with(&self, has_next: bool) -> Value {
-        self.to_json_in(has_next, &|_| false)
+    pub fn item_json(&self, inactive: &Inactive) -> Value {
+        self.to_json_in(!self.next.is_empty(), inactive)
     }
 
     /// Gives the frozen error object of an envelope with the hint for the active tools (see
-    /// [`ToolError::hint_in`]). `has_next` tells if the envelope has valid `next` calls.
+    /// [`ToolError::hint_in`]), cut to [`ERROR_CAP`] characters. `has_next` tells if the
+    /// envelope has valid `next` calls.
+    ///
+    /// The cut drops `details` first, then candidates from the end. `candidates_total` keeps
+    /// the count of all candidates.
     #[must_use]
-    pub fn to_json_in(&self, has_next: bool, inactive: &dyn Fn(&str) -> bool) -> Value {
+    pub fn to_json_in(&self, has_next: bool, inactive: &Inactive) -> Value {
         let hint = self.hint_in(has_next, inactive);
         let mut shown = self.candidates.len().min(MAX_CANDIDATES);
         let mut details = self.details.is_some();
@@ -334,13 +381,13 @@ pub(crate) fn count(value: usize) -> Value {
 /// Gives the sentences of the catalog text `text` that name no inactive tool. A word is a run
 /// of ASCII letters, digits and `_`. When each sentence names an inactive tool, the text is
 /// empty.
-fn active_sentences(text: &str, inactive: &dyn Fn(&str) -> bool) -> String {
+fn active_sentences(text: &str, inactive: &Inactive) -> String {
     let kept: String = text
         .split_inclusive(". ")
         .filter(|sentence| {
             !sentence
                 .split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
-                .any(inactive)
+                .any(|word| inactive.names(word))
         })
         .collect();
     kept.trim_end().to_owned()

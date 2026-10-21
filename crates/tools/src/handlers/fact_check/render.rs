@@ -6,7 +6,7 @@ use ghidorah_analysis::Rule;
 use ghidorah_analysis::facts::{Evidence, Gap, Node, Outcome, fact_name};
 use ghidorah_json::{Object, Value};
 
-use crate::errors::ToolError;
+use crate::errors::{Inactive, ToolError};
 
 /// The largest number of evidence items and gaps of one verdict.
 pub const MAX_ITEMS: usize = 20;
@@ -40,10 +40,11 @@ pub fn verdict(claim: &Value, out: &Outcome, partial: bool) -> Value {
     ])
 }
 
-/// Gives the entry of an item whose input does not resolve: `{ <key>: input, error }`.
+/// Gives the entry of an item whose input does not resolve: `{ <key>: input, error }`. The
+/// hint of the error names no tool of `inactive`.
 #[must_use]
-pub fn error(key: &str, input: &Value, error: &ToolError) -> Value {
-    Value::object([(key, input.clone()), ("error", error.to_json())])
+pub fn error(key: &str, input: &Value, error: &ToolError, inactive: &Inactive) -> Value {
+    Value::object([(key, input.clone()), ("error", error.item_json(inactive))])
 }
 
 /// Gives the JSON of a why tree. Each rule of the tree goes into `rules` with its doc line.
