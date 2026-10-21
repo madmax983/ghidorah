@@ -195,9 +195,11 @@ pub fn stale(rows: &[Row], design: &[AcRow], head: &str) -> Value {
     Value::from(items)
 }
 
-/// Gives the `not_passed` list: one `{ ac, kind, tier, status }` object for each `test`,
-/// `cmd` or `xtask` row that is not `pass`. Each evidence item without a row also gives an
-/// object, with the status `missing`. The `xtask:ac` items do not count.
+/// Gives the `not_passed` list of the evidence items that do not pass.
+///
+/// Each `test`, `cmd` or `xtask` row that is not `pass` gives one `{ ac, kind, tier, status }`
+/// object. Each evidence item without a row also gives an object, with the status `missing`.
+/// The `xtask:ac` items do not count.
 #[must_use]
 pub fn not_passed(rows: &[Row], design: &[AcRow]) -> Value {
     let items = item_rows(rows, design)

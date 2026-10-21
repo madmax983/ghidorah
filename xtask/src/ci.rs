@@ -300,9 +300,9 @@ pub fn summary_ran(lines: &[(u64, String)]) -> u64 {
 /// equal to [`summary_ran`] of the same lines.
 #[must_use]
 pub fn each_reported(times: &[TestTime], lines: &[(u64, String)]) -> bool {
-    let timed = times.iter().filter(|t| !t.ignored).count();
-    let timed = u64::try_from(timed).unwrap_or(u64::MAX);
-    timed > 0 && timed == summary_ran(lines)
+    let counted = times.iter().filter(|t| !t.ignored).count();
+    let counted = u64::try_from(counted).unwrap_or(u64::MAX);
+    counted > 0 && counted == summary_ran(lines)
 }
 
 /// Tells if a tier-1 run of `ms` milliseconds is within [`TIER1_CAP_SECS`].
@@ -325,7 +325,7 @@ pub fn offline_build_ok(build_passed: bool, config: &str) -> bool {
     build_passed && manifest::offline(config).is_empty()
 }
 
-/// Gives the number of CPUs that the run can use, or 0 when it is not known.
+/// Gives the number of CPUs that the run can use. It gives 0 when the system does not tell.
 fn cpus() -> usize {
     std::thread::available_parallelism().map_or(0, std::num::NonZero::get)
 }

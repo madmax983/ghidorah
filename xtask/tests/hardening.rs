@@ -270,7 +270,7 @@ fn check_each_reported() {
     assert_eq!(ci::summary_ran(&complete), 4);
     assert!(ci::each_reported(&times, &complete));
     // One result line has no time entry: the test prints over its own result line.
-    let mut garbled = complete.clone();
+    let mut garbled = complete;
     garbled[4] = (40, "noise from a child process ok".to_owned());
     let times = ci::parse_test_times(&garbled);
     assert_eq!(times.len(), 4);

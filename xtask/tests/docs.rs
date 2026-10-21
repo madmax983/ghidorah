@@ -475,8 +475,8 @@ fn check_not_passed(design: &[AcRow], merged: &[Row]) {
     );
 }
 
-#[test]
-fn ac_018b_evidence_passes() {
+/// Checks the record status of each named input, and the tree record of the repository.
+fn check_record_inputs() {
     // The record check of each named input.
     let record = json::parse(CLAIMS).expect("record parses");
     assert_eq!(record::expected(&record, "/kernels/K1", "tree"), Some("aa"));
@@ -509,6 +509,11 @@ fn ac_018b_evidence_passes() {
         record::status(&root(), "verify/none.json", "/kernels", "tree", true),
         Status::Fail
     );
+}
+
+#[test]
+fn ac_018b_evidence_passes() {
+    check_record_inputs();
 
     // The failed list and the merge of a partial run.
     let test_item = |func: &str| Evidence::Test {
@@ -523,7 +528,7 @@ fn ac_018b_evidence_passes() {
     };
     let design = vec![
         gate_row("AC-001", vec![test_item("ac_001_a")]),
-        gate_row("AC-002", vec![test_item("ac_002_a"), record_item.clone()]),
+        gate_row("AC-002", vec![test_item("ac_002_a"), record_item]),
     ];
     let old = vec![
         Row::new(&outcome("AC-002", "test", Status::Fail), "c1"),
@@ -603,7 +608,11 @@ fn ac_018b_evidence_passes() {
     assert_eq!(first_ids, ["AC-020", "AC-021"]);
     assert_eq!(last_ids, ["AC-018b", "AC-020"]);
 
-    // The committed table covers each MVP AC with evidence and names no other AC.
+    check_committed_table();
+}
+
+/// Checks that the committed table covers each MVP AC with evidence and names no other AC.
+fn check_committed_table() {
     let gates = gate_ids();
     let committed = table::read(&root()).expect("the evidence table reads");
     let named: BTreeSet<&str> = committed.iter().map(|r| r.ac.as_str()).collect();
