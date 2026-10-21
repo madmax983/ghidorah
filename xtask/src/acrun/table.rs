@@ -176,13 +176,58 @@ fn item_rows<'a>(
     found
 }
 
-/// Gives the `stale` list: one `{ ac, kind, tier, commit }` object for each row of an
-/// evidence item whose commit is not `head`. The rows of `xtask:ac` items do not count.
+/// The largest number of row commits that [`fresh_commits`] compares with `HEAD`.
+pub const MAX_COMPARED: usize = 64;
+
+/// Tells if `text` can be a commit name: 4 to 64 hex digits. Another text never goes to `git`.
+fn is_commit_name(text: &str) -> bool {
+    (4..=64).contains(&text.len()) && text.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+/// Tells if the trees of `commit` and `head` are equal outside the table.
+fn same_tree(root: &Path, commit: &str, head: &str) -> bool {
+    let mut cmd = Command::new("git");
+    cmd.args(["diff", "--quiet", "--no-ext-diff", commit, head, "--", "."])
+        .arg(format!(":(exclude){TABLE_PATH}"))
+        .current_dir(root);
+    proc::run(&mut cmd).is_ok_and(|out| out.ok())
+}
+
+/// Gives the fresh commits of `rows` at `head`. The `stale` list holds the rows of the other
+/// commits.
+///
+/// `head` is fresh. Another commit is fresh when its tree and the tree of `head` are equal
+/// outside the table. So the commit that writes the table does not make the rows of its run
+/// stale. Each distinct commit takes one `git diff --quiet` call, for at most
+/// [`MAX_COMPARED`] commits. An unknown commit, a failed call, a text that is not a commit
+/// name and a commit after the bound are not fresh.
 #[must_use]
-pub fn stale(rows: &[Row], design: &[AcRow], head: &str) -> Value {
+pub fn fresh_commits(root: &Path, rows: &[Row], head: &str) -> BTreeSet<String> {
+    let mut fresh = BTreeSet::new();
+    if !is_commit_name(head) {
+        return fresh;
+    }
+    let others: BTreeSet<&str> = rows
+        .iter()
+        .map(|r| r.commit.as_str())
+        .filter(|c| *c != head && is_commit_name(c))
+        .collect();
+    for commit in others.into_iter().take(MAX_COMPARED) {
+        if same_tree(root, commit, head) {
+            fresh.insert(commit.to_owned());
+        }
+    }
+    fresh.insert(head.to_owned());
+    fresh
+}
+
+/// Gives the `stale` list: one `{ ac, kind, tier, commit }` object for each row of an
+/// evidence item whose commit is not in `fresh`. The rows of `xtask:ac` items do not count.
+#[must_use]
+pub fn stale(rows: &[Row], design: &[AcRow], fresh: &BTreeSet<String>) -> Value {
     let items = item_rows(rows, design)
         .into_iter()
-        .filter_map(|(_, _, row)| row.filter(|r| r.commit != head))
+        .filter_map(|(_, _, row)| row.filter(|r| !fresh.contains(&r.commit)))
         .map(|r| {
             Value::object([
                 ("ac", Value::from(r.ac.as_str())),

@@ -574,7 +574,8 @@ pub fn run(root: &Path, args: &[String]) -> Result<Value, Error> {
         (checked_rows(root, &rows, &commit, require_proofs)?, commit)
     };
     report.push(("failed", table::failed(&table_rows)));
-    report.push(("stale", table::stale(&table_rows, &rows, &commit)));
+    let fresh = table::fresh_commits(root, &table_rows, &commit);
+    report.push(("stale", table::stale(&table_rows, &rows, &fresh)));
     report.push(("not_passed", table::not_passed(&table_rows, &rows)));
     report.push(("ok", Value::from(ok)));
     Ok(Value::object(report))

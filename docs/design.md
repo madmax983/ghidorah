@@ -3035,6 +3035,7 @@ Rules for this section:
 - A `host-<name>` item also needs `mismatches: 0` and `agree` equal to `insns`. A record that fails a claim gives `fail` on every host, also with a matching hash.
 - `xtask ac` writes `docs/ac-evidence.json` with rows `{ ac, tier, kind, status: pass | fail | recorded | skipped, commit }`. A run with a list of ACs replaces only the rows of those ACs.
 - `xtask ac` without `--run` reads the table and reports `failed`: one `{ ac, kind, tier }` item for each `fail` row. It checks each record item again, so a record row of the table does not count.
+- The `stale` list holds one `{ ac, kind, tier, commit }` item for each evidence row that is not fresh. A row is fresh when the tree of its commit and the tree of `HEAD` are equal outside `docs/ac-evidence.json`. So the commit that writes the table keeps the rows of its run fresh. Each distinct commit takes one `git diff --quiet` call, for at most 64 commits. An unknown commit is stale.
 - That check reads `GHIDORAH_REQUIRE_PROOFS` once. The tier-1 test `ac_018b_failed_is_empty` runs it, so it follows the warning rule of Section 13.3.
 - An `xtask:ac` item reads the table of the same run. The runner runs the other items first, writes the table, then runs the `xtask:ac` items.
 - Closes: the WP that closes the AC. "13a/25" means that the test starts green in WP-13a over the tools registered then, and closes in WP-25.
