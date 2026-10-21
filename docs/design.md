@@ -1175,10 +1175,23 @@ Seeds in confidence order. Each start keeps `start_reason`, a `Why` and a confid
 - A call to a callee with no count keeps every argument register. Its text shows the arguments that the caller sets. The facts of `cc::params` do not change.
 - `cc::params` solves the callees first, depth first, up to 32 functions. It runs again in that fixed order until no count changes.
 - For a positional convention (MS x64), the parameter count is the highest used slot + 1. The integer and the float register of a slot share the slot. So a live-in `r8` or `xmm2` means at least 3 parameters, and a read of a stack slot at `k >= 0x28` adds stack parameters.
+- `SysV` numbers its integer and floating parameter slots apart. The slots of a recovered count are the integer registers, then the floating registers, then the stack slots. So `scale(double x, int32_t k)` with no signature prints as `double scale(uint64_t param_1, double param_2)`.
+- A signature or a Tier-0 prototype gives each parameter the next free register of its class (`callsite::sig_slots`). A parameter has the floating class when its type is a `float`, a `double` or an 8-byte `long double`. A full class puts the parameter on the stack. In `SysV`, `cc::Params` counts the integer and the floating parameters of a signature apart. MS x64 keeps its positional slots.
+- The convention gives the call clobber set. A call writes each general and XMM register that the callee does not keep, and the flags. MS x64 keeps `xmm6` to `xmm15`. `SysV` keeps no XMM register.
 - Varargs: the `test al, al` prologue that guards the XMM save area sets `varargs`. MS x64 has no varargs rule in the MVP.
 - The stores of the register save area read no parameter. A signature or a Tier-0 prototype gives the exact parameter count of the head. The parameter list of a varargs head ends with `...`.
 - Known prototypes (Tier-0, Section 9.4) and agent signatures override recovery for imports and for functions whose name matches a prototype.
 - The call-site cross-check and `W_CC_CONFLICT` are stretch S16.
+
+Floating return and return value (`analysis::fir::ret`):
+
+- The signature of a function gives its floating return first. Then the Tier-0 prototype of its name gives it, and then a recovery over the L0 body. A `float`, a `double` or an 8-byte `long double` return type gives a floating return.
+- The recovery walks back from each `ret` to the last event of `xmm0` and of `rax` on each path. An event is a read, a write, a call or the function entry. All the paths share one walk, so each block gets one visit.
+- A write of `xmm0` that no op reads before the `ret` is a floating return value. A scalar op on `float` values or a 32-bit move gives `float`. Another floating write gives `double`.
+- A write of `rax` that no op reads before the `ret` is an integer return value. It rules out a floating return.
+- A direct call that is the last event of `xmm0` gives the floating return of its callee. The callee value comes from its facts and its L0 body only, so the rule looks one call deep. An indirect call is no evidence.
+- With a floating return, each L1 `Ret` reads `xmm0` in place of `rax` (Section 7.12).
+- The return value of a function (`RetValue`) is no value, an integer value or a floating value. A `void` return type gives no value. With no signature, a function with no floating return gives no value when a `ret` returns the entry value of `rax`. A C function returns a value on each path or on none, so one such `ret` is enough.
 
 ### 7.11 Other analyzers
 
@@ -1192,6 +1205,8 @@ Seeds in confidence order. Each start keeps `start_reason`, a `Why` and a confid
 ### 7.12 Function IR builder
 
 `analysis::fir::build(&Program, FuncId, &Opts, &mut Fuel) -> FuncIr` lifts the body and builds the CFG on L0. Then it runs local folds and fusion, tracks the stack and rewrites `Stack(k)`. Stack tracking, jump tables, block-local evaluation and `func_get include ir` use it. With `level: l1`, it also runs SSA, SCCP, copy propagation and DCE and applies the calling convention on L1 (WP-21). Its output is derived data (Section 3.9).
+
+On L1, a call reads the argument registers of its callee (Section 7.10) and writes the registers of the call clobber set. A `Ret` reads `xmm0` for a floating return, else `rax`.
 
 ### 7.13 Function similarity
 
@@ -1266,7 +1281,7 @@ All passes are pure, named and switchable (`passes: { fold, sailr, canary, tailc
 1. Expression view: `Expr { Var, Const, Load, Un, Bin, Ite, Call, Str }` and `Stmt { Assign, Store, Call, If, Loop, Switch, Return, Goto, Label, Break, Continue }` with an `OpId` on each node. The decompiler builds the view again on demand. Passes never edit L1.
 2. Safe folding (angr rule): a def folds into its use only when four conditions are true. It has exactly 1 def and 1 use. The use is not a phi. No store, call or `Intrinsic` with a memory effect lies between def and use. The def does not leave a loop body. Other values become named variables (Ghidra `max_implied_ref = 2` for explicit versus implied).
 3. Out-of-SSA: SSA values merge into one variable when their live ranges do not intersect (interference coloring). Variable identity is storage-based (`VarId`), so agent renames and retypes survive (AC-105a).
-4. SAILR-lite passes: stack-canary removal (the `fs:0x28` load and the `__stack_chk_fail` branch), per-call-site noreturn, and tail calls printed as `return f(..);`. Return duplication, loop-inversion cleanup and guard-clause flattening are stretch S31.
+4. SAILR-lite passes: stack-canary removal (the `fs:0x28` load and the `__stack_chk_fail` branch), per-call-site noreturn, and tail calls printed as `return f(..);`. A tail call of a callee with no return value prints `f(..);`, then `return;`. A tail call of a callee that does not return prints `f(..);` only. Return duplication, loop-inversion cleanup and guard-clause flattening are stretch S31.
 5. Type lattice (Section 8.4).
 6. Structuring (Section 8.1).
 7. Self-check (always on): the CFG walker and an AST interpreter run with 8 branch oracles seeded from the function body hash. Their block traces must be equal. A mismatch switches the output to FLAT and adds `W_STRUCTURE_SELFCHECK`. The result carries `validation: { structure: ok | repaired }`.
@@ -1292,7 +1307,14 @@ decomp {
 - Comments: the printer puts PLATE comments before the function, PRE comments before the first line of their address, POST comments after the last line of their address and EOL comments at the end of the line. Each comment line has a `line_map` row with `comment` set (AC-237).
 - Printer: precedence climbing with Ghidra's numbers. Conditions negate by a flip of the compare operator. `for` only when init, condition and step on one variable are adjacent. A cast only where widths or lattice types differ. String literals inline. Call names come from symbols, PLT names, IAT names and `sys:` IDs. Labels use addresses (`L_401234`).
 - Default names: `param_N`, `local_<hex>` (stack offset) and `v<N>` for register temporaries. Names from agent facts win.
-- Call arguments: a known count (signature, prototype, recovery) gives the registers, then the stack arguments. Without a count, the arguments are the registers that the caller sets: a new value, or a write in the block of the call. The register of an indirect target is not an argument. A variadic call with all argument registers set also shows its stack arguments. A callee whose signature returns `void` has no result.
+- Call arguments: a known count (signature, prototype, recovery) gives the registers, then the stack arguments. Without a count, the arguments are the registers that the caller sets: a new value, or a write in the block of the call. The register of an indirect target is not an argument. A variadic call with all argument registers set also shows its stack arguments.
+- Staging register: a register that an op reads after its last `Put` in the block of the call is not an argument. An example is `rdx` in `mov rdx,[rbp-0x18]; mov rsi,rdx` of `-O0` code.
+- A `SysV` call that is not variadic takes its arguments from the slots of the callee (Section 7.10). A signature gives the register of the class of each parameter. The recovery gives the integer registers, then the floating registers, then the stack arguments. So the text keeps the slot order of the head of the callee.
+- A `SysV` variadic call passes its floating arguments in `xmm0` to `xmm7`, and `al` holds their count. A constant `al`, or the low byte of a `mov al, k`, gives the count. Else the count is the XMM argument registers that the caller sets. The XMM arguments follow the integer arguments. The `al` value is no argument and no read.
+- An MS x64 slot prints its floating register when the caller sets only that register of the slot.
+- Call result: a signature with a floating return type gives `xmm0`, another type gives `rax`, and `void` gives no result. With no signature, a recovered floating return of the callee gives `xmm0`, and a recovered return with no value gives no result. Else `xmm0` is the result when the caller reads the `xmm0` def and reads the `rax` def only as a return value. Else the result is `rax`.
+- The `rax` def of a call with no `rax` result is a value that the call leaves behind. A return of it prints `return;`, and the head gets no return type from it.
+- Head: the return type of the signature, else `float` or `double` for a floating return (Section 7.10), else the type of the widest returned value. A tail call of a callee with a floating return gives that type when no other return gives a value. The head shows the slots of the facts and the read slots that the text names.
 - Import thunk: a PLT stub or an IAT thunk (analysis flag `thunk`) whose jump loads a constant import slot prints a tail call of the import, for example `return puts(param_1);`. It gets no `W_JUMPTABLE_UNRESOLVED`.
 - Other unresolved indirect jump: `goto *(expr);`. It never prints `return` (AC-108).
 - The decompiler takes jump-table caveats from the analysis facts. A jump gets `W_JUMPTABLE_UNRESOLVED` only when the facts hold a jump-table record with no targets there, or the function caveat `W_JUMPTABLE_UNRESOLVED`.
@@ -1300,7 +1322,9 @@ decomp {
 
 ### 8.4 Type lattice
 
-- Seeds: Tier-0 prototypes and agent signatures at call sites, parameter types of the function signature and agent types on `var:` IDs.
+- Seeds: Tier-0 prototypes and agent signatures at call sites, parameter types of the function signature and agent types on `var:` IDs. An argument of a call gets the type of its parameter by the register of the parameter class (Section 7.10).
+- A parameter that holds the entry value of an XMM register gets `float` when each scalar op that reads it reads `float` values, else `double`. This seed applies only to a function with no signature.
+- The `xmm0` result of a call gets `float` or `double` when the callee has no signature and a recovered floating return.
 - One forward pass over L1 `Copy` ops and phis spreads each seed. A conflict at a phi gives no type.
 - The printer shows `Load(v + k)` as `v->field` when `v` has type `T *`, `T` is a complete record and `T` has a field at offset `k`. Else it prints `*(T *)(v + k)` with the load width type.
 - Example: after `type_edit` sets a `var:` ID to `struct sockaddr_in *` in `socket_client`, the decompile shows `->sin_port` (AC-236).
