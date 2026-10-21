@@ -92,3 +92,28 @@ fn regress_positional_call_arg_count() {
     assert_eq!(args[0], ArgValue::Int(1));
     assert_eq!(args[2], ArgValue::Int(3));
 }
+
+/// `m4(double a, int b, double c, int d)` of `pe_cc.exe` has the slots `xmm0`, `rdx`, `xmm2`
+/// and `r9`. The argument count held the floating slots, but each slot read its integer
+/// register. So the floating slots read `rcx` and `r8` (r3-engine-06). A floating slot now
+/// names its register and has no value.
+#[test]
+fn regress_positional_float_slot_args() {
+    let p = cached("fixtures/bin/pe/pe_cc.exe");
+    let args = callargs::slots_at(p, 0x1_4000_13ef, &mut Fuel::unlimited()).expect("the args");
+    let got: Vec<(&str, ArgValue)> = args.iter().map(|a| (a.reg, a.value.clone())).collect();
+    assert_eq!(
+        got,
+        [
+            ("xmm0", ArgValue::Unknown),
+            ("rdx", ArgValue::Int(2)),
+            ("xmm2", ArgValue::Unknown),
+            ("r9", ArgValue::Int(4)),
+        ]
+    );
+    let values = callargs::at(p, 0x1_4000_13ef, &mut Fuel::unlimited()).expect("the values");
+    assert_eq!(
+        values,
+        args.into_iter().map(|a| a.value).collect::<Vec<_>>()
+    );
+}

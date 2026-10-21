@@ -427,3 +427,39 @@ fn regress_xref_basis_open_without_analysis() {
         "no analysis run, so the list can miss sites: {envelope}"
     );
 }
+
+/// The call of `m4(double a, int b, double c, int d)` in `pe_cc.exe` labels each slot with its
+/// register. A floating slot names its XMM register and has no value. The items labelled each
+/// slot with the integer register of its position (r3-engine-06).
+#[test]
+fn regress_positional_float_slot_regs() {
+    let (mut session, _) = fixture("pe/pe_cc.exe");
+    let envelope = call(
+        &mut session,
+        "xref_list",
+        r#"{"targets":["fn:0x140001150"],"args":true}"#,
+    );
+    let site = items(&envelope)
+        .into_iter()
+        .find(|i| str_of(i, "from") == "0x1400013ef")
+        .unwrap_or_else(|| panic!("the call of m4: {envelope}"));
+    let args = site.get("args").and_then(Value::as_array).expect("args");
+    let got: Vec<(String, String)> = args
+        .iter()
+        .map(|a| {
+            let kind = a.pointer("/value/kind").and_then(Value::as_str);
+            (str_of(a, "reg"), kind.unwrap_or_default().to_owned())
+        })
+        .collect();
+    let want = [
+        ("xmm0", "unknown"),
+        ("rdx", "int"),
+        ("xmm2", "unknown"),
+        ("r9", "int"),
+    ];
+    let want: Vec<(String, String)> = want
+        .iter()
+        .map(|(r, k)| ((*r).to_owned(), (*k).to_owned()))
+        .collect();
+    assert_eq!(got, want, "{envelope}");
+}

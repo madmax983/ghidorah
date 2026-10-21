@@ -68,24 +68,24 @@ fn param_names(p: &Program, to: Address) -> Vec<Option<String>> {
         .unwrap_or_default()
 }
 
-/// Gives the argument values of the call or jump at `site` to `to`.
+/// Gives the argument values of the call or jump at `site` to `to`. Each slot has the register
+/// of its slot: a floating slot of a positional convention names its XMM register.
 fn args_at(p: &Program, site: u64, to: Address, q: &Query, fuel: &mut Fuel) -> Value {
-    let Ok(values) = callargs::at(p, site, fuel) else {
+    let Ok(slots) = callargs::slots_at(p, site, fuel) else {
         return Value::Array(Vec::new());
     };
-    let regs = ghidorah_analysis::cc::conv_of(p).int_args;
     let names = param_names(p, to);
-    let list = values
+    let list = slots
         .iter()
         .enumerate()
-        .map(|(i, v)| {
+        .map(|(i, a)| {
             let mut out = Object::new();
             out.push("index", Value::from(i));
-            out.push("reg", Value::from(regs.get(i).copied().unwrap_or_default()));
+            out.push("reg", Value::from(a.reg));
             if let Some(Some(name)) = names.get(i) {
                 out.push("name", Value::from(name.as_str()));
             }
-            out.push("value", arg_value(p, v, q.caps));
+            out.push("value", arg_value(p, &a.value, q.caps));
             Value::Object(out)
         })
         .collect();
