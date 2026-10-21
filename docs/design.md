@@ -584,7 +584,7 @@ Journal line (one per committed Tx):
 
 - Each commit appends `Event { rev, tx, kind, ranges: RangeSet, ids: Vec<IdKey> }`, coalesced per Tx. The event log is a bounded in-memory ring (4,096 entries). The scheduler and the caches pull from it. There are no callbacks.
 - Each table has an epoch: the `rev` of its last change. Tables: `memory`, `listing`, `functions`, `symbols`, `refs`, `strings`, `comments`, `notes`, `vars`, `types`, `analysis`.
-- `func_epoch(f)` is the maximum epoch of the facts that the derived views of `f` read. These facts are the body, flow overrides, jump tables, callee signatures and noreturn flags, and variable facts.
+- `func_epoch(f)` is the maximum epoch of the facts that the derived views of `f` read. These facts are the body, flow overrides, jump tables, callee signatures and noreturn flags, and variable facts. A callee is the target of a call reference or of a jump reference from the body. So a tail jump to a function entry counts as a call reference. The record at each other jump target counts too.
 - `history_list { since_rev }` reads the journal, not the ring. It returns one coalesced row per changed fact `{ kind, id, addr, fields, last_rev, session }` and the analysis-run markers. It never expires (AC-232).
 
 ### 3.9 Facts, derived data and the analysis state
@@ -1160,7 +1160,7 @@ Seeds in confidence order. Each start keeps `start_reason`, a `Why` and a confid
 - An access `[SP0 + k]` becomes `Stack(k)` when no op lets the address escape. An address escapes when an op stores it, passes it to a call or uses it in non-constant arithmetic.
 - Rule (AC-207): an `Intrinsic` whose `MemEffect` address can point into the frame makes every slot in `[k, k + size)` escape. When the address is not a constant offset of `SP0`, every slot of the frame escapes. An escaped slot stays in memory, so no pass keeps a stale slot value.
 - Frame layout: locals (`k < 0` below the return address), stack parameters, saved registers (push and pop pairs of callee-saved registers at entry and exits). The convention table gives the first stack-parameter offset: 8 for SysV and 0x28 for MS x64. For MS x64, `8 <= k < 0x28` is the shadow space (the home slots of the four register parameters).
-- Cross-check: at each call site with a known FDE CFA, the tracked offset must equal the CFA offset (AC-091). A mismatch gives `W_SP_MISMATCH`, and the function keeps `Top` there. PE functions have no FDE, so they have no cross-check in the MVP.
+- Cross-check: at each call site with a known FDE CFA, the tracked offset must equal the CFA offset (AC-091). A mismatch gives `W_SP_MISMATCH`, and the function keeps `Top` there. The cross-check skips a site after `and rsp, imm`, because the offset there is unknown (`Top`). The CFA rows of `_start` do not show the realign. PE functions have no FDE, so they have no cross-check in the MVP.
 
 ### 7.10 Calling conventions
 
@@ -3068,8 +3068,8 @@ Rules for this section:
 | AC | Statement | Evidence | Closes | Needs |
 |---|---|---|---|---|
 | AC-009 | `cargo fmt --all --check` passes. | `cmd:cargo fmt --all --check` | 01 | - |
-| AC-010 | Clippy passes with `all`, `pedantic` and `nursery` denied, except the reviewed allowlist of ADR-0019. | `cmd:env CARGO_BUILD_WARNINGS=deny cargo clippy --workspace --all-targets` | 01 | - |
-| AC-011 | `cargo doc` passes with warnings and `missing_docs` denied. | `cmd:env RUSTDOCFLAGS=-Dwarnings cargo doc --workspace --no-deps` | 01 | - |
+| AC-010 | Clippy passes with `all`, `pedantic` and `nursery` denied, except the reviewed allowlist of ADR-0019. | `cmd:env CARGO_BUILD_WARNINGS=deny cargo clippy --workspace --all-targets`, `test:xtask::ac_010_clippy_policy@T1` | 01 | - |
+| AC-011 | `cargo doc` passes with warnings and `missing_docs` denied. | `cmd:env RUSTDOCFLAGS=-Dwarnings cargo doc --workspace --no-deps`, `test:xtask::ac_011_docs_policy@T1` | 01 | - |
 | AC-012 | Non-test code has no `todo!`, `unimplemented!`, `dbg!`, `TODO`, `FIXME`, `XXX`, `unwrap()` or `expect()`. | `test:xtask::ac_012_no_stubs@T1` | 01 | - |
 | AC-013 | Line coverage meets the coverage table of `xtask/src/cov.rs`: 85% for the workspace, 90% for core crates and 95% for `kernel`. The kernel and each core crate have instrumented lines. | `xtask:cov#/ok == true` | 01 | - |
 | AC-014 | Every non-table, non-test source file has at most 600 lines. | `test:xtask::ac_014_file_size@T1` | 01 | - |
@@ -3080,11 +3080,11 @@ Rules for this section:
 | AC-016 | `clippy.toml` disallows `HashMap`, `HashSet` and `RandomState`, and each exception has `expect` with a reason. | `test:xtask::ac_016_disallowed_types@T1` | 01 | - |
 | AC-017 | Pure core crates do not use `std::fs`, `std::net`, `std::process`, `std::env` or `SystemTime`. | `test:xtask::ac_017_layering@T1` | 01 | - |
 | AC-018a | `xtask ac` finds at least one evidence item for every MVP AC: every row that is not moved to stretch or removed, the rows of Sections 15.20 and 15.22 included. | `xtask:ac#/missing == []` | 28 | 27 |
-| AC-018b | Every T1 and T2 evidence item passes, and no record item gives `fail`. | `xtask:ac#/failed == []` | 28 | 27 |
+| AC-018b | Every T1 and T2 evidence item passes, and no record item gives `fail`. | `xtask:ac#/failed == []`, `xtask:ac#/stale == []`, `xtask:ac#/not_passed == []` | 28 | 27 |
 | AC-018c | `xtask ac` fails when an AC closes in a WP that comes before a WP of its Needs column. | `test:xtask::ac_018c_needs_order@T1` | 01 | - |
 | AC-019 | `ci.yml` has a tier-1 job and a tier-2 job and uses no action other than `actions/checkout` and `actions/cache`. | `test:xtask::ac_019_ci_workflow@T1` | 01 | - |
 | AC-020 | Test binaries pass with `PATH` reduced to the toolchain directory and an empty `HOME`. | `xtask:ci#/steps/test_hermetic/ok == true` | 27 | - |
-| AC-021 | Tier 1 finishes in at most 120 s on the 4-core build host. | `xtask:ci#/steps/tier1/seconds <= 120` | 27 | - |
+| AC-021 | Tier 1 finishes in at most 120 s on the 4-core build host. | `xtask:ci#/steps/tier1/seconds <= 120`, `xtask:ci#/steps/tier1/ok == true` | 27 | - |
 | AC-022 | Each fixture sha256 equals `fixtures/manifest.json`, and each golden header names the current fixture sha256 and generator version. | `test:xtask::ac_022_fixture_manifest@T1` | 06 | - |
 
 ### 15.3 Docs and STE
@@ -3175,7 +3175,7 @@ Rules for this section:
 
 | AC | Statement | Evidence | Closes | Needs |
 |---|---|---|---|---|
-| AC-067 | `size_of::<Op>() <= 64`, `size_of::<Insn>() <= 64` and `size_of::<Address>() == 16`. | `test:ir::ac_067_size_budgets@T1` | 12 | - |
+| AC-067 | `size_of::<Op>() <= 64`, `size_of::<Insn>() <= 64` and `size_of::<Address>() == 16`. | `test:ir::ac_067_size_budgets@T1`, `test:x86::ac_067_insn_fits_64_bytes@T1` | 12 | - |
 | AC-068a | For every `(FlagOp, Cc)` pair, all 8-bit `a` and `b` and `c` in {0, 1}, `fuse` equals `x86_cond(cc, x86_flags(..))`. | `test:ir::ac_068a_fusion_exhaustive_8bit@T1` | 12 | - |
 | AC-068b | For every `Pred` at widths 8, 16, 32 and 64, the interpreter result of its `Opc` equals `eval_pred` on 10,000 values. | `test:ir::ac_068b_pred_opc_all_widths@T1` | 12 | - |
 | AC-069a | Each lifter mnemonic row replays at least 64 native vectors per width, AFL edge values included, with 100% match. | `test:x86::ac_069a_semantic_vectors@T1` | 16 | - |
@@ -3212,7 +3212,7 @@ AC-073 and AC-075b are in Section 15.20 (SSA and decompiler).
 | AC-090a | Parameter counts match the known prototypes of the calling-convention fixture for at least 95% of functions. | `test:analysis::ac_090a_param_counts@T1` | 19 | - |
 | AC-090b | The varargs functions of that fixture have the `varargs` flag. | `test:analysis::ac_090b_varargs@T1` | 19 | - |
 | AC-090c | Moved to stretch S16 (`W_CC_CONFLICT`). | - | - | - |
-| AC-091 | The tracked stack offset equals the FDE CFA offset at every call site with a CFA row. | `test:analysis::ac_091_sp_vs_cfa@T1` | 19 | - |
+| AC-091 | The tracked stack offset equals the FDE CFA offset at every call site with a CFA row. The check skips a site after a dynamic realign of rsp (`and rsp, imm`, as in `_start`), because its offset is unknown. | `test:analysis::ac_091_sp_vs_cfa@T1` | 19 | - |
 | AC-092 | Repeated `run(k)` for random `k` gives the same `state_hash` as one unlimited run. | `test:analysis::ac_092_fuel_slicing@T1` (T1), `test:analysis::ac_092_fuel_slicing_t2@T2` | 15/19 | - |
 | AC-093 | A second full analysis run emits zero change events. | `test:analysis::ac_093_idempotent@T1` | 15/19 | - |
 | AC-094 | Every ANALYSIS fact has a `Why` whose premises exist and form an acyclic graph. | `test:analysis::ac_094_why_records@T1` | 15/19 | - |
@@ -3481,7 +3481,7 @@ These ACs are normal MVP ACs since revision 3 (Section 1.7). AC-018a counts them
 | AC-221 | Each selector action enforces its required and forbidden arguments, and `MISSING_ARGUMENT` names the action in `details`. | `test:tools::ac_221_selector_rules@T1`, `test:tools::ac_221_full_selector_rules@T1` | 13a/25 | 24 |
 | AC-222 | The registry lint fails when two tools give different names to the same argument kind and role. | `test:tools::ac_222_vocabulary_lint@T1` | 13a/25 | 24 |
 | AC-223 | No crate source calls `std::env::set_var` or `std::env::remove_var`. | `test:xtask::ac_223_no_set_var@T1` | 01 | - |
-| AC-224 | Each tier-1 test finishes in at most 15 s, and `xtask ci` reports the time of each test. | `xtask:ci#/steps/test_times/max_seconds <= 15` | 27 | - |
+| AC-224 | Each tier-1 test finishes in at most 15 s, and `xtask ci` reports the time of each test. | `xtask:ci#/steps/test_times/max_seconds <= 15`, `xtask:ci#/steps/test_times/each_reported == true` | 27 | - |
 | AC-225 | The STE checker gives the expected rule IDs for every line of `tests/data/ste/pass.txt` and `fail.txt`. | `test:testkit::ac_225_ste_corpus@T1` | 02 | - |
 | AC-226 | Every argument value of every scripted eval call has a provenance entry of an allowed kind. | `test:eval::ac_226_provenance_lint@T1` | 26 | - |
 | AC-227 | The hint-follower robot reaches the evidence IDs of at least 60% of `triage` and `locate` scenarios within depth 6. | `test:eval::ac_227_hint_follower@T1` | 26 | - |
