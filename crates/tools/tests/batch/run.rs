@@ -6,15 +6,16 @@ use ghidorah_testkit::golden::{self, Header};
 use ghidorah_testkit::rng::{Xoshiro256ss, below};
 use ghidorah_tools::Fit;
 use ghidorah_tools::batch::STEP_GLOBALS;
-use ghidorah_tools::handlers::batch_run;
+use ghidorah_tools::handlers::{self, batch_run};
 
 use crate::support::{
-    batch, call, chars, code, data, demo, full_registry, int_at, json, lines, next0, program, rev,
-    root, state_hash, step_code, steps, text_at,
+    batch, call, chars, code, data, demo, demo_without_engine, full_registry, int_at, json, lines,
+    next0, program, rev, root, state_hash, step_code, steps, text_at,
 };
 
-/// The read-only tools whose examples the equivalence test mixes.
-const MIXED: [&str; 12] = [
+/// The tools whose examples the equivalence test mixes: the read tools, then the tools that
+/// edit the program. A batch takes only the actions of `func_edit` that are not destructive.
+const MIXED: [&str; 19] = [
     "binary_survey",
     "func_list",
     "func_get",
@@ -27,9 +28,17 @@ const MIXED: [&str; 12] = [
     "type_get",
     "history_list",
     "tool_search",
+    "session_brief",
+    "func_similar",
+    "symbol_rename",
+    "comment_set",
+    "note_write",
+    "type_edit",
+    "func_edit",
 ];
 
-/// Gives the examples of [`MIXED`] that a batch step can take: `(tool, args)`.
+/// Gives the examples of [`MIXED`] that a batch step can take: `(tool, args)`. An example
+/// with a step global, a destructive action or a setup call does not go in the pool.
 fn pool() -> Vec<(&'static str, Value)> {
     let registry = full_registry();
     let mut out = Vec::new();
@@ -39,7 +48,13 @@ fn pool() -> Vec<(&'static str, Value)> {
             let global = args
                 .as_object()
                 .is_some_and(|o| o.iter().any(|(k, _)| STEP_GLOBALS.contains(&k)));
-            if !global {
+            let destructive = tool
+                .selector()
+                .and_then(|sel| args.get(sel.name).and_then(Value::as_str))
+                .and_then(|action| tool.action(action))
+                .is_some_and(|a| a.destructive);
+            let setup = handlers::func_edit::setup_of(example.args).is_some();
+            if !(global || destructive || setup) {
                 out.push((tool.name, args));
             }
         }
@@ -50,20 +65,92 @@ fn pool() -> Vec<(&'static str, Value)> {
 /// The members of a step entry that equal the members of the direct envelope.
 const SAME: [&str; 6] = ["ok", "data", "page", "warnings", "next", "error"];
 
+/// The members of the data of an edit that name its commit: the batch has one commit for all
+/// of its edits, and the direct calls have one commit each.
+const COMMIT_MEMBERS: [&str; 2] = ["rev", "tx"];
+
+/// The tools whose results read the journal of committed transactions.
+const JOURNAL_READS: [&str; 2] = ["history_list", "session_brief"];
+
+/// The largest number of rounds of the equivalence test.
+const MAX_ROUNDS: usize = 60;
+
+/// Gives the examples of one round: the first example that did not run yet, then up to 4
+/// other examples at random. No example comes twice in a round.
+fn draw(rng: &mut Xoshiro256ss, ran: &[bool]) -> Vec<usize> {
+    let mut picked: Vec<usize> = ran.iter().position(|r| !r).into_iter().collect();
+    let count = 1 + usize::try_from(below(rng, 5)).unwrap_or(0);
+    for _ in 0..count.saturating_mul(4) {
+        if picked.len() >= count {
+            break;
+        }
+        let i = usize::try_from(below(rng, ran.len() as u64)).unwrap_or(0);
+        if !picked.contains(&i) {
+            picked.push(i);
+        }
+    }
+    picked
+}
+
+/// Gives the members of [`SAME`] of a step entry or of a direct envelope, in the form that a
+/// batch with edits gives. The [`COMMIT_MEMBERS`] of an edit leave the data: the batch commits
+/// all edits in one transaction. A batch with edits runs the analysis once after the commit, so
+/// its steps have no `analysis_run` call in `next`.
+fn same_members(value: &Value, edits: bool) -> Vec<(&'static str, Option<Value>)> {
+    SAME.iter()
+        .map(|key| {
+            let mut member = value.get(key).cloned();
+            if let (&"data", Some(Value::Object(data))) = (key, member.as_mut()) {
+                for commit in COMMIT_MEMBERS {
+                    let _ = data.remove(commit);
+                }
+            }
+            if let (&"next", true, Some(Value::Array(calls))) = (key, edits, member.as_mut()) {
+                calls.retain(|c| text_at(c, "/tool") != "analysis_run");
+            }
+            if member
+                .as_ref()
+                .is_some_and(|m| m == &Value::Array(Vec::new()))
+            {
+                member = None;
+            }
+            (*key, member)
+        })
+        .collect()
+}
+
 #[test]
 fn ac_175_step_equivalence() {
     let pool = pool();
-    assert!(pool.len() >= 20, "{} examples", pool.len());
+    assert!(pool.len() >= 40, "{} examples", pool.len());
+    let registry = full_registry();
+    let mutating = |tool: &str| registry.get(tool).is_some_and(|(_, t)| t.mutating);
+    let edits = pool.iter().filter(|(tool, _)| mutating(tool)).count();
+    assert!(edits >= 15, "{edits} edit examples");
     let mut rng = Xoshiro256ss::seed_from_u64(175);
-    for round in 0..8 {
-        let count = 1 + usize::try_from(below(&mut rng, 5)).unwrap_or(0);
-        let picked: Vec<&(&str, Value)> = (0..count)
-            .map(|_| {
-                let i = usize::try_from(below(&mut rng, pool.len() as u64)).unwrap_or(0);
-                &pool[i]
-            })
-            .collect();
-        let mut direct = demo();
+    let mut ran = vec![false; pool.len()];
+    let mut round = 0;
+    let mut edit_rounds = 0;
+    while ran.contains(&false) {
+        assert!(round < MAX_ROUNDS, "{round} rounds: {ran:?}");
+        round += 1;
+        let indices = draw(&mut rng, &ran);
+        for i in &indices {
+            ran[*i] = true;
+        }
+        // The journal holds committed transactions only, and a batch commits after its last
+        // step. So a journal read runs before the edits of its round: then both runs read
+        // the journal at the same rev.
+        let mut picked: Vec<&(&str, Value)> = indices.iter().map(|i| &pool[*i]).collect();
+        picked.sort_by_key(|(tool, _)| !JOURNAL_READS.contains(tool));
+        let count = picked.len();
+        let with_edits = picked.iter().any(|(tool, _)| mutating(tool));
+        edit_rounds += usize::from(with_edits);
+        // The direct session runs the same calls one at a time from the same start state.
+        // Neither session has an analysis engine, so an edit marks the analysis stale, as
+        // inside the transaction of a batch.
+        let mut direct = demo_without_engine();
+        let start = rev(&direct);
         let expected: Vec<Value> = picked
             .iter()
             .map(|(tool, args)| crate::support::call_value(&mut direct, tool, args.clone()))
@@ -85,28 +172,36 @@ fn ac_175_step_equivalence() {
             ("return", Value::Array(ids)),
             ("max_chars", Value::from(60_000)),
         ]);
-        let mut batched = demo();
+        let mut batched = demo_without_engine();
         let envelope = crate::support::call_value(&mut batched, "batch_run", args);
         let entries = steps(&envelope);
         assert_eq!(entries.len(), count, "round {round}: {envelope}");
         for (i, (entry, want)) in entries.iter().zip(&expected).enumerate() {
-            for key in SAME {
+            let (got, want_members) = (
+                same_members(entry, with_edits),
+                same_members(want, with_edits),
+            );
+            for ((key, a), (_, b)) in got.iter().zip(&want_members) {
                 assert_eq!(
-                    entry.get(key),
-                    want.get(key),
+                    a, b,
                     "round {round} step {i} {key}: {} {}",
-                    picked[i].0,
-                    picked[i].1
+                    picked[i].0, picked[i].1
                 );
             }
             assert_eq!(
                 int_at(entry, "/chars"),
                 chars(want),
-                "round {round} step {i}"
+                "round {round} step {i}: {} {}",
+                picked[i].0,
+                picked[i].1
             );
         }
-        assert_eq!(rev(&batched), rev(&direct));
+        // A batch with edits commits one transaction with all of them.
+        let one = u64::from(rev(&direct) > start);
+        assert_eq!(u64::from(with_edits), one, "round {round}");
+        assert_eq!(rev(&batched), start + one, "round {round}: {envelope}");
     }
+    assert!(edit_rounds >= 5, "{edit_rounds} rounds with edits");
 }
 
 const EDITS: &str = r#"{"steps":[
