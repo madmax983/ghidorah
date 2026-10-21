@@ -19,8 +19,8 @@
 //! [`cfa_check`] compares the tracked offset at each call site with the CFA row of the FDE
 //! (AC-091). A CFA of `rsp + c` needs the offset `8 - c` for `rsp`. A CFA of `rbp + c` needs
 //! the offset `8 - c` for `rbp`. A known offset that differs is a [`Mismatch`]: the function
-//! gets `W_SP_MISMATCH` there. A `Top` value gives no compare: the tracking already gave up,
-//! for example after `and rsp, -16` in `_start`.
+//! gets `W_SP_MISMATCH` there. A site with no known offset, for example a `Top` value, gives
+//! no compare. The [`CfaReport`] lists it as [`Untracked`].
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -30,7 +30,7 @@ use ghidorah_ir::{Arena, Arg, Loc, MemEffect, Node, Op, Opc, Val, rpo};
 
 mod cfa;
 
-pub use self::cfa::{Mismatch, cfa_check, cfa_rule, run, spec};
+pub use self::cfa::{CfaReport, Mismatch, Untracked, cfa_check, cfa_rule, run, spec};
 
 /// The DWARF number of `rsp`.
 pub const DWARF_RSP: u16 = 7;
