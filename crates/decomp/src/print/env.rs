@@ -31,7 +31,7 @@ use ghidorah_ir::Loc;
 use ghidorah_types::{CallConv, DataModel, Prim, Sig, Type, TypeId, TypeStore};
 
 use super::{PrintEnv, Signature, body_units};
-use crate::expr::{Call, Expr, Stmt, VarIdx};
+use crate::expr::{Call, Callee, Expr, Stmt, VarIdx};
 use crate::lattice::{Store, Stores, Ty};
 use crate::view::View;
 use crate::{Env, ProgramEnv};
@@ -85,32 +85,57 @@ pub(crate) fn caller_ret_loc(c: &Call, reads: &BTreeSet<VarIdx>, conv: &CallConv
     }
 }
 
+/// Gives the inputs of the call `c` that the text can show. The `rax` value of a direct or an
+/// indirect call is its varargs count, and the text never shows it.
+fn shown_inputs(c: &Call) -> Vec<&Expr> {
+    if !matches!(c.callee, Callee::Direct(_) | Callee::Indirect(_)) {
+        return c.inputs();
+    }
+    let mut out = Vec::new();
+    if let Callee::Indirect(t) = &c.callee {
+        out.push(t);
+    }
+    out.extend(
+        c.args
+            .iter()
+            .filter(|(l, _)| *l != Loc::RAX)
+            .map(|(_, e)| e),
+    );
+    out.extend(c.mem.iter());
+    out
+}
+
 /// Gives the variables that the statements, conditions and switch values of `view` read. A
-/// variable that is the full value of a return is not a read of that return.
+/// variable that is the full value of a return is not a read of that return. The varargs
+/// count of a call is no read ([`shown_inputs`]).
 #[must_use]
 pub(crate) fn reads(view: &View) -> BTreeSet<VarIdx> {
-    let mut roots: Vec<&Expr> = Vec::new();
+    let mut stack: Vec<&Expr> = Vec::new();
     for n in &view.nodes {
-        roots.extend([&n.cond, &n.target, &n.index].into_iter().flatten());
+        stack.extend([&n.cond, &n.target, &n.index].into_iter().flatten());
         for s in &n.stmts {
             match s {
-                Stmt::Return { uses, .. } => roots.extend(
+                Stmt::Return { uses, .. } => stack.extend(
                     uses.iter()
                         .map(|(_, e)| e)
                         .filter(|e| !matches!(e, Expr::Var { .. })),
                 ),
-                _ => roots.extend(s.exprs()),
+                Stmt::Call(c) => stack.extend(shown_inputs(c)),
+                _ => stack.extend(s.exprs()),
             }
         }
     }
-    roots
-        .into_iter()
-        .flat_map(Expr::preorder)
-        .filter_map(|x| match x {
-            Expr::Var { var, .. } => Some(*var),
-            _ => None,
-        })
-        .collect()
+    let mut out = BTreeSet::new();
+    while let Some(e) = stack.pop() {
+        match e {
+            Expr::Var { var, .. } => {
+                out.insert(*var);
+            }
+            Expr::Call(c) => stack.extend(shown_inputs(c)),
+            _ => stack.extend(e.inputs()),
+        }
+    }
+    out
 }
 
 impl PrintEnv for ProgramEnv<'_> {

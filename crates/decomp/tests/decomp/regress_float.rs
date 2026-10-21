@@ -1,8 +1,12 @@
-//! Regression tests of the floating results of calls (k3-03).
+//! Regression tests of the floating values of calls and returns (k3-03, L1 to L4).
 //!
 //! A callee returns a `float` or a `double` in `xmm0`. The printer took only the `rax` def of
 //! a call as its result. So a caller that read the `xmm0` def of a call printed a variable
 //! with no def in place of the call result.
+//!
+//! The later tests cover four more cases. MS x64 keeps `xmm6` .. `xmm15` across a call. A
+//! function can return a floating value. A `SysV` varargs call has XMM arguments. A `void`
+//! callee leaves no value in `rax`.
 
 use std::collections::BTreeSet;
 
@@ -453,4 +457,147 @@ fn float_return_reads_xmm0() {
     );
     assert_eq!(lines[0], "void f(void)", "{lines:?}");
     assert_eq!(lines[3], "    return;", "{lines:?}");
+}
+
+/// Gives the argument texts of the first call of `name` in `text`.
+fn call_args(text: &str, name: &str) -> Vec<String> {
+    let start = text
+        .find(&format!("{name}("))
+        .unwrap_or_else(|| panic!("no call of {name}:\n{text}"));
+    let (mut depth, mut quoted, mut escaped) = (0usize, false, false);
+    let (mut out, mut cur) = (Vec::new(), String::new());
+    for ch in text[start + name.len() + 1..].chars() {
+        match ch {
+            _ if escaped => escaped = false,
+            '\\' if quoted => escaped = true,
+            '"' => quoted = !quoted,
+            _ if quoted => {}
+            '(' => depth += 1,
+            ')' if depth == 0 => break,
+            ')' => depth -= 1,
+            ',' if depth == 0 => {
+                out.push(cur.trim().to_owned());
+                cur.clear();
+                continue;
+            }
+            _ => {}
+        }
+        cur.push(ch);
+    }
+    if !cur.trim().is_empty() {
+        out.push(cur.trim().to_owned());
+    }
+    out
+}
+
+/// A `SysV` varargs call passes its floating arguments in `xmm0` .. `xmm7`, and `al` holds
+/// their count. The printer took the named count of a varargs callee as its full count. A
+/// `SysV` argument list held no XMM register too. So in `main` of `varargs`, `sum_va(3, 1, 2,
+/// a)` printed as `sum_va(3)`, and `log_msg("%lld %f\n", r, scale(..))` lost `r` and the
+/// `double`. Now the call keeps its integer arguments, and `al` gives the XMM arguments.
+#[test]
+fn regress_sysv_varargs_call_keeps_float_args() {
+    for build in ["varargs.gcc-O0", "varargs.gcc-O2", "varargs.clang-O2"] {
+        let text = render_of(build, 0, "main").text();
+        let sum = call_args(&text, "sum_va");
+        assert_eq!(sum.len(), 4, "{build}: {sum:?}\n{text}");
+        assert_eq!(sum[..3], ["3", "1", "2"], "{build}:\n{text}");
+        let log = call_args(&text, "log_msg");
+        assert_eq!(log.len(), 3, "{build}: {log:?}\n{text}");
+        assert_eq!(log[0], "\"%lld %f\\n\"", "{build}:\n{text}");
+        let scale = text
+            .lines()
+            .map(str::trim)
+            .find(|l| l.contains("scale("))
+            .unwrap_or_else(|| panic!("{build}: no call of scale:\n{text}"));
+        let (var, _) = scale
+            .split_once(" = ")
+            .unwrap_or_else(|| panic!("{build}: the call binds no result: {scale}\n{text}"));
+        assert_eq!(word_count(&log[2], var), 1, "{build}: {log:?}\n{text}");
+        assert!(undefined_reads(&text).is_empty(), "{build}:\n{text}");
+    }
+}
+
+/// Gives an environment with the variadic callee `printf` at [`CALLEE`].
+fn printf_env() -> SigEnv {
+    let p = Types::prototype("printf").expect("the Tier-0 prototype printf");
+    let ty = |id| Ty {
+        store: Store::Tier0,
+        id,
+    };
+    let sig = Signature {
+        params: p.sig.params.iter().map(|x| ty(x.ty)).collect(),
+        names: p.sig.params.iter().map(|x| x.name.clone()).collect(),
+        ret: Some(ty(p.sig.ret)),
+        variadic: true,
+    };
+    SigEnv("printf", sig)
+}
+
+/// Gives the call line of a call of `printf` with the `rax` value `al`. The caller sets the
+/// registers of `set`, and the call reads `rdi`, `xmm0` and `xmm1`.
+fn printf_line(al: Expr, set: &[Loc]) -> String {
+    let xmm1 = Loc::xmm(1).expect("the register xmm1");
+    let call = Call {
+        callee: Callee::Direct(CALLEE),
+        args: vec![
+            (Loc::RDI, k(0x3000, 64)),
+            (xmm0(), v(0, 128)),
+            (xmm1, v(1, 128)),
+            (Loc::RAX, al),
+        ],
+        set: set.iter().copied().collect(),
+        push: None,
+        imm: Vec::new(),
+        mem: None,
+        rets: Vec::new(),
+        ret: None,
+        noreturn: false,
+        tail: false,
+        at: op(0, 0, 0),
+    };
+    let ret = Stmt::Return {
+        uses: Vec::new(),
+        at: op(0, 1, 0),
+    };
+    let vars = vec![
+        temp("xmm0", ENTRY, 128),
+        temp("xmm1", ENTRY, 128),
+        temp("rax", ENTRY, 64),
+    ];
+    let d = decomp(
+        vec![Spec::new(Exit::Stop, vec![Stmt::Call(call), ret])],
+        vars,
+        Tree::Block(node(0)),
+    );
+    let out = print::print(&d, &printf_env(), &NoNames, "f");
+    out.lines
+        .get(2)
+        .map(|l| l.text.trim().to_owned())
+        .unwrap_or_default()
+}
+
+/// The XMM arguments of a `SysV` varargs call follow its integer arguments. A constant `al`,
+/// or the low byte of a `mov al, k`, gives their count. With no constant, the count is the
+/// XMM registers that the caller sets.
+#[test]
+fn varargs_float_args_follow_al() {
+    let xmm1 = Loc::xmm(1).expect("the register xmm1");
+    let rdi = [Loc::RDI];
+    assert_eq!(printf_line(k(0, 64), &rdi), "printf(0x3000);");
+    assert_eq!(printf_line(k(1, 64), &rdi), "printf(0x3000, v1);");
+    assert_eq!(printf_line(k(0x102, 64), &rdi), "printf(0x3000, v1, v2);");
+    let mov_al = Expr::Ite {
+        op: ghidorah_ir::Opc::Insert,
+        w: 64,
+        sub: 8,
+        a: Box::new(v(2, 64)),
+        b: Box::new(k(1, 8)),
+        c: Box::new(k(0, 8)),
+        at: op(0, 0, 1),
+    };
+    assert_eq!(printf_line(mov_al, &rdi), "printf(0x3000, v1);");
+    let set = [Loc::RDI, xmm0(), xmm1];
+    assert_eq!(printf_line(v(2, 64), &set), "printf(0x3000, v1, v2);");
+    assert_eq!(printf_line(v(2, 64), &rdi), "printf(0x3000);");
 }
