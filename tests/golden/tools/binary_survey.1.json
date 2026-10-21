@@ -530,19 +530,8 @@
       "items": []
     },
     "diagnostics": {
-      "total": 1,
-      "items": [
-        {
-          "code": "E_CFA_OPCODE",
-          "count": 1,
-          "places": [
-            {
-              "path": "elf.eh_frame[0x30].cfa",
-              "offset": "0x20cf"
-            }
-          ]
-        }
-      ]
+      "total": 0,
+      "items": []
     }
   },
   "next": [

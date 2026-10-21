@@ -154,3 +154,85 @@ fn regress_eh_frame_extended_length_id_is_4_bytes() {
     assert!(long.diagnostics.is_empty(), "{:?}", long.diagnostics);
     assert_eq!(long.fdes, short.fdes);
 }
+
+/// The PLT expression of GNU ld: `breg7 8; breg16 0; lit15; and; lit<k>; ge; lit3; shl; plus`.
+fn plt_expr(k: u8) -> Vec<u8> {
+    let block = [
+        0x77,
+        0x08,
+        0x80,
+        0x00,
+        0x3f,
+        0x1a,
+        0x30 | k,
+        0x2a,
+        0x33,
+        0x24,
+        0x22,
+    ];
+    let mut out = vec![0x0f, 11];
+    out.extend_from_slice(&block);
+    out
+}
+
+fn row(pc: u64, offset: i64) -> CfaRow {
+    CfaRow { pc, reg: 7, offset }
+}
+
+#[test]
+fn regress_cfa_plt_expression_rows() {
+    // The PLT FDE of GNU ld: PLT0 pushes and jumps, each entry pushes at offset k.
+    let mut program = vec![0x0e, 0x10, 0x46, 0x0e, 0x18, 0x4a];
+    program.extend(plt_expr(11));
+    program.extend_from_slice(&[0, 0, 0]);
+    let run = run(&program, GCC, 0x1020, Some(0x1050), RSP8, 64).expect("the PLT rule");
+    assert_eq!(
+        run.rows,
+        vec![
+            row(0x1020, 16),
+            row(0x1026, 24),
+            row(0x1030, 8),
+            row(0x103b, 16),
+            row(0x1040, 8),
+            row(0x104b, 16),
+        ]
+    );
+    // The IBT PLT pushes at offset 9. A start inside an entry takes the rule of its offset.
+    let mut ibt = vec![0x4c];
+    ibt.extend(plt_expr(9));
+    let run = super::cfa::run(&ibt, GCC, 0x1020, Some(0x1040), RSP8, 64).expect("the IBT rule");
+    assert_eq!(
+        run.rows,
+        vec![
+            row(0x1020, 8),
+            row(0x102c, 16),
+            row(0x1030, 8),
+            row(0x1039, 16)
+        ]
+    );
+}
+
+#[test]
+fn regress_cfa_plt_expression_limits() {
+    // Each row counts as one instruction of the cap.
+    let program = plt_expr(11);
+    let s = run(&program, GCC, 0x1000, Some(0x1000 + 16 * 64), RSP8, 64).expect_err("the cap");
+    assert_eq!((s.code, s.opcode), (DiagCode::Limit, 0x0f));
+    // A CIE program has no end, so the PLT rule stops it.
+    let s = run(&program, GCC, 0, None, RSP8, 64).expect_err("no end");
+    assert_eq!(s.code, DiagCode::CfaOpcode);
+    // An instruction after the PLT rule stops the FDE.
+    let mut more = plt_expr(11);
+    more.extend_from_slice(&[0x41, 0x0e, 0x10]);
+    assert_eq!(stop(&more), (DiagCode::CfaOpcode, 0, 0x0f));
+    // Another expression still stops the FDE.
+    let mut other = plt_expr(11);
+    other[4] = 0x31;
+    assert_eq!(stop(&other), (DiagCode::CfaOpcode, 0, 0x0f));
+    assert_eq!(
+        stop(&[0x0f, 0x02, 0x77, 0x08]),
+        (DiagCode::CfaOpcode, 0, 0x0f)
+    );
+    // A block that runs past the program.
+    assert_eq!(stop(&[0x0f, 0x20, 0x77]), (DiagCode::Oob, 0, 0x0f));
+}

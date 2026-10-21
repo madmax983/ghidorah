@@ -752,6 +752,7 @@ Binary {
 - The loader finds `.eh_frame` through its section or, without section headers, through `PT_GNU_EH_FRAME` and the `eh_frame_ptr` field of `.eh_frame_hdr`. The MVP does not read the sorted table of `.eh_frame_hdr`.
 - Output: FDE PC ranges (function seeds) and a CFA summary per FDE (CFA register and offset at each row start). Stack tracking uses the CFA rows as a cross-check (AC-091).
 - The CFA row interpreter supports `DW_CFA_advance_loc*`, `def_cfa*`, `offset*`, `restore*`, `remember_state`, `restore_state` and `nop`. Other opcodes stop the FDE with a diagnostic.
+- The PLT FDE of GNU ld ends in a `def_cfa_expression`: `rsp + 8`, plus 8 from offset `k` of each 16-byte entry. The interpreter knows this one expression. It gives one row at each change of the rule, and each row counts against the instruction cap. Other expressions stop the FDE.
 
 ### 4.5 Import slots and stub naming
 

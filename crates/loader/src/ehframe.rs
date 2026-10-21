@@ -26,7 +26,10 @@
 //! - It also reads the register-rule opcodes (`undefined`, `same_value`, `register`,
 //!   `expression`, `val_*`, `GNU_args_size`, `GNU_negative_offset_extended`). They do not
 //!   change the CFA, so the rows do not change.
-//! - `def_cfa_expression` and other opcodes stop the FDE with `E_CFA_OPCODE`.
+//! - The PLT expression of GNU ld (`breg7 8; breg16 0; lit15; and; lit<k>; ge; lit3; shl;
+//!   plus`) gives one row at each change of its rule to the end of the range. Each such row
+//!   counts as one instruction of the cap.
+//! - Another `def_cfa_expression` and other opcodes stop the FDE with `E_CFA_OPCODE`.
 //! - A stopped FDE keeps its PC range and has no CFA rows. So no reader gets a wrong row.
 //! - A row starts at each address where the CFA rule changes. The walk keeps no row at or
 //!   after the end of the PC range.

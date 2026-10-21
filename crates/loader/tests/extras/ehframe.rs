@@ -186,7 +186,26 @@ fn ac_053_parse_equals_the_load() {
     let eh = parse(&b, &map, &Limits::DEFAULT);
     assert_eq!(eh.fdes, b.fdes);
     assert_eq!(eh.fdes.len(), 8);
-    assert_eq!(diag_codes(&eh), vec![DiagCode::CfaOpcode], "the PLT FDE");
+    assert!(diag_codes(&eh).is_empty(), "the PLT FDE has its rule");
+    let plt = eh
+        .fdes
+        .iter()
+        .find(|f| f.range.first == 0x1020)
+        .expect("the PLT FDE");
+    assert_eq!(
+        plt.cfa_rows
+            .iter()
+            .map(|r| (r.pc, r.offset))
+            .collect::<Vec<_>>(),
+        [
+            (0x1020, 16),
+            (0x1026, 24),
+            (0x1030, 8),
+            (0x1039, 16),
+            (0x1040, 8),
+            (0x1049, 16)
+        ]
+    );
 }
 
 #[test]

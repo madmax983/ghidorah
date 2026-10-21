@@ -30,6 +30,19 @@ const DW_CFA_VAL_EXPRESSION: u8 = 0x16;
 const DW_CFA_GNU_ARGS_SIZE: u8 = 0x2e;
 const DW_CFA_GNU_NEGATIVE_OFFSET_EXTENDED: u8 = 0x2f;
 
+/// The DWARF register number of `rsp`.
+const RSP: u16 = 7;
+
+/// The ops of the PLT expression of GNU ld after `DW_OP_breg7 <base>`: `breg16 0; lit15;
+/// and`, then `lit<k>`, then `ge; lit3; shl; plus`.
+const PLT_HEAD: [u8; 4] = [0x80, 0x00, 0x3f, 0x1a];
+/// The ops of the PLT expression after `lit<k>`.
+const PLT_TAIL: [u8; 4] = [0x2a, 0x33, 0x24, 0x22];
+/// The opcode of `DW_OP_breg7`.
+const DW_OP_BREG7: u8 = 0x77;
+/// The opcode of `DW_OP_lit0`. `DW_OP_lit<k>` is `0x30 + k` for `k` in 0..=31.
+const DW_OP_LIT0: u8 = 0x30;
+
 /// The CFA rule: a register and an offset.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) struct Rule {
@@ -79,6 +92,10 @@ struct Machine<'a> {
     rule: Rule,
     stack: Vec<Rule>,
     rows: Vec<CfaRow>,
+    /// The instructions and the PLT rows so far.
+    count: u64,
+    /// The cap of `count`.
+    max_insns: u64,
 }
 
 /// The result of one instruction.
@@ -176,6 +193,64 @@ impl Machine<'_> {
         Ok(Step::Next)
     }
 
+    /// Reads a `def_cfa_expression`. The PLT expression of GNU ld gives its rows to the end of
+    /// the range ([`plt_rule`]). It is the last instruction, so only `nop` padding can
+    /// follow it. Another expression stops the program.
+    fn def_cfa_expression(&mut self) -> Result<Step, Fail> {
+        const EXPRESSION: Fail = (DiagCode::CfaOpcode, "the CFA is a DWARF expression");
+        let len = self.uleb()?;
+        let len = usize::try_from(len).map_err(|_| read_fail(ReadError::Eof))?;
+        let block = self.reader.take(len).map_err(read_fail)?;
+        let (base, k) = plt_rule(block).ok_or(EXPRESSION)?;
+        let end = self.end.ok_or(EXPRESSION)?;
+        if self.reader.rest().iter().any(|b| *b != DW_CFA_NOP) {
+            return Err(EXPRESSION);
+        }
+        self.plt_rows(base, k, end)?;
+        Ok(Step::Done)
+    }
+
+    /// Adds the rows of the PLT rule from the location to `end`. An offset below `k` in a
+    /// 16-byte entry gets `rsp + base`. Another offset gets `rsp + base + 8`. Each row counts
+    /// as one instruction of the cap.
+    fn plt_rows(&mut self, base: i64, k: u64, end: u64) -> Result<(), Fail> {
+        const LIMIT: Fail = (
+            DiagCode::Limit,
+            "the PLT rule has more rows than the instruction cap",
+        );
+        let pushed = base
+            .checked_add(8)
+            .ok_or((DiagCode::Overflow, "a CFA offset overflows"))?;
+        let offset_at = |pc: u64| if pc % 16 >= k { pushed } else { base };
+        let mut pc = self.loc;
+        while pc < end {
+            self.count = self.count.checked_add(1).ok_or(LIMIT)?;
+            if self.count > self.max_insns {
+                return Err(LIMIT);
+            }
+            emit(
+                &mut self.rows,
+                pc,
+                Rule {
+                    reg: Some(RSP),
+                    offset: offset_at(pc),
+                },
+            );
+            // The next change is at the next entry start or at offset `k` of the entry.
+            let entry = pc & !15;
+            let at_k = entry.checked_add(k).filter(|q| *q > pc && k < 16);
+            match at_k.or_else(|| entry.checked_add(16)) {
+                Some(q) => pc = q,
+                None => break,
+            }
+        }
+        self.rule = Rule {
+            reg: Some(RSP),
+            offset: offset_at(pc),
+        };
+        Ok(())
+    }
+
     /// Runs one instruction with the opcode `op`.
     fn step(&mut self, op: u8) -> Result<Step, Fail> {
         let low = op & 0x3f;
@@ -257,13 +332,31 @@ impl Machine<'_> {
                 let offset = self.factored()?;
                 self.set(Rule { offset, ..rule })
             }
-            DW_CFA_DEF_CFA_EXPRESSION => {
-                return Err((DiagCode::CfaOpcode, "the CFA is a DWARF expression"));
-            }
+            DW_CFA_DEF_CFA_EXPRESSION => self.def_cfa_expression()?,
             _ => return Err((DiagCode::CfaOpcode, "the opcode is not supported")),
         };
         Ok(step)
     }
+}
+
+/// Gives the base offset and the entry offset `k` of the PLT expression of GNU ld, or `None`
+/// for another expression.
+///
+/// The expression is `breg7 <base>; breg16 0; lit15; and; lit<k>; ge; lit3; shl; plus`. So
+/// the CFA is `rsp + base`, plus 8 when `rip & 15 >= k`. The lazy PLT pushes the slot index
+/// at offset 11 of each entry, and the IBT PLT at offset 9.
+fn plt_rule(block: &[u8]) -> Option<(i64, u64)> {
+    let mut r = Reader::new(block, Endian::Little);
+    if r.u8().ok()? != DW_OP_BREG7 {
+        return None;
+    }
+    let base = r.sleb128().ok()?;
+    let head = r.take(PLT_HEAD.len()).ok()?;
+    let lit = r.u8().ok()?;
+    let tail = r.take(PLT_TAIL.len()).ok()?;
+    let k = lit.checked_sub(DW_OP_LIT0).filter(|k| *k < 32)?;
+    let exact = head == PLT_HEAD && tail == PLT_TAIL && r.remaining() == 0;
+    exact.then_some((base, u64::from(k)))
 }
 
 /// Adds a row at `pc`, or replaces the row at the same address. The list keeps no row that
@@ -309,16 +402,17 @@ pub(crate) fn run(
         rule: init,
         stack: Vec::new(),
         rows: Vec::new(),
+        count: 0,
+        max_insns,
     };
     if end.is_none_or(|e| start < e) {
         emit(&mut m.rows, start, init);
     }
-    let mut count = 0u64;
     while m.reader.remaining() > 0 {
         let at = m.reader.pos();
         let opcode = m.reader.u8().unwrap_or(DW_CFA_NOP);
-        count = count.saturating_add(1);
-        let step = if count > max_insns {
+        m.count = m.count.saturating_add(1);
+        let step = if m.count > max_insns {
             Err((
                 DiagCode::Limit,
                 "the FDE has more CFA instructions than the limit",
