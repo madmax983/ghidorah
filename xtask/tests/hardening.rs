@@ -648,6 +648,47 @@ fn ac_202_bench_budgets() {
     let none = bench::verdict(cold, &stats, None);
     assert_eq!(none.get("ok").and_then(Value::as_bool), Some(false));
     assert!(bench::run(&workspace::root(), &strings(&["no_such_bench"])).is_err());
+    check_bench_replies();
+}
+
+/// Each benchmark sample checks its reply, so an error reply is never a fast sample (AC-202).
+fn check_bench_replies() {
+    let ok = r#"{"id":1,"ok":true,"data":{"value":"0x70"}}"#;
+    assert!(bench::check_reply("calc", ok, None).is_ok());
+    let budget = r#"{"id":1,"ok":false,"error":{"code":"OUTPUT_BUDGET_EXCEEDED","details":{"chars":39897,"limit":7840}}}"#;
+    let err = bench::check_reply("mem_read", budget, Some(500)).expect_err("an error reply");
+    assert!(err.to_string().contains("OUTPUT_BUDGET_EXCEEDED"), "{err}");
+    assert!(bench::check_reply("calc", "not json", None).is_err());
+    assert!(bench::check_reply("calc", r#"{"id":1}"#, None).is_err());
+    let rows = |n: usize| {
+        let row = r#"{"a":"0x2650","m":"endbr64"}"#;
+        format!(
+            r#"{{"ok":true,"data":{{"rows":[{}]}}}}"#,
+            vec![row; n].join(",")
+        )
+    };
+    assert!(bench::check_reply("mem_read", &rows(500), Some(500)).is_ok());
+    assert!(bench::check_reply("mem_read", &rows(499), Some(500)).is_err());
+    assert!(bench::check_reply("mem_read", r#"{"ok":true,"data":{}}"#, Some(500)).is_err());
+    let page = r#"{"ok":true,"data":{"items":[]},"page":{"returned":500}}"#;
+    assert!(bench::check_reply("mem_read", page, Some(500)).is_ok());
+    let args = json::parse(&bench::decode_args("684e3a526a8ab75a", "0x2650")).expect("args parse");
+    assert_eq!(
+        args.get("count").and_then(Value::as_u64),
+        Some(bench::DECODE_COUNT)
+    );
+    let max_chars = args.get("max_chars").and_then(Value::as_u64);
+    assert!(
+        max_chars.is_some_and(|m| m >= 40_000),
+        "500 rows need about 40,000 chars"
+    );
+    // A full load needs the complete analysis state.
+    let complete = r#"{"ok":true,"data":{"analysis":{"state":"complete"}}}"#;
+    let none = r#"{"ok":true,"data":{"analysis":{"state":"none"}}}"#;
+    assert!(bench::check_load(complete, true).is_ok());
+    assert!(bench::check_load(none, true).is_err());
+    assert!(bench::check_load(none, false).is_ok());
+    assert!(bench::check_load(r#"{"ok":false}"#, false).is_err());
 }
 
 /// The step reads `git log`, so it runs in tier 2 (the hermetic run has no `git`).
