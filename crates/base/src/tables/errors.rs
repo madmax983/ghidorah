@@ -350,7 +350,7 @@ pub(crate) const fn info(code: ErrorCode) -> CodeInfo {
             "NO_BINARY_OPEN",
             H,
             false,
-            "No binary is open. The call needs an open binary. Load a binary with binary_load.",
+            "No binary is open. The call needs an open binary. Load a binary or open a project first.",
             "Send next[0]. It lists the projects or opens the newest project.",
         )
         .with_plain(

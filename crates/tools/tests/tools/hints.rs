@@ -7,6 +7,7 @@ use ghidorah_json::Value;
 use ghidorah_tools::args::parse_strict;
 use ghidorah_tools::errors::Inactive;
 use ghidorah_tools::hints::{HintError, MAX_NEXT, check, keep_valid};
+use ghidorah_tools::session::ProjectsConfig;
 use ghidorah_tools::{
     AnalysisInfo, AnalysisState, Args, Call, Candidate, Ctx, Host, Payload, Profile, ProfileSet,
     Registry, Request, Roots, Session, SessionConfig, ToolError, ToolSpec, Warning, dispatch_with,
@@ -296,4 +297,98 @@ fn regress_conflict_hint_reads_first() {
     );
     assert!(hint.starts_with("Read"), "{hint}");
     assert!(!hint.contains("history_list"), "{hint}");
+}
+
+/// Gives the words of `text` that name a tool of `inactive`.
+fn inactive_words(text: &str, inactive: &Inactive) -> Vec<String> {
+    text.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+        .filter(|word| inactive.names(word))
+        .map(str::to_owned)
+        .collect()
+}
+
+/// Gives the problems of one envelope: a text or a `next` call that names an inactive tool.
+fn chain_problems(s: &Session, inactive: &Inactive, tool: &str, envelope: &Value) -> Vec<String> {
+    let mut out = Vec::new();
+    for pointer in ["/error/message", "/error/hint", "/data/hint"] {
+        let words = inactive_words(&text_at(envelope, pointer), inactive);
+        if !words.is_empty() {
+            out.push(format!("{tool} {pointer} names {words:?}"));
+        }
+    }
+    let next = envelope.get("next").and_then(Value::as_array);
+    for call in next.unwrap_or_default() {
+        let name = text_at(call, "/tool");
+        if !s.in_profile(&name) {
+            out.push(format!("{tool} next names {name}"));
+        }
+        let words = inactive_words(&text(call), inactive);
+        if !words.is_empty() {
+            out.push(format!("{tool} next {name} names {words:?}"));
+        }
+    }
+    out
+}
+
+/// The readonly profile has no `binary_load`. With no project, the chain from
+/// `NO_BINARY_OPEN` names only active tools. `session_brief` names the `--open` option, and
+/// `tool_search` with an unknown name gives active tool names as candidates (r3-surface-06).
+#[test]
+fn regress_readonly_no_binary_chain() {
+    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("readonly_no_binary_chain");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("the temp directory exists");
+    let roots = Roots::new(&root(), &[PathBuf::from(".")]).expect("the root is valid");
+    let mut config = SessionConfig::new(roots);
+    config.projects = Some(ProjectsConfig {
+        root: dir,
+        named: true,
+        break_lock: false,
+    });
+    let mut s = shipped_in(Profile::Readonly, config);
+    assert!(!s.in_profile("binary_load"));
+    let inactive = Inactive::of(&<Session as Host>::registry(), &|name| s.in_profile(name));
+    let mut bad = Vec::new();
+
+    let missing = send(&mut s, "func_list", "{}");
+    assert_eq!(code(&missing), "NO_BINARY_OPEN", "{missing}");
+    assert_eq!(
+        text_at(&missing, "/next/0/tool"),
+        "session_brief",
+        "{missing}"
+    );
+    bad.extend(chain_problems(&s, &inactive, "func_list", &missing));
+
+    let brief = send(&mut s, "session_brief", "{}");
+    assert_eq!(code(&brief), "", "{brief}");
+    assert!(text_at(&brief, "/data/hint").contains("--open"), "{brief}");
+    bad.extend(chain_problems(&s, &inactive, "session_brief", &brief));
+    let next = brief.get("next").and_then(Value::as_array);
+    for call in next.unwrap_or_default().to_vec() {
+        let tool = text_at(&call, "/tool");
+        let args = text(call.get("args").unwrap_or(&Value::Null));
+        let envelope = send(&mut s, &tool, &args);
+        bad.extend(chain_problems(&s, &inactive, &tool, &envelope));
+    }
+
+    for name in ["binary_load", "zzzz_qqq"] {
+        let args = format!(r#"{{"name":"{name}","level":"full"}}"#);
+        let found = send(&mut s, "tool_search", &args);
+        assert_eq!(code(&found), "NOT_FOUND", "{found}");
+        let candidates = found
+            .pointer("/error/candidates")
+            .and_then(Value::as_array)
+            .unwrap_or_default();
+        assert!(!candidates.is_empty(), "{found}");
+        for c in candidates {
+            let value = text_at(c, "/value");
+            assert!(s.in_profile(&value), "{value} is an active tool: {found}");
+        }
+        assert!(
+            !text_at(&found, "/error/hint").contains("search"),
+            "{found}"
+        );
+        bad.extend(chain_problems(&s, &inactive, "tool_search", &found));
+    }
+    assert!(bad.is_empty(), "{}", bad.join("\n"));
 }

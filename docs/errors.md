@@ -62,7 +62,7 @@ A tool failure gives one error object with one of these codes.
 | 37 | `OUTPUT_BUDGET_EXCEEDED` | N | no | The result is larger than the output budget. The call changed no fact, and an internal guard stopped it. Read details.chars and details.limit. | A committed edit never gives this error. Its result drops data members until it fits. | A committed edit never gives this error. Its result drops data members until it fits. |
 | 38 | `INTERNAL_ERROR` | N | no | The tool failed with an internal error. The handler stopped on a fault. Report the crash_id. | The crash file holds the tool, the arguments and the rev. | The crash file holds the tool, the arguments and the rev. |
 | 39 | reserved | - | - | `IDEMPOTENCY_MISMATCH` waits for stretch item S19. | - | - |
-| 40 | `NO_BINARY_OPEN` | H | no | No binary is open. The call needs an open binary. Load a binary with binary_load. | Send next[0]. It lists the projects or opens the newest project. | Send binary_load with a path under a root of the server. The --open option of the server opens a project at the start. |
+| 40 | `NO_BINARY_OPEN` | H | no | No binary is open. The call needs an open binary. Load a binary or open a project first. | Send next[0]. It lists the projects or opens the newest project. | Send binary_load with a path under a root of the server. The --open option of the server opens a project at the start. |
 | 41 | `NOTHING_TO_REDO` | N | no | The redo found no transaction. The scope has no transaction in the undone state, or a later edit ended the redo chain. Call history_list to see the transactions. | A new edit after an undo ends the redo chain. | A new edit after an undo ends the redo chain. |
 
 ## Warning codes

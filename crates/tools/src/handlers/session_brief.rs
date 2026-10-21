@@ -3,6 +3,7 @@
 //! | Open binaries | Result |
 //! |---|---|
 //! | none | `{ projects: [{ binary_id, file_name, rev, last_session, last_rev, open }] }`: at most 20 projects of the projects root, newest rev first. `next[0]` is `binary_load { binary_id }` for the first project (AC-212). |
+//! | none, and the profile has no `binary_load` | the projects and `hint`: the text [`HINT_OPEN`], which names the `--open` option of the server |
 //! | one or more | the brief of the bound binary, else of the most recent binary |
 //!
 //! A default projects root inside a git working tree keeps no project (ADR-0022). Then the
@@ -34,6 +35,7 @@ use ghidorah_db::MetaLine;
 use ghidorah_json::{Object, Value};
 
 use super::func_sections::{self as fs, safe};
+use crate::api::Host;
 use crate::args::Args;
 use crate::dispatch::{Ctx, Payload};
 use crate::errors::ToolError;
@@ -70,8 +72,14 @@ pub const WHY_NOTES: &str = "List the open notes.";
 /// The `why` of the `func_edit` call on an orphan.
 pub const WHY_ORPHAN: &str = "Make a function again for the orphaned fact.";
 
+/// The `hint` of the project list in a profile with no `binary_load`. No tool of the profile
+/// opens a binary, so the text names the options of the server.
+pub const HINT_OPEN: &str = "Start the server again with --open and a binary_id from projects. \
+                             Start it with --profile full or a wider --tools list to load a new binary.";
+
 /// Every fixed text of the handler that an agent reads.
 pub const TEXTS: &[&str] = &[
+    HINT_OPEN,
     WHY_REOPEN,
     WHY_LOAD,
     WHY_CHANGES,
@@ -156,6 +164,7 @@ const PROJECT: &[Field] = &[
 const PROJECT_SHAPE: OutputShape = OutputShape::Obj(PROJECT);
 const FIELDS: &[Field] = &[
     Field::opt("projects", OutputShape::List(&PROJECT_SHAPE)),
+    Field::opt("hint", OutputShape::Str),
     Field::opt("persisted", OutputShape::Bool),
     Field::opt("persist_reason", OutputShape::Str),
     Field::opt("binary_id", OutputShape::Str),
@@ -209,8 +218,12 @@ fn fit(
 
 /// Gives the brief with zero open binaries: the projects on disk, newest rev first. A refused
 /// projects root adds `persisted: false` and `persist_reason`.
+///
+/// The `next` call opens a binary with `binary_load`. A profile with no `binary_load` gets no
+/// `next` call. The data then holds `hint`, the text [`HINT_OPEN`].
 fn projects(session: &mut Session, ctx: &mut Ctx) -> Object {
     let all = session.projects();
+    let can_load = session.in_profile("binary_load");
     let refusal = session.persist_refusal().map(|r| safe(&r));
     let rows: Vec<Value> = all
         .iter()
@@ -229,20 +242,23 @@ fn projects(session: &mut Session, ctx: &mut Ctx) -> Object {
             ])
         })
         .collect();
-    match all.first() {
-        Some(first) => ctx.hint(Call::new(
-            "binary_load",
-            Value::object([("binary_id", Value::from(first.binary_id.to_string()))]),
-            WHY_REOPEN,
-        )),
-        None => ctx.hint(Call::new(
-            "tool_search",
-            Value::object([
-                ("name", Value::from("binary_load")),
-                ("level", Value::from("full")),
-            ]),
-            WHY_LOAD,
-        )),
+    if can_load {
+        let call = match all.first() {
+            Some(first) => Call::new(
+                "binary_load",
+                Value::object([("binary_id", Value::from(first.binary_id.to_string()))]),
+                WHY_REOPEN,
+            ),
+            None => Call::new(
+                "tool_search",
+                Value::object([
+                    ("name", Value::from("binary_load")),
+                    ("level", Value::from("full")),
+                ]),
+                WHY_LOAD,
+            ),
+        };
+        ctx.hint(call);
     }
     let longer = all.len() > MAX_PROJECTS;
     fit(
@@ -254,6 +270,9 @@ fn projects(session: &mut Session, ctx: &mut Ctx) -> Object {
                 "projects",
                 Value::Array(rows.iter().take(cap).cloned().collect()),
             );
+            if !can_load {
+                out.push("hint", Value::from(HINT_OPEN));
+            }
             if let Some(reason) = &refusal {
                 out.push("persisted", Value::Bool(false));
                 out.push("persist_reason", Value::from(reason.as_str()));
