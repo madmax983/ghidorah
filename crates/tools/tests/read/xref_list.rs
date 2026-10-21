@@ -28,9 +28,9 @@ const R_X86_64_GLOB_DAT: u32 = 6;
 /// The PLT sections, which hold the stubs themselves.
 const PLT: [&str; 3] = [".plt", ".plt.sec", ".plt.got"];
 
-/// Gives the call sites of `import` in the objdump golden of `name`, outside the PLT, each
-/// with the `via` that the site must show: `plt` for a call of `<import@plt>` and `got` for a
-/// `call [rip+slot]` that objdump names `<import@GLIBC..>`.
+/// Gives the call sites of `import` in the objdump golden of `name`, outside the PLT. Each site
+/// has the `via` that it must show. A call of `<import@plt>` gives `plt`. A `call [rip+slot]`
+/// that objdump names `<import@GLIBC..>` gives `got`.
 fn objdump_calls(name: &str, import: &str) -> BTreeMap<u64, String> {
     let text = std::fs::read_to_string(root().join(format!("tests/golden/objdump/{name}.txt")))
         .expect("the objdump golden reads");
@@ -90,8 +90,8 @@ struct PutsSites {
     data: u64,
 }
 
-/// Builds an ELF file whose `main` calls `puts` in three ways: through its PLT stub, through a
-/// second `GLOB_DAT` slot at `.data+0` and through its `.got.plt` slot. The word at `.data+8`
+/// Builds an ELF file whose `main` calls `puts` in three ways. The calls go through the PLT
+/// stub, a second `GLOB_DAT` slot at `.data+0` and the `.got.plt` slot. The word at `.data+8`
 /// holds the address of `puts` through an `R_X86_64_64` relocation, so it is not a slot.
 fn puts_sites_elf() -> PutsSites {
     let code = [

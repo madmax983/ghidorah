@@ -61,7 +61,7 @@ fn golden_calls() -> (BTreeMap<u64, BTreeSet<u64>>, BTreeMap<u64, BTreeSet<u64>>
 }
 
 /// Checks the thunks of `p` against the 6 truth thunks of `pe_main.exe`. A called thunk is a
-/// function. Each thunk that is a function has the thunk flag and the truth name, and each
+/// function. Each thunk that is a function has the thunk flag and the truth name. Each
 /// discovered function that starts with `jmp [rip+IAT]` is a truth thunk (design Section 4.11).
 ///
 /// Gives the entry of each called thunk by its import ID.

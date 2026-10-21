@@ -1,8 +1,8 @@
 //! `analysis_run` over MCP: progress per fuel slice and cancellation (AC-172, AC-173).
 //!
-//! The server runs in the test process with the shipped backend. The cancel test first runs
-//! the dispatcher of the server with a cancel flag that is set at the start. Then the emit
-//! function sets the cancel flag at the first progress notification, as a client does.
+//! The server runs in the test process with the shipped backend. The cancel test first sets
+//! the cancel flag and then runs the dispatcher of the server. Then the emit function sets the
+//! cancel flag at the first progress notification, as a client does.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
@@ -159,10 +159,10 @@ fn tool_call(
 
 #[test]
 fn ac_172_cancellation() {
-    // A cancel flag that is set when the tool starts stops the run at the first fuel
-    // checkpoint: the end of the first slice. The dispatcher is the one of the server, which
-    // gives no reply to such a call (see the case below). The one report gives the work of
-    // the slice, which equals the work of a run with the fuel of one slice.
+    // The test sets the cancel flag before the tool starts. The run then stops at the first
+    // fuel checkpoint: the end of the first slice. The dispatcher is the one of the server,
+    // which gives no reply to such a call (see the case below). The one report gives the work
+    // of the slice, which equals the work of a run with the fuel of one slice.
     let mut b = backend_with_fixture("analysis_cancel_first");
     let set = Arc::new(AtomicBool::new(true));
     let (sender, reports) = mpsc::channel();

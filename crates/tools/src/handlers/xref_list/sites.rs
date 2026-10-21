@@ -67,8 +67,8 @@ pub fn found(
         .collect()
 }
 
-/// Gives the ELF slots of the import `row`: its own slot and each slot of the slot map whose
-/// relocation symbol has the name of the import (design Section 7.5).
+/// Gives the ELF slots of the import `row`. They are its own slot and each slot of the slot
+/// map with its name (design Section 7.5).
 fn elf_slots(p: &Program, row: &ImportRow) -> BTreeSet<Address> {
     let imports = &p.binary().imports;
     let name_of = |index: usize| {
