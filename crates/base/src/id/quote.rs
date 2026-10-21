@@ -1,10 +1,12 @@
 //! The quoted form of a name part in an ID (ADR-0008, amendment 2026-10-20).
 //!
-//! A name part shows in the quoted form when it holds a character that
-//! [`BinText`](crate::BinText) escapes, when it starts with a double quote, or when its first
-//! or last character is ASCII white space. The address parser trims outer white space, so
-//! only the quoted form keeps it. The quoted form is a double quote, the name with escapes and
-//! a closing double quote. Every other name shows its exact text.
+//! A name part shows in the quoted form in three cases. It holds a character that
+//! [`BinText`](crate::BinText) escapes. It starts with a double quote. Its first or last
+//! character is ASCII white space: the address parser trims outer white space, so only the
+//! quoted form keeps it.
+//!
+//! The quoted form is a double quote, the name with escapes and a closing double quote. Every
+//! other name shows its exact text.
 //!
 //! | Character | Escape |
 //! |---|---|

@@ -160,8 +160,8 @@ fn targets(p: &Program, value: &str) -> Vec<Address> {
 /// The `NOT_FOUND` and `AMBIGUOUS_NAME` candidates of a hostile binary name hold escaped text.
 /// Each candidate value resolves to a matching item (AC-146a, r2-surface-03).
 ///
-/// A name with a space at its start or end is hostile too: the resolver trims outer white
-/// space, so its candidate value is the quoted `sym:` ID (r3-surface-02).
+/// A name with a space at its start or end is hostile too (r3-surface-02). The resolver trims
+/// outer white space, so its candidate value is the quoted `sym:` ID.
 #[test]
 fn regress_hostile_candidates_escape_and_resolve() {
     let evil = "\x1b[2J\u{202e}evil";
@@ -262,7 +262,7 @@ fn open_elf(dir: &str, b: &ElfBuilder) -> (Session, String) {
 }
 
 /// A candidate value has at most 256 characters, the cut of a candidate text. A longer value
-/// takes the rule of a hostile name: the `AMBIGUOUS_NAME` value is the address, and the
+/// takes the rule of a hostile name. The `AMBIGUOUS_NAME` value is the address. The
 /// `NOT_FOUND` value is the function ID or the address. Each value resolves (k3-04).
 #[test]
 fn regress_long_name_candidates_resolve() {

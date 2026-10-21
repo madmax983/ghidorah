@@ -254,9 +254,9 @@ pub const SOFT_SECTION: &str = ".x\u{ad}y";
 /// The owner name of the ELF note of [`hostile`]: a name with a backslash.
 pub const NOTE_NAME: &str = "a\\b";
 
-/// Loads an ELF file with the names of [`hostile_names`], one `ret` function each, the
-/// sections `"q`, [`SOFT_SECTION`] and [`SPACE_SECTION`], a note of the owner [`NOTE_NAME`]
-/// and two data symbols [`EVIL`] in `"q`.
+/// Loads an ELF file with the names of [`hostile_names`], one `ret` function each. The file
+/// also has the sections `"q`, [`SOFT_SECTION`] and [`SPACE_SECTION`], a note of the owner
+/// [`NOTE_NAME`] and two data symbols [`EVIL`] in `"q`.
 pub fn hostile(test: &str) -> ghidorah_tools::Session {
     let at = |off| Loc::section(".text", off);
     let mut b = ElfBuilder::exec()
@@ -326,9 +326,10 @@ fn dead_ids(session: &mut ghidorah_tools::Session, kind: &str) -> Vec<String> {
 /// (r2-surface-01, known-02).
 ///
 /// Each `search` item of the kinds `symbol` and `name` has an ID that resolves to the item.
-/// A name of two symbols, a file symbol, an undefined versioned import and a linker symbol
-/// outside the memory map give no `NOT_FOUND` and no `AMBIGUOUS_NAME` (r3-surface-03). A
-/// symbol or section name with a space at its start or end keeps the space (r3-surface-02).
+/// These IDs give no `NOT_FOUND` and no `AMBIGUOUS_NAME` (r3-surface-03). The cases are a
+/// name of two symbols, a file symbol, an undefined versioned import and a linker symbol
+/// outside the memory map. A symbol or section name with a space at its start or end keeps the
+/// space (r3-surface-02).
 #[test]
 fn regress_emitted_ids_round_trip() {
     let mut session = hostile("regress_emitted_ids_round_trip");

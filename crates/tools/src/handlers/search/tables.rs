@@ -196,8 +196,8 @@ fn sym_names(
     (kind, bind, table)
 }
 
-/// Gives the `imp:` ID of the undefined ELF symbol `s` with the name `raw`: the import of
-/// this name, else the import of the name before its first `@`. A versioned name such as
+/// Gives the `imp:` ID of the undefined ELF symbol `s` with the name `raw`. The import has
+/// this name, else the name before its first `@`. A versioned name such as
 /// `puts@GLIBC_2.2.5` gives `imp:puts`. Another symbol gives `None`.
 fn import_of(program: &Program, s: &Sym, raw: &str) -> Option<String> {
     let elf = matches!(s.table, SymTable::Symtab | SymTable::Dynsym);

@@ -37,8 +37,8 @@ pub fn is_mangled(name: &str) -> bool {
     name.starts_with("_Z") || name.starts_with("_R") || name.starts_with('?')
 }
 
-/// The program names of one binary that hold the escaped text of a loader name that is not
-/// UTF-8: each `(address, escaped text)` with the text of its loader bytes, escaped once.
+/// The escaped program names of one binary. Each `(address, escaped text)` key holds a loader
+/// name that is not UTF-8. Its value is the text of the loader bytes, escaped once.
 type Escaped = BTreeMap<(Address, String), String>;
 
 /// Renders names for one result and keeps its mangled-name flag (design Section 9.6).

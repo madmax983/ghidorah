@@ -7,9 +7,9 @@
 //! from the binary.
 //!
 //! A candidate value has at most [`MAX_TEXT_CHARS`] characters, so it never gets cut. A name
-//! whose value is longer takes the address form: the `AMBIGUOUS_NAME` value is the address,
-//! and the `NOT_FOUND` value is the function ID or the address. An ID of a list that is longer
-//! gives no candidate.
+//! with a longer value takes the address form. The `AMBIGUOUS_NAME` value is the address. The
+//! `NOT_FOUND` value is the function ID or the address. An ID of a list that is longer gives
+//! no candidate.
 
 use std::collections::BTreeSet;
 
@@ -315,9 +315,9 @@ fn escaped(program: &Program, name: &str) -> Vec<Candidate> {
 
 /// Gives `NOT_FOUND` of `kind` with the did-you-mean candidates of `query` among `names`.
 ///
-/// The value of each candidate is the matched text. A hostile binary name of [`names`], or a
-/// name above [`MAX_TEXT_CHARS`] characters, gives its ID or its addresses instead, with the
-/// escaped name as the label ([`escaped`]). An ID of a list above [`MAX_TEXT_CHARS`]
+/// The value of each candidate is the matched text. A hostile binary name of [`names`] gives
+/// its ID or its addresses instead ([`escaped`]). A name above [`MAX_TEXT_CHARS`] characters
+/// does too. The label is then the escaped name. An ID of a list above [`MAX_TEXT_CHARS`]
 /// characters gives no candidate.
 pub(super) fn not_found<'a>(
     kind: &str,
