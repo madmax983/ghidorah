@@ -300,6 +300,45 @@ fn agent_texts(envelope: &Value) -> Vec<String> {
     out
 }
 
+/// Adds each text below a member `error`, `warnings` or `caveats` of `value` at any depth to
+/// `out`: messages, hints, detail strings, candidate labels and warning texts.
+fn report_texts(value: &Value, inside: bool, out: &mut Vec<String>) {
+    match value {
+        Value::String(text) if inside => out.push(text.clone()),
+        Value::Object(object) => {
+            for (key, member) in object.iter() {
+                let report = inside || matches!(key, "error" | "warnings" | "caveats");
+                report_texts(member, report, out);
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                report_texts(item, inside, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Gives the texts with a debug mark in the envelopes of the trigger lines of
+/// `tests/data/code_triggers.jsonl` on the shipped registry, and the number of texts.
+fn shipped_debug_texts() -> (Vec<String>, usize) {
+    let mut bad = Vec::new();
+    let mut count = 0;
+    for line in crate::trigger_lines::lines() {
+        let (_s, envelope, _keep) = crate::trigger_lines::run(&line);
+        let mut texts = Vec::new();
+        report_texts(&envelope, false, &mut texts);
+        count += texts.len();
+        for t in texts {
+            if DEBUG_MARKS.iter().any(|mark| t.contains(mark)) {
+                bad.push(format!("line {} ({}): {t:?}", line.number, line.code));
+            }
+        }
+    }
+    (bad, count)
+}
+
 #[test]
 fn ac_142_no_debug_text() {
     let mut texts: Vec<String> = Vec::new();
@@ -374,6 +413,17 @@ fn ac_142_no_debug_text() {
             assert!(!t.contains(mark), "debug text {mark:?} in {t:?}");
         }
     }
+    // The errors and warnings that the shipped handlers give on every trigger line.
+    let (bad, count) = shipped_debug_texts();
+    assert!(count > 200, "{count} texts");
+    assert!(bad.is_empty(), "debug text:\n{}", bad.join("\n"));
+    let mut found = Vec::new();
+    report_texts(
+        &json(r#"{"data":{"steps":[{"error":{"details":{"reason":"Os { code: 2 }"}}}]}}"#),
+        false,
+        &mut found,
+    );
+    assert_eq!(found, ["Os { code: 2 }"]);
     let call = Call::new(
         "item_get",
         json(r#"{"target":"0x401000"}"#),

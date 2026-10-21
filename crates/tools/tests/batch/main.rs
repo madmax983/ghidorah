@@ -21,5 +21,7 @@ mod refs;
 mod registry;
 mod run;
 mod support;
+#[path = "../support/triggers.rs"]
+mod trigger_lines;
 mod triggers;
 mod validate;
