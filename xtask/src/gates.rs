@@ -161,13 +161,17 @@ pub const GATES: &[Gate] = &[
     gate("AC-009", "`cargo fmt --all -- --check` passes.", fmt_check),
     gate(
         "AC-010",
-        "The clippy policy of ADR-0019 applies to every package.",
-        |r| policy(r, manifest::lint_policy),
+        "The clippy policy of ADR-0019 applies to every package and source file.",
+        clippy_policy,
     ),
     gate(
         "AC-011",
-        "The workspace denies `missing_docs` and `unsafe_code`.",
-        |r| policy(r, manifest::docs_policy),
+        "The workspace denies `missing_docs` and `unsafe_code`, with no source exception.",
+        |r| {
+            let mut found = policy(r, manifest::docs_policy)?;
+            found.extend(r.each_rust_file(scan::is_source_file, scan::docs_exceptions)?);
+            Ok(found)
+        },
     ),
     gate(
         "AC-012",
@@ -261,6 +265,31 @@ fn each_package_manifest(
 fn policy(repo: &Repo, root_check: fn(&str) -> Vec<Finding>) -> Result<Vec<Finding>, Error> {
     let mut found = root_check(&repo.read("Cargo.toml")?);
     found.extend(each_package_manifest(repo, manifest::lints_inherited)?);
+    Ok(found)
+}
+
+/// AC-010: checks the root clippy policy, the inherited lints, the ADR-0019 lists and each
+/// clippy exception of the non-test sources.
+fn clippy_policy(repo: &Repo) -> Result<Vec<Finding>, Error> {
+    let root_toml = repo.read("Cargo.toml")?;
+    let mut found = policy(repo, manifest::lint_policy)?;
+    found.extend(manifest::adr_names_exceptions(
+        &repo.read(manifest::LINT_ADR)?,
+    ));
+    let mut sources = Vec::new();
+    for rel in scan::rust_files(&repo.root)? {
+        if scan::is_source_file(&rel) {
+            let text = repo.read(&rel)?;
+            sources.push((rel, text));
+        }
+    }
+    let mut restriction = manifest::restriction_lints(&root_toml);
+    for (_, text) in &sources {
+        restriction.extend(scan::denied_clippy_lints(text));
+    }
+    for (rel, text) in &sources {
+        found.extend(scan::clippy_exceptions(rel, text, &restriction));
+    }
     Ok(found)
 }
 

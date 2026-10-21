@@ -45,8 +45,6 @@ missing_const_for_fn = "allow"
 cognitive_complexity = "allow"
 # Reason: the workspace has no async code.
 future_not_send = "allow"
-# Reason: no package goes to a registry, so registry metadata has no use.
-cargo_common_metadata = "allow"
 
 [profile.release]
 overflow-checks = true
