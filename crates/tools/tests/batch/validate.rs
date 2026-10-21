@@ -292,6 +292,23 @@ fn ac_219_destructive_rejected() {
         let step = json(second);
         assert_eq!(Some(&args), step.get("args"), "{envelope}");
     }
+    // An action that a reference gives can be destructive, so the step does not run.
+    let mut s = demo();
+    let referenced = r#"{"id":"b","tool":"func_edit","args":{"action":{"$ref":"a","ptr":"/data/action"},"target":"fn:0x11e0"}}"#;
+    let envelope = rejected(&mut s, &with_second(referenced));
+    assert_eq!(code(&envelope), "TOOL_NOT_IN_PROFILE", "{envelope}");
+    assert_eq!(
+        text_at(&envelope, "/error/details/reason"),
+        DESTRUCTIVE,
+        "{envelope}"
+    );
+    assert_eq!(text_at(&envelope, "/error/field_path"), "/steps/1/tool");
+    // The direct call has no action yet, so no next call holds the reference.
+    let next = envelope.get("next").map(ghidorah_json::write);
+    assert!(
+        !next.unwrap_or_default().contains("$ref"),
+        "next holds the reference: {envelope}"
+    );
     // A direct call accepts a destructive action, and a batch accepts a safe action.
     let mut s = demo();
     let envelope = batch(
