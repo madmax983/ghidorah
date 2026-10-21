@@ -336,6 +336,16 @@ const PARAM_FIXTURES: [&str; 14] = [
     "pe/pe_flags.exe",
 ];
 
+/// Tells if each read of the variable `name` in `text` is a store of its value to memory:
+/// `*(..) = name;`. The integer save area of a varargs function stores the entry values of the
+/// argument registers after the named parameters. They are register values, not parameters.
+fn save_area_only(text: &str, name: &str) -> bool {
+    let store = format!(" = {name};");
+    text.lines()
+        .filter(|l| var_tokens(l).iter().any(|(t, _)| t == name))
+        .all(|l| l.trim_start().starts_with("*(") && l.ends_with(&store))
+}
+
 /// Gives the undefined reads of the text of each function of `fixture` whose variable holds
 /// the entry value of an integer argument register. The entry stack pointer, a floating
 /// register and the other registers have no parameter number of their own, so the check
@@ -362,7 +372,12 @@ fn undefined_params(fixture: &str) -> Vec<String> {
         let body = ghidorah_decomp::print::body_units(p, id);
         let out = ghidorah_decomp::finish(d, &env, &ghidorah_ir::NoNames, "f", &body);
         let text = out.text();
+        let varargs = ghidorah_analysis::cc::params(p, id, &mut ghidorah_base::Fuel::unlimited())
+            .is_ok_and(|(params, _)| params.varargs);
         for name in undefined_reads(&text) {
+            if varargs && save_area_only(&text, &name) {
+                continue;
+            }
             let input = out
                 .vars
                 .iter()
@@ -557,4 +572,91 @@ fn regress_open_import_count_keeps_set_args() {
         })
         .expect("the call of the Sleep thunk");
     assert_eq!(arg_count(&line.text, "Sleep"), 1, "{}", out.text());
+}
+
+/// Gives the parameter texts of the head of `text`. The variadic marker `...` is not a
+/// parameter.
+fn head_params(text: &str) -> Vec<String> {
+    let head = text.lines().next().unwrap_or_default();
+    let (Some(open), Some(close)) = (head.find('('), head.rfind(')')) else {
+        panic!("no parameter list: {head}");
+    };
+    let list = &head[open + 1..close];
+    list.split(", ")
+        .filter(|p| *p != "void" && *p != "...")
+        .map(str::to_owned)
+        .collect()
+}
+
+/// Gives the text of the function at `entry` of `p` after the rename of the function to
+/// `name`.
+fn renamed_text(fixture: &str, entry: u64, name: &str) -> String {
+    let mut p = crate::fixtures::program(fixture).clone();
+    let label = ghidorah_db::SessionLabel::new("test").expect("a label");
+    let mut tx = p
+        .begin("edit", ghidorah_db::Source::User, label)
+        .expect("a transaction");
+    let edit = ghidorah_db::Edit::SetName {
+        addr: ghidorah_base::Address::ram(entry),
+        key: None,
+        kind: ghidorah_db::SymKind::Function,
+        primary: true,
+        name: Some(tx.fact(name.to_owned())),
+        evidence: Vec::new(),
+    };
+    tx.apply(edit).expect("the edit applies");
+    tx.commit().expect("the commit");
+    ghidorah_decomp::render(
+        &p,
+        crate::fixtures::fid(entry),
+        &Opts::default(),
+        &ghidorah_ir::NoNames,
+        &mut ghidorah_base::Fuel::new(50_000_000),
+    )
+    .unwrap_or_else(|e| panic!("{fixture} {entry:#x}: {e}"))
+    .text()
+}
+
+/// The varargs prologue stores `rsi` .. `r9` to the register save area. The namer counted
+/// those stores as reads of parameter slots, and the head took the slots that the text reads.
+/// So `log_msg` and `sum_va` printed six parameters, and a Tier-0 prototype or a signature no
+/// longer bounded the head (r3-engine-01). The registers of the save area are no named
+/// parameters, and a fact count bounds the head.
+#[test]
+fn regress_varargs_head_keeps_fact_count() {
+    let mut seen = 0;
+    for build in ["gcc-O0", "gcc-O2", "clang-O2"] {
+        let truth = std::fs::read_to_string(
+            crate::fixtures::root().join(format!("fixtures/truth/varargs.{build}.json")),
+        )
+        .expect("the truth file");
+        let truth = crate::fixtures::json(&truth);
+        let funcs = truth
+            .get("functions")
+            .and_then(ghidorah_json::Value::as_array)
+            .expect("the truth functions");
+        for name in ["log_msg", "sum_va"] {
+            let addr = funcs
+                .iter()
+                .find(|f| f.get("name").and_then(ghidorah_json::Value::as_str) == Some(name))
+                .and_then(|f| f.get("addr").and_then(ghidorah_json::Value::as_str))
+                .and_then(ghidorah_base::hex::parse_u64)
+                .expect("the truth address");
+            for fixture in [
+                format!("varargs.{build}"),
+                format!("varargs.{build}.stripped"),
+            ] {
+                let text = text_at(&fixture, addr);
+                assert_eq!(head_params(&text).len(), 1, "{fixture} {name}: {text}");
+                seen += 1;
+            }
+        }
+    }
+    assert_eq!(seen, 12, "six builds of two functions");
+    let printf = renamed_text("varargs.gcc-O2", 0x14c0, "printf");
+    let head = printf.lines().next().unwrap_or_default();
+    assert_eq!(head_params(&printf).len(), 1, "{printf}");
+    assert!(head.ends_with(", ...)"), "the variadic marker: {printf}");
+    let puts = renamed_text("varargs.gcc-O2", 0x1300, "puts");
+    assert_eq!(head_params(&puts).len(), 1, "{puts}");
 }

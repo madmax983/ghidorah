@@ -71,7 +71,7 @@ pub use selfcheck::Validation;
 pub use shape::{Exit, NodeKind, Shape, ShapeNode};
 pub use structure::{FlatReason, Mode};
 pub use tree::{Arm, Cond, LoopKind, Tree};
-pub use view::{Env, Input, NoEnv, NodeView, Var, VarKind, View, ViewError};
+pub use view::{Env, Input, NoEnv, NodeView, ParamInfo, Var, VarKind, View, ViewError};
 pub use warnings::{Remedy, WarningRow};
 pub use window::Window;
 
@@ -283,6 +283,12 @@ impl Env for ProgramEnv<'_> {
         let mut fuel = Fuel::new(PARAM_FUEL);
         let facts = cache::param_facts(self.0, addr, &mut Memo::default(), &mut fuel)?;
         cache::slot_count(self.0, &facts)
+    }
+
+    fn param_info(&self, addr: u64) -> Option<ParamInfo> {
+        let mut fuel = Fuel::new(PARAM_FUEL);
+        let facts = cache::param_facts(self.0, addr, &mut Memo::default(), &mut fuel)?;
+        cache::param_info(self.0, &facts)
     }
 
     fn jumptable_unresolved(&self, site: u64) -> bool {

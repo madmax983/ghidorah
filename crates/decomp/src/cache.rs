@@ -20,7 +20,7 @@ use ghidorah_db::{CommentKind, Program};
 use ghidorah_ir::IntrinsicNames;
 use ghidorah_types::{CallConv, DataModel, TypeId, TypeStore};
 
-use crate::{DecompError, Env, Opts, Output, PrintEnv, ProgramEnv, Signature};
+use crate::{DecompError, Env, Opts, Output, ParamInfo, PrintEnv, ProgramEnv, Signature};
 
 /// The default capacity of a cache: 512 outputs (design Section 3.9).
 pub const DEFAULT_CAPACITY: usize = 512;
@@ -198,6 +198,15 @@ pub(crate) fn slot_count(program: &Program, facts: &ParamFacts) -> Option<u8> {
     })
 }
 
+/// Gives the parameter count of `facts` with its source and its varargs flag.
+pub(crate) fn param_info(program: &Program, facts: &ParamFacts) -> Option<ParamInfo> {
+    Some(ParamInfo {
+        count: slot_count(program, facts)?,
+        source: facts.source,
+        varargs: facts.params.varargs,
+    })
+}
+
 /// Gives the parameter facts of the function at `addr` with the solve memo `memo`.
 pub(crate) fn param_facts(
     program: &Program,
@@ -287,6 +296,10 @@ impl Env for RenderEnv<'_> {
 
     fn param_count(&self, addr: u64) -> Option<u8> {
         self.facts(addr).and_then(|f| slot_count(self.env.0, &f))
+    }
+
+    fn param_info(&self, addr: u64) -> Option<ParamInfo> {
+        self.facts(addr).and_then(|f| param_info(self.env.0, &f))
     }
 
     fn jumptable_unresolved(&self, site: u64) -> bool {

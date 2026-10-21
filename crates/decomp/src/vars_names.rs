@@ -9,8 +9,10 @@
 //! | other values | `reg:<name>@<first def address>` |
 //!
 //! A parameter number must be below the parameter count of the view. The count is the count of
-//! the facts ([`crate::Env::param_count`]), or the count of the slots that the L1 body reads
-//! when that is more. A call use is a read. An entry value of a later slot is a register value.
+//! the facts ([`crate::Env::param_info`]). A recovered count of a function with no variable
+//! argument list grows to the count of the slots that the L1 body reads. A call use is a read.
+//! An entry value of a later slot is a register value. So are the registers of a varargs save
+//! area, and the slots past a signature or a prototype.
 //!
 //! Two variables never share an identity. A taken identity gets a register storage, and a
 //! taken register name gets a number suffix.
