@@ -6,11 +6,11 @@
 //! six. Each site gets the `EOL` note `sys:<name>`, or `sys:<number>` for a number with no
 //! name, with `R_SYSCALL_NUMBER`. [`sites`] gives the sites of a program on demand.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use ghidorah_base::{Fuel, FuncId, Limits, SyscallId};
 use ghidorah_db::{FactKey, Program, Types};
-use ghidorah_ir::{Loc, Opc, local};
+use ghidorah_ir::{Loc, Memory, OpId, Opc, local};
 use ghidorah_kernel::RangeSet;
 use ghidorah_loader::Format;
 use ghidorah_types::syscalls::ARG_REGS;
@@ -111,6 +111,27 @@ fn arg_regs(name: Option<&str>) -> Vec<Loc> {
         .take(count)
         .filter_map(|n| crate::cc::loc_of(n))
         .collect()
+}
+
+/// The fuel of the block-local walk of the number of one `Syscall` op.
+const NR_FUEL: u64 = 10_000;
+
+/// Gives the syscall argument registers that each `Syscall` op of `fir` does not read. The op
+/// reads the registers of [`arg_regs`] for the name of its number. The walk of the number
+/// reads the bytes of `mem`. An op with no known number reads all six registers.
+pub(crate) fn unread(fir: &FuncIr, mem: &dyn Memory) -> BTreeMap<OpId, BTreeSet<Loc>> {
+    let scope = fir.scope(mem);
+    let all: BTreeSet<Loc> = arg_regs(None).into_iter().collect();
+    let mut out = BTreeMap::new();
+    for (i, op) in (0u32..).zip(fir.arena.ops()) {
+        if op.opc != Opc::Syscall {
+            continue;
+        }
+        let nr = local::value_at(&scope, i, Loc::RAX, &mut Fuel::new(NR_FUEL)).value();
+        let read: BTreeSet<Loc> = arg_regs(name_of(nr)).into_iter().collect();
+        out.insert(op.id, all.difference(&read).copied().collect());
+    }
+    out
 }
 
 /// Gives the syscall sites of `fir` in address order.

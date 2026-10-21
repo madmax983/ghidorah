@@ -20,6 +20,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
+use ghidorah_analysis::cc::ParamSource;
 use ghidorah_analysis::jumptable::GuardInfo;
 use ghidorah_base::{Fuel, VarId};
 use ghidorah_ir::ssa::Ssa;
@@ -72,12 +73,52 @@ pub trait Env {
         None
     }
 
+    /// Gives the argument register of each parameter slot of the function at `addr`, in slot
+    /// order: the choice of the parameter recovery. In a positional convention, a slot is a
+    /// floating slot when the recovery reads only its floating register. A count of a signature
+    /// or a prototype, and the default, give `None`.
+    fn param_slots(&self, addr: u64) -> Option<Vec<Loc>> {
+        let _ = addr;
+        None
+    }
+
+    /// Gives the parameter count of the function at `addr` with its source and its varargs
+    /// flag. The default takes [`Env::param_count`] as a recovered count with no varargs.
+    fn param_info(&self, addr: u64) -> Option<ParamInfo> {
+        self.param_count(addr).map(|count| ParamInfo {
+            count,
+            source: ParamSource::Recovered,
+            varargs: false,
+        })
+    }
+
     /// Tells if the facts hold an unresolved jump table at the indirect jump `site`. Such a
     /// fact is a jump-table record with no targets or the caveat `W_JUMPTABLE_UNRESOLVED`.
     /// The default knows no fact, so it gives `true` for each site.
     fn jumptable_unresolved(&self, site: u64) -> bool {
         let _ = site;
         true
+    }
+}
+
+/// The parameter count of a function, its source and its varargs flag.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ParamInfo {
+    /// The count of the parameter slots (see [`Env::param_count`]).
+    pub count: u8,
+    /// The source of the count.
+    pub source: ParamSource,
+    /// The function takes a variable argument list after the counted parameters.
+    pub varargs: bool,
+}
+
+impl ParamInfo {
+    /// Tells if the slots that the body reads can add to the count. Only a recovered count
+    /// of a function with no variable argument list can grow. The registers of a varargs save
+    /// area are no parameters, and a signature or a prototype bounds the count.
+    #[must_use]
+    pub fn grows(&self) -> bool {
+        self.source == ParamSource::Recovered && !self.varargs
     }
 }
 
@@ -288,7 +329,11 @@ pub fn build(
         l0: input.l0,
         conv: input.conv,
         entry,
-        params: env.param_count(entry).map(|n| u16::from(n).max(read)),
+        params: env.param_info(entry).map(|i| {
+            let n = u16::from(i.count);
+            if i.grows() { n.max(read) } else { n }
+        }),
+        slots: env.param_slots(entry),
     };
     let assigned = vars::assign(&cx);
     let mut warnings = Vec::new();

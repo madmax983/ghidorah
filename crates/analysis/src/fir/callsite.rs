@@ -4,7 +4,7 @@
 //!
 //! | Uses | Rule |
 //! |---|---|
-//! | the integer argument registers | the count of the callee, or all of them for an unknown or variadic callee |
+//! | the integer argument registers | the count of the callee, or all of them for a callee with no count or a variadic callee |
 //! | the floating argument registers | every call |
 //! | the varargs register (`al`) | only a call whose callee can take a variable argument list |
 //! | the stack arguments | the slots `Stack(k + 8j)` above the stack pointer at the call that the block writes before the call, while no slot is missing |
@@ -18,18 +18,14 @@
 //! a callee-saved register in the entry block is not an argument. A slot that escapes stays
 //! in memory, so it has no `Stack` location.
 //!
-//! The caller can write integer argument registers in the block of the call, after the call
-//! before it. The call keeps each register up to the last such one. So a short callee count
-//! drops no argument that the caller sets.
+//! A callee has a count when its signature, its Tier-0 prototype or the recovery gives one
+//! ([`callee_arity_in`]). The call then keeps only that count of integer argument registers.
+//! A callee with no count reads all of them. An unknown target has no count. So has an import
+//! with no Tier-0 prototype. So has a function whose tail jump at stack height 0 passes its
+//! registers on to such an import, as a thunk does.
 //!
 //! [`solve`] recovers the parameters of a function with the reads of its calls and tail
-//! calls. A call reads each argument register of its callee that holds its entry value at the
-//! call:
-//!
-//! 1. The solve takes the function, then each callee with no parameter fact that a call can
-//!    pass an entry value to, depth first. It stops at [`MAX_SOLVE`] functions.
-//! 2. It recovers the functions callees first, in that fixed order, until no count changes. A
-//!    recursion takes more rounds. Each step takes one unit of fuel.
+//! calls (the `solve` module).
 //!
 //! A callee is a direct call target or the target of a tail jump out of the body. An indirect
 //! call can load its target from an import slot. Then the slot is the callee. The same is true
@@ -37,20 +33,24 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use ghidorah_base::{Address, Fuel, FuncId};
+use ghidorah_base::{Address, Fuel, FuncId, OutOfFuel};
 use ghidorah_db::{Program, Types};
 use ghidorah_ir::{Arena, Arg, Loc, OpId, Opc};
 use ghidorah_types::{CallConv, Sig};
 
 use super::l1::ssa_opts;
-use super::{FirError, FuncIr, Opts};
-use crate::cc::{self, BlockUse, ParamSource, Params, loc_of, params};
+use super::{FirError, FuncIr};
+use crate::cc::{ParamSource, Params, conv_of, loc_of};
+
+mod solve;
+
+pub use solve::{MAX_SOLVE, Memo, Solved, solve, solve_in};
 
 /// The largest count of stack arguments of one call.
 pub const MAX_STACK_ARGS: i64 = 16;
 
-/// The fuel of the parameter recovery of one callee.
-const CALLEE_FUEL: u64 = 1_000_000;
+/// The largest fuel of the parameter recovery of one callee.
+pub const CALLEE_FUEL: u64 = 1_000_000;
 
 /// The arguments of a direct callee that the facts know.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -64,7 +64,7 @@ pub struct Arity {
 /// Gives the use list of each call op of `arena` (see the module doc).
 ///
 /// `arena` is the arena of `l0` with its tail jumps as calls. `callee` gives the arity of the
-/// direct callee at an address, or `None` for a callee with no facts. The callee of an
+/// direct callee at an address, or `None` for a callee with no count. The callee of an
 /// indirect call through an import slot is the slot. Another indirect call has no facts.
 #[must_use]
 pub fn uses(
@@ -87,7 +87,6 @@ pub fn uses(
         let first_insn = usize::try_from(block.first).unwrap_or(usize::MAX);
         let count = usize::try_from(block.count).unwrap_or(0);
         let mut written: BTreeSet<i64> = BTreeSet::new();
-        let mut set: BTreeSet<Loc> = BTreeSet::new();
         for span in arena.insns().iter().skip(first_insn).take(count) {
             for k in 0..span.count {
                 let Some(index) = span.first.checked_add(k) else {
@@ -103,7 +102,6 @@ pub fn uses(
                         {
                             written.insert(i64::from(slot));
                         }
-                        set.extend(op.a[0].as_loc().filter(|l| ints.contains(l)));
                     }
                     Opc::Call | Opc::CallInd => {
                         let direct = match (op.opc, op.a[0]) {
@@ -112,9 +110,7 @@ pub fn uses(
                         };
                         let mut list = base.clone();
                         if let Some(a) = direct.and_then(callee).filter(|a| !a.varargs) {
-                            let top = ints.iter().rposition(|l| set.contains(l));
-                            let keep = top.map_or(0, |i| i.saturating_add(1));
-                            let keep = keep.max(usize::from(a.int));
+                            let keep = usize::from(a.int);
                             let unread: BTreeSet<Loc> = ints.iter().skip(keep).copied().collect();
                             list.retain(|l| !al.contains(l) && !unread.contains(l));
                         }
@@ -134,7 +130,6 @@ pub fn uses(
                         }
                         out.insert(index, list);
                         written.clear();
-                        set.clear();
                     }
                     _ => {}
                 }
@@ -152,19 +147,49 @@ pub fn uses(
 /// register. An address with no facts gives `None`.
 #[must_use]
 pub fn callee_arity(program: &Program, addr: u64, conv: &CallConv) -> Option<Arity> {
+    let mut fuel = Fuel::new(CALLEE_FUEL);
+    callee_arity_in(program, addr, conv, &mut Memo::default(), &mut fuel)
+        .ok()
+        .flatten()
+}
+
+/// Gives the arity of the function or import at `addr` like [`callee_arity`], with the solve
+/// memo `memo` of the caller.
+///
+/// The recovery takes its fuel from `fuel`, at most [`CALLEE_FUEL`] units. A recovery that
+/// needs more units gives `None`. So does a function with no count ([`Solved::open`]), and an
+/// import with no Tier-0 prototype.
+///
+/// # Errors
+///
+/// Returns [`OutOfFuel`] when `fuel` runs out.
+pub fn callee_arity_in(
+    program: &Program,
+    addr: u64,
+    conv: &CallConv,
+    memo: &mut Memo,
+    fuel: &mut Fuel,
+) -> Result<Option<Arity>, OutOfFuel> {
     let at = Address::ram(addr);
     if let Some(row) = program
         .imports()
         .values()
         .find(|r| r.stub == Some(at) || r.slot == Some(at))
     {
-        let proto = row.id.name().and_then(Types::prototype)?;
-        return Some(Arity {
+        return Ok(row.id.name().and_then(Types::prototype).map(|proto| Arity {
             int: u8::try_from(proto.sig.params.len()).unwrap_or(u8::MAX),
             varargs: proto.sig.variadic,
-        });
+        }));
     }
-    let (p, _) = params(program, FuncId(at), &mut Fuel::new(CALLEE_FUEL)).ok()?;
+    let mut part = Fuel::new(fuel.remaining().min(CALLEE_FUEL));
+    let found = param_facts(program, FuncId(at), memo, &mut part);
+    fuel.take(part.used())?;
+    let p = match found {
+        Ok(f) if f.open => return Ok(None),
+        Ok(f) => f.params,
+        Err(FirError::Fuel(e)) if fuel.is_empty() => return Err(e),
+        Err(_) => return Ok(None),
+    };
     let regs = u8::try_from(conv.int_args.len()).unwrap_or(u8::MAX);
     let int = if p.stack > 0 {
         regs
@@ -173,9 +198,56 @@ pub fn callee_arity(program: &Program, addr: u64, conv: &CallConv) -> Option<Ari
     } else {
         p.int
     };
-    Some(Arity {
+    Ok(Some(Arity {
         int,
         varargs: p.varargs,
+    }))
+}
+
+/// The parameter facts of a function.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParamFacts {
+    /// The parameters.
+    pub params: Params,
+    /// The source of the parameters.
+    pub source: ParamSource,
+    /// The live-in registers of a recovered count, with the reads of the calls. A signature
+    /// or a prototype gives `None`.
+    pub live: Option<BTreeSet<Loc>>,
+    /// The function has no count ([`Solved::open`]). A signature or a prototype gives `false`.
+    pub open: bool,
+}
+
+/// Gives the parameter facts of the published function `id`: its signature, then the Tier-0
+/// prototype of its name, then the solve over `memo`.
+///
+/// # Errors
+///
+/// Returns [`FirError::NoFunc`] when no function starts at `id`, and the errors of
+/// [`solve_in`].
+pub fn param_facts(
+    program: &Program,
+    id: FuncId,
+    memo: &mut Memo,
+    fuel: &mut Fuel,
+) -> Result<ParamFacts, FirError> {
+    if program.func(id).is_none() {
+        return Err(FirError::NoFunc(id));
+    }
+    if let Some((params, source)) = fixed(program, id) {
+        return Ok(ParamFacts {
+            params,
+            source,
+            live: None,
+            open: false,
+        });
+    }
+    let s = solve_in(program, id, conv_of(program), memo, fuel)?;
+    Ok(ParamFacts {
+        params: s.params,
+        source: ParamSource::Recovered,
+        live: Some(s.live),
+        open: s.open,
     })
 }
 
@@ -263,202 +335,19 @@ pub fn arg_regs(conv: &CallConv, p: &Params, live: Option<&BTreeSet<Loc>>) -> Ve
     out
 }
 
-/// The largest count of functions of one [`solve`].
-pub const MAX_SOLVE: usize = 32;
-
-/// What the facts say about the callee of a call.
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum Callee {
-    /// The callee reads these registers.
-    Fixed(Vec<Loc>),
-    /// A function with no parameter fact. The solve recovers it.
-    Func(u64),
-    /// A target with no facts. The call reads no register.
-    Unknown,
-}
-
-/// Gives the callee at the target `addr`: an import stub or slot, or a function entry.
-fn callee_of(program: &Program, conv: &CallConv, addr: u64) -> Callee {
-    let at = Address::ram(addr);
-    if let Some(row) = program
-        .imports()
-        .values()
-        .find(|r| r.stub == Some(at) || r.slot == Some(at))
+/// Gives the varargs flag that a base fact sets for the function `entry`: its agent
+/// signature, then the Tier-0 prototype of its base symbol name.
+pub(crate) fn known_varargs(program: &Program, entry: u64) -> Option<bool> {
+    let addr = Address::ram(entry);
+    if let Some(sig) = program
+        .base()
+        .funcs()
+        .get(FuncId(addr))
+        .and_then(|f| f.sig.as_ref())
+        .and_then(|s| program.types().sig(s.value))
     {
-        return row
-            .id
-            .name()
-            .and_then(Types::prototype)
-            .map_or(Callee::Unknown, |p| {
-                Callee::Fixed(arg_regs(conv, &from_sig(&p.sig), None))
-            });
+        return Some(sig.variadic);
     }
-    if program.func(FuncId(at)).is_none() {
-        return Callee::Unknown;
-    }
-    match fixed(program, FuncId(at)) {
-        Some((p, _)) => Callee::Fixed(arg_regs(conv, &p, None)),
-        None => Callee::Func(addr),
-    }
-}
-
-/// One function of a solve.
-struct Node {
-    /// The L0 IR.
-    ir: FuncIr,
-    /// The use summary of each block.
-    blocks: Vec<BlockUse>,
-    /// The callee of each call and tail jump.
-    callees: BTreeMap<OpId, Callee>,
-    /// The live-in registers so far.
-    live: BTreeSet<Loc>,
-    /// The parameters so far.
-    params: Params,
-}
-
-impl Node {
-    /// Makes the node of `ir`. Its first parameters take the reads of the fixed callees.
-    fn new(program: &Program, conv: &CallConv, ir: FuncIr) -> Self {
-        let blocks = cc::summaries(&ir, conv, false);
-        let callees: BTreeMap<OpId, Callee> = call_targets(&ir)
-            .into_iter()
-            .map(|(id, t)| (id, callee_of(program, conv, t)))
-            .collect();
-        let mut node = Self {
-            ir,
-            blocks,
-            callees,
-            live: BTreeSet::new(),
-            params: Params::default(),
-        };
-        node.live = node.live_with(&node.reads(conv, &BTreeMap::new()));
-        node.params = cc::from_live(&node.ir, conv, &node.live);
-        node
-    }
-
-    /// Gives the live-in registers when each call op of `reads` reads its registers. A call
-    /// reads only the registers that its block does not write before it.
-    fn live_with(&self, reads: &BTreeMap<OpId, Vec<Loc>>) -> BTreeSet<Loc> {
-        let mut blocks = self.blocks.clone();
-        for b in &mut blocks {
-            for (id, free) in &b.free {
-                let regs = reads.get(id).into_iter().flatten();
-                b.uses.extend(regs.filter(|r| free.contains(r)));
-            }
-        }
-        cc::flow(&self.ir, &blocks)
-    }
-
-    /// Gives the reads of the calls: the fixed callees, and the callees in `nodes`.
-    fn reads(&self, conv: &CallConv, nodes: &BTreeMap<u64, Self>) -> BTreeMap<OpId, Vec<Loc>> {
-        let mut out = BTreeMap::new();
-        for (id, c) in &self.callees {
-            let regs = match c {
-                Callee::Fixed(r) => r.clone(),
-                Callee::Func(t) => match nodes.get(t) {
-                    Some(n) => arg_regs(conv, &n.params, Some(&n.live)),
-                    None => continue,
-                },
-                Callee::Unknown => continue,
-            };
-            out.insert(*id, regs);
-        }
-        out
-    }
-
-    /// Gives the callees with no parameter fact that a call can pass an entry value to. A read
-    /// of every argument register at their calls adds a live-in register.
-    fn children(&self, conv: &CallConv) -> Vec<u64> {
-        let names = conv.int_args.iter().chain(conv.float_args.iter());
-        let all: Vec<Loc> = names.filter_map(|n| loc_of(n)).collect();
-        let fixed = self.reads(conv, &BTreeMap::new());
-        let funcs: BTreeSet<u64> = self
-            .callees
-            .values()
-            .filter_map(|c| match c {
-                Callee::Func(t) => Some(*t),
-                _ => None,
-            })
-            .collect();
-        funcs
-            .into_iter()
-            .filter(|t| {
-                let mut reads = fixed.clone();
-                for (id, c) in &self.callees {
-                    if *c == Callee::Func(*t) {
-                        reads.insert(*id, all.clone());
-                    }
-                }
-                self.live_with(&reads) != self.live
-            })
-            .collect()
-    }
-}
-
-/// Recovers the parameters of the published function `id` with the reads of its calls and
-/// tail calls (see the module doc).
-///
-/// # Errors
-///
-/// Returns the [`FirError`] of the function IR of `id`. A callee whose IR does not build
-/// reads no register.
-pub fn solve(
-    program: &Program,
-    id: FuncId,
-    conv: &CallConv,
-    fuel: &mut Fuel,
-) -> Result<Params, FirError> {
-    let root = id.0.off;
-    let first = Node::new(
-        program,
-        conv,
-        super::build(program, id, &Opts::DEFAULT, fuel)?,
-    );
-    let mut stack = vec![(root, first.children(conv), 0usize)];
-    let mut nodes = BTreeMap::from([(root, first)]);
-    let mut order = Vec::new();
-    while let Some(top) = stack.last_mut() {
-        let Some(&t) = top.1.get(top.2) else {
-            order.push(top.0);
-            stack.pop();
-            continue;
-        };
-        top.2 = top.2.saturating_add(1);
-        if nodes.contains_key(&t) || nodes.len() >= MAX_SOLVE {
-            continue;
-        }
-        let at = FuncId(Address::ram(t));
-        let Ok(ir) = super::build(program, at, &Opts::DEFAULT, fuel) else {
-            continue;
-        };
-        let node = Node::new(program, conv, ir);
-        stack.push((t, node.children(conv), 0));
-        nodes.insert(t, node);
-    }
-    let rounds = order.len().saturating_mul(4).saturating_add(4);
-    'rounds: for _ in 0..rounds {
-        let mut changed = false;
-        for u in &order {
-            if fuel.tick().is_err() {
-                break 'rounds;
-            }
-            let Some(node) = nodes.get(u) else {
-                continue;
-            };
-            let live = node.live_with(&node.reads(conv, &nodes));
-            if live == node.live {
-                continue;
-            }
-            let params = cc::from_live(&node.ir, conv, &live);
-            if let Some(n) = nodes.get_mut(u) {
-                n.live = live;
-                n.params = params;
-                changed = true;
-            }
-        }
-        if !changed {
-            break;
-        }
-    }
-    Ok(nodes.get(&root).map_or_else(Params::default, |n| n.params))
+    let name = program.base().symbols().primary(addr)?;
+    Types::prototype(&name.name.value).map(|p| p.sig.variadic)
 }

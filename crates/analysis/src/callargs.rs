@@ -14,7 +14,8 @@
 //!
 //! The argument count comes from the parameters of the callee ([`crate::cc::params`]), or from
 //! the Tier-0 prototype of an import. A positional convention counts the floating slots too. A
-//! call with no known callee gives six arguments.
+//! slot takes the register that the parameter recovery chose for it. A floating slot has no
+//! value. A call with no known callee, or a callee with no count, gives six arguments.
 
 use ghidorah_base::{Address, Fuel, FuncId, Limits};
 use ghidorah_db::{Encoding, Program, Types};
@@ -22,6 +23,7 @@ use ghidorah_ir::{Loc, LocalValue, Opc, local};
 use ghidorah_loader::Perms;
 
 use crate::code::{decode_at, slot_of};
+use crate::fir::callsite::{self, Memo, param_facts};
 use crate::fir::{self, FirError, FuncIr, Image, Opts};
 use crate::work::import_slots;
 
@@ -134,26 +136,50 @@ pub fn values(
         .collect()
 }
 
-/// Gives the argument count of a call to `target`: the parameters of the function or the
-/// prototype of the import of a slot.
-fn arg_count(program: &Program, target: Callee, fuel: &mut Fuel) -> usize {
+/// Gives the names of the first `n` integer argument registers of the convention of `program`,
+/// at most [`DEFAULT_ARGS`].
+fn ints(program: &Program, n: usize) -> Vec<&'static str> {
+    let conv = crate::cc::conv_of(program);
+    conv.int_args
+        .iter()
+        .take(n.min(DEFAULT_ARGS))
+        .copied()
+        .collect()
+}
+
+/// Gives the name of the argument register `loc` in the convention table of `program`.
+fn reg_name(program: &Program, loc: Loc) -> Option<&'static str> {
+    let conv = crate::cc::conv_of(program);
+    let names = conv.int_args.iter().chain(conv.float_args.iter());
+    names.copied().find(|n| crate::cc::loc_of(n) == Some(loc))
+}
+
+/// Gives the argument register of each slot of a call to `target`, in slot order. The
+/// parameters of the function or the prototype of the import of a slot give the slots. A positional slot
+/// takes the register that the parameter recovery chose. A callee with no count gives six
+/// integer registers.
+fn arg_regs(program: &Program, target: Callee, fuel: &mut Fuel) -> Vec<&'static str> {
     let count = match target {
-        Callee::Func(t) => crate::cc::params(program, FuncId(Address::ram(t)), fuel)
-            .ok()
-            .map(|(p, _)| {
-                let positional = crate::cc::conv_of(program).positional;
-                if positional {
-                    p.int.saturating_add(p.float)
-                } else {
-                    p.int
+        Callee::Func(t) => {
+            let mut memo = Memo::default();
+            match param_facts(program, FuncId(Address::ram(t)), &mut memo, fuel) {
+                Ok(f) if f.open => None,
+                Ok(f) if crate::cc::conv_of(program).positional => {
+                    let conv = crate::cc::conv_of(program);
+                    let slots = callsite::arg_regs(conv, &f.params, f.live.as_ref());
+                    let names = slots.into_iter().filter_map(|l| reg_name(program, l));
+                    return names.take(DEFAULT_ARGS).collect();
                 }
-            }),
+                Ok(f) => Some(f.params.int),
+                Err(_) => None,
+            }
+        }
         Callee::Import(name) => {
             Types::prototype(&name).map(|p| u8::try_from(p.sig.params.len()).unwrap_or(u8::MAX))
         }
         Callee::None => None,
     };
-    count.map_or(DEFAULT_ARGS, usize::from).min(DEFAULT_ARGS)
+    ints(program, count.map_or(DEFAULT_ARGS, usize::from))
 }
 
 /// The callee of a call site.
@@ -169,14 +195,37 @@ enum Callee {
 /// The argument count of a call with no known callee.
 const DEFAULT_ARGS: usize = 6;
 
-/// Gives the argument values of the call at `site` in its published function. A `jmp` to a
-/// function, a tail call, also counts as a call site.
+/// One argument of a call site: its register and its value.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct SlotArg {
+    /// The name of the argument register in the convention table, for example `rdx` or `xmm1`.
+    pub reg: &'static str,
+    /// The value. A floating slot has no value: [`ArgValue::Unknown`].
+    pub value: ArgValue,
+}
+
+/// Gives the argument values of the call at `site` in its published function, in slot order.
+/// A `jmp` to a function, a tail call, also counts as a call site.
+///
+/// # Errors
+///
+/// Returns the errors of [`slots_at`].
+pub fn at(program: &Program, site: u64, fuel: &mut Fuel) -> Result<Vec<ArgValue>, FirError> {
+    Ok(slots_at(program, site, fuel)?
+        .into_iter()
+        .map(|a| a.value)
+        .collect())
+}
+
+/// Gives the register and the value of each argument of the call at `site` in its published
+/// function, in slot order. A floating slot of a positional convention names its register and
+/// has no value.
 ///
 /// # Errors
 ///
 /// Returns [`FirError::NoFunc`] when no function holds `site`, [`FirError::NoEntry`] when no
 /// call or jump starts at `site`, and the errors of the IR build.
-pub fn at(program: &Program, site: u64, fuel: &mut Fuel) -> Result<Vec<ArgValue>, FirError> {
+pub fn slots_at(program: &Program, site: u64, fuel: &mut Fuel) -> Result<Vec<SlotArg>, FirError> {
     let owner = program
         .owner_of(Address::ram(site))
         .ok_or_else(|| FirError::NoFunc(crate::fir::func_id(site)))?;
@@ -194,13 +243,22 @@ pub fn at(program: &Program, site: u64, fuel: &mut Fuel) -> Result<Vec<ArgValue>
             .map_or(Callee::None, Callee::Import),
         (None, None) => Callee::None,
     };
-    let count = arg_count(program, callee, fuel);
-    let conv = crate::cc::conv_of(program);
-    let regs: Vec<Loc> = conv
-        .int_args
+    let regs = arg_regs(program, callee, fuel);
+    let ints: Vec<Loc> = regs
         .iter()
-        .take(count)
         .filter_map(|n| crate::cc::loc_of(n))
+        .filter(|l| l.is_gpr())
         .collect();
-    Ok(values(program, &ir, op, &regs, fuel))
+    let mut known = values(program, &ir, op, &ints, fuel).into_iter();
+    Ok(regs
+        .into_iter()
+        .map(|reg| {
+            let int = crate::cc::loc_of(reg).is_some_and(Loc::is_gpr);
+            let value = if int { known.next() } else { None };
+            SlotArg {
+                reg,
+                value: value.unwrap_or(ArgValue::Unknown),
+            }
+        })
+        .collect())
 }

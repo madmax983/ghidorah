@@ -5,15 +5,22 @@
 //! so the next lookup misses. The cache holds at most its capacity of outputs. A full cache
 //! drops the entry with the oldest use. The use counter is a plain counter, so the order is
 //! deterministic.
+//!
+//! One render also has a memo of the parameter facts of each function (`RenderEnv`). The L1
+//! build, the view, the head and the printer share it.
 
+use std::cell::{RefCell, RefMut};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use ghidorah_base::{Fnv1a64, Fuel, FuncId, Rev};
-use ghidorah_db::Program;
-use ghidorah_ir::IntrinsicNames;
+use ghidorah_analysis::cc::conv_of;
+use ghidorah_analysis::fir::callsite::{self, Memo, ParamFacts};
+use ghidorah_base::{Address, Fnv1a64, Fuel, FuncId, Rev, VarId};
+use ghidorah_db::{CommentKind, Program};
+use ghidorah_ir::{IntrinsicNames, Loc};
+use ghidorah_types::{CallConv, DataModel, TypeId, TypeStore};
 
-use crate::{DecompError, Opts, Output};
+use crate::{DecompError, Env, Opts, Output, ParamInfo, PrintEnv, ProgramEnv, Signature};
 
 /// The default capacity of a cache: 512 outputs (design Section 3.9).
 pub const DEFAULT_CAPACITY: usize = 512;
@@ -164,5 +171,191 @@ impl Cache {
         }
         let out = crate::render(program, func, opts, names, fuel)?;
         Ok((self.put(key, out), false))
+    }
+}
+
+/// The largest fuel of the parameter queries of one render.
+const PARAM_FUEL: u64 = 1_000_000;
+
+/// Gives the count of the parameter slots of `facts` (see [`Env::param_count`]). A function
+/// with no count gives `None`: it passes its registers on to an import with no Tier-0
+/// prototype in a tail jump, as a thunk does.
+pub(crate) fn slot_count(program: &Program, facts: &ParamFacts) -> Option<u8> {
+    let p = facts.params;
+    let conv = conv_of(program);
+    if facts.open {
+        return None;
+    }
+    if p.stack > 0 {
+        let regs = u8::try_from(conv.int_args.len()).unwrap_or(u8::MAX);
+        return Some(regs.saturating_add(p.stack));
+    }
+    // A positional slot is its position, so the count holds the floating slots too.
+    Some(if conv.positional {
+        p.int.saturating_add(p.float)
+    } else {
+        p.int
+    })
+}
+
+/// Gives the argument register of each parameter slot of `facts`: the choice of the recovery
+/// ([`callsite::arg_regs`]). A signature, a prototype or a function with no count gives `None`.
+pub(crate) fn param_slots(program: &Program, facts: &ParamFacts) -> Option<Vec<Loc>> {
+    let live = facts.live.as_ref().filter(|_| !facts.open)?;
+    Some(callsite::arg_regs(
+        conv_of(program),
+        &facts.params,
+        Some(live),
+    ))
+}
+
+/// Gives the parameter count of `facts` with its source and its varargs flag.
+pub(crate) fn param_info(program: &Program, facts: &ParamFacts) -> Option<ParamInfo> {
+    Some(ParamInfo {
+        count: slot_count(program, facts)?,
+        source: facts.source,
+        varargs: facts.params.varargs,
+    })
+}
+
+/// Gives the parameter facts of the function at `addr` with the solve memo `memo`.
+pub(crate) fn param_facts(
+    program: &Program,
+    addr: u64,
+    memo: &mut Memo,
+    fuel: &mut Fuel,
+) -> Option<ParamFacts> {
+    callsite::param_facts(program, FuncId(Address::ram(addr)), memo, fuel).ok()
+}
+
+/// The facts of a program for one render (r3-engine-07).
+///
+/// One memo holds the parameter facts of each function. So the L1 build, the view, the head
+/// and the printer share one solve of each function. The parameter queries take their fuel
+/// from one tank of at most [`PARAM_FUEL`] units. [`RenderEnv::charge`] takes those units from
+/// the fuel of the render.
+pub(crate) struct RenderEnv<'a> {
+    /// The facts of the program.
+    env: ProgramEnv<'a>,
+    /// The solve memo of the render.
+    memo: RefCell<Memo>,
+    /// The parameter facts of each function so far.
+    facts: RefCell<BTreeMap<u64, Option<ParamFacts>>>,
+    /// The fuel of the parameter queries.
+    fuel: RefCell<Fuel>,
+}
+
+impl<'a> RenderEnv<'a> {
+    /// Makes the environment of one render of `program`. `fuel` is the fuel of the render.
+    pub(crate) fn new(program: &'a Program, fuel: &Fuel) -> Self {
+        Self {
+            env: ProgramEnv(program),
+            memo: RefCell::new(Memo::default()),
+            facts: RefCell::new(BTreeMap::new()),
+            fuel: RefCell::new(Fuel::new(fuel.remaining().min(PARAM_FUEL))),
+        }
+    }
+
+    /// Gives the solve memo of the render.
+    pub(crate) fn memo(&self) -> RefMut<'_, Memo> {
+        self.memo.borrow_mut()
+    }
+
+    /// Gives the parameter facts of the function at `addr`, from the memo when it has them.
+    pub(crate) fn facts(&self, addr: u64) -> Option<ParamFacts> {
+        if let Some(found) = self.facts.borrow().get(&addr) {
+            return found.clone();
+        }
+        let found = param_facts(
+            self.env.0,
+            addr,
+            &mut self.memo.borrow_mut(),
+            &mut self.fuel.borrow_mut(),
+        );
+        self.facts.borrow_mut().insert(addr, found.clone());
+        found
+    }
+
+    /// Takes the units of the parameter queries from `fuel`. A short tank becomes empty.
+    pub(crate) fn charge(&self, fuel: &mut Fuel) {
+        let used = self.fuel.borrow().used();
+        // A failed take empties the tank, so the next step of the caller stops.
+        let _ = fuel.take(used);
+    }
+}
+
+impl Env for RenderEnv<'_> {
+    fn callee_name(&self, addr: u64) -> Option<String> {
+        self.env.callee_name(addr)
+    }
+
+    fn is_noreturn(&self, addr: u64) -> bool {
+        self.env.is_noreturn(addr)
+    }
+
+    fn is_string(&self, addr: u64) -> bool {
+        self.env.is_string(addr)
+    }
+
+    fn is_thunk(&self, entry: u64) -> bool {
+        self.env.is_thunk(entry)
+    }
+
+    fn import_at_slot(&self, slot: u64) -> Option<u64> {
+        self.env.import_at_slot(slot)
+    }
+
+    fn param_count(&self, addr: u64) -> Option<u8> {
+        self.facts(addr).and_then(|f| slot_count(self.env.0, &f))
+    }
+
+    fn param_info(&self, addr: u64) -> Option<ParamInfo> {
+        self.facts(addr).and_then(|f| param_info(self.env.0, &f))
+    }
+
+    fn param_slots(&self, addr: u64) -> Option<Vec<Loc>> {
+        self.facts(addr).and_then(|f| param_slots(self.env.0, &f))
+    }
+
+    fn jumptable_unresolved(&self, site: u64) -> bool {
+        self.env.jumptable_unresolved(site)
+    }
+}
+
+impl PrintEnv for RenderEnv<'_> {
+    fn var_name(&self, id: &VarId) -> Option<(String, &'static str)> {
+        self.env.var_name(id)
+    }
+
+    fn var_type(&self, id: &VarId) -> Option<TypeId> {
+        self.env.var_type(id)
+    }
+
+    fn comments(&self, entry: u64) -> Vec<(u64, CommentKind, String)> {
+        self.env.comments(entry)
+    }
+
+    fn signature(&self, addr: u64) -> Option<Signature> {
+        self.env.signature(addr)
+    }
+
+    fn string_bytes(&self, addr: u64) -> Option<Vec<u8>> {
+        self.env.string_bytes(addr)
+    }
+
+    fn types(&self) -> Option<(&TypeStore, &DataModel)> {
+        self.env.types()
+    }
+
+    fn call_targets(&self, site: u64) -> Vec<u64> {
+        self.env.call_targets(site)
+    }
+
+    fn syscall_name(&self, nr: u64) -> Option<&'static str> {
+        self.env.syscall_name(nr)
+    }
+
+    fn conv(&self) -> &'static CallConv {
+        self.env.conv()
     }
 }

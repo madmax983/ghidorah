@@ -3,14 +3,17 @@
 //! | Members | Storage |
 //! |---|---|
 //! | the entry value of argument register `n` | `param:<n>` |
-//! | the entry value of floating register `n` of a positional convention, when the body reads no entry value of integer register `n` | `param:<n>` |
+//! | the entry value of floating register `n` of a positional convention, when the recovery chose that register for slot `n` ([`crate::Env::param_slots`]) | `param:<n>` |
+//! | the same, for a slot that the recovery does not know, when the body reads no entry value of integer register `n` | `param:<n>` |
 //! | the entry value of a stack parameter slot | `param:<n>`, after the register parameters |
 //! | a value of the stack slot `k` | `stack:<k>` |
 //! | other values | `reg:<name>@<first def address>` |
 //!
 //! A parameter number must be below the parameter count of the view. The count is the count of
-//! the facts ([`crate::Env::param_count`]), or the count of the slots that the L1 body reads
-//! when that is more. A call use is a read. An entry value of a later slot is a register value.
+//! the facts ([`crate::Env::param_info`]). A recovered count of a function with no variable
+//! argument list grows to the count of the slots that the L1 body reads. A call use is a read.
+//! An entry value of a later slot is a register value. So are the registers of a varargs save
+//! area, and the slots past a signature or a prototype.
 //!
 //! Two variables never share an identity. A taken identity gets a register storage, and a
 //! taken register name gets a number suffix.
@@ -43,6 +46,12 @@ fn slot_of(conv: &CallConv, loc: Loc) -> Option<u16> {
     }
     let n = i64::try_from(conv.int_args.len()).ok()? + (k - off) / 8;
     u16::try_from(n).ok()
+}
+
+/// Gives the position of an integer or floating argument register in the convention `conv`.
+fn reg_slot(conv: &CallConv, loc: Loc) -> Option<usize> {
+    let at = |names: &[&str]| names.iter().position(|r| loc_of(r) == Some(loc));
+    at(conv.int_args).or_else(|| at(conv.float_args))
 }
 
 /// Gives the locations whose entry values have a use in the L1 body. A call use counts.
@@ -121,10 +130,18 @@ impl<'a> Namer<'a> {
     }
 
     /// Gives the parameter slot of an entry location in the calling convention. In a
-    /// positional convention, floating register n has slot n when the body reads no entry
-    /// value of integer register n.
+    /// positional convention, slot n has the register that the recovery chose for it. For
+    /// another slot, floating register n has slot n when the body reads no entry value of
+    /// integer register n.
     fn slot(&self, loc: Loc) -> Option<u16> {
         let conv = self.cx.conv?;
+        if conv.positional
+            && let Some(slots) = &self.cx.slots
+            && let Some(k) = reg_slot(conv, loc).filter(|k| *k < slots.len())
+        {
+            // The recovery chose the register of the slot, so the other register has none.
+            return (slots.get(k) == Some(&loc)).then(|| u16::try_from(k).ok())?;
+        }
         if let Some(n) = slot_of(conv, loc) {
             return Some(n);
         }

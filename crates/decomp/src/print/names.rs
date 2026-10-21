@@ -108,13 +108,13 @@ impl Printer<'_> {
             .max()
             .unwrap_or(0);
         // The signature, the prototype or the parameter recovery gives the count. A parameter
-        // that the text reads adds its slot when the count of the facts is short.
-        let facts = match (&sig, self.env.param_count(view.entry)) {
-            (Some(s), _) => s.params.len(),
-            (None, Some(n)) => usize::from(n),
-            (None, None) => 0,
+        // that the text reads adds its slot only to a count that can grow (`ParamInfo::grows`).
+        let (facts, grows, variadic) = match (&sig, self.env.param_info(view.entry)) {
+            (Some(s), _) => (s.params.len(), false, s.variadic),
+            (None, Some(i)) => (usize::from(i.count), i.grows(), i.varargs),
+            (None, None) => (0, true, false),
         };
-        let count = facts.max(used_max);
+        let count = if grows { facts.max(used_max) } else { facts };
         let mut texts = Vec::new();
         for n in 0..count {
             let sig_ty = sig.as_ref().and_then(|s| s.params.get(n)).copied();
@@ -137,6 +137,9 @@ impl Printer<'_> {
                     format!("{} {pname}", width_type(w))
                 });
             texts.push(decl);
+        }
+        if variadic {
+            texts.push("...".to_owned());
         }
         let ret = match &sig {
             Some(s) => s
