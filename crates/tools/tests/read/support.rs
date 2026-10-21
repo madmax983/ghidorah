@@ -281,6 +281,19 @@ pub fn t2_fixtures() -> Vec<&'static str> {
     names.into_iter().map(leak).collect()
 }
 
+/// Gives the names of the PE fixture binaries in name order: every file of `fixtures/bin/pe`,
+/// with the `pe/` prefix.
+pub fn pe_fixtures() -> Vec<&'static str> {
+    let mut names: Vec<String> = std::fs::read_dir(root().join("fixtures/bin/pe"))
+        .expect("the PE fixture directory reads")
+        .filter_map(Result::ok)
+        .filter(|e| e.path().is_file())
+        .map(|e| format!("pe/{}", e.file_name().to_string_lossy()))
+        .collect();
+    names.sort();
+    names.into_iter().map(leak).collect()
+}
+
 /// Gives the names of the unstripped T1 fixtures with a truth file, in name order.
 pub fn truth_fixtures() -> Vec<&'static str> {
     let mut names: Vec<String> = std::fs::read_dir(root().join("fixtures/truth"))

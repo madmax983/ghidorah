@@ -11,8 +11,8 @@ use ghidorah_json::Value;
 use ghidorah_x86::Flow;
 
 use crate::support::{
-    addr_of, all_items, call, call_value, data, fixture, items, json, program, root, str_of, truth,
-    truth_fixtures,
+    addr_of, all_items, call, call_value, data, fixture, items, json, pe_fixtures, program, root,
+    str_of, t1_fixtures, t2_fixtures, truth, truth_fixtures,
 };
 
 /// The PLT sections, which hold the stubs themselves.
@@ -123,11 +123,56 @@ fn cfg_calls(program: &Program, func: FuncId) -> BTreeSet<String> {
     out
 }
 
+/// The counts of a cross-view run: fixtures, functions and functions with calls.
+#[derive(Debug, Default, Clone, Copy)]
+struct Counts {
+    fixtures: usize,
+    functions: usize,
+    with_calls: usize,
+}
+
+/// Checks the three call views of each function of each fixture of `names` on 4 threads.
+/// Fixture `i` goes to thread `i % 4`, so the large builds spread over the threads.
+fn cross_view(names: &[&'static str]) -> Counts {
+    let mut parts: [Vec<&'static str>; 4] = Default::default();
+    for (i, name) in names.iter().enumerate() {
+        parts[i % 4].push(name);
+    }
+    std::thread::scope(|scope| {
+        let handles: Vec<_> = parts
+            .iter()
+            .map(|part| scope.spawn(move || cross_view_of(part)))
+            .collect();
+        let mut out = Counts::default();
+        for handle in handles {
+            let c = handle.join().expect("the cross-view thread ends");
+            out.fixtures += c.fixtures;
+            out.functions += c.functions;
+            out.with_calls += c.with_calls;
+        }
+        out
+    })
+}
+
 #[test]
 fn ac_086a_cross_view() {
+    let mut names = t1_fixtures();
+    let (pe, t2) = (pe_fixtures(), t2_fixtures());
+    assert_eq!(pe.len(), 4, "{pe:?}");
+    assert_eq!(t2.len(), 6, "{t2:?}");
+    names.extend(pe);
+    names.extend(t2);
+    let c = cross_view(&names);
+    assert!(c.fixtures >= 144, "{c:?}");
+    assert!(c.functions >= 6_000, "{c:?}");
+    assert!(c.with_calls >= 1_700, "{c:?}");
+}
+
+/// Checks the three call views of each function of each fixture of `names`.
+fn cross_view_of(names: &[&'static str]) -> Counts {
     let mut checked = 0;
     let (mut functions, mut with_calls) = (0, 0);
-    for name in truth_fixtures() {
+    for name in names.iter().copied() {
         let (mut session, id) = fixture(name);
         let funcs = all_items(&mut session, "func_list", &json("{}"), 1000);
         for f in &funcs {
@@ -171,9 +216,11 @@ fn ac_086a_cross_view() {
         }
         checked += 1;
     }
-    assert!(checked >= 60, "{checked} fixtures");
-    assert!(functions >= 600, "{functions} functions");
-    assert!(with_calls >= 200, "{with_calls} functions with calls");
+    Counts {
+        fixtures: checked,
+        functions,
+        with_calls,
+    }
 }
 
 #[test]
