@@ -6,7 +6,7 @@
 //! |---|---|
 //! | an agent type on the `var:` ID | the type of the fact. It always wins. |
 //! | a parameter of the function signature | the type of the parameter |
-//! | a variable that is an argument of a call | the parameter type of the callee signature or prototype, by the register of its class ([`sig_regs`]) |
+//! | a variable that is an argument of a call | the parameter type of the callee signature or prototype, by the register of its class ([`sig_slots`]) |
 //! | the result of a call: the `rax` def, or the `xmm0` def for a floating return type | the return type of the callee |
 //! | the `xmm0` def of a call of a callee with no signature and a recovered floating return | `float` or `double` |
 //! | a variable that a floating return of the function gives | the return type of the signature, else `float` or `double` ([`View::float_ret`]) |
