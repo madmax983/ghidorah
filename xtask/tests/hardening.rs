@@ -194,6 +194,14 @@ fn ac_021_tier1_cap() {
     assert!(ci::tier1_within_cap(0));
     assert!(ci::tier1_within_cap(120_000));
     assert!(!ci::tier1_within_cap(120_001));
+    // A run that fails early is fast, but it does not finish tier 1.
+    assert!(ci::tier1_ok(true, 120_000));
+    assert!(
+        !ci::tier1_ok(false, 1_000),
+        "a failed run is not within the cap"
+    );
+    assert!(!ci::tier1_ok(true, 120_001));
+    assert!(!ci::tier1_ok(false, 120_001));
 }
 
 #[test]
@@ -222,8 +230,60 @@ fn ac_224_test_times() {
         name: "c::edge".to_owned(),
         ms: ci::TEST_CAP_MS,
         ok: true,
+        ignored: false,
     };
     assert!(ci::over_cap(&[at_cap]).is_empty(), "the cap itself passes");
+    // The second binary has no summary line, so one timed test has no count.
+    assert_eq!(ci::summary_ran(&lines), 2);
+    assert!(!ci::each_reported(&times, &lines));
+    check_each_reported();
+}
+
+fn timed(lines: &[(u64, &str)]) -> Vec<(u64, String)> {
+    lines
+        .iter()
+        .map(|(at, line)| (*at, (*line).to_owned()))
+        .collect()
+}
+
+/// Checks that `each_reported` needs a time for each test that libtest counts (AC-224).
+fn check_each_reported() {
+    let complete = timed(&[
+        (0, "running 4 tests"),
+        (10, "test a::one ... ok"),
+        (20, "test a::two ... FAILED"),
+        (30, "test a::three ... ignored, tier2"),
+        (40, "test a::four ... ok"),
+        (
+            50,
+            "test result: FAILED. 2 passed; 1 failed; 1 ignored; 0 measured; 0 filtered out",
+        ),
+        (60, "running 1 test"),
+        (70, "test crates/x/src/lib.rs - f (line 3) ... ok"),
+        (
+            80,
+            "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out",
+        ),
+    ]);
+    let times = ci::parse_test_times(&complete);
+    assert_eq!(times.len(), 5);
+    assert_eq!(ci::summary_ran(&complete), 4);
+    assert!(ci::each_reported(&times, &complete));
+    // One result line has no time entry: the test prints over its own result line.
+    let mut garbled = complete;
+    garbled[4] = (40, "noise from a child process ok".to_owned());
+    let times = ci::parse_test_times(&garbled);
+    assert_eq!(times.len(), 4);
+    assert!(
+        !ci::each_reported(&times, &garbled),
+        "a test without a time"
+    );
+    // A run with no tests reports no time.
+    let empty = timed(&[
+        (0, "running 0 tests"),
+        (1, "test result: ok. 0 passed; 0 failed"),
+    ]);
+    assert!(!ci::each_reported(&ci::parse_test_times(&empty), &empty));
 }
 
 #[test]
@@ -394,6 +454,7 @@ fn ac_190b_long_runs() {
         name, "ba7816bf.bin",
         "the SHA-256 of abc starts with ba7816bf"
     );
+    check_batch_rules("long_runs");
 }
 
 #[test]
@@ -424,21 +485,89 @@ fn collect_moves_failing_inputs() {
 #[test]
 fn regress_fuzz_stage_miss_is_not_violation() {
     use fuzz::{End, Verdict, classify};
-    assert_eq!(classify(End::Pass, false), Verdict::Pass);
+    let all = Some(2_000);
+    assert_eq!(classify(End::Pass, false, all, 2_000), Verdict::Pass);
     assert_eq!(
-        classify(End::Fail { signal: false }, false),
+        classify(End::Fail { signal: false }, false, all, 2_000),
         Verdict::StageMiss
     );
     assert_eq!(
-        classify(End::Fail { signal: false }, true),
+        classify(End::Fail { signal: false }, true, all, 2_000),
         Verdict::Violation
     );
     assert_eq!(
-        classify(End::Fail { signal: true }, false),
+        classify(End::Fail { signal: true }, false, all, 2_000),
         Verdict::Violation
     );
-    assert_eq!(classify(End::Hang, false), Verdict::Violation);
-    assert_eq!(classify(End::Pass, true), Verdict::Violation);
+    assert_eq!(classify(End::Hang, false, all, 2_000), Verdict::Violation);
+    assert_eq!(classify(End::Pass, true, all, 2_000), Verdict::Violation);
+}
+
+/// A batch that fails before its cases runs no case. Its exit code alone looked like a stage
+/// miss, so a run with no passed case gave no violation (AC-190b).
+#[test]
+fn regress_fuzz_short_batch_is_violation() {
+    check_batch_rules("regress");
+}
+
+/// Checks the verdict of each batch, the passed-case sum and the `ok` rule of `xtask fuzz`.
+///
+/// `tag` names the temp directory of the caller, so two tests do not share it.
+fn check_batch_rules(tag: &str) {
+    use fuzz::{End, Tally, Verdict, classify};
+    let fail = End::Fail { signal: false };
+    // A failed replay or a harness error ends the batch before the report.
+    assert_eq!(classify(fail, false, None, 2_000), Verdict::Violation);
+    assert_eq!(classify(fail, false, Some(0), 2_000), Verdict::Violation);
+    assert_eq!(classify(End::Pass, false, None, 2_000), Verdict::Violation);
+    assert_eq!(
+        classify(End::Pass, false, Some(1_999), 2_000),
+        Verdict::Violation
+    );
+    assert_eq!(
+        classify(End::Pass, false, Some(2_500), 2_000),
+        Verdict::Pass
+    );
+    assert!(fuzz::ran_all(Some(2_000), 2_000) && !fuzz::ran_all(None, 0));
+    let mut tally = Tally::default();
+    tally.add(End::Pass, Vec::new(), Some(2_000), 2_000);
+    tally.add(fail, Vec::new(), Some(2_000), 2_000);
+    tally.add(fail, Vec::new(), None, 2_000);
+    tally.add(End::Pass, Vec::new(), Some(10), 2_000);
+    tally.add(End::Hang, Vec::new(), None, 2_000);
+    tally.add(fail, vec!["ba7816bf.bin".to_owned()], Some(1_999), 2_000);
+    let got = (
+        tally.batches,
+        tally.passed_cases,
+        tally.short,
+        tally.failed,
+        tally.hangs,
+        tally.stage_misses,
+    );
+    assert_eq!(got, (6, 6_009, 4, 4, 1, 1));
+    let row = tally.to_json(2_000);
+    assert_eq!(row.get("passed_cases").and_then(Value::as_u64), Some(6_009));
+    assert_eq!(row.get("cases").and_then(Value::as_u64), Some(12_000));
+    assert_eq!(row.get("short").and_then(Value::as_u64), Some(4));
+    // `ok` needs `iters` passed cases for each target.
+    assert!(fuzz::enough_cases(&[4_000, 100_000], 4_000));
+    assert!(!fuzz::enough_cases(&[4_000, 3_999], 4_000));
+    assert!(!fuzz::enough_cases(&[], 4_000));
+    // The harness reports the cases with no panic and no violation.
+    let report = tkfuzz::Report {
+        cases: 10,
+        panics: 1,
+        violations: 2,
+        ..tkfuzz::Report::default()
+    };
+    assert_eq!(tkfuzz::passed_cases(&report), 7);
+    let dir = tmp(&format!("fuzz_report_{tag}"));
+    let file = dir.join("calc.passed");
+    assert_eq!(fuzz::read_passed(&file), None);
+    std::fs::write(&file, "2000\n").expect("write");
+    assert_eq!(fuzz::read_passed(&file), Some(2_000));
+    std::fs::write(&file, "x").expect("write");
+    assert_eq!(fuzz::read_passed(&file), None);
 }
 
 #[test]
@@ -519,6 +648,47 @@ fn ac_202_bench_budgets() {
     let none = bench::verdict(cold, &stats, None);
     assert_eq!(none.get("ok").and_then(Value::as_bool), Some(false));
     assert!(bench::run(&workspace::root(), &strings(&["no_such_bench"])).is_err());
+    check_bench_replies();
+}
+
+/// Each benchmark sample checks its reply, so an error reply is never a fast sample (AC-202).
+fn check_bench_replies() {
+    let ok = r#"{"id":1,"ok":true,"data":{"value":"0x70"}}"#;
+    assert!(bench::check_reply("calc", ok, None).is_ok());
+    let budget = r#"{"id":1,"ok":false,"error":{"code":"OUTPUT_BUDGET_EXCEEDED","details":{"chars":39897,"limit":7840}}}"#;
+    let err = bench::check_reply("mem_read", budget, Some(500)).expect_err("an error reply");
+    assert!(err.to_string().contains("OUTPUT_BUDGET_EXCEEDED"), "{err}");
+    assert!(bench::check_reply("calc", "not json", None).is_err());
+    assert!(bench::check_reply("calc", r#"{"id":1}"#, None).is_err());
+    let rows = |n: usize| {
+        let row = r#"{"a":"0x2650","m":"endbr64"}"#;
+        format!(
+            r#"{{"ok":true,"data":{{"rows":[{}]}}}}"#,
+            vec![row; n].join(",")
+        )
+    };
+    assert!(bench::check_reply("mem_read", &rows(500), Some(500)).is_ok());
+    assert!(bench::check_reply("mem_read", &rows(499), Some(500)).is_err());
+    assert!(bench::check_reply("mem_read", r#"{"ok":true,"data":{}}"#, Some(500)).is_err());
+    let page = r#"{"ok":true,"data":{"items":[]},"page":{"returned":500}}"#;
+    assert!(bench::check_reply("mem_read", page, Some(500)).is_ok());
+    let args = json::parse(&bench::decode_args("684e3a526a8ab75a", "0x2650")).expect("args parse");
+    assert_eq!(
+        args.get("count").and_then(Value::as_u64),
+        Some(bench::DECODE_COUNT)
+    );
+    let max_chars = args.get("max_chars").and_then(Value::as_u64);
+    assert!(
+        max_chars.is_some_and(|m| m >= 40_000),
+        "500 rows need about 40,000 chars"
+    );
+    // A full load needs the complete analysis state.
+    let complete = r#"{"ok":true,"data":{"analysis":{"state":"complete"}}}"#;
+    let none = r#"{"ok":true,"data":{"analysis":{"state":"none"}}}"#;
+    assert!(bench::check_load(complete, true).is_ok());
+    assert!(bench::check_load(none, true).is_err());
+    assert!(bench::check_load(none, false).is_ok());
+    assert!(bench::check_load(r#"{"ok":false}"#, false).is_err());
 }
 
 /// The step reads `git log`, so it runs in tier 2 (the hermetic run has no `git`).
@@ -541,9 +711,20 @@ fn ac_234_fix_commits_step() {
 fn ac_190b_fuzz_batches() {
     let _lock = process_lock();
     let args = strings(&["calc", "--iters", "4000", "--seed", "11"]);
+    check_batch_rules("batches");
     let report = fuzz::run(&workspace::root(), &args).expect("xtask fuzz runs");
     assert_eq!(
         report.pointer("/violations").and_then(Value::as_u64),
+        Some(0),
+        "{report}"
+    );
+    assert_eq!(report.pointer("/ok"), Some(&Value::Bool(true)), "{report}");
+    let passed = report.pointer("/passed_cases").and_then(Value::as_u64);
+    assert!(passed.is_some_and(|p| p >= 4_000), "{report}");
+    assert_eq!(
+        report
+            .pointer("/targets/calc/short")
+            .and_then(Value::as_u64),
         Some(0),
         "{report}"
     );

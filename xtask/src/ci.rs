@@ -1,8 +1,9 @@
 //! The `xtask ci` command: the CI steps of both tiers and the time of each test.
 //!
 //! Output: `{ ok, steps: { <step>: { ok, seconds, .. } } }`.
-//! AC-002 reads `/steps/offline_build/ok`. AC-021 reads `/steps/tier1/seconds`.
-//! AC-224 reads `/steps/test_times/max_seconds`. AC-020 reads `/steps/test_hermetic/ok`.
+//! AC-002 reads `/steps/offline_build/ok`. AC-021 reads `/steps/tier1/seconds` and
+//! `/steps/tier1/ok`. AC-224 reads `/steps/test_times/max_seconds` and
+//! `/steps/test_times/each_reported`. AC-020 reads `/steps/test_hermetic/ok`.
 //! AC-234 reads `/steps/fix_commits/ok`.
 
 mod fixes;
@@ -15,7 +16,7 @@ use std::process::{Command, Stdio};
 use std::time::Instant;
 
 use crate::json::Value;
-use crate::{Error, proc};
+use crate::{Error, manifest, proc};
 
 pub use fixes::{
     FIX_PREFIX, LOG_FORMAT, fix_commit_count, fix_commits_without_tests, is_test_file,
@@ -32,6 +33,9 @@ pub const TIER1_CAP_SECS: u64 = 120;
 
 /// The number of slow tests that the `test_times` step lists.
 const SLOWEST: usize = 10;
+
+/// The cargo configuration that sets `[net] offline = true` (AC-002).
+pub const CARGO_CONFIG: &str = ".cargo/config.toml";
 
 /// One step of `xtask ci`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -229,6 +233,8 @@ pub struct TestTime {
     pub ms: u64,
     /// True when the test passes or libtest ignores it.
     pub ok: bool,
+    /// True when libtest ignores the test.
+    pub ignored: bool,
 }
 
 /// Gives the time of each test from timed libtest output lines.
@@ -260,16 +266,68 @@ pub fn parse_test_times(lines: &[(u64, String)]) -> Vec<TestTime> {
             name: name.to_owned(),
             ms: at.saturating_sub(last),
             ok: result.starts_with("ok") || result.starts_with("ignored"),
+            ignored: result.starts_with("ignored"),
         });
         last = *at;
     }
     times
 }
 
+/// Gives the sum of the `passed` and `failed` counts of the libtest summary lines
+/// `test result: ..`.
+#[must_use]
+pub fn summary_ran(lines: &[(u64, String)]) -> u64 {
+    let mut ran = 0u64;
+    for (_, line) in lines {
+        let Some(rest) = line.strip_prefix("test result:") else {
+            continue;
+        };
+        let words: Vec<&str> = rest.split_whitespace().collect();
+        for pair in words.windows(2) {
+            if let [count, word] = pair
+                && matches!(word.trim_end_matches(';'), "passed" | "failed")
+            {
+                ran = ran.saturating_add(count.parse().unwrap_or(0));
+            }
+        }
+    }
+    ran
+}
+
+/// Tells if the run gives the time of each test that ran (AC-224).
+///
+/// The count of timed tests that libtest does not ignore must be above 0. It must also be
+/// equal to [`summary_ran`] of the same lines.
+#[must_use]
+pub fn each_reported(times: &[TestTime], lines: &[(u64, String)]) -> bool {
+    let counted = times.iter().filter(|t| !t.ignored).count();
+    let counted = u64::try_from(counted).unwrap_or(u64::MAX);
+    counted > 0 && counted == summary_ran(lines)
+}
+
 /// Tells if a tier-1 run of `ms` milliseconds is within [`TIER1_CAP_SECS`].
 #[must_use]
 pub const fn tier1_within_cap(ms: u64) -> bool {
     ms <= TIER1_CAP_SECS.saturating_mul(1_000)
+}
+
+/// Tells if a tier-1 run passes within [`TIER1_CAP_SECS`] (AC-021). A run that fails does not
+/// finish tier 1, so its time does not count.
+#[must_use]
+pub const fn tier1_ok(passed: bool, ms: u64) -> bool {
+    passed && tier1_within_cap(ms)
+}
+
+/// Tells if the offline build step passes (AC-002): the build passes, and the text of
+/// [`CARGO_CONFIG`] sets `[net] offline = true`.
+#[must_use]
+pub fn offline_build_ok(build_passed: bool, config: &str) -> bool {
+    build_passed && manifest::offline(config).is_empty()
+}
+
+/// Gives the number of CPUs that the run can use. It gives 0 when the system does not tell.
+fn cpus() -> usize {
+    std::thread::available_parallelism().map_or(0, std::num::NonZero::get)
 }
 
 /// Gives the tests above [`TEST_CAP_MS`], slowest first.
@@ -308,9 +366,18 @@ fn run_plain(root: &Path, step: Step) -> Result<Value, Error> {
         out.code
             .map_or(Value::Null, |c| Value::Number(c.to_string())),
     )];
+    let mut ok = out.ok();
+    if step == Step::OfflineBuild {
+        // A missing configuration reads as the empty text, which does not set `net.offline`.
+        let config = std::fs::read_to_string(root.join(CARGO_CONFIG)).unwrap_or_default();
+        let config_offline = manifest::offline(&config).is_empty();
+        extra.push(("config_offline", Value::from(config_offline)));
+        ok = offline_build_ok(ok, &config);
+    }
     if step == Step::Tier1 {
         extra.push(("cap_seconds", Value::from(TIER1_CAP_SECS)));
-        extra.push(("within_cap", Value::from(tier1_within_cap(ms))));
+        extra.push(("within_cap", Value::from(tier1_ok(out.ok(), ms))));
+        extra.push(("cpus", Value::from(cpus())));
     }
     if !out.ok() {
         let tail = format!(
@@ -320,7 +387,7 @@ fn run_plain(root: &Path, step: Step) -> Result<Value, Error> {
         );
         extra.push(("tail", Value::from(tail)));
     }
-    Ok(step_report(out.ok(), ms, extra))
+    Ok(step_report(ok, ms, extra))
 }
 
 /// Runs the `test_hermetic` step (AC-020).
@@ -388,6 +455,17 @@ fn run_times(root: &Path) -> Result<Value, Error> {
     }
     let status = child.wait().map_err(|e| proc::start_error(&argv, &e))?;
     let mut times = parse_test_times(&lines);
+    let reported = each_reported(&times, &lines);
+    let tests: Vec<Value> = times
+        .iter()
+        .map(|t| {
+            Value::object([
+                ("binary", Value::from(t.binary)),
+                ("name", Value::from(t.name.as_str())),
+                ("ms", Value::from(t.ms)),
+            ])
+        })
+        .collect();
     let max_ms = times.iter().map(|t| t.ms).max().unwrap_or(0);
     let failed: Vec<Value> = times
         .iter()
@@ -416,6 +494,8 @@ fn run_times(root: &Path) -> Result<Value, Error> {
             ("max_seconds", Value::from(max_ms.div_ceil(1000))),
             ("slowest", Value::from(slowest)),
             ("failed", Value::from(failed)),
+            ("each_reported", Value::from(reported)),
+            ("tests", Value::from(tests)),
         ],
     ))
 }

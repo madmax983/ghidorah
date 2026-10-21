@@ -1,4 +1,4 @@
-//! AC-111: parser bombs stay within the limits in a 256 KiB stack.
+//! AC-111: parser bombs stay within the limits in a 256 KiB stack and give errors with candidates.
 
 use std::time::{Duration, Instant};
 
@@ -176,10 +176,12 @@ fn ac_111_c_parser_limits() {
             started.elapsed()
         );
     }
+    check_bomb_candidates();
+    check_largest_inputs();
 }
 
-#[test]
-fn ac_111_limits_allow_the_largest_inputs() {
+/// Checks that inputs at each limit parse in the small stack.
+fn check_largest_inputs() {
     in_small_stack(|| {
         let mut s = store();
         let text = format!("void f({}int)", "int,".repeat(MAX_PARAMS - 1));
@@ -194,8 +196,8 @@ fn ac_111_limits_allow_the_largest_inputs() {
     });
 }
 
-#[test]
-fn ac_111_bomb_errors_carry_candidates() {
+/// Checks that a bomb of 1,000 `const` words before an unknown type gives candidates.
+fn check_bomb_candidates() {
     in_small_stack(|| {
         let mut s = store();
         let text = format!("{} uint8", "const ".repeat(1000));

@@ -1,4 +1,5 @@
 //! Gates over `Cargo.toml`, `Cargo.lock`, `.cargo/config.toml`, `clippy.toml` and `rust-toolchain.toml`.
+//! The lists of reviewed lint exceptions of ADR-0019 are here too (AC-010).
 //!
 //! The reader knows the small TOML subset that these files use: table headers, `key = value`
 //! lines, inline tables and arrays that can span lines.
@@ -35,7 +36,44 @@ pub const ALLOWED_LINTS: &[&str] = &[
     "missing_const_for_fn",
     "cognitive_complexity",
     "future_not_send",
-    "cargo_common_metadata",
+];
+
+/// The ADR that holds the lint policy and its reviewed exceptions (AC-010).
+pub const LINT_ADR: &str = "docs/adr/0019-lint-policy-and-ste.md";
+
+/// The reviewed exceptions of single items to a clippy group lint, as pairs of a path and a lint.
+///
+/// The source scan of AC-010 accepts a group lint exception in three cases. The file is a
+/// `tables/` file, the lint is `disallowed_types` with a reason, or the pair is an entry of
+/// this list. ADR-0019 gives the reason of each entry.
+pub const REVIEWED_EXCEPTIONS: &[(&str, &str)] = &[
+    ("crates/analysis/src/tailcall.rs", "struct_excessive_bools"),
+    ("crates/base/src/sha256.rs", "many_single_char_names"),
+    ("crates/db/src/progress.rs", "struct_excessive_bools"),
+    (
+        "crates/decomp/src/interp_ast/lower.rs",
+        "many_single_char_names",
+    ),
+    ("crates/decomp/src/lib.rs", "struct_excessive_bools"),
+    ("crates/decomp/src/loops.rs", "many_single_char_names"),
+    ("crates/decomp/src/schemas.rs", "many_single_char_names"),
+    (
+        "crates/decomp/src/view/assemble.rs",
+        "many_single_char_names",
+    ),
+    ("crates/ir/src/op.rs", "cast_possible_truncation"),
+    ("crates/kernel/src/flags.rs", "fn_params_excessive_bools"),
+    ("crates/kernel/src/reader/leb.rs", "cast_possible_wrap"),
+    ("crates/loader/src/binary.rs", "struct_excessive_bools"),
+    ("crates/testkit/src/elf/plan.rs", "struct_excessive_bools"),
+    (
+        "crates/tools/src/handlers/note_write/members.rs",
+        "default_trait_access",
+    ),
+    ("crates/tools/src/spec.rs", "struct_excessive_bools"),
+    ("crates/x86/src/decode/special.rs", "enum_glob_use"),
+    ("crates/x86/src/lift/rows.rs", "cast_possible_truncation"),
+    ("xtask/src/verify/tree.rs", "many_single_char_names"),
 ];
 
 /// The types that `clippy.toml` must disallow (AC-016).
@@ -388,10 +426,60 @@ pub fn lint_policy(text: &str) -> Vec<Finding> {
     found
 }
 
-/// AC-011: finds a root `Cargo.toml` without `missing_docs` and `unsafe_code` at `deny`.
+/// Gives the clippy lints that `[workspace.lints.clippy]` of the root `Cargo.toml` sets one by
+/// one to `deny` or `forbid`. A lint group of [`DENIED_GROUPS`] does not count.
+#[must_use]
+pub fn restriction_lints(text: &str) -> Vec<String> {
+    entries(text)
+        .into_iter()
+        .filter(|e| e.table == "workspace.lints.clippy")
+        .filter(|e| !DENIED_GROUPS.contains(&e.key.as_str()))
+        .filter(|e| matches!(level(&e.value).as_str(), "deny" | "forbid"))
+        .map(|e| e.key)
+        .collect()
+}
+
+/// AC-010: finds a lint of [`ALLOWED_LINTS`] or an entry of [`REVIEWED_EXCEPTIONS`] that the
+/// text of [`LINT_ADR`] does not name.
+///
+/// The ADR names an allowlist lint as a code span. It names each entry on one line, with the
+/// path and the lint as code spans.
+#[must_use]
+pub fn adr_names_exceptions(adr: &str) -> Vec<Finding> {
+    let span = |name: &str| format!("`{name}`");
+    let mut found: Vec<Finding> = ALLOWED_LINTS
+        .iter()
+        .filter(|lint| !adr.contains(&span(lint)))
+        .map(|lint| {
+            Finding::new(
+                "AC-010",
+                LINT_ADR,
+                0,
+                format!("name the allowlist lint `{lint}`"),
+            )
+        })
+        .collect();
+    for (path, lint) in REVIEWED_EXCEPTIONS {
+        let named = adr
+            .lines()
+            .any(|line| line.contains(&span(path)) && line.contains(&span(lint)));
+        if !named {
+            found.push(Finding::new(
+                "AC-010",
+                LINT_ADR,
+                0,
+                format!("name the exception `{lint}` of `{path}` with its reason"),
+            ));
+        }
+    }
+    found
+}
+
+/// AC-011: finds a root `Cargo.toml` without `missing_docs` and `unsafe_code` at `deny`, or
+/// with a `rustdoc` lint at `allow`.
 #[must_use]
 pub fn docs_policy(text: &str) -> Vec<Finding> {
-    ["missing_docs", "unsafe_code"]
+    let mut found: Vec<Finding> = ["missing_docs", "unsafe_code"]
         .into_iter()
         .filter(|lint| {
             value(text, "workspace.lints.rust", lint).is_none_or(|v| level(&v) != "deny")
@@ -404,7 +492,17 @@ pub fn docs_policy(text: &str) -> Vec<Finding> {
                 format!("set `{lint} = \"deny\"`"),
             )
         })
-        .collect()
+        .collect();
+    found.extend(
+        entries(text)
+            .into_iter()
+            .filter(|e| e.table == "workspace.lints.rustdoc" && level(&e.value) == "allow")
+            .map(|e| {
+                let detail = format!("the rustdoc lint `{}` takes no exception", e.key);
+                Finding::new("AC-011", "Cargo.toml", e.line, detail)
+            }),
+    );
+    found
 }
 
 /// AC-010 and AC-011: finds a package `Cargo.toml` without `[lints] workspace = true`.

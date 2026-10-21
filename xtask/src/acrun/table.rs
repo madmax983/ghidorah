@@ -3,13 +3,14 @@
 //! The table holds one JSON array with one row per line, so a diff shows each change.
 //! A row is `{ ac, tier, kind, status, commit }`. A run with a list of ACs replaces only the
 //! rows of those ACs ([`merge`]). The rows keep the order of the AC rows of the design.
+//! [`failed`], [`stale`] and [`not_passed`] give the lists of the `xtask ac` report (AC-018b).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::process::Command;
 
-use crate::ac::{AcRow, Tier};
-use crate::acrun::{Outcome, Status, TABLE_PATH};
+use crate::ac::{AcRow, Evidence, Tier};
+use crate::acrun::{Outcome, Status, TABLE_PATH, is_self};
 use crate::json::{self, Value};
 use crate::{Error, proc};
 
@@ -143,6 +144,78 @@ pub fn failed(rows: &[Row]) -> Value {
                 ("kind", Value::from(r.kind.as_str())),
                 ("tier", Value::from(tier_name(r.tier))),
             ])
+        })
+        .collect::<Vec<_>>();
+    Value::from(items)
+}
+
+/// Gives each evidence item of the MVP rows of `design` with its table row, or `None` when the
+/// item has no row. The `xtask:ac` items do not take part, because their rows come after them.
+///
+/// A row does not name its item. So the rows of one AC match the items of the same kind and
+/// tier in order. The `xtask:ac` items run last, so a row after the other items of its kind
+/// and tier is the row of an `xtask:ac` item.
+fn item_rows<'a>(
+    rows: &'a [Row],
+    design: &'a [AcRow],
+) -> Vec<(&'a str, &'a Evidence, Option<&'a Row>)> {
+    let mut found = Vec::new();
+    for ac in design.iter().filter(|r| r.is_gate()) {
+        let mut used: BTreeMap<(&str, Tier), usize> = BTreeMap::new();
+        for item in ac.evidence.iter().filter(|item| !is_self(item)) {
+            let key = (item.kind(), item.tier());
+            let seen = used.entry(key).or_default();
+            let row = rows
+                .iter()
+                .filter(|r| r.ac == ac.id && r.kind == key.0 && r.tier == key.1)
+                .nth(*seen);
+            *seen += 1;
+            found.push((ac.id.as_str(), item, row));
+        }
+    }
+    found
+}
+
+/// Gives the `stale` list: one `{ ac, kind, tier, commit }` object for each row of an
+/// evidence item whose commit is not `head`. The rows of `xtask:ac` items do not count.
+#[must_use]
+pub fn stale(rows: &[Row], design: &[AcRow], head: &str) -> Value {
+    let items = item_rows(rows, design)
+        .into_iter()
+        .filter_map(|(_, _, row)| row.filter(|r| r.commit != head))
+        .map(|r| {
+            Value::object([
+                ("ac", Value::from(r.ac.as_str())),
+                ("kind", Value::from(r.kind.as_str())),
+                ("tier", Value::from(tier_name(r.tier))),
+                ("commit", Value::from(r.commit.as_str())),
+            ])
+        })
+        .collect::<Vec<_>>();
+    Value::from(items)
+}
+
+/// Gives the `not_passed` list of the evidence items that do not pass.
+///
+/// Each `test`, `cmd` or `xtask` row that is not `pass` gives one `{ ac, kind, tier, status }`
+/// object. Each evidence item without a row also gives an object, with the status `missing`.
+/// The `xtask:ac` items do not count.
+#[must_use]
+pub fn not_passed(rows: &[Row], design: &[AcRow]) -> Value {
+    let items = item_rows(rows, design)
+        .into_iter()
+        .filter_map(|(ac, item, row)| {
+            let status = match row {
+                None => "missing",
+                Some(r) if r.kind != "record" && r.status != Status::Pass => r.status.name(),
+                Some(_) => return None,
+            };
+            Some(Value::object([
+                ("ac", Value::from(ac)),
+                ("kind", Value::from(item.kind())),
+                ("tier", Value::from(tier_name(item.tier()))),
+                ("status", Value::from(status)),
+            ]))
         })
         .collect::<Vec<_>>();
     Value::from(items)

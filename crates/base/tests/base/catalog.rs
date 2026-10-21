@@ -129,10 +129,23 @@ fn want_rows(table: &[(u16, &str, &str, bool)]) -> Vec<(u16, String, String, boo
         .collect()
 }
 
-#[test]
-fn error_codes_frozen() {
+/// Asserts that each number of a catalog, reserved numbers included, occurs once.
+fn assert_unique_numbers(what: &str, infos: &[CodeInfo], reserved: &[catalog::Reserved]) {
+    let mut seen = BTreeSet::new();
+    for num in infos
+        .iter()
+        .map(|i| i.num)
+        .chain(reserved.iter().map(|r| r.num))
+    {
+        assert!(seen.insert(num), "{what} number {num} occurs twice");
+    }
+}
+
+/// Compares `ErrorCode` with the frozen table: number, name, class and retry flag.
+fn check_error_codes_frozen() {
     let infos: Vec<CodeInfo> = ErrorCode::ALL.iter().map(|c| c.info()).collect();
     assert_eq!(rows(&infos, &ErrorCode::RESERVED), want_rows(&ERRORS));
+    assert_unique_numbers("ErrorCode", &infos, &ErrorCode::RESERVED);
     for code in ErrorCode::ALL {
         assert_eq!(code.num(), code.info().num, "{code:?}");
         assert_eq!(code as u16, code.num(), "{code:?}");
@@ -150,10 +163,11 @@ fn error_codes_frozen() {
     assert_eq!(ErrorCode::from_name("invalid_argument"), None);
 }
 
-#[test]
-fn warning_codes_frozen() {
+/// Compares `WarningCode` with the frozen table: number, name, class and retry flag.
+fn check_warning_codes_frozen() {
     let infos: Vec<CodeInfo> = WarningCode::ALL.iter().map(|c| c.info()).collect();
     assert_eq!(rows(&infos, &WarningCode::RESERVED), want_rows(&WARNINGS));
+    assert_unique_numbers("WarningCode", &infos, &WarningCode::RESERVED);
     for code in WarningCode::ALL {
         assert_eq!(code.num(), code.info().num, "{code:?}");
         assert_eq!(code as u16, code.num(), "{code:?}");
@@ -166,6 +180,16 @@ fn warning_codes_frozen() {
         assert_eq!(WarningCode::from_name(reserved.name), None);
     }
     assert_eq!(WarningCode::from_num(21), None);
+}
+
+#[test]
+fn error_codes_frozen() {
+    check_error_codes_frozen();
+}
+
+#[test]
+fn warning_codes_frozen() {
+    check_warning_codes_frozen();
 }
 
 #[test]
@@ -231,6 +255,8 @@ fn check_text(info: &CodeInfo, failures: &mut Vec<String>) {
 
 #[test]
 fn ac_141a_catalog_complete() {
+    check_error_codes_frozen();
+    check_warning_codes_frozen();
     let mut failures = Vec::new();
     let mut names = BTreeSet::new();
     let infos = ErrorCode::ALL

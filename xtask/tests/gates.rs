@@ -160,6 +160,19 @@ fn ac_002_offline_config() {
     assert!(manifest::offline("[net]\noffline = true\n").is_empty());
     assert_eq!(manifest::offline("[net]\noffline = false\n").len(), 1);
     assert_eq!(manifest::offline("").len(), 1);
+    // The step passes only when the build passes and the config sets `net.offline`.
+    let config = repo()
+        .read(ci::CARGO_CONFIG)
+        .expect("the cargo config reads");
+    assert!(ci::offline_build_ok(true, &config));
+    assert!(!ci::offline_build_ok(false, &config));
+    let online = config.replace("offline = true", "offline = false");
+    assert!(
+        !ci::offline_build_ok(true, &online),
+        "the build passes, the config does not"
+    );
+    assert!(!ci::offline_build_ok(true, "[alias]\nx = \"run\"\n"));
+    assert!(!ci::offline_build_ok(true, ""));
     let root = workspace::root();
     let cmd = ci::command(&root, Step::OfflineBuild);
     let args: Vec<String> = cmd
@@ -379,6 +392,88 @@ fn ac_010_clippy_policy() {
     assert!(
         manifest::lints_inherited("crates/x/Cargo.toml", "[lints]\nworkspace = true\n").is_empty()
     );
+    check_adr_names_exceptions();
+    check_clippy_source_scan(&root_toml);
+}
+
+/// ADR-0019 names each workspace allowlist lint and each reviewed item exception.
+fn check_adr_names_exceptions() {
+    let adr = repo().read(manifest::LINT_ADR).expect("ADR-0019 reads");
+    for lint in manifest::ALLOWED_LINTS {
+        assert!(adr.contains(&format!("`{lint}`")), "ADR-0019 names {lint}");
+    }
+    for (path, lint) in manifest::REVIEWED_EXCEPTIONS {
+        let row = adr
+            .lines()
+            .find(|l| l.contains(&format!("`{path}`")) && l.contains(&format!("`{lint}`")));
+        let reason = row.and_then(|r| r.rsplit('|').nth(1)).map(str::trim);
+        assert!(
+            reason.is_some_and(|r| r.ends_with('.')),
+            "ADR-0019 gives the reason of {path} {lint}"
+        );
+    }
+    assert!(manifest::adr_names_exceptions(&adr).is_empty());
+    let first = manifest::REVIEWED_EXCEPTIONS.first().expect("one entry");
+    let dropped = adr.replace(&format!("`{}`", first.0), "`gone`");
+    assert_eq!(manifest::adr_names_exceptions(&dropped).len(), 1);
+    let no_allowlist = adr.replace("`future_not_send`", "future_not_send");
+    assert_eq!(manifest::adr_names_exceptions(&no_allowlist).len(), 1);
+}
+
+/// The source scan accepts restriction lints, `tables/` files, a reasoned `disallowed_types`
+/// and the reviewed items. It finds each other group lint exception.
+fn check_clippy_source_scan(root_toml: &str) {
+    let restriction = manifest::restriction_lints(root_toml);
+    for lint in ["unwrap_used", "expect_used", "panic", "print_stdout"] {
+        assert!(restriction.iter().any(|r| r == lint), "{lint}");
+    }
+    assert!(
+        !restriction
+            .iter()
+            .any(|r| r == "pedantic" || r == "option_if_let_else")
+    );
+    let mut restriction = restriction;
+    restriction.extend(scan::denied_clippy_lints(
+        "#![deny(clippy::indexing_slicing, clippy::arithmetic_side_effects)]\n",
+    ));
+    let scan = |rel: &str, text: &str| scan::clippy_exceptions(rel, text, &restriction);
+    let src = "crates/base/src/x.rs";
+    let long = "#[allow(clippy::too_many_lines, reason = \"long\")]\nfn f() {}\n";
+    let found = scan(src, long);
+    assert_eq!(found.len(), 1, "{}", render(&found));
+    assert_eq!(found.first().map(|f| f.line), Some(1));
+    let bare = "#[allow(clippy::too_many_lines)]\nfn f() {}\n";
+    assert_eq!(scan(src, bare).len(), 1, "a group lint outside tables/");
+    assert_eq!(scan(src, "#![allow(clippy::pedantic)]\n").len(), 1);
+    let inner = "//! Doc.\n#![expect(\n    clippy::enum_glob_use,\n    reason = \"rows\"\n)]\n";
+    assert_eq!(scan(src, inner).first().map(|f| f.line), Some(2));
+    let cfg = "#[cfg_attr(test, allow(clippy::cast_lossless, reason = \"x\"))]\nfn f() {}\n";
+    assert_eq!(scan(src, cfg).len(), 1);
+    assert_eq!(scan("crates/x86/src/tables/map0.rs", long).len(), 0);
+    let reviewed = "#[expect(clippy::fn_params_excessive_bools, reason = \"r\")]\n";
+    assert!(scan("crates/kernel/src/flags.rs", reviewed).is_empty());
+    assert_eq!(scan("crates/kernel/src/range.rs", reviewed).len(), 1);
+    for ok in [
+        "#[allow(clippy::panic, reason = \"a golden mismatch fails the test\")]\n",
+        "#[expect(clippy::arithmetic_side_effects, reason = \"bound proved by Verus\")]\n",
+        "#[expect(clippy::disallowed_types, reason = \"an internal lookup\")]\n",
+        "#[allow(unused_mut, reason = \"a rustc lint\")]\n",
+        "#[deny(clippy::cast_lossless)]\n",
+        "// #[allow(clippy::too_many_lines)]\nlet s = \"#[allow(clippy::too_many_lines)]\";\n",
+    ] {
+        let found = scan(src, ok);
+        assert!(found.is_empty(), "{ok}: {}", render(&found));
+    }
+    assert_eq!(
+        scan(src, "#[expect(clippy::disallowed_types)]\n").len(),
+        1,
+        "disallowed_types needs a reason"
+    );
+    assert!(scan::is_source_file("xtask/src/verify/tree.rs"));
+    assert!(scan::is_source_file("crates/testkit/src/golden.rs"));
+    assert!(!scan::is_source_file("crates/db/src/edit/tests.rs"));
+    assert!(!scan::is_source_file("crates/db/tests/db/main.rs"));
+    assert!(!scan::is_source_file("xtask/tests/gates.rs"));
 }
 
 #[test]
@@ -388,6 +483,28 @@ fn ac_011_docs_policy() {
     assert!(manifest::docs_policy(&root_toml).is_empty());
     let warn = root_toml.replace("missing_docs = \"deny\"", "missing_docs = \"warn\"");
     assert_eq!(manifest::docs_policy(&warn).len(), 1);
+    let rustdoc = root_toml.replace(
+        "broken_intra_doc_links = \"deny\"",
+        "broken_intra_doc_links = \"allow\"",
+    );
+    assert_eq!(manifest::docs_policy(&rustdoc).len(), 1);
+    let src = "crates/base/src/x.rs";
+    for bad in [
+        "#![allow(missing_docs, reason = \"x\")]\n",
+        "#[expect(missing_docs, reason = \"x\")]\npub fn f() {}\n",
+        "#![allow(rustdoc::broken_intra_doc_links, reason = \"x\")]\n",
+        "#[cfg_attr(test, allow(missing_docs))]\n",
+    ] {
+        assert_eq!(scan::docs_exceptions(src, bad).len(), 1, "{bad}");
+    }
+    for ok in [
+        "#![deny(missing_docs)]\n",
+        "// #[allow(missing_docs)]\n",
+        "fn missing_docs() {}\n",
+        "#[allow(clippy::panic, reason = \"x\")]\n",
+    ] {
+        assert!(scan::docs_exceptions(src, ok).is_empty(), "{ok}");
+    }
 }
 
 #[test]
@@ -710,6 +827,13 @@ fn ac_018b_failed_is_empty() {
         Some(&Value::Array(Vec::new())),
         "{report}"
     );
+    // The committed rows come from an earlier commit, so the test reads only the list form.
+    for list in ["/stale", "/not_passed"] {
+        assert!(
+            report.pointer(list).and_then(Value::as_array).is_some(),
+            "{list}: {report}"
+        );
+    }
 }
 
 /// A proof record of the kernel K1 and a host record of bash. Every claim holds.

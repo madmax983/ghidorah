@@ -12,6 +12,10 @@
 //! | `load_ms` | `ghidorah call binary_load` of a T2 fixture with no analysis |
 //! | `analysis_t2_ms` | `ghidorah call binary_load` of a T2 fixture with the full analysis |
 //!
+//! Each sample checks its reply ([`check_reply`], [`check_load`]). A reply that is not `ok`
+//! stops the benchmark with an error, so an error path never counts as a fast sample. A
+//! `decode_us` reply needs 500 rows. An `analysis_t2_ms` reply needs the state `complete`.
+//!
 //! Output: `{ ok, cpu, profile, <key>: { median, mad, runs, budget, ok } }` with values in the
 //! unit of the key. AC-171 reads `/cold_start_ms/median`. AC-202 reads `/ok`.
 
@@ -33,6 +37,12 @@ pub const T2_FIXTURE: &str = "fixtures/bin/large.gcc-O2";
 
 /// The number of instructions of one `decode_us` sample.
 pub const DECODE_COUNT: u64 = 500;
+
+/// The output budget of one `decode_us` sample: the hard cap of `max_chars`.
+///
+/// The default budget of `mem_read` is too small for 500 rows, and then the reply is
+/// `OUTPUT_BUDGET_EXCEEDED`.
+pub const DECODE_MAX_CHARS: u64 = 60_000;
 
 /// The unit of a benchmark value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -125,6 +135,64 @@ pub fn verdict(bench: &Bench, stats: &Stats, budget: Option<u64>) -> Value {
 #[must_use]
 pub fn discover_line(id: u64) -> String {
     format!(r#"{{"jsonrpc":"2.0","id":{id},"method":"server/discover"}}"#)
+}
+
+/// Checks one reply of a benchmark call: the reply is JSON with `ok: true`.
+///
+/// With `rows`, the reply also holds that many rows at `/data/rows`, or a page with that
+/// many returned items at `/page/returned`.
+///
+/// # Errors
+///
+/// Returns [`Error::Data`] for a reply that is not JSON, that is not `ok`, or that holds
+/// another number of rows.
+pub fn check_reply(tool: &str, reply: &str, rows: Option<u64>) -> Result<Value, Error> {
+    let value = json::parse(reply.trim()).map_err(|e| Error::data(tool, e.to_string()))?;
+    if value.get("ok").and_then(Value::as_bool) != Some(true) {
+        let code = value
+            .pointer("/error/code")
+            .and_then(Value::as_str)
+            .unwrap_or("no error code");
+        return Err(Error::data(tool, format!("the reply is not ok: {code}")));
+    }
+    if let Some(want) = rows {
+        let listed = value
+            .pointer("/data/rows")
+            .and_then(Value::as_array)
+            .map(|r| u64::try_from(r.len()).unwrap_or(u64::MAX));
+        let got = listed.or_else(|| value.pointer("/page/returned").and_then(Value::as_u64));
+        if got != Some(want) {
+            let detail = format!("the reply holds {got:?} rows, not {want}");
+            return Err(Error::data(tool, detail));
+        }
+    }
+    Ok(value)
+}
+
+/// Checks the output of `ghidorah call binary_load`: the reply is `ok`. With `analysis`, the
+/// state at `/data/analysis/state` is also `complete`.
+///
+/// # Errors
+///
+/// Returns [`Error::Data`] when the output fails a check.
+pub fn check_load(stdout: &str, analysis: bool) -> Result<(), Error> {
+    let value = check_reply("binary_load", stdout, None)?;
+    let state = value
+        .pointer("/data/analysis/state")
+        .and_then(Value::as_str);
+    if analysis && state != Some("complete") {
+        let detail = format!("the analysis state is {state:?}, not complete");
+        return Err(Error::data("binary_load", detail));
+    }
+    Ok(())
+}
+
+/// Gives the `mem_read` arguments of one `decode_us` sample at `entry` of `binary_id`.
+#[must_use]
+pub fn decode_args(binary_id: &str, entry: &str) -> String {
+    format!(
+        r#"{{"binary_id":"{binary_id}","target":"{entry}","as":"insn","count":{DECODE_COUNT},"max_chars":{DECODE_MAX_CHARS}}}"#
+    )
 }
 
 /// Gives the benchmarks that `args` names, or every benchmark.
@@ -282,13 +350,22 @@ fn call_overhead(p: &Paths<'_>, decode: bool) -> Result<Stats, Error> {
         &["jsonl", "--project-root", &projects, "--root", &root],
         p.root,
     )?;
-    let line = if decode {
+    let (tool, line, rows) = if decode {
         let load = request(
             "binary_load",
             &format!(r#"{{"path":"{T2_FIXTURE}","analysis":"none"}}"#),
         );
-        let reply = json::parse(server.ask(&load)?.trim())
-            .map_err(|e| Error::data("binary_load", e.to_string()))?;
+        let reply = match server.ask(&load) {
+            Ok(text) => check_reply("binary_load", &text, None),
+            Err(e) => Err(e),
+        };
+        let reply = match reply {
+            Ok(value) => value,
+            Err(e) => {
+                server.stop();
+                return Err(e);
+            }
+        };
         let field = |ptr: &str| {
             reply
                 .pointer(ptr)
@@ -299,16 +376,14 @@ fn call_overhead(p: &Paths<'_>, decode: bool) -> Result<Stats, Error> {
             server.stop();
             return Err(Error::data("binary_load", "no binary_id or entry"));
         };
-        request(
-            "mem_read",
-            &format!(
-                r#"{{"binary_id":"{id}","target":"{entry}","as":"insn","count":{DECODE_COUNT}}}"#
-            ),
-        )
+        let line = request("mem_read", &decode_args(&id, &entry));
+        ("mem_read", line, Some(DECODE_COUNT))
     } else {
-        request("calc", r#"{"expr":"0x10 + 0x20 * 0x3"}"#)
+        let line = request("calc", r#"{"expr":"0x10 + 0x20 * 0x3"}"#);
+        ("calc", line, None)
     };
-    let stats = timed(|| server.ask(&line).map(|_| ()));
+    // Each sample checks its reply, so an error reply does not count as a fast call.
+    let stats = timed(|| check_reply(tool, &server.ask(&line)?, rows).map(|_| ()));
     server.stop();
     stats
 }
@@ -335,7 +410,8 @@ fn load(p: &Paths<'_>, analysis: bool) -> Result<Stats, Error> {
             &root,
         ])
         .current_dir(p.root);
-        proc::run_ok(&mut cmd).map(|_| ())
+        let out = proc::run_ok(&mut cmd)?;
+        check_load(&out.stdout, analysis)
     })
 }
 
