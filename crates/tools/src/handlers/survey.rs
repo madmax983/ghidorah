@@ -25,14 +25,26 @@
 //!
 //! On a binary for another machine, the code sections stay empty, and the result carries
 //! `W_ARCH_UNSUPPORTED` (design Section 4.1).
+//!
+//! Each worklist item of `coverage` can have a `remedy` call with a `why`. It is the first of
+//! these calls that `hints::check` accepts in the active profile:
+//!
+//! | Item | Calls in order |
+//! |---|---|
+//! | `unresolved_jump` | `func_edit` with the targets of the table of the site, then `func_get { target, include: ["jumptables", "disasm"] }` |
+//! | `unresolved_call` | `func_edit` with the targets of the table of the site, then `func_get { target, include: ["disasm"] }` |
+//! | `gap` | `func_edit { action: "create", target }`, then `mem_read { target, as: "insn", count }` |
 
 mod imports;
 mod parts;
 
 use ghidorah_analysis::CallGraph;
-use ghidorah_base::WarningCode;
+use ghidorah_analysis::analyzers::metrics;
+use ghidorah_base::{FuncId, WarningCode};
+use ghidorah_db::Program;
 use ghidorah_json::{Object, Value};
 
+use super::func_get::remedy;
 use super::func_sections::{self as fs, Namer};
 use crate::args::Args;
 use crate::content::{self, ContentMode};
@@ -74,6 +86,9 @@ pub const DIAG_PLACES: usize = 5;
 /// The largest number of worklist items in `coverage`.
 pub const WORK_ITEMS: usize = 5;
 
+/// The number of instructions of the `mem_read` remedy of a gap.
+pub const GAP_INSNS: u64 = 16;
+
 /// The `why` of the `func_list` hint.
 pub const WHY_PRIORITY: &str = "List the functions in priority order.";
 
@@ -83,8 +98,29 @@ pub const WHY_MAIN: &str = "Read the main function.";
 /// The `why` of a `search` call that lists the rest of a cut section.
 pub const WHY_REST: &str = "List the items that the survey leaves out.";
 
+/// The `why` of a `func_edit` call that sets the targets of an unresolved site. A worklist
+/// can hold 5 remedies, so the text is short.
+pub const WHY_TARGETS: &str = "Set the targets.";
+
+/// The `why` of a `func_edit` call that makes a function at the start of a gap.
+pub const WHY_CREATE: &str = "Make a function at the gap.";
+
+/// The `why` of a `func_get` call on the function of an unresolved site.
+pub const WHY_READ_SITE: &str = "Find the targets of the site.";
+
+/// The `why` of a `mem_read` call at the start of a gap.
+pub const WHY_READ_GAP: &str = "Read the code of the gap.";
+
 /// Every fixed text of the handler that an agent reads.
-pub const TEXTS: &[&str] = &[WHY_PRIORITY, WHY_MAIN, WHY_REST];
+pub const TEXTS: &[&str] = &[
+    WHY_PRIORITY,
+    WHY_MAIN,
+    WHY_REST,
+    WHY_TARGETS,
+    WHY_CREATE,
+    WHY_READ_SITE,
+    WHY_READ_GAP,
+];
 
 /// Gives the budget weight of a section: 3 for `strings` and `functions`, 2 for `imports`
 /// and `sections`, else 1.
@@ -198,11 +234,13 @@ fn run(session: &mut Session, args: &Args, ctx: &mut Ctx) -> Result<Payload, Too
     let include = included(args);
     let namer = Namer::new();
     let graph = CallGraph::build(p);
+    let check = |call| remedy::checked(session, call);
     let c = parts::Ctx {
         program: p,
         file_name: &binary.file_name,
         namer: &namer,
         caps: fs::caps(ctx),
+        check: &check,
     };
     let mode = ctx.budget.mode;
     let built: Vec<(&'static str, parts::Part)> = include
@@ -269,6 +307,57 @@ fn run(session: &mut Session, args: &Args, ctx: &mut Ctx) -> Result<Payload, Too
         ));
     }
     Ok(Payload::Object(out))
+}
+
+/// Gives the `func_get` call that reads the sections `include` of `func`.
+fn read_func(func: FuncId, include: &[&str]) -> Call {
+    let include = include.iter().map(|s| Value::from(*s)).collect();
+    Call::new(
+        "func_get",
+        Value::object([
+            ("target", Value::from(func.to_string())),
+            ("include", Value::Array(include)),
+        ]),
+        WHY_READ_SITE,
+    )
+}
+
+/// Gives the `func_edit` call that sets the targets of the site `at` of `func` from the table
+/// of the site. Gives `None` when the site has no table with targets.
+fn set_targets(p: &Program, func: FuncId, at: u64, jump: bool) -> Option<Call> {
+    remedy::site(p, func, at, jump).map(|call| Call::new(&call.tool, call.args, WHY_TARGETS))
+}
+
+/// Gives the calls that can fix the worklist item `w`, the best call first (see the module
+/// table).
+fn work_calls(p: &Program, w: &metrics::WorkItem) -> Vec<Call> {
+    match (w.remedy, w.func) {
+        (Some(metrics::Remedy::SetJumpTable(at)), Some(f)) => set_targets(p, f, at, true)
+            .into_iter()
+            .chain([read_func(f, &["jumptables", "disasm"])])
+            .collect(),
+        (Some(metrics::Remedy::SetCallTargets(at)), Some(f)) => set_targets(p, f, at, false)
+            .into_iter()
+            .chain([read_func(f, &["disasm"])])
+            .collect(),
+        (Some(metrics::Remedy::Create(at)), _) => vec![
+            Call::new(
+                "func_edit",
+                Value::object([("action", Value::from("create")), ("target", fs::hex(at))]),
+                WHY_CREATE,
+            ),
+            Call::new(
+                "mem_read",
+                Value::object([
+                    ("target", fs::hex(at)),
+                    ("as", Value::from("insn")),
+                    ("count", Value::from(GAP_INSNS)),
+                ]),
+                WHY_READ_GAP,
+            ),
+        ],
+        _ => Vec::new(),
+    }
 }
 
 /// Gives the included sections of the call in output order.

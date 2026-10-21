@@ -114,7 +114,11 @@ pub struct Coverage {
     pub commented: u64,
 }
 
-/// A call that fixes a worklist item.
+/// The kind of call that fixes a worklist item: the `func_edit` action and its address.
+///
+/// The value is not a complete call. A site action also needs `targets`, and `set_noreturn`
+/// needs `noreturn`. The `binary_survey` tool adds these arguments from the facts of the
+/// site, or sends a read call in place of the edit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Remedy {
     /// `func_edit { action: "create", target }`.
@@ -150,8 +154,9 @@ impl Remedy {
         }
     }
 
-    /// Gives the arguments of the `func_edit` call, for example
-    /// `{"action":"create","target":"0x1150"}`. An action on a site names it with `at`.
+    /// Gives the action and the address arguments of the `func_edit` call, for example
+    /// `{"action":"create","target":"0x1150"}`. An action on a site names it with `at`. The
+    /// other arguments of the action are not in the value.
     #[must_use]
     pub fn args(self) -> Value {
         let key = match self {

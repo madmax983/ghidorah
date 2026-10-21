@@ -19,6 +19,7 @@ use ghidorah_json::{Object, Value};
 use super::shapes::{Typed, fits, shape_at};
 use crate::args::{check_value, globals_of};
 use crate::errors::{Candidate, ToolError};
+use crate::outshape::OutputShape;
 use crate::session::Session;
 use crate::spec::{ArgKind, ArgSpec, Role, ToolSpec};
 
@@ -71,7 +72,7 @@ impl Reference {
         for part in &self.at {
             out.push('/');
             match part {
-                Part::Key(key) => out.push_str(&key.replace('~', "~0").replace('/', "~1")),
+                Part::Key(key) => out.push_str(&escape(key)),
                 Part::Index(i) => out.push_str(&i.to_string()),
             }
         }
@@ -238,6 +239,7 @@ pub fn find(
 ///
 /// Returns `BAD_REFERENCE` with the candidate paths in three cases. The pointer leaves the
 /// output shape, the shape does not fit the argument, or a `*` reference does not go into a list.
+/// For a shape that does not fit, the candidates are the data paths whose shapes fit.
 pub fn typed(r: &Reference, source: &ToolSpec<Session>, step: usize) -> Result<Typed, ToolError> {
     let path = r.path(step);
     let typed = shape_at(source, &r.pointer).map_err(|paths| {
@@ -247,24 +249,109 @@ pub fn typed(r: &Reference, source: &ToolSpec<Session>, step: usize) -> Result<T
     let Some(spec) = r.spec else {
         return Ok(typed);
     };
-    let ok = if typed.star {
-        let item = match spec.kind {
-            ArgKind::AddrList(_) => Some(ArgKind::Addr),
-            ArgKind::List(item, _) => Some(item.kind),
-            ArgKind::Json => Some(ArgKind::Json),
-            _ => None,
-        };
-        item.is_some_and(|k| fits(typed.shape, &k))
-    } else {
-        fits(typed.shape, &spec.kind)
-    };
-    if ok {
-        Ok(typed)
-    } else if typed.star && r.cap().is_none() {
-        Err(bad(&path, "a list argument for a pointer with *"))
-    } else {
-        Err(bad(&path, "a value of the kind of the argument"))
+    if shape_fits(&spec, typed.shape, typed.star) {
+        return Ok(typed);
     }
+    let expected = if typed.star && r.cap().is_none() {
+        "a list argument for a pointer with *"
+    } else {
+        "a value of the kind of the argument"
+    };
+    let mut tree = Vec::new();
+    shape_tree(
+        source.output,
+        "/data",
+        r.cap().is_some(),
+        false,
+        0,
+        &mut tree,
+    );
+    let paths = pick(
+        tree.into_iter()
+            .map(|(p, shape, star)| (p, shape_fits(&spec, shape, star))),
+    );
+    Err(bad(&path, expected).candidates(ranked(&r.ptr, &paths, "path")))
+}
+
+/// Tells if a value of `shape` fits the argument `spec`. The value of a `*` pointer goes into
+/// the items of a list argument.
+fn shape_fits(spec: &ArgSpec, shape: OutputShape, star: bool) -> bool {
+    if !star {
+        return fits(shape, &spec.kind);
+    }
+    let item = match spec.kind {
+        ArgKind::AddrList(_) => Some(ArgKind::Addr),
+        ArgKind::List(item, _) => Some(item.kind),
+        ArgKind::Json => Some(ArgKind::Json),
+        _ => None,
+    };
+    item.is_some_and(|k| fits(shape, &k))
+}
+
+/// Adds the paths of the output shape `shape` below `prefix` to `out`, with their shapes and
+/// `true` for a path with `*`. An array item is `*` when `list` is `true`, else `0`.
+fn shape_tree(
+    shape: OutputShape,
+    prefix: &str,
+    list: bool,
+    star: bool,
+    depth: usize,
+    out: &mut Vec<(String, OutputShape, bool)>,
+) {
+    let shape = match shape {
+        OutputShape::Nullable(inner) => *inner,
+        other => other,
+    };
+    if out.len() >= MAX_PATHS {
+        return;
+    }
+    out.push((prefix.to_owned(), shape, star));
+    if depth >= MAX_PATH_DEPTH {
+        return;
+    }
+    let next = depth.saturating_add(1);
+    match shape {
+        OutputShape::Obj(fields) => {
+            for f in fields {
+                let sub = format!("{prefix}/{}", escape(f.name));
+                shape_tree(f.shape, &sub, list, star, next, out);
+            }
+        }
+        OutputShape::List(inner) => {
+            let sub = format!("{prefix}/{}", item_token(list));
+            shape_tree(*inner, &sub, list, star || list, next, out);
+        }
+        OutputShape::Text => {
+            let sub = format!("{prefix}/text");
+            shape_tree(OutputShape::Str, &sub, list, star, next, out);
+        }
+        _ => {}
+    }
+}
+
+/// Gives the paths that fit, or all paths when no path fits.
+fn pick(paths: impl Iterator<Item = (String, bool)>) -> Vec<String> {
+    let all: Vec<(String, bool)> = paths.collect();
+    let fit: Vec<String> = all
+        .iter()
+        .filter(|(_, fit)| *fit)
+        .map(|(p, _)| p.clone())
+        .collect();
+    if fit.is_empty() {
+        all.into_iter().map(|(p, _)| p).collect()
+    } else {
+        fit
+    }
+}
+
+/// Gives the pointer token of an object key.
+fn escape(key: &str) -> String {
+    key.replace('~', "~0").replace('/', "~1")
+}
+
+/// Gives the pointer token of an array item: `*` for a list argument, else `0`.
+const fn item_token(list: bool) -> &'static str {
+    if list { "*" } else { "0" }
 }
 
 /// Gives the value at `at` in `root`, or `None` for a missing path.
@@ -292,36 +379,61 @@ pub fn set_at(root: &mut Value, at: &[Part], new: Value) {
     *slot = new;
 }
 
-/// Gives the candidate paths of the values of `value` below `prefix`: arrays give `*`.
-fn value_paths(value: &Value, prefix: &str, depth: usize, out: &mut Vec<String>) {
+/// Gives the candidate paths of the values of `value` below `prefix`. An array gives the
+/// paths of its first item, with `*` when `list` is `true`, else `0`.
+fn value_paths(value: &Value, prefix: &str, list: bool, depth: usize, out: &mut Vec<String>) {
     if out.len() >= MAX_PATHS {
         return;
     }
+    let next = depth.saturating_add(1);
     match value {
         Value::Object(object) if depth < MAX_PATH_DEPTH => {
             for (key, member) in object.iter() {
-                let path = format!("{prefix}/{key}");
+                let path = format!("{prefix}/{}", escape(key));
                 out.push(path.clone());
-                value_paths(member, &path, depth + 1, out);
+                value_paths(member, &path, list, next, out);
             }
         }
         Value::Array(items) if depth < MAX_PATH_DEPTH => {
             if let Some(first) = items.first() {
-                value_paths(first, &format!("{prefix}/*"), depth + 1, out);
+                let path = format!("{prefix}/{}", item_token(list));
+                value_paths(first, &path, list, next, out);
             }
         }
         _ => {}
     }
 }
 
-/// Gives the candidate paths of the data of the envelope `source`.
-fn data_paths(source: &Value) -> Vec<String> {
+/// Gives the candidate paths of the data of the envelope `source` for reference `r`.
+fn data_paths(r: &Reference, source: &Value) -> Vec<String> {
     let mut out = Vec::new();
     if let Some(data) = source.get("data") {
-        value_paths(data, "/data", 0, &mut out);
+        value_paths(data, "/data", r.cap().is_some(), 0, &mut out);
     }
     out.truncate(MAX_PATHS);
     out
+}
+
+/// Gives the value of `source` at the candidate path `path`, or `None` for no value.
+fn value_at(source: &Value, path: &str) -> Option<Value> {
+    let pointer = pointer::parse(path).ok()?;
+    if pointer.has_star() {
+        let selection = pointer::select(source, &pointer);
+        Some(Value::Array(
+            selection.values.into_iter().cloned().collect(),
+        ))
+    } else {
+        pointer::get(source, &pointer).cloned()
+    }
+}
+
+/// Gives the candidate paths of the data of `source` for the argument `spec` of reference
+/// `r`: the paths whose value fits. When no value fits, it gives all paths.
+fn fit_paths(r: &Reference, spec: &ArgSpec, source: &Value) -> Vec<String> {
+    pick(data_paths(r, source).into_iter().map(|p| {
+        let fit = value_at(source, &p).is_some_and(|v| check_value(spec, &v).is_ok());
+        (p, fit)
+    }))
 }
 
 /// Gives the value of reference `r` of step `step` in the envelope `source`.
@@ -332,6 +444,7 @@ fn data_paths(source: &Value) -> Vec<String> {
 ///
 /// Returns `BAD_REFERENCE` for a truncated source page without `partial`, a missing path, or
 /// a value that does not fit the argument. The candidates are the paths of the source data.
+/// For a value that does not fit, the candidates are the paths whose values fit.
 /// Returns `PLUCK_TOO_LONG` with `details: { count, cap }` when a `*` pointer gives more
 /// values than the cap of the target list.
 pub fn resolve(r: &Reference, source: &Value, step: usize) -> Result<Value, ToolError> {
@@ -340,7 +453,7 @@ pub fn resolve(r: &Reference, source: &Value, step: usize) -> Result<Value, Tool
     let missing = |given: &str| {
         bad(&path, "a path of the data of the source step").candidates(ranked(
             given,
-            &data_paths(source),
+            &data_paths(r, source),
             "path",
         ))
     };
@@ -372,7 +485,10 @@ pub fn resolve(r: &Reference, source: &Value, step: usize) -> Result<Value, Tool
             .cloned()
             .ok_or_else(|| missing(&r.ptr))?
     };
-    check(r, &value, step)?;
+    check(r, &value, step).map_err(|e| match r.spec {
+        Some(spec) => e.candidates(ranked(&r.ptr, &fit_paths(r, &spec, source), "path")),
+        None => e,
+    })?;
     Ok(value)
 }
 

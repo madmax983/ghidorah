@@ -11,28 +11,55 @@ use crate::common::{json, root, run, walk};
 use crate::test_registry::{REQUESTS, registry};
 
 /// The keys whose values are addresses in every result.
-const ADDRESS_KEYS: [&str; 8] = ["addr", "entry", "at", "from", "to", "start", "end", "va"];
+const ADDRESS_KEYS: [&str; 14] = [
+    "addr",
+    "entry",
+    "at",
+    "from",
+    "to",
+    "start",
+    "end",
+    "va",
+    "image_base",
+    "stub",
+    "slot",
+    "file_off",
+    "file_offset",
+    "base",
+];
 
 /// The smallest JSON integer that a result must not hold: 2^53.
 const JSON_INT_LIMIT: u64 = 1 << 53;
 
-/// Gives the problems of AC-137 in one envelope.
+/// Tells if `value` is an address text `^0x[0-9a-f]+$`.
+fn is_hex(value: &Value) -> bool {
+    value.as_str().is_some_and(|t| {
+        t.strip_prefix("0x").is_some_and(|h| {
+            !h.is_empty()
+                && h.bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        })
+    })
+}
+
+/// Gives the problems of AC-137 in one envelope. An address-like key holds hex text, or
+/// null for an address that does not exist. A `target` is a hex text, an ID or a name: a
+/// number fails, and a text that starts with `0x` must be hex text.
 fn hex_problems(envelope: &Value) -> Vec<String> {
     let mut out = Vec::new();
     walk(envelope, "", &mut |path, key, value| {
         if let Some(key) = key {
             let address_like = ADDRESS_KEYS.contains(&key) || key.ends_with("_addr");
-            if address_like {
-                let ok = value.as_str().is_some_and(|t| {
-                    t.strip_prefix("0x").is_some_and(|h| {
-                        !h.is_empty()
-                            && h.bytes()
-                                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
-                    })
-                });
-                if !ok {
-                    out.push(format!("{path} is not hex text"));
-                }
+            if address_like && !(is_hex(value) || value == &Value::Null) {
+                out.push(format!("{path} is not hex text"));
+            }
+            let target = match value {
+                Value::Number(_) => false,
+                Value::String(text) if text.starts_with("0x") => is_hex(value),
+                _ => true,
+            };
+            if key == "target" && !target {
+                out.push(format!("{path} is not an address, an ID or a name"));
             }
         }
         if let Value::Number(n) = value {
@@ -218,4 +245,18 @@ fn ac_137_hex_strings() {
     let bad =
         json(r#"{"data":{"addr":4198400,"items":[{"from":"0x40ABC"}],"n":9007199254740992}}"#);
     assert_eq!(hex_problems(&bad).len(), 3);
+    // The other address keys, and a target that is a number or bad hex text.
+    let bad = json(
+        r#"{"data":{"image_base":4194304,"stubs":[{"stub":"4198400","slot":16384}],
+        "sections":[{"file_off":4096,"base":"0x10G"}],"file_offset":12,
+        "edits":[{"target":4198400},{"target":"0x40ABC"}]}}"#,
+    );
+    let found = hex_problems(&bad);
+    assert_eq!(found.len(), 8, "{found:?}");
+    // An ID, a name, a hex target and a null address pass.
+    let good = json(
+        r#"{"data":{"items":[{"target":"fn:0x401000"},{"target":"main"},
+        {"target":"0x401000"}],"file_offset":null,"slot":"0x4000"}}"#,
+    );
+    assert_eq!(hex_problems(&good), Vec::<String>::new());
 }

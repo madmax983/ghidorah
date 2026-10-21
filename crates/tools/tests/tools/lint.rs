@@ -2,10 +2,10 @@
 
 use ghidorah_json::Value;
 use ghidorah_tools::registry::{first_sentence, lint, resource_word, schema_root_problem, shipped};
-use ghidorah_tools::schema::{input_schema, tool_entry};
+use ghidorah_tools::schema::{Detail, catalog_schema, input_schema, tool_entry};
 use ghidorah_tools::{
     ActionSpec, Annotations, ArgKind, ArgSpec, Args, Ctx, Example, Group, GroupRule, LintRule,
-    Payload, Registry, Role, ToolError, ToolSpec,
+    Payload, Profile, ProfileSet, Registry, Role, ToolError, ToolSpec,
 };
 
 use crate::common::json;
@@ -344,6 +344,31 @@ fn ac_129b_schema_root() {
                 assert!(schema.get(key).is_none(), "{} has {key}", tool.name);
             }
             assert_eq!(schema_root_problem(&schema), None);
+            // The catalog schemas that tools/list sends have the same root rules.
+            for detail in [Detail::Catalog, Detail::Compact] {
+                let schema = catalog_schema(tool, detail);
+                assert_eq!(
+                    schema_root_problem(&schema),
+                    None,
+                    "{} {detail:?}",
+                    tool.name
+                );
+            }
+        }
+        // The inputSchema of each tools/list entry of each profile.
+        for profile in Profile::ALL {
+            let list = ProfileSet::new(profile, None).tools_list(&registry);
+            let entries = list.as_array().unwrap_or_default();
+            assert!(!entries.is_empty(), "{}", profile.as_str());
+            for entry in entries {
+                let schema = entry.get("inputSchema").cloned().unwrap_or_default();
+                assert_eq!(
+                    schema_root_problem(&schema),
+                    None,
+                    "{} {entry}",
+                    profile.as_str()
+                );
+            }
         }
     });
     let bad = json(r#"{"type":"object","properties":{},"additionalProperties":false,"oneOf":[]}"#);

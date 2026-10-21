@@ -123,9 +123,9 @@
     },
     "locate-04": {
       "calls": 3,
-      "chars": 2123,
-      "peak": 1028,
-      "est_tokens": 708
+      "chars": 2363,
+      "peak": 1268,
+      "est_tokens": 788
     },
     "locate-05": {
       "calls": 2,
@@ -165,9 +165,9 @@
     },
     "recover-01": {
       "calls": 4,
-      "chars": 2383,
-      "peak": 1028,
-      "est_tokens": 795
+      "chars": 2623,
+      "peak": 1268,
+      "est_tokens": 875
     },
     "recover-02": {
       "calls": 3,

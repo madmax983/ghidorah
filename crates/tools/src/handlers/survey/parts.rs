@@ -13,6 +13,7 @@ use ghidorah_loader::{EntryKind, Kind, Protections, Relro, SegmentKind};
 use super::{DIAG_PLACES, STRING_FUNCS, TOP_FUNCTIONS, WHY_REST, WORK_ITEMS};
 use crate::handlers::addr_info;
 use crate::handlers::func_sections::{self as fs, Namer};
+use crate::hints::Call;
 
 /// One section: its members, its list and the call that lists the items it leaves out.
 pub struct Part {
@@ -98,6 +99,8 @@ pub struct Ctx<'a> {
     pub namer: &'a Namer,
     /// The caps of binary text.
     pub caps: Caps,
+    /// Keeps a call that the agent can send in the active profile, or drops it.
+    pub check: &'a dyn Fn(Call) -> Option<Call>,
 }
 
 /// Gives a section by name.
@@ -114,7 +117,7 @@ pub fn part(c: &Ctx<'_>, name: &str, graph: &CallGraph, fuel: &mut Fuel) -> Part
         "functions" => functions(c, graph),
         "syscalls" => syscalls(c.program, fuel),
         "notes" => notes(c.program),
-        "coverage" => coverage(c.program),
+        "coverage" => coverage(c),
         "languages" => languages(c),
         _ => diagnostics(c.program),
     }
@@ -469,8 +472,11 @@ fn notes(p: &Program) -> Part {
     Part::listed(Object::new(), "items", list, None)
 }
 
-/// The coverage counts and the first worklist items.
-fn coverage(p: &Program) -> Part {
+/// The coverage counts and the first worklist items. The remedy of an item is the first call
+/// that the check of `ctx` keeps.
+fn coverage(ctx: &Ctx<'_>) -> Part {
+    let p = ctx.program;
+    let check = ctx.check;
     let c = metrics::coverage(p);
     let pct = c
         .visited
@@ -488,11 +494,8 @@ fn coverage(p: &Program) -> Part {
             if let Some(f) = w.func {
                 out.push("func", Value::from(f.to_string()));
             }
-            if let Some(r) = w.remedy {
-                out.push(
-                    "remedy",
-                    Value::object([("tool", Value::from("func_edit")), ("args", r.args())]),
-                );
+            if let Some(call) = super::work_calls(p, w).into_iter().find_map(check) {
+                out.push("remedy", call.to_json());
             }
             Value::Object(out)
         })

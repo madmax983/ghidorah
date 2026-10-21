@@ -185,6 +185,23 @@ pub fn demo() -> Session {
     demo_with(config())
 }
 
+/// Makes a session with the analyzed demo binary open and no analysis engine. An edit marks
+/// the analysis `stale` and runs no re-analysis.
+pub fn demo_without_engine() -> Session {
+    let found = analyzed();
+    let mut session = Session::with_registry(registry(), config(), Box::new(FixedClock::new(0)));
+    let label = session.new_label();
+    session.open(OpenBinary {
+        id: demo_id(),
+        program: found.program.clone(),
+        file_name: found.file_name.clone(),
+        read_only: false,
+        label,
+        analysis: found.analysis,
+    });
+    session
+}
+
 /// Makes a session in the profile `profile` with the analyzed demo binary open.
 pub fn demo_in(profile: Profile) -> Session {
     let mut config = config();
