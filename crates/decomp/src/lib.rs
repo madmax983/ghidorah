@@ -55,8 +55,9 @@ pub mod window;
 
 use std::fmt;
 
-use ghidorah_analysis::cc::{conv_of, params};
+use ghidorah_analysis::cc::conv_of;
 use ghidorah_analysis::fir::Opts as FirOpts;
+use ghidorah_analysis::fir::callsite::Memo;
 use ghidorah_analysis::fir::l1::{self, L1Error, L1Ir};
 use ghidorah_base::{Address, Fuel, FuncId, JumpTableId, WarningCode};
 use ghidorah_db::Program;
@@ -279,23 +280,9 @@ impl Env for ProgramEnv<'_> {
     }
 
     fn param_count(&self, addr: u64) -> Option<u8> {
-        let (p, _) = params(
-            self.0,
-            FuncId(Address::ram(addr)),
-            &mut Fuel::new(PARAM_FUEL),
-        )
-        .ok()?;
-        let conv = conv_of(self.0);
-        if p.stack > 0 {
-            let regs = u8::try_from(conv.int_args.len()).unwrap_or(u8::MAX);
-            return Some(regs.saturating_add(p.stack));
-        }
-        // A positional slot is its position, so the count holds the floating slots too.
-        Some(if conv.positional {
-            p.int.saturating_add(p.float)
-        } else {
-            p.int
-        })
+        let mut fuel = Fuel::new(PARAM_FUEL);
+        let facts = cache::param_facts(self.0, addr, &mut Memo::default(), &mut fuel)?;
+        Some(cache::slot_count(self.0, &facts))
     }
 
     fn jumptable_unresolved(&self, site: u64) -> bool {
@@ -334,14 +321,31 @@ pub fn decompile(
     opts: &Opts,
     fuel: &mut Fuel,
 ) -> Result<Decomp, DecompError> {
-    let ir = l1::build(program, id, &FirOpts::DEFAULT, &Switches::all(), fuel)?;
-    from_l1(
-        &ir,
-        &ProgramEnv(program),
-        Some(conv_of(program)),
-        opts,
+    let env = cache::RenderEnv::new(program, fuel);
+    let out = decompile_in(program, id, opts, &env, fuel);
+    env.charge(fuel);
+    out
+}
+
+/// Decompiles like [`decompile`] with the facts of `env`. The L1 build and the view share the
+/// solve memo of `env`.
+fn decompile_in(
+    program: &Program,
+    id: FuncId,
+    opts: &Opts,
+    env: &cache::RenderEnv<'_>,
+    fuel: &mut Fuel,
+) -> Result<Decomp, DecompError> {
+    let switches = Switches::all();
+    let ir = l1::build_in(
+        program,
+        id,
+        &FirOpts::DEFAULT,
+        &switches,
+        &mut env.memo(),
         fuel,
-    )
+    )?;
+    from_l1(&ir, env, Some(conv_of(program)), opts, fuel)
 }
 
 /// Decompiles the L1 form `ir` of a function.
@@ -458,11 +462,15 @@ pub fn render(
     names: &dyn IntrinsicNames,
     fuel: &mut Fuel,
 ) -> Result<Output, DecompError> {
-    let decomp = decompile(program, id, opts, fuel)?;
-    let env = ProgramEnv(program);
-    let name = env.callee_name(id.0.off).unwrap_or_default();
-    let body = print::body_units(program, id);
-    Ok(finish(decomp, &env, names, &name, &body))
+    let env = cache::RenderEnv::new(program, fuel);
+    let decomp = decompile_in(program, id, opts, &env, fuel);
+    let out = decomp.map(|d| {
+        let name = env.callee_name(id.0.off).unwrap_or_default();
+        let body = print::body_units(program, id);
+        finish(d, &env, names, &name, &body)
+    });
+    env.charge(fuel);
+    out
 }
 
 /// Runs the self-check, the printer and the line map on `decomp`. `name` is the name of the

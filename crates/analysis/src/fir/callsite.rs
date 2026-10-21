@@ -31,24 +31,24 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use ghidorah_base::{Address, Fuel, FuncId};
+use ghidorah_base::{Address, Fuel, FuncId, OutOfFuel};
 use ghidorah_db::{Program, Types};
 use ghidorah_ir::{Arena, Arg, Loc, OpId, Opc};
 use ghidorah_types::{CallConv, Sig};
 
-use super::FuncIr;
 use super::l1::ssa_opts;
-use crate::cc::{ParamSource, Params, loc_of, params};
+use super::{FirError, FuncIr};
+use crate::cc::{ParamSource, Params, conv_of, loc_of};
 
 mod solve;
 
-pub use solve::{MAX_SOLVE, solve};
+pub use solve::{MAX_SOLVE, Memo, Solved, solve, solve_in};
 
 /// The largest count of stack arguments of one call.
 pub const MAX_STACK_ARGS: i64 = 16;
 
-/// The fuel of the parameter recovery of one callee.
-const CALLEE_FUEL: u64 = 1_000_000;
+/// The largest fuel of the parameter recovery of one callee.
+pub const CALLEE_FUEL: u64 = 1_000_000;
 
 /// The arguments of a direct callee that the facts know.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -150,19 +150,47 @@ pub fn uses(
 /// register. An address with no facts gives `None`.
 #[must_use]
 pub fn callee_arity(program: &Program, addr: u64, conv: &CallConv) -> Option<Arity> {
+    let mut fuel = Fuel::new(CALLEE_FUEL);
+    callee_arity_in(program, addr, conv, &mut Memo::default(), &mut fuel)
+        .ok()
+        .flatten()
+}
+
+/// Gives the arity of the function or import at `addr` like [`callee_arity`], with the solve
+/// memo `memo` of the caller.
+///
+/// The recovery takes its fuel from `fuel`, at most [`CALLEE_FUEL`] units. A recovery that
+/// needs more units gives `None`.
+///
+/// # Errors
+///
+/// Returns [`OutOfFuel`] when `fuel` runs out.
+pub fn callee_arity_in(
+    program: &Program,
+    addr: u64,
+    conv: &CallConv,
+    memo: &mut Memo,
+    fuel: &mut Fuel,
+) -> Result<Option<Arity>, OutOfFuel> {
     let at = Address::ram(addr);
     if let Some(row) = program
         .imports()
         .values()
         .find(|r| r.stub == Some(at) || r.slot == Some(at))
     {
-        let proto = row.id.name().and_then(Types::prototype)?;
-        return Some(Arity {
+        return Ok(row.id.name().and_then(Types::prototype).map(|proto| Arity {
             int: u8::try_from(proto.sig.params.len()).unwrap_or(u8::MAX),
             varargs: proto.sig.variadic,
-        });
+        }));
     }
-    let (p, _) = params(program, FuncId(at), &mut Fuel::new(CALLEE_FUEL)).ok()?;
+    let mut part = Fuel::new(fuel.remaining().min(CALLEE_FUEL));
+    let found = param_facts(program, FuncId(at), memo, &mut part);
+    fuel.take(part.used())?;
+    let p = match found {
+        Ok(f) => f.params,
+        Err(FirError::Fuel(e)) if fuel.is_empty() => return Err(e),
+        Err(_) => return Ok(None),
+    };
     let regs = u8::try_from(conv.int_args.len()).unwrap_or(u8::MAX);
     let int = if p.stack > 0 {
         regs
@@ -171,9 +199,52 @@ pub fn callee_arity(program: &Program, addr: u64, conv: &CallConv) -> Option<Ari
     } else {
         p.int
     };
-    Some(Arity {
+    Ok(Some(Arity {
         int,
         varargs: p.varargs,
+    }))
+}
+
+/// The parameter facts of a function.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParamFacts {
+    /// The parameters.
+    pub params: Params,
+    /// The source of the parameters.
+    pub source: ParamSource,
+    /// The live-in registers of a recovered count, with the reads of the calls. A signature
+    /// or a prototype gives `None`.
+    pub live: Option<BTreeSet<Loc>>,
+}
+
+/// Gives the parameter facts of the published function `id`: its signature, then the Tier-0
+/// prototype of its name, then the solve over `memo`.
+///
+/// # Errors
+///
+/// Returns [`FirError::NoFunc`] when no function starts at `id`, and the errors of
+/// [`solve_in`].
+pub fn param_facts(
+    program: &Program,
+    id: FuncId,
+    memo: &mut Memo,
+    fuel: &mut Fuel,
+) -> Result<ParamFacts, FirError> {
+    if program.func(id).is_none() {
+        return Err(FirError::NoFunc(id));
+    }
+    if let Some((params, source)) = fixed(program, id) {
+        return Ok(ParamFacts {
+            params,
+            source,
+            live: None,
+        });
+    }
+    let s = solve_in(program, id, conv_of(program), memo, fuel)?;
+    Ok(ParamFacts {
+        params: s.params,
+        source: ParamSource::Recovered,
+        live: Some(s.live),
     })
 }
 

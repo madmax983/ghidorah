@@ -512,14 +512,9 @@ pub fn params(
     id: FuncId,
     fuel: &mut Fuel,
 ) -> Result<(Params, ParamSource), FirError> {
-    if program.func(id).is_none() {
-        return Err(FirError::NoFunc(id));
-    }
-    if let Some(found) = crate::fir::callsite::fixed(program, id) {
-        return Ok(found);
-    }
-    let p = crate::fir::callsite::solve(program, id, conv_of(program), fuel)?;
-    Ok((p, ParamSource::Recovered))
+    let mut memo = crate::fir::callsite::Memo::default();
+    let f = crate::fir::callsite::param_facts(program, id, &mut memo, fuel)?;
+    Ok((f.params, f.source))
 }
 
 /// Gives the varargs flag that a base fact sets for the function `entry`: its agent

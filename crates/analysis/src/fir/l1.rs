@@ -221,13 +221,39 @@ pub fn build(
     switches: &Switches,
     fuel: &mut Fuel,
 ) -> Result<L1Ir, L1Error> {
+    let mut memo = callsite::Memo::default();
+    build_in(program, id, opts, switches, &mut memo, fuel)
+}
+
+/// Builds the L1 form like [`build`], with the solve memo `memo`.
+///
+/// The parameter recovery of each callee takes its fuel from `fuel`
+/// ([`callsite::callee_arity_in`]). The callees share the bases of `memo`, so a function that
+/// many callees call builds once.
+///
+/// # Errors
+///
+/// Returns the errors of [`build`], and [`FirError::Fuel`] when a callee recovery uses the
+/// last unit of `fuel`.
+pub fn build_in(
+    program: &Program,
+    id: FuncId,
+    opts: &Opts,
+    switches: &Switches,
+    memo: &mut callsite::Memo,
+    fuel: &mut Fuel,
+) -> Result<L1Ir, L1Error> {
     let l0 = super::build(program, id, opts, fuel)?;
     let targets: BTreeSet<u64> = callsite::call_targets(&l0).into_values().collect();
     let conv = conv_of(program);
-    let arity: BTreeMap<u64, callsite::Arity> = targets
-        .into_iter()
-        .filter_map(|t| Some((t, callsite::callee_arity(program, t, conv)?)))
-        .collect();
+    let mut arity: BTreeMap<u64, callsite::Arity> = BTreeMap::new();
+    for t in targets {
+        let found =
+            callsite::callee_arity_in(program, t, conv, memo, fuel).map_err(FirError::Fuel)?;
+        if let Some(a) = found {
+            arity.insert(t, a);
+        }
+    }
     let imports = crate::tailcall::import_jumps(program, id, &l0);
     lift_with(
         l0,

@@ -3,10 +3,10 @@
 use std::time::{Duration, Instant};
 
 use ghidorah_analysis::cc::{self, ParamSource, Params};
-use ghidorah_analysis::fir::{self, Opts};
+use ghidorah_analysis::fir::{self, Opts, l1};
 use ghidorah_base::Fuel;
 use ghidorah_db::Program;
-use ghidorah_ir::{Loc, Opc};
+use ghidorah_ir::{Loc, Opc, Switches};
 use ghidorah_json::Value;
 use ghidorah_loader::LoadOpts;
 use ghidorah_testkit::elf::{ElfBuilder, Section};
@@ -217,5 +217,105 @@ fn regress_solve_children_linear() {
     assert!(
         used[1] * 2 <= used[0] * 5,
         "the fuel is not linear: {used:?}"
+    );
+}
+
+/// Gives an analyzed executable whose entry `F` calls `t` functions `g_i`. Each `g_i` calls
+/// `h_1`. Each `h_j` calls `h_(j + 1)` up to `h_k`, then runs `m` instructions. Gives the
+/// program, the address of `F` and the address of each `h_j`.
+fn shared_chain(t: usize, k: usize, m: usize) -> (Program, u64, Vec<u64>) {
+    let call = |text: &mut Vec<u8>, to: usize| {
+        let next = i64::try_from(text.len() + 5).expect("small");
+        let rel = i32::try_from(i64::try_from(to).expect("small") - next).expect("a near call");
+        text.push(0xe8);
+        text.extend_from_slice(&rel.to_le_bytes());
+    };
+    let f_len = t * 5 + 1;
+    let g_len = 6;
+    let h_len = 5 + m * 3 + 1;
+    let g_at = |i: usize| f_len + i * g_len;
+    let h_at = |j: usize| f_len + t * g_len + j * h_len;
+    let mut text = Vec::new();
+    for i in 0..t {
+        call(&mut text, g_at(i));
+    }
+    text.push(0xc3);
+    for _ in 0..t {
+        call(&mut text, h_at(0));
+        text.push(0xc3);
+    }
+    for j in 0..k {
+        if j + 1 < k {
+            call(&mut text, h_at(j + 1));
+        } else {
+            text.extend_from_slice(&[0x31, 0xc0, 0x90, 0x90, 0x90]);
+        }
+        for _ in 0..m {
+            text.extend_from_slice(&[0x83, 0xc0, 0x01]);
+        }
+        text.push(0xc3);
+    }
+    let (bytes, layout) = ElfBuilder::exec()
+        .section(Section::code(".text", &text))
+        .build_with_layout();
+    let mut p = program_of(&bytes, &LoadOpts::AUTO);
+    let _ = analyze(&mut p);
+    let base = layout.section(".text").expect("the code section").addr;
+    let hs = (0..k)
+        .map(|j| base + u64::try_from(h_at(j)).expect("small"))
+        .collect();
+    (p, base, hs)
+}
+
+/// Gives the fuel of the L1 build of the function at `f`.
+fn l1_fuel(p: &Program, f: u64) -> u64 {
+    let mut fuel = Fuel::unlimited();
+    let _ = l1::build(p, fid(f), &Opts::DEFAULT, &Switches::all(), &mut fuel).expect("the L1");
+    fuel.used()
+}
+
+/// The L1 build gave each callee a fresh tank of 1,000,000 units and a solve with no memo. So
+/// a callee that shared large callees with other callees built them again each time. The fuel
+/// of the caller did not see the work (r3-robust-02). The solves of the callees now take the
+/// fuel of the caller. One memo holds the bases of their functions.
+#[test]
+fn regress_callee_solves_use_caller_fuel() {
+    let (p, f, hs) = shared_chain(10, 8, 1000);
+    let conv = cc::conv_of(&p);
+    let mut own = Fuel::unlimited();
+    let l0 = fir::build(&p, fid(f), &Opts::DEFAULT, &mut own).expect("the IR of F");
+    let _ = l1::lift(l0, conv, &Switches::all(), &mut own).expect("the L1 of F");
+    let small = own.used() * 2;
+    let built = l1::build(
+        &p,
+        fid(f),
+        &Opts::DEFAULT,
+        &Switches::all(),
+        &mut Fuel::new(small),
+    );
+    assert!(
+        built.is_err(),
+        "the callee solves need more than {small} units"
+    );
+    let mut chain = Fuel::unlimited();
+    for h in hs {
+        let _ = fir::build(&p, fid(h), &Opts::DEFAULT, &mut chain).expect("the IR of h");
+    }
+    let one = l1_fuel(&p, f);
+    let (p2, f2, _) = shared_chain(20, 8, 1000);
+    let two = l1_fuel(&p2, f2);
+    assert!(
+        one >= chain.used(),
+        "{one} units, the h chain takes {}",
+        chain.used()
+    );
+    assert!(
+        two * 2 <= one * 5,
+        "the fuel is not linear: {one} and {two}"
+    );
+    assert!(
+        two - one < chain.used(),
+        "the h chain builds once: {one} and {two}, the chain takes {}",
+        chain.used()
     );
 }

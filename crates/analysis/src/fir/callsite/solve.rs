@@ -15,6 +15,7 @@
 //! rounds takes one unit of fuel. Each pass over the blocks of a function takes one unit for
 //! each block and each call op. The solve stops with an error when the fuel runs out.
 
+use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, BTreeSet};
 
 use ghidorah_base::{Address, Fuel, FuncId, OutOfFuel};
@@ -67,6 +68,7 @@ fn callee_of(program: &Program, conv: &CallConv, addr: u64) -> Callee {
 
 /// The fixed part of one function of a solve: its IR, the use summaries of its blocks and
 /// the callees of its calls.
+#[derive(Debug)]
 struct Base {
     /// The L0 IR.
     ir: FuncIr,
@@ -143,7 +145,7 @@ impl Base {
     }
 
     /// Gives the reads of the calls: the fixed callees, and the callees in `state`.
-    fn reads(&self, conv: &CallConv, state: &BTreeMap<u64, State>) -> BTreeMap<OpId, Vec<Loc>> {
+    fn reads(&self, conv: &CallConv, state: &BTreeMap<u64, Solved>) -> BTreeMap<OpId, Vec<Loc>> {
         let mut out = BTreeMap::new();
         for (id, c) in &self.callees {
             let regs = match c {
@@ -221,12 +223,25 @@ fn unwritten(ir: &FuncIr, blocks: &[BlockUse], regs: &BTreeSet<Loc>) -> Vec<BTre
     at
 }
 
-/// The state of one function in the rounds of a solve.
-struct State {
-    /// The live-in registers so far.
-    live: BTreeSet<Loc>,
-    /// The parameters so far.
-    params: Params,
+/// The result of one solve: the parameters and the live-in registers of the function.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Solved {
+    /// The parameters.
+    pub params: Params,
+    /// The live-in registers, with the reads of the calls.
+    pub live: BTreeSet<Loc>,
+}
+
+/// The memo of the solves of one caller.
+///
+/// It holds the base of each function by entry, and the result of each solve. The base of a
+/// function depends only on the program, so all the solves of one caller can share it. The fuel of a solve takes no unit for a base in the memo.
+#[derive(Debug, Default)]
+pub struct Memo {
+    /// The base of each function. A function whose IR does not build has `None`.
+    bases: BTreeMap<u64, Option<Base>>,
+    /// The result of each solve, by the entry of its function.
+    solved: BTreeMap<u64, Solved>,
 }
 
 /// Builds the base of the function at `addr`. A function whose IR does not build gives
@@ -253,18 +268,30 @@ fn build(
 ///
 /// # Errors
 ///
-/// Returns the [`FirError`] of the function IR of `id`, and [`FirError::Fuel`] when the fuel
-/// runs out. A callee whose IR does not build reads no register.
+/// Returns the errors of [`solve_in`].
 pub fn solve(
     program: &Program,
     id: FuncId,
     conv: &CallConv,
     fuel: &mut Fuel,
 ) -> Result<Params, FirError> {
-    let root = id.0.off;
-    let ir = fir::build(program, id, &Opts::DEFAULT, fuel)?;
-    let mut bases: BTreeMap<u64, Option<Base>> = BTreeMap::new();
-    bases.insert(root, Some(Base::new(program, conv, ir, fuel)?));
+    solve_in(program, id, conv, &mut Memo::default(), fuel).map(|s| s.params)
+}
+
+/// Gives the functions of the solve of `root` in callee-first order (step 1 of the module
+/// doc). It builds each base that `memo` does not hold.
+///
+/// # Errors
+///
+/// Returns [`FirError::Fuel`] when the fuel runs out.
+fn members(
+    program: &Program,
+    conv: &CallConv,
+    root: u64,
+    memo: &mut Memo,
+    fuel: &mut Fuel,
+) -> Result<Vec<u64>, FirError> {
+    let bases = &mut memo.bases;
     let mut members = BTreeSet::from([root]);
     let mut stack = vec![(root, 0usize)];
     let mut order = Vec::new();
@@ -284,7 +311,7 @@ pub fn solve(
         if members.contains(&t) || members.len() >= MAX_SOLVE {
             continue;
         }
-        if let std::collections::btree_map::Entry::Vacant(slot) = bases.entry(t) {
+        if let Entry::Vacant(slot) = bases.entry(t) {
             slot.insert(build(program, conv, t, fuel)?);
         }
         if bases.get(&t).is_some_and(Option::is_some) {
@@ -292,17 +319,40 @@ pub fn solve(
             stack.push((t, 0));
         }
     }
-    let mut state: BTreeMap<u64, State> = BTreeMap::new();
-    for u in &members {
+    Ok(order)
+}
+
+/// Recovers the parameters of the published function `id` like [`solve`], with the bases
+/// and the results of `memo`. The result goes into `memo`.
+///
+/// # Errors
+///
+/// Returns the [`FirError`] of the function IR of `id`, and [`FirError::Fuel`] when the fuel
+/// runs out. A callee whose IR does not build reads no register.
+pub fn solve_in(
+    program: &Program,
+    id: FuncId,
+    conv: &CallConv,
+    memo: &mut Memo,
+    fuel: &mut Fuel,
+) -> Result<Solved, FirError> {
+    let root = id.0.off;
+    if let Some(found) = memo.solved.get(&root) {
+        return Ok(found.clone());
+    }
+    if !memo.bases.get(&root).is_some_and(Option::is_some) {
+        let ir = fir::build(program, id, &Opts::DEFAULT, fuel)?;
+        let base = Base::new(program, conv, ir, fuel)?;
+        memo.bases.insert(root, Some(base));
+    }
+    let order = members(program, conv, root, memo, fuel)?;
+    let bases = &memo.bases;
+    let mut state: BTreeMap<u64, Solved> = BTreeMap::new();
+    for u in &order {
         if let Some(Some(b)) = bases.get(u) {
             let live = b.live.clone();
-            state.insert(
-                *u,
-                State {
-                    live,
-                    params: b.params,
-                },
-            );
+            let params = b.params;
+            state.insert(*u, Solved { params, live });
         }
     }
     let rounds = order.len().saturating_mul(4).saturating_add(4);
@@ -318,12 +368,14 @@ pub fn solve(
                 continue;
             }
             let params = cc::from_live(&base.ir, conv, &live);
-            state.insert(*u, State { live, params });
+            state.insert(*u, Solved { params, live });
             changed = true;
         }
         if !changed {
             break;
         }
     }
-    Ok(state.get(&root).map_or_else(Params::default, |s| s.params))
+    let out = state.remove(&root).unwrap_or_default();
+    memo.solved.insert(root, out.clone());
+    Ok(out)
 }
