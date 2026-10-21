@@ -65,8 +65,8 @@ fn pool() -> Vec<(&'static str, Value)> {
 /// The members of a step entry that equal the members of the direct envelope.
 const SAME: [&str; 6] = ["ok", "data", "page", "warnings", "next", "error"];
 
-/// The members of the data of an edit that name its commit: the batch has one commit for all
-/// of its edits, and the direct calls have one commit each.
+/// The members of the data of an edit that name its commit. The batch has one commit for all
+/// of its edits. The direct calls have one commit each.
 const COMMIT_MEMBERS: [&str; 2] = ["rev", "tx"];
 
 /// The tools whose results read the journal of committed transactions.

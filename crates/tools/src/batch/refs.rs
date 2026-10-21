@@ -428,7 +428,7 @@ fn value_at(source: &Value, path: &str) -> Option<Value> {
 }
 
 /// Gives the candidate paths of the data of `source` for the argument `spec` of reference
-/// `r`: the paths whose value fits, or all paths when no value fits.
+/// `r`: the paths whose value fits. When no value fits, it gives all paths.
 fn fit_paths(r: &Reference, spec: &ArgSpec, source: &Value) -> Vec<String> {
     pick(data_paths(r, source).into_iter().map(|p| {
         let fit = value_at(source, &p).is_some_and(|v| check_value(spec, &v).is_ok());
@@ -444,7 +444,7 @@ fn fit_paths(r: &Reference, spec: &ArgSpec, source: &Value) -> Vec<String> {
 ///
 /// Returns `BAD_REFERENCE` for a truncated source page without `partial`, a missing path, or
 /// a value that does not fit the argument. The candidates are the paths of the source data.
-/// For a value that does not fit, the paths whose values fit come first.
+/// For a value that does not fit, the candidates are the paths whose values fit.
 /// Returns `PLUCK_TOO_LONG` with `details: { count, cap }` when a `*` pointer gives more
 /// values than the cap of the target list.
 pub fn resolve(r: &Reference, source: &Value, step: usize) -> Result<Value, ToolError> {
