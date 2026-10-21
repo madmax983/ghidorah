@@ -257,8 +257,96 @@ fn list_shapes<B: Backend>(name: &str) {
     }
 }
 
+/// The 23 tools of the full profile in the fixed `tools/list` order of design Section 10.3.
+const CATALOG: [&str; 23] = [
+    "binary_load",
+    "binary_survey",
+    "analysis_run",
+    "func_list",
+    "func_get",
+    "xref_list",
+    "search",
+    "mem_read",
+    "addr_info",
+    "calc",
+    "fact_check",
+    "type_get",
+    "history_list",
+    "session_brief",
+    "tool_search",
+    "symbol_rename",
+    "comment_set",
+    "note_write",
+    "func_edit",
+    "type_edit",
+    "history_undo",
+    "batch_run",
+    "func_similar",
+];
+
+/// The `mini` tools of design Section 10.3 in the catalog order.
+const MINI: [&str; 10] = [
+    "binary_load",
+    "binary_survey",
+    "func_list",
+    "func_get",
+    "xref_list",
+    "search",
+    "tool_search",
+    "symbol_rename",
+    "note_write",
+    "batch_run",
+];
+
+/// The `readonly` tools of design Section 10.3 in the catalog order: tools 2, 4 to 15, 22
+/// (`batch_run`) and 23.
+const READONLY: [&str; 15] = [
+    "binary_survey",
+    "func_list",
+    "func_get",
+    "xref_list",
+    "search",
+    "mem_read",
+    "addr_info",
+    "calc",
+    "fact_check",
+    "type_get",
+    "history_list",
+    "session_brief",
+    "tool_search",
+    "batch_run",
+    "func_similar",
+];
+
+/// Gives the tool names of the shipped `tools/list` of `profile`, in list order.
+fn shipped_names(name: &str, profile: Profile) -> Vec<String> {
+    let mut options = Options::new(&env(name), LABEL);
+    options.profile = profile;
+    mcp_tools_list::<Shipped>(&options)
+        .get("tools")
+        .and_then(Value::as_array)
+        .expect("tools")
+        .iter()
+        .filter_map(|t| t.get("name").and_then(Value::as_str).map(str::to_owned))
+        .collect()
+}
+
 #[test]
 fn ac_174_tools_list_shape() {
+    // The fixed order of the design, not of the registry.
+    for (profile, want) in [
+        (Profile::Full, &CATALOG[..]),
+        (Profile::Mini, &MINI[..]),
+        (Profile::Readonly, &READONLY[..]),
+    ] {
+        let names = shipped_names("shape_fixed", profile);
+        assert_eq!(names, want, "{profile:?}: the fixed order of Section 10.3");
+        let mut at = CATALOG.iter();
+        assert!(
+            want.iter().all(|w| at.any(|c| c == w)),
+            "{profile:?}: an ordered subsequence of the catalog"
+        );
+    }
     list_shapes::<TestHost>("shape_test");
     list_shapes::<Shipped>("shape_shipped");
     let options = Options::new(&env("shape_error"), LABEL);
