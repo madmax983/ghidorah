@@ -2,7 +2,7 @@
 //!
 //! The key is `(FuncId, func_epoch, options hash)`. A rename, a retype, a comment or a
 //! signature change of the function or of a callee changes `func_epoch` (design Section 3.8),
-//! so the next lookup misses. The cache holds at most its capacity of outputs. A full cache
+//! so the next lookup misses. The target of a tail jump is a callee too. The cache holds at most its capacity of outputs. A full cache
 //! drops the entry with the oldest use. The use counter is a plain counter, so the order is
 //! deterministic.
 //!

@@ -506,6 +506,13 @@ fn cache_steps(p: &Program, run: u64, finish: u64, var: &VarId) -> Vec<(&'static
             }),
         ),
         (
+            "signature of the function",
+            Box::new(move |tx| Edit::SetSignature {
+                id: fid(run),
+                sig: Some(tx.fact(sig)),
+            }),
+        ),
+        (
             "comment in the body",
             Box::new(move |tx| Edit::SetComment {
                 addr: Address::ram(run),
@@ -565,6 +572,78 @@ fn ac_104b_cache_invalidation() {
     assert!(
         text.contains("int count") || text.contains("count"),
         "{text}"
+    );
+    tail_callee_edits_miss();
+}
+
+/// Gives the function edit of a rename of `addr` to `name`.
+fn rename_to(addr: u64, name: &'static str) -> impl FnOnce(&ghidorah_db::Tx<'_>) -> Edit {
+    move |tx| Edit::SetName {
+        addr: Address::ram(addr),
+        key: None,
+        kind: SymKind::Function,
+        primary: true,
+        name: Some(tx.fact(name.to_owned())),
+        evidence: Vec::new(),
+    }
+}
+
+/// `run` of `hello.gcc-O2` ends with a tail jump to `finish`, and the text prints it as
+/// `return finish(..)`. A rename or a signature change of `finish` makes the lookup miss.
+fn tail_callee_edits_miss() {
+    let mut p = program("hello.gcc-O2").clone();
+    let (run, finish) = (entry_of(&p, "run"), entry_of(&p, "finish"));
+    let opts = Opts::default();
+    let mut cache = Cache::new(8);
+    let mut look = |p: &Program| {
+        cache
+            .render(p, fid(run), &opts, &NoNames, &mut Fuel::unlimited())
+            .expect("the render")
+    };
+    let (first, hit) = look(&p);
+    assert!(!hit, "the first lookup misses");
+    assert!(first.text().contains("return finish("), "{}", first.text());
+    commit(&mut p, rename_to(finish, "finish_renamed"));
+    let (out, hit) = look(&p);
+    assert!(
+        !hit,
+        "the lookup after the rename of the tail callee misses"
+    );
+    assert!(out.text().contains("finish_renamed("), "{}", out.text());
+    assert!(look(&p).1, "the lookup after the rename hits again");
+    let sig = type_where(&p, |t| matches!(t, Type::Func(_)));
+    commit(&mut p, |tx| Edit::SetSignature {
+        id: fid(finish),
+        sig: Some(tx.fact(sig)),
+    });
+    assert!(
+        !look(&p).1,
+        "the lookup after the signature of the tail callee misses"
+    );
+}
+
+#[test]
+fn regress_tail_callee_rename_misses_cache() {
+    let mut p = program("hello.gcc-O2").clone();
+    let (run, finish) = (entry_of(&p, "run"), entry_of(&p, "finish"));
+    let before = p.func_epoch(fid(run));
+    commit(&mut p, rename_to(finish, "finish_renamed"));
+    assert!(
+        p.func_epoch(fid(run)) > before,
+        "the rename of the tail callee changes the epoch of run"
+    );
+    let out = ghidorah_decomp::render(
+        &p,
+        fid(run),
+        &Opts::default(),
+        &NoNames,
+        &mut Fuel::unlimited(),
+    )
+    .expect("the render");
+    assert!(
+        out.text().contains("return finish_renamed("),
+        "{}",
+        out.text()
     );
 }
 
