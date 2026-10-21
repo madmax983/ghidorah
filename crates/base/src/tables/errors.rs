@@ -66,7 +66,7 @@ pub(crate) const fn info(code: ErrorCode) -> CodeInfo {
             H,
             false,
             "The tool {tool} does not exist. No tool in the registry has this name. Use a name from the candidates.",
-            "Call next[0] to search the tools.",
+            "Call next[0] to find the tools that match the name.",
         )
         .with_plain("Use a tool name from tools/list."),
         E::ToolNotInProfile => row(
@@ -95,7 +95,9 @@ pub(crate) const fn info(code: ErrorCode) -> CodeInfo {
             "The address is not in a memory region of the binary. The binary has no bytes at this address. Use an address from the candidates.",
             "The candidates hold the nearest addresses in a region.",
         )
-        .with_plain("Call binary_survey to see the memory regions of the binary."),
+        .with_plain(
+            "Use an address in a memory region of the binary. Call binary_survey to see the memory regions.",
+        ),
         E::AddressBaseAmbiguous => row(
             code,
             "ADDRESS_BASE_AMBIGUOUS",
@@ -110,9 +112,9 @@ pub(crate) const fn info(code: ErrorCode) -> CodeInfo {
             C,
             false,
             "The name matches more than one entity. The server does not pick a match. Use a candidate value.",
-            "Each candidate value is a sym: form or a name@0x form.",
+            "Each candidate value is a name@0x form, an ID or an address.",
         )
-        .with_plain("Send the name as a sym: form or a name@0x form."),
+        .with_plain("Send a name@0x form, an ID or an address of one match."),
         E::NotFound => row(
             code,
             "NOT_FOUND",
@@ -121,7 +123,9 @@ pub(crate) const fn info(code: ErrorCode) -> CodeInfo {
             "The {kind} does not exist. No entity of this kind has this ID or name. Use a candidate value or search for the entity.",
             "The candidates hold the closest names.",
         )
-        .with_plain("Call search to find the entity by name or by kind."),
+        .with_plain(
+            "Use an ID or a name from an earlier result. Call search to find the entity by name or by kind.",
+        ),
         E::UnknownBinary => row(
             code,
             "UNKNOWN_BINARY",
@@ -172,7 +176,7 @@ pub(crate) const fn info(code: ErrorCode) -> CodeInfo {
             N,
             false,
             "The binary has no x86-64 code. Code features work only on x86-64 binaries. Use the survey tools for this binary.",
-            "The tools binary_survey and search work on every binary.",
+            "Only code features need x86-64 code. The tool binary_survey works on every binary. The tool search works on every binary.",
         ),
         E::FormatMalformed => row(
             code,
@@ -208,7 +212,7 @@ pub(crate) const fn info(code: ErrorCode) -> CodeInfo {
             "The call conflicts with the current state. The expected_rev differs from the current rev, or a later transaction changed the same facts. Read the later edits before you send the call again.",
             "Send next[0] to read the later edits. The candidates hold the call with the current rev or the later transactions.",
         )
-        .with_plain("Call history_list to read the later edits. Read rev in this result. Send the call again with that rev as expected_rev."),
+        .with_plain("Call history_list to read the later edits. Read the current facts of the target first. Then send the call again with details.current_rev as expected_rev."),
         E::BlockedByHigherPrioritySource => row(
             code,
             "BLOCKED_BY_HIGHER_PRIORITY_SOURCE",
@@ -346,10 +350,12 @@ pub(crate) const fn info(code: ErrorCode) -> CodeInfo {
             "NO_BINARY_OPEN",
             H,
             false,
-            "No binary is open. The call needs an open binary. Load a binary with binary_load.",
+            "No binary is open. The call needs an open binary. Load a binary or open a project first.",
             "Send next[0]. It lists the projects or opens the newest project.",
         )
-        .with_plain("Send binary_load with a path under a root of the server."),
+        .with_plain(
+            "Send binary_load with a path under a root of the server. The --open option of the server opens a project at the start.",
+        ),
         E::NothingToRedo => row(
             code,
             "NOTHING_TO_REDO",

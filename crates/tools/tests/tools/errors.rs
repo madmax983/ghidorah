@@ -4,6 +4,7 @@ use std::path::PathBuf;
 
 use ghidorah_base::{ErrorCode, FixedClock, WarningCode};
 use ghidorah_json::Value;
+use ghidorah_testkit::elf::{ElfBuilder, Loc, Section, Symbol};
 use ghidorah_tools::args::parse_strict;
 use ghidorah_tools::errors::{ERROR_CAP, MAX_CANDIDATES, cut};
 use ghidorah_tools::{
@@ -510,4 +511,59 @@ fn regress_unknown_argument_repair_wraps_list() {
             .unwrap_or_default();
         assert!(hint.contains("next[0]"), "{envelope}");
     }
+}
+
+/// The value of an `AMBIGUOUS_NAME` candidate of a hostile name is the address. So the hint
+/// and the plain hint name the address form (r3-surface-07).
+#[test]
+fn regress_ambiguous_hint_names_address_form() {
+    let evil = "\u{202e}evil";
+    let at = |off| Loc::section(".text", off);
+    let b = ElfBuilder::exec()
+        .section(Section::code(".text", &[0xc3; 4]))
+        .symbol(Symbol::func("main", at(0), 1))
+        .symbol(Symbol::func(evil, at(1), 1))
+        .symbol(Symbol::func(evil, at(2), 1).local())
+        .entry(Loc::symbol("main"));
+    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("tools_ambiguous_hint");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("the temp directory exists");
+    std::fs::write(dir.join("input.elf"), b.build()).expect("the file writes");
+    let roots = Roots::new(&dir, &[PathBuf::from(".")]).expect("the root is valid");
+    let mut s = Session::with_registry(
+        <Session as Host>::registry(),
+        SessionConfig::new(roots),
+        Box::new(FixedClock::new(0)),
+    );
+    let registry = s.active_registry();
+    let mut send = |tool: &str, args: Value| {
+        dispatch_with(&registry, &mut s, &Request::new(tool, args)).to_json()
+    };
+    let path = Value::object([("path", Value::from("input.elf"))]);
+    assert_eq!(code(&send("binary_load", path)), "");
+    let envelope = send("func_get", Value::object([("target", Value::from(evil))]));
+    assert_eq!(code(&envelope), "AMBIGUOUS_NAME", "{envelope}");
+    let candidates = envelope
+        .pointer("/error/candidates")
+        .and_then(Value::as_array)
+        .unwrap_or_default();
+    assert_eq!(candidates.len(), 2, "{envelope}");
+    for c in candidates {
+        let value = c.get("value").and_then(Value::as_str).unwrap_or_default();
+        assert!(
+            value.starts_with("0x"),
+            "{value:?} is an address: {envelope}"
+        );
+    }
+    let hint = envelope
+        .pointer("/error/hint")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    assert!(hint.contains("an address"), "{envelope}");
+    assert!(!hint.contains("sym:"), "{envelope}");
+    let plain = ToolError::new(ErrorCode::AmbiguousName)
+        .plain_hint()
+        .hint(false);
+    assert!(plain.contains("an address"), "{plain}");
+    assert!(!plain.contains("sym:"), "{plain}");
 }

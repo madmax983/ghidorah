@@ -138,13 +138,28 @@ fn ranked(pos: usize, value: Value) -> Item {
     }
 }
 
-/// Gives the `NOT_FOUND` error of an unknown tool name with the nearest active names.
+/// Gives the `NOT_FOUND` error of an unknown tool name.
+///
+/// The candidates are the active tools with the nearest names. With no near name, they are the
+/// active tools in the rank order of the words of the name, else every active tool. So the
+/// error always has candidates, and its hint names the candidates, not the `search` tool.
 fn unknown_tool(name: &str, tools: &[&'static ToolSpec<Session>]) -> ToolError {
     let mut fuel = Fuel::new(DYM_FUEL);
-    let names = tools.iter().map(|t| t.name);
-    let candidates = did_you_mean(name, names, &mut fuel)
-        .into_iter()
-        .map(|s| Candidate::text(&s.name, "tool"))
+    let near = did_you_mean(name, tools.iter().map(|t| t.name), &mut fuel);
+    let mut names: Vec<String> = near.into_iter().map(|s| s.name).collect();
+    if names.is_empty() {
+        names = rank(tools, name)
+            .into_iter()
+            .filter_map(|(i, _)| tools.get(i))
+            .map(|t| t.name.to_owned())
+            .collect();
+    }
+    if names.is_empty() {
+        names = tools.iter().map(|t| t.name.to_owned()).collect();
+    }
+    let candidates = names
+        .iter()
+        .map(|name| Candidate::text(name, "tool"))
         .collect();
     ToolError::new(ErrorCode::NotFound)
         .var("kind", "tool")
