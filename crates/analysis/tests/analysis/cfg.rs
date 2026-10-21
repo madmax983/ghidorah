@@ -1,53 +1,18 @@
-//! The CFG of a function and its invariants (AC-083).
-
-use std::collections::BTreeSet;
+//! The CFG of a function and its invariants. The `ir_analyzers` tests check them on the
+//! fixtures (AC-083).
 
 use ghidorah_analysis::cfg::{self, Block, CfgViolation, Edge, EdgeKind, FuncCfg};
 use ghidorah_base::{Address, FuncId, JumpTableId};
 use ghidorah_db::{Edit, JtMethod, JumpTable, SessionLabel, Source};
 
 use crate::blobs::{BASE, Blob};
-use crate::support::{all_t1, analyze};
+use crate::support::analyze;
 
 fn kinds(g: &FuncCfg) -> Vec<(u64, Option<u64>, EdgeKind)> {
     g.edges
         .iter()
         .map(|e| (e.from - BASE, e.to.map(|t| t.off - BASE), e.kind))
         .collect()
-}
-
-#[test]
-fn ac_083_cfg_invariants() {
-    let mut funcs = 0usize;
-    for (path, p) in all_t1() {
-        for view in p.funcs() {
-            funcs += 1;
-            let g = cfg::build(p, view.id()).expect("a CFG");
-            let found = cfg::check(&g);
-            assert!(found.is_empty(), "{path}: {}: {found:?}", view.id());
-            let mut seen = BTreeSet::new();
-            for block in &g.blocks {
-                for (at, _) in &block.insns {
-                    assert!(seen.insert(*at), "{path}: {at:#x} is in two blocks");
-                    assert!(view.func.body.contains(*at));
-                }
-            }
-            let units: usize = view
-                .func
-                .body
-                .ranges()
-                .iter()
-                .map(|r| p.analysis().listing().units_in(*r).count())
-                .sum();
-            assert_eq!(
-                units,
-                seen.len(),
-                "{path}: {}: each unit is in a block",
-                view.id()
-            );
-        }
-    }
-    assert!(funcs > 1_500, "the fixtures hold functions: {funcs}");
 }
 
 #[test]

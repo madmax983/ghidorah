@@ -36,7 +36,8 @@ fn program_of(bytes: &[u8]) -> Program {
     Program::from_binary(binary, mem, &Limits::DEFAULT).expect("from_binary")
 }
 
-/// Gives the fixture paths of the ELF tiers `T1` and `T2` of the manifest.
+/// Gives the fixture paths of the tiers `T1`, `T2` and `PE` of the manifest. Design Section
+/// 12.3 puts the PE32+ fixtures in T1.
 fn fixture_paths() -> Vec<String> {
     let text = std::fs::read_to_string(root().join("fixtures/manifest.json")).expect("manifest");
     let manifest = ghidorah_json::parse(&text, &ghidorah_json::Limits::DEFAULT).expect("JSON");
@@ -45,7 +46,12 @@ fn fixture_paths() -> Vec<String> {
         .and_then(Value::as_array)
         .expect("fixtures list")
         .iter()
-        .filter(|f| matches!(f.get("tier").and_then(Value::as_str), Some("T1" | "T2")))
+        .filter(|f| {
+            matches!(
+                f.get("tier").and_then(Value::as_str),
+                Some("T1" | "T2" | "PE")
+            )
+        })
         .map(|f| {
             f.get("path")
                 .and_then(Value::as_str)
@@ -107,9 +113,9 @@ fn t3_functions(p: &Program) -> Vec<(u64, u64)> {
     out.into_iter().collect()
 }
 
-/// Builds the L1 form of a T3 function from a linear sweep over its bytes. Gives `None`
-/// when a byte run does not decode.
-fn t3_ir(p: &Program, entry: u64, size: u64) -> Option<L1Ir> {
+/// Gives the units of a linear sweep over the bytes of a T3 function. Gives `None` when an
+/// instruction does not decode or has no flow kind: a decoder gap.
+fn t3_units(p: &Program, entry: u64, size: u64) -> Option<BTreeMap<u64, Unit>> {
     let mut units = BTreeMap::new();
     let mut at = entry;
     let end = entry.checked_add(size)?;
@@ -126,6 +132,12 @@ fn t3_ir(p: &Program, entry: u64, size: u64) -> Option<L1Ir> {
         );
         at = at.checked_add(u64::from(insn.len()))?;
     }
+    Some(units)
+}
+
+/// Builds the L1 form of a T3 function from its units. An L0 build or an L1 lift error is a
+/// failure.
+fn t3_ir(p: &Program, entry: u64, units: BTreeMap<u64, Unit>) -> Result<L1Ir, String> {
     let no = |_: u64| false;
     let input = Input {
         entry,
@@ -134,39 +146,61 @@ fn t3_ir(p: &Program, entry: u64, size: u64) -> Option<L1Ir> {
         noreturn: &no,
     };
     let mut fuel = Fuel::new(50_000_000);
-    let l0 = fir::build_units(p, input, &Opts::DEFAULT, &mut fuel).ok()?;
-    l1::lift(l0, &SYSV_X86_64, &Switches::all(), &mut fuel).ok()
+    let l0 = fir::build_units(p, input, &Opts::DEFAULT, &mut fuel)
+        .map_err(|e| format!("{entry:#x}: the L0 build fails: {e}"))?;
+    l1::lift(l0, &SYSV_X86_64, &Switches::all(), &mut fuel)
+        .map_err(|e| format!("{entry:#x}: the L1 lift fails: {e}"))
 }
 
-/// Checks `sample` T3 functions with a fixed seed, or all of them. Gives the checked count,
-/// the skipped count and the failures.
-fn check_t3(sample: Option<usize>) -> (usize, usize, Vec<String>) {
+/// The result of a T3 check.
+struct T3 {
+    /// The functions with an L1 form that the checker ran on.
+    checked: usize,
+    /// The functions with a decoder gap.
+    skipped: usize,
+    /// The functions whose L0 build or L1 lift fails.
+    build_failures: Vec<String>,
+    /// The checker violations.
+    violations: Vec<String>,
+}
+
+/// Checks `sample` decodable T3 functions with a fixed seed, or all T3 functions. A function
+/// with a decoder gap is skipped. The sample draws functions until `sample` of them decode.
+fn check_t3(sample: Option<usize>) -> T3 {
     let exe = std::env::current_exe().expect("the test executable");
     let bytes = std::fs::read(exe).expect("the executable bytes");
     let p = program_of(&bytes);
     let mut all = t3_functions(&p);
-    if let Some(n) = sample {
-        let mut rng = Xoshiro256ss::seed_from_u64(0x0073);
-        let mut picked = Vec::new();
-        while picked.len() < n && !all.is_empty() {
+    let mut rng = Xoshiro256ss::seed_from_u64(0x0073);
+    let mut out = T3 {
+        checked: 0,
+        skipped: 0,
+        build_failures: Vec::new(),
+        violations: Vec::new(),
+    };
+    let mut decoded = 0;
+    while !all.is_empty() && sample.is_none_or(|n| decoded < n) {
+        let (entry, size) = if sample.is_some() {
             let len = u64::try_from(all.len()).expect("a count");
             let k = usize::try_from(below(&mut rng, len)).expect("an index");
-            picked.push(all.swap_remove(k));
-        }
-        all = picked;
-    }
-    let (mut checked, mut skipped) = (0, 0);
-    let mut failures = Vec::new();
-    for (entry, size) in all {
-        match t3_ir(&p, entry, size) {
-            Some(ir) => {
-                checked += 1;
-                failures.extend(violations(&ir));
+            all.swap_remove(k)
+        } else {
+            all.remove(0)
+        };
+        let Some(units) = t3_units(&p, entry, size) else {
+            out.skipped += 1;
+            continue;
+        };
+        decoded += 1;
+        match t3_ir(&p, entry, units) {
+            Ok(ir) => {
+                out.checked += 1;
+                out.violations.extend(violations(&ir));
             }
-            None => skipped += 1,
+            Err(e) => out.build_failures.push(e),
         }
     }
-    (checked, skipped, failures)
+    out
 }
 
 #[test]
@@ -208,34 +242,49 @@ fn ac_073_ssa_invariants() {
         failures.len(),
         failures.iter().take(10).collect::<Vec<_>>()
     );
-    let (checked, skipped, t3) = check_t3(Some(300));
+    let t3 = check_t3(Some(300));
     assert!(
-        checked >= 290,
-        "only {checked} T3 functions checked, {skipped} skipped"
+        t3.build_failures.is_empty(),
+        "T3 build failures:\n{:#?}",
+        &t3.build_failures[..t3.build_failures.len().min(10)]
+    );
+    assert_eq!(
+        t3.checked, 300,
+        "the T3 sample, {} decoder gaps skipped",
+        t3.skipped
     );
     assert!(
-        t3.is_empty(),
+        t3.violations.is_empty(),
         "T3 violations:\n{:#?}",
-        &t3[..t3.len().min(10)]
+        &t3.violations[..t3.violations.len().min(10)]
     );
 }
 
 #[test]
 #[ignore = "tier2"]
 fn ac_073_ssa_invariants_t3() {
-    let (checked, skipped, t3) = check_t3(None);
+    let t3 = check_t3(None);
     assert!(
-        checked > 1_000,
-        "only {checked} T3 functions checked, {skipped} skipped"
+        t3.checked > 1_000,
+        "only {} T3 functions checked, {} skipped",
+        t3.checked,
+        t3.skipped
     );
     assert!(
-        skipped * 100 <= checked,
-        "{skipped} T3 functions do not build"
+        t3.skipped * 100 <= t3.checked,
+        "{} T3 functions have a decoder gap",
+        t3.skipped
     );
     assert!(
-        t3.is_empty(),
+        t3.build_failures.is_empty(),
+        "{} T3 build failures:\n{:#?}",
+        t3.build_failures.len(),
+        &t3.build_failures[..t3.build_failures.len().min(10)]
+    );
+    assert!(
+        t3.violations.is_empty(),
         "T3 violations:\n{:#?}",
-        &t3[..t3.len().min(10)]
+        &t3.violations[..t3.violations.len().min(10)]
     );
 }
 

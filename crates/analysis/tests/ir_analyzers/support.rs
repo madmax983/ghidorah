@@ -61,6 +61,21 @@ pub fn fixtures() -> Vec<Fixture> {
         .collect()
 }
 
+/// Gives the paths of the PE32+ fixtures of the manifest (tier `PE`) in manifest order.
+/// Design Section 12.3 puts them in T1.
+pub fn pe_paths() -> Vec<String> {
+    let text = std::fs::read_to_string(root().join("fixtures/manifest.json")).expect("manifest");
+    json(&text)
+        .get("fixtures")
+        .and_then(Value::as_array)
+        .expect("fixtures list")
+        .iter()
+        .filter(|f| f.get("tier").and_then(Value::as_str) == Some("PE"))
+        .filter_map(|f| f.get("path").and_then(Value::as_str))
+        .map(str::to_owned)
+        .collect()
+}
+
 /// Loads the fixture at `path` under the root.
 pub fn program(path: &str) -> Program {
     let bytes = std::fs::read(root().join(path)).expect("the fixture bytes");
