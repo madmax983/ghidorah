@@ -1670,7 +1670,7 @@ Repair classes: **R** (repair): `next[0]` is the complete corrected call, so a c
 | 1 | `INVALID_ARGUMENT` | N | no | Value has the wrong type or range. | `field_path`, `details.expected`. For `details.reason: "load_spec_differs"`: `details.stored` and `next[0]` `binary_load { binary_id }` (Section 10.4). |
 | 2 | `UNKNOWN_ARGUMENT` | R | no | Key is not in the schema. | Candidates: closest fields. `next[0]`: the key renamed or removed. When that call fails its argument check: `tool_search { name, level: "full" }`. |
 | 3 | `MISSING_ARGUMENT` | H | no | A required key is absent. | `details: { action?, example }`. `next[0]`: `tool_search { name, level: "full" }`. |
-| 4 | `UNKNOWN_TOOL` | H | no | Tool name is unknown (batch step). | Candidates. `next[0]`: `tool_search { query }`. |
+| 4 | `UNKNOWN_TOOL` | H | no | Tool name is unknown (batch step). | Candidates: did-you-mean, else the tools with a full name word of the query (`undo` gives `history_undo`). `next[0]`: `tool_search { query }`. |
 | 5 | `TOOL_NOT_IN_PROFILE` | H | no | Tool is outside the active profile, or a batch step is destructive. | `details.reason`: `not_in_profile` or `destructive_in_batch`. For `not_in_profile`: candidates (the active tools with close names) and `next[0]` `tool_search { query: <tool> }` when `tool_search` is active. For a destructive step: `next[0]` is the direct call. |
 | 6 | `ADDRESS_INVALID` | R* | no | Address text does not parse, or a JSON integer is 2^53 or more. | `next[0]` for a large integer (hex string) or hex text with letters and no `0x` (prefix added). |
 | 7 | `ADDRESS_UNMAPPED` | C | no | Address is not in a mapped region. | Candidates: nearest mapped VAs. |

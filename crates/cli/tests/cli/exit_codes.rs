@@ -44,6 +44,18 @@ fn ac_150_cli_exit_codes() {
         Some("UNKNOWN_TOOL")
     );
 
+    // A name word of a tool gives that tool as a candidate.
+    let undo = run_binary(&["call", "undo", "{}"], "");
+    assert_eq!(undo.code, 1, "{}", undo.stderr);
+    assert_eq!(
+        json(&undo.stdout)
+            .pointer("/error/candidates/0/value")
+            .and_then(|v| v.as_str()),
+        Some("history_undo"),
+        "{}",
+        undo.stdout
+    );
+
     // Code 2: usage errors write nothing to stdout.
     for args in [
         &["--bogus"][..],

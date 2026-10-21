@@ -131,6 +131,21 @@ fn unknown_tool_and_profile() {
     assert_eq!(code(&run("echo_value", "[]")), "INVALID_ARGUMENT");
 }
 
+/// A name with no near tool name gets the tools that share a name word with it.
+#[test]
+fn regress_unknown_tool_word_candidates() {
+    let envelope = run("get", "{}");
+    assert_eq!(code(&envelope), "UNKNOWN_TOOL");
+    assert_eq!(
+        envelope
+            .pointer("/error/candidates/0/value")
+            .and_then(Value::as_str),
+        Some("item_get"),
+        "{}",
+        text(&envelope)
+    );
+}
+
 #[test]
 fn frame_binds_the_binary() {
     let mut host = TestHost::default();

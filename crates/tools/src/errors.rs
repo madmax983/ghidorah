@@ -18,7 +18,7 @@ use std::fmt;
 use std::ops::{Deref, DerefMut};
 
 use ghidorah_base::catalog::render;
-use ghidorah_base::{ErrorCode, Fuel, did_you_mean};
+use ghidorah_base::{ErrorCode, Fuel, did_you_mean, word_matches};
 use ghidorah_json::{Number, Object, Value};
 
 use crate::content::chars;
@@ -402,6 +402,32 @@ pub fn cut(text: &str, max: usize) -> String {
 /// The fuel of the did-you-mean scan of a tool name.
 const DYM_FUEL: u64 = 100_000;
 
+/// Gives the candidates of the tool name `tool` from `names`.
+///
+/// The candidates are the names near `tool` ([`did_you_mean`]). With no near name, they are
+/// the names that share a full word with `tool` ([`word_matches`]), for example
+/// `history_undo` for `undo`.
+pub(crate) fn tool_candidates(tool: &str, names: &[&str]) -> Vec<Candidate> {
+    let mut fuel = Fuel::new(DYM_FUEL);
+    let near: Vec<String> = did_you_mean(tool, names.iter().copied(), &mut fuel)
+        .into_iter()
+        .map(|s| s.name)
+        .collect();
+    let found = if near.is_empty() {
+        let mut fuel = Fuel::new(DYM_FUEL);
+        word_matches(tool, names.iter().copied(), &mut fuel)
+            .into_iter()
+            .map(str::to_owned)
+            .collect()
+    } else {
+        near
+    };
+    found
+        .iter()
+        .map(|name| Candidate::text(name, "tool"))
+        .collect()
+}
+
 /// Gives the name of the active tool set for a hint, for example `the mini profile`.
 ///
 /// `in_profile` tells if the active set holds a tool. A set that matches no profile of the
@@ -426,7 +452,8 @@ pub(crate) fn profile_label<S: 'static>(
 
 /// Gives the `TOOL_NOT_IN_PROFILE` error of `tool` with the reason `not_in_profile`.
 ///
-/// The hint names the active tool set. The candidates are the active tools with close names.
+/// The hint names the active tool set. The candidates are the active tools with close names
+/// or a shared name word ([`tool_candidates`]).
 /// The repair call searches the active tools for the name. The pipeline drops it when the
 /// profile has no `tool_search`.
 pub(crate) fn not_in_profile<S: 'static>(
@@ -439,11 +466,7 @@ pub(crate) fn not_in_profile<S: 'static>(
         .into_iter()
         .filter(|name| in_profile(name))
         .collect();
-    let mut fuel = Fuel::new(DYM_FUEL);
-    let candidates = did_you_mean(tool, names.iter().copied(), &mut fuel)
-        .into_iter()
-        .map(|s| Candidate::text(&s.name, "tool"))
-        .collect();
+    let candidates = tool_candidates(tool, &names);
     let query = Value::object([("query", Value::from(tool))]);
     ToolError::new(ErrorCode::ToolNotInProfile)
         .var("tool", tool)
