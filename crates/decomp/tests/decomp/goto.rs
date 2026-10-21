@@ -3,11 +3,24 @@
 use std::collections::BTreeSet;
 
 use ghidorah_base::{Fuel, WarningCode};
-use ghidorah_decomp::{Exit, Expr, Input, NoEnv, Opts, Stmt};
+use ghidorah_decomp::{Exit, Expr, Input, NoEnv, Opts, Output, Stmt};
 use ghidorah_ir::ssa;
-use ghidorah_ir::{Arg, Builder, Loc, Opc, Switches};
+use ghidorah_ir::{Arg, Builder, Loc, NoNames, Opc, Switches};
 
+use crate::fixtures::{fid, program};
 use crate::progs::{body_with, pool_opts};
+
+/// The function of `func_ptrs.gcc-O2` with an unresolved indirect jump, and that jump.
+const REAL: (u64, u64) = (0x1350, 0x1366);
+
+/// Gives the lines of `out` whose span holds `addr`.
+fn lines_at(out: &Output, addr: u64) -> Vec<&str> {
+    out.lines
+        .iter()
+        .filter(|l| l.span.is_some_and(|(s, n)| s <= addr && addr < s + n))
+        .map(|l| l.text.trim_start())
+        .collect()
+}
 
 #[test]
 fn ac_108_computed_goto() {
@@ -69,5 +82,36 @@ fn ac_108_computed_goto() {
             .any(|w| w.code == WarningCode::JumptableUnresolved && w.at == 0x1004),
         "{:?}",
         d.warnings
+    );
+    let out = ghidorah_decomp::finish(d.clone(), &NoEnv, &NoNames, "jump", &d.view.insns);
+    let text = out.text();
+    assert!(text.contains("goto *("), "{text}");
+    assert!(!text.contains("return"), "{text}");
+    assert_eq!(lines_at(&out, 0x1004).len(), 1, "{text}");
+    assert!(lines_at(&out, 0x1004)[0].starts_with("goto *("), "{text}");
+    // A real binary: the facts hold the unresolved jump table, and `ProgramEnv` reads them.
+    let (entry, jump) = REAL;
+    let p = program("func_ptrs.gcc-O2");
+    let out = ghidorah_decomp::render(
+        p,
+        fid(entry),
+        &Opts::default(),
+        &NoNames,
+        &mut Fuel::new(50_000_000),
+    )
+    .expect("the render");
+    let text = out.text();
+    let at = lines_at(&out, jump);
+    assert!(
+        at.iter().any(|l| l.starts_with("goto *(")),
+        "{at:?} in {text}"
+    );
+    assert!(at.iter().all(|l| !l.starts_with("return")), "{text}");
+    assert!(
+        out.warnings
+            .iter()
+            .any(|w| w.code == WarningCode::JumptableUnresolved && w.at == jump),
+        "{:?}",
+        out.warnings
     );
 }

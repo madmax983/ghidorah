@@ -20,7 +20,8 @@ use ghidorah_types::{DataModel, Prim, Type, TypeId, TypeStore};
 
 use crate::fixtures::{entry_of, fid, json, program, root};
 
-/// Gives the T1 and T2 fixtures of the manifest in manifest order, every variant included.
+/// Gives the T1, T2 and PE fixtures of the manifest in manifest order, every variant included.
+/// Design Section 12.3 puts the PE32+ fixtures in T1.
 fn all_fixtures() -> Vec<String> {
     let text = std::fs::read_to_string(root().join("fixtures/manifest.json")).expect("manifest");
     json(&text)
@@ -28,7 +29,12 @@ fn all_fixtures() -> Vec<String> {
         .and_then(Value::as_array)
         .expect("fixtures")
         .iter()
-        .filter(|f| matches!(f.get("tier").and_then(Value::as_str), Some("T1" | "T2")))
+        .filter(|f| {
+            matches!(
+                f.get("tier").and_then(Value::as_str),
+                Some("T1" | "T2" | "PE")
+            )
+        })
         .filter_map(|f| f.get("path").and_then(Value::as_str))
         .map(|p| p.trim_start_matches("fixtures/bin/").to_owned())
         .collect()
@@ -44,12 +50,11 @@ pub struct Item {
     pub out: Output,
 }
 
-/// Renders each function of one fixture, thunks excluded.
+/// Renders each function of one fixture, thunks included.
 fn render_all(name: &str) -> Vec<Item> {
     let p = program(name);
     p.funcs()
         .iter()
-        .filter(|v| !v.func.flags.thunk)
         .map(|v| {
             let entry = v.id().0.off;
             let out = ghidorah_decomp::render(
@@ -69,7 +74,8 @@ fn render_all(name: &str) -> Vec<Item> {
         .collect()
 }
 
-/// Gives the rendered functions of every T1 and T2 fixture. The test binary renders them once.
+/// Gives the rendered functions of every T1, T2 and PE fixture. The test binary renders them
+/// once.
 pub fn corpus() -> &'static [Item] {
     static CORPUS: OnceLock<Vec<Item>> = OnceLock::new();
     CORPUS.get_or_init(|| {
@@ -97,8 +103,31 @@ pub fn corpus() -> &'static [Item] {
     })
 }
 
+/// Makes sure that `items` hold the T2 fixtures, the PE fixtures and the thunks.
+fn assert_wide(items: &[Item]) {
+    assert!(
+        items.iter().any(|i| i.fixture.starts_with("large.")),
+        "the corpus holds the T2 fixtures"
+    );
+    let pe = items
+        .iter()
+        .filter(|i| i.fixture.starts_with("pe/"))
+        .count();
+    assert!(pe > 40, "the corpus holds the PE functions: {pe}");
+    let thunks = items
+        .iter()
+        .filter(|i| {
+            program(&i.fixture)
+                .func(fid(i.entry))
+                .is_some_and(|v| v.func.flags.thunk)
+        })
+        .count();
+    assert!(thunks > 200, "the corpus holds the thunks: {thunks}");
+}
+
 #[test]
 fn ac_106a_selfcheck_ok() {
+    assert_wide(corpus());
     let bad: Vec<String> = corpus()
         .iter()
         .filter(|i| i.out.metrics.validation != Validation::Ok)
@@ -110,6 +139,7 @@ fn ac_106a_selfcheck_ok() {
 #[test]
 fn ac_106b_flat_rate() {
     let items = corpus();
+    assert_wide(items);
     let structured = items
         .iter()
         .filter(|i| i.out.metrics.mode == Mode::Structured)
@@ -165,10 +195,13 @@ fn refs_of(p: &Program, site: u64, kind: impl Fn(RefType) -> bool) -> Vec<u64> {
 /// Gives the call targets of the CFG of a function: the call references from the body sites
 /// and the targets of the tail jumps. A site in a canary or unreachable row has no target.
 /// A call site in another elided row is a problem: the output hides the call.
+///
+/// A thunk has no L1 tail call. Its one target is the target of its single jump: the stub or
+/// the slot of an import, or a function entry.
 fn cfg_targets(p: &Program, entry: u64, out: &Output) -> (BTreeSet<u64>, Vec<String>) {
     let mut want = BTreeSet::new();
     let mut hidden = Vec::new();
-    let mut add = |site: u64, targets: Vec<u64>| {
+    let mut add = |site: u64, targets: Vec<u64>, hidden: &mut Vec<String>| {
         if targets.is_empty() {
             return;
         }
@@ -179,8 +212,23 @@ fn cfg_targets(p: &Program, entry: u64, out: &Output) -> (BTreeSet<u64>, Vec<Str
         }
         want.extend(targets);
     };
+    if p.func(fid(entry)).is_some_and(|v| v.func.flags.thunk) {
+        let jumps: Vec<(u64, Vec<u64>)> = print::body_units(p, fid(entry))
+            .iter()
+            .map(|(site, _)| {
+                let to = refs_of(p, *site, |k| k == RefType::UnconditionalJump);
+                (*site, to)
+            })
+            .filter(|(_, to)| !to.is_empty())
+            .collect();
+        match jumps.as_slice() {
+            [(site, to)] if to.len() == 1 => add(*site, to.clone(), &mut hidden),
+            _ => hidden.push(format!("the thunk has the jumps {jumps:x?}")),
+        }
+        return (want, hidden);
+    }
     for (site, _) in print::body_units(p, fid(entry)) {
-        add(site, refs_of(p, site, RefType::is_call));
+        add(site, refs_of(p, site, RefType::is_call), &mut hidden);
     }
     let ir = l1::build(
         p,
@@ -191,10 +239,8 @@ fn cfg_targets(p: &Program, entry: u64, out: &Output) -> (BTreeSet<u64>, Vec<Str
     )
     .expect("the L1 form");
     for site in &ir.tail_calls {
-        add(
-            *site,
-            refs_of(p, *site, |k| k == RefType::UnconditionalJump),
-        );
+        let to = refs_of(p, *site, |k| k == RefType::UnconditionalJump);
+        add(*site, to, &mut hidden);
     }
     (want, hidden)
 }
@@ -256,11 +302,8 @@ fn corpus_call_problems(items: &[&Item]) -> (Vec<String>, usize) {
 
 #[test]
 fn ac_086b_decomp_calls() {
+    assert_wide(corpus());
     let items: Vec<&Item> = corpus().iter().collect();
-    assert!(
-        items.iter().any(|i| i.fixture.starts_with("large.")),
-        "the corpus holds the T2 fixtures"
-    );
     let (bad, calls) = corpus_call_problems(&items);
     assert!(calls > 500, "only {calls} call targets");
     assert!(
@@ -277,7 +320,13 @@ fn ac_086b_decomp_calls() {
 fn ac_086b_decomp_calls_sees_a_hidden_call() {
     let item = corpus()
         .iter()
-        .find(|i| i.fixture == "hello.gcc-O0" && i.out.lines.iter().any(|l| !l.calls.is_empty()))
+        .find(|i| {
+            i.fixture == "hello.gcc-O0"
+                && i.out.lines.iter().any(|l| !l.calls.is_empty())
+                && !program(&i.fixture)
+                    .func(fid(i.entry))
+                    .is_some_and(|v| v.func.flags.thunk)
+        })
         .expect("a function with a call");
     let p = program(&item.fixture);
     let mut out = item.out.clone();
