@@ -23,7 +23,7 @@ use ghidorah_db::{Program, Types};
 use ghidorah_ir::{Loc, OpId, Opc, rpo};
 use ghidorah_types::CallConv;
 
-use super::{arg_regs, call_targets, fixed, from_sig};
+use super::{arg_regs, call_targets, fixed, proto_params};
 use crate::cc::{self, BlockUse, Params, loc_of};
 use crate::fir::{self, FirError, FuncIr, Image, Opts};
 
@@ -56,7 +56,7 @@ fn callee_of(program: &Program, conv: &CallConv, addr: u64) -> Callee {
             .name()
             .and_then(Types::prototype)
             .map_or(Callee::Import, |p| {
-                Callee::Fixed(arg_regs(conv, &from_sig(&p.sig), None))
+                Callee::Fixed(arg_regs(conv, &proto_params(program, conv, &p.sig), None))
             });
     }
     if program.func(FuncId(at)).is_none() {

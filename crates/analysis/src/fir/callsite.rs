@@ -36,14 +36,17 @@ use std::collections::{BTreeMap, BTreeSet};
 use ghidorah_base::{Address, Fuel, FuncId, OutOfFuel};
 use ghidorah_db::{Program, Types};
 use ghidorah_ir::{Arena, Arg, Loc, OpId, Opc};
-use ghidorah_types::{CallConv, Sig};
+use ghidorah_types::CallConv;
 
 use super::l1::ssa_opts;
 use super::{FirError, FuncIr};
 use crate::cc::{ParamSource, Params, conv_of, loc_of};
 
+mod slots;
 mod solve;
 
+pub(crate) use slots::{declared, fixed, proto_params};
+pub use slots::{fixed_slots, sig_slots};
 pub use solve::{MAX_SOLVE, Memo, Solved, solve, solve_in};
 
 /// The largest count of stack arguments of one call.
@@ -176,9 +179,12 @@ pub fn callee_arity_in(
         .values()
         .find(|r| r.stub == Some(at) || r.slot == Some(at))
     {
-        return Ok(row.id.name().and_then(Types::prototype).map(|proto| Arity {
-            int: u8::try_from(proto.sig.params.len()).unwrap_or(u8::MAX),
-            varargs: proto.sig.variadic,
+        return Ok(row.id.name().and_then(Types::prototype).map(|proto| {
+            let p = proto_params(program, conv, &proto.sig);
+            Arity {
+                int: p.int,
+                varargs: p.varargs,
+            }
         }));
     }
     let mut part = Fuel::new(fuel.remaining().min(CALLEE_FUEL));
@@ -279,30 +285,6 @@ pub fn call_targets(fir: &FuncIr) -> BTreeMap<OpId, u64> {
         }
     }
     out
-}
-
-/// Gives the parameters of a signature.
-fn from_sig(sig: &Sig) -> Params {
-    Params {
-        int: u8::try_from(sig.params.len()).unwrap_or(u8::MAX),
-        float: 0,
-        stack: 0,
-        varargs: sig.variadic,
-    }
-}
-
-/// Gives the parameters that a fact gives the published function `id`: its signature, then
-/// the Tier-0 prototype of its name. A function with no such fact gives `None`.
-pub(crate) fn fixed(program: &Program, id: FuncId) -> Option<(Params, ParamSource)> {
-    let view = program.func(id)?;
-    if let Some(sig) = view.sig.and_then(|s| program.types().sig(s.value)) {
-        return Some((from_sig(sig), ParamSource::Signature));
-    }
-    let proto = program
-        .name(id.0)
-        .filter(|n| !n.is_default())
-        .and_then(|n| Types::prototype(&n.text))?;
-    Some((from_sig(&proto.sig), ParamSource::Prototype))
 }
 
 /// Gives the argument registers that a call reads, in slot order.

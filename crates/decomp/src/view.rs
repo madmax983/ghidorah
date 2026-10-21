@@ -65,19 +65,27 @@ pub trait Env {
         None
     }
 
-    /// Gives the count of the parameter slots of the function at `addr`: from its signature,
-    /// its Tier-0 prototype or the parameter recovery. The stack parameters come after all
-    /// integer argument registers. A positional convention counts its floating slots too.
-    /// The default knows no count.
+    /// Gives the count of the integer and stack parameter slots of the function at `addr`:
+    /// from its signature, its Tier-0 prototype or the parameter recovery. The stack
+    /// parameters come after all integer argument registers. A positional convention counts
+    /// its floating slots too. The floating slots of another convention are in
+    /// [`Env::param_slots`]. The default knows no count.
     fn param_count(&self, addr: u64) -> Option<u8> {
         let _ = addr;
         None
     }
 
-    /// Gives the argument register of each parameter slot of the function at `addr`, in slot
-    /// order: the choice of the parameter recovery. In a positional convention, a slot is a
-    /// floating slot when the recovery reads only its floating register. A count of a signature
-    /// or a prototype, and the default, give `None`.
+    /// Gives the location of each parameter slot of the function at `addr`, in slot order.
+    ///
+    /// - In a positional convention, the list holds the register of each register slot that
+    ///   the parameter recovery chose. A slot is a floating slot when the recovery reads only
+    ///   its floating register. A signature or a prototype gives `None`.
+    /// - Another convention (`SysV`) numbers its integer and floating slots apart. The list
+    ///   holds the integer registers, then the floating registers, then the stack slots
+    ///   `Stack(k)` of the recovery. A signature or a prototype gives each parameter the next
+    ///   register of its class, or a stack slot.
+    ///
+    /// The default gives `None`.
     fn param_slots(&self, addr: u64) -> Option<Vec<Loc>> {
         let _ = addr;
         None
@@ -238,6 +246,11 @@ pub struct View {
     pub sources: BTreeMap<OpId, OpId>,
     /// The kind of the floating return of the function. Then each return reads `xmm0`.
     pub float_ret: Option<FloatRet>,
+    /// The location of each parameter slot in slot order, in a convention that numbers its
+    /// integer and floating slots apart ([`Env::param_slots`]). The slots that the body reads
+    /// can add integer and stack slots to a recovered count. `None` when the facts give no
+    /// slots or the convention is positional.
+    pub params: Option<Vec<Loc>>,
 }
 
 impl View {
@@ -330,17 +343,30 @@ pub fn build(
     };
     let mut raws: Vec<Raw> = f.reach.iter().map(|&b| stmts::block(&ex, b)).collect();
     let read = crate::vars_names::read_slots(&f, input.conv);
+    let info = env.param_info(entry);
+    let layout = input.conv.filter(|c| !c.positional).and_then(|c| {
+        let grows = info.is_some_and(|i| i.grows());
+        Some(crate::vars_names::layout(
+            &f,
+            c,
+            env.param_slots(entry)?,
+            grows,
+        ))
+    });
     let cx = vars::Ctx {
         f: &f,
         raws: &raws,
         l0: input.l0,
         conv: input.conv,
         entry,
-        params: env.param_info(entry).map(|i| {
-            let n = u16::from(i.count);
-            if i.grows() { n.max(read) } else { n }
-        }),
-        slots: env.param_slots(entry),
+        params: match &layout {
+            Some(l) => Some(u16::try_from(l.len()).unwrap_or(u16::MAX)),
+            None => info.map(|i| {
+                let n = u16::from(i.count);
+                if i.grows() { n.max(read) } else { n }
+            }),
+        },
+        slots: layout.clone().or_else(|| env.param_slots(entry)),
     };
     let assigned = vars::assign(&cx);
     let mut warnings = Vec::new();
@@ -350,6 +376,7 @@ pub fn build(
     }
     let mut view = assemble::shape(&f, &mut raws, &assigned, entry);
     view.float_ret = input.float_ret;
+    view.params = layout;
     let reached: BTreeSet<Node> = f.reach.iter().copied().collect();
     let elided = (0..ssa.blocks().len())
         .filter_map(|i| u32::try_from(i).ok().map(Node))

@@ -23,6 +23,7 @@ mod regress;
 mod regress_float;
 mod regress_sema;
 mod regress_switch;
+mod regress_sysv;
 mod shapes;
 mod structure;
 mod units;

@@ -114,10 +114,21 @@ impl Printer<'_> {
             (None, Some(i)) => (usize::from(i.count), i.grows(), i.varargs),
             (None, None) => (0, true, false),
         };
-        let count = if grows { facts.max(used_max) } else { facts };
+        // The slot list of the view bounds the parameters of the namer (`View::params`). The
+        // read slots after the slots of the facts show only when the text reads them.
+        let count = match (&view.params, self.env.param_slots(view.entry)) {
+            (Some(_), Some(slots)) => slots.len().max(used_max),
+            _ if grows => facts.max(used_max),
+            _ => facts,
+        };
         let mut texts = Vec::new();
         for n in 0..count {
             let sig_ty = sig.as_ref().and_then(|s| s.params.get(n)).copied();
+            let float = view
+                .params
+                .as_ref()
+                .and_then(|s| s.get(n))
+                .is_some_and(|l| l.is_xmm());
             let var = params
                 .iter()
                 .find(|(p, _)| usize::from(*p) == n)
@@ -134,7 +145,12 @@ impl Printer<'_> {
                 .and_then(|t| self.stores.decl(t, &pname))
                 .unwrap_or_else(|| {
                     let w = var.and_then(|v| self.view().var(v)).map_or(64, |x| x.w);
-                    format!("{} {pname}", width_type(w))
+                    let ty = if float && var.is_none() {
+                        "double".to_owned()
+                    } else {
+                        width_type(w)
+                    };
+                    format!("{ty} {pname}")
                 });
             texts.push(decl);
         }

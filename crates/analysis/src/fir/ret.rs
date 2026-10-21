@@ -28,7 +28,7 @@
 use std::collections::BTreeSet;
 
 use ghidorah_base::FuncId;
-use ghidorah_db::{Program, Types};
+use ghidorah_db::Program;
 use ghidorah_ir::{Arena, Arg, IntrinsicId, Loc, Node, Op, Opc};
 use ghidorah_types::{DataModel, Prim, Type, TypeId, TypeStore};
 use ghidorah_x86::Mnem;
@@ -101,6 +101,57 @@ const DOUBLE_OPS: [Mnem; 17] = [
     Mnem::Xorps,
 ];
 
+/// The scalar ops that read `float` values.
+const FLOAT_READS: [Mnem; 15] = [
+    Mnem::Addss,
+    Mnem::Subss,
+    Mnem::Mulss,
+    Mnem::Divss,
+    Mnem::Sqrtss,
+    Mnem::Minss,
+    Mnem::Maxss,
+    Mnem::Rcpss,
+    Mnem::Rsqrtss,
+    Mnem::Cmpss,
+    Mnem::Comiss,
+    Mnem::Ucomiss,
+    Mnem::Cvtss2sd,
+    Mnem::Cvtss2si,
+    Mnem::Cvttss2si,
+];
+
+/// The scalar ops that read `double` values.
+const DOUBLE_READS: [Mnem; 13] = [
+    Mnem::Addsd,
+    Mnem::Subsd,
+    Mnem::Mulsd,
+    Mnem::Divsd,
+    Mnem::Sqrtsd,
+    Mnem::Minsd,
+    Mnem::Maxsd,
+    Mnem::Cmpsd,
+    Mnem::Comisd,
+    Mnem::Ucomisd,
+    Mnem::Cvtsd2ss,
+    Mnem::Cvtsd2si,
+    Mnem::Cvttsd2si,
+];
+
+/// Gives the kind of the floating values that the scalar op `name` reads. An op such as
+/// `addss` or `cvtss2sd` gives `float`. An op such as `mulsd` or `cvtsd2ss` gives `double`.
+/// Another op gives `None`.
+#[must_use]
+pub fn operand_kind(name: IntrinsicId) -> Option<FloatRet> {
+    let is = |list: &[Mnem]| list.iter().any(|m| name.0 == *m as u16);
+    if is(&FLOAT_READS) {
+        Some(FloatRet::Float)
+    } else if is(&DOUBLE_READS) {
+        Some(FloatRet::Double)
+    } else {
+        None
+    }
+}
+
 /// The last event of a register before a `ret` on one path.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Event {
@@ -128,19 +179,12 @@ pub fn float_ret(program: &Program, id: FuncId, l0: &FuncIr) -> Option<FloatRet>
 /// Gives the return type that a fact gives the function `id`, with its store: the signature,
 /// then the Tier-0 prototype of its name. A function with no such fact gives `None`.
 fn declared_ret(program: &Program, id: FuncId) -> Option<(&TypeStore, TypeId)> {
-    let view = program.func(id)?;
-    let types = program.types();
-    if let Some(sig) = view.sig.and_then(|s| types.sig(s.value)) {
-        return Some((types.store(), sig.ret));
-    }
-    let name = program.name(id.0).filter(|n| !n.is_default())?;
-    let proto = Types::prototype(&name.text)?;
-    let tier0 = ghidorah_types::proto::builtin().ok()?;
-    Some((tier0.store(), proto.sig.ret))
+    let (sig, store, _) = super::callsite::declared(program, id)?;
+    Some((store, sig.ret))
 }
 
 /// Gives the floating kind of the type `ty` of `store`, or `None` for another type.
-fn kind_of(store: &TypeStore, model: &DataModel, ty: TypeId) -> Option<FloatRet> {
+pub(crate) fn kind_of(store: &TypeStore, model: &DataModel, ty: TypeId) -> Option<FloatRet> {
     let id = store.resolve(ty).ok()?;
     match store.get(id)? {
         Type::Prim(Prim::Float) => Some(FloatRet::Float),

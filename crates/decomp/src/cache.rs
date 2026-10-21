@@ -177,9 +177,9 @@ impl Cache {
 /// The largest fuel of the parameter queries of one render.
 const PARAM_FUEL: u64 = 1_000_000;
 
-/// Gives the count of the parameter slots of `facts` (see [`Env::param_count`]). A function
-/// with no count gives `None`: it passes its registers on to an import with no Tier-0
-/// prototype in a tail jump, as a thunk does.
+/// Gives the count of the integer and stack parameter slots of `facts` (see
+/// [`Env::param_count`]). A function with no count gives `None`: it passes its registers on to
+/// an import with no Tier-0 prototype in a tail jump, as a thunk does.
 pub(crate) fn slot_count(program: &Program, facts: &ParamFacts) -> Option<u8> {
     let p = facts.params;
     let conv = conv_of(program);
@@ -198,15 +198,33 @@ pub(crate) fn slot_count(program: &Program, facts: &ParamFacts) -> Option<u8> {
     })
 }
 
-/// Gives the argument register of each parameter slot of `facts`: the choice of the recovery
-/// ([`callsite::arg_regs`]). A signature, a prototype or a function with no count gives `None`.
-pub(crate) fn param_slots(program: &Program, facts: &ParamFacts) -> Option<Vec<Loc>> {
-    let live = facts.live.as_ref().filter(|_| !facts.open)?;
-    Some(callsite::arg_regs(
-        conv_of(program),
-        &facts.params,
-        Some(live),
-    ))
+/// Gives the slot of each parameter of the function at `addr` with the facts `facts`, in
+/// slot order (see [`Env::param_slots`]). A function with no count gives `None`.
+///
+/// - A positional convention gives the register of each register slot that the recovery
+///   chose ([`callsite::arg_regs`]). A signature or a prototype gives `None`.
+/// - Another convention (`SysV`) gives the integer registers, then the floating registers,
+///   then the stack slots of the recovery. A signature or a prototype gives the slots of its
+///   parameter classes ([`callsite::fixed_slots`]).
+pub(crate) fn param_slots(program: &Program, addr: u64, facts: &ParamFacts) -> Option<Vec<Loc>> {
+    if facts.open {
+        return None;
+    }
+    let conv = conv_of(program);
+    let Some(live) = facts.live.as_ref() else {
+        return (!conv.positional)
+            .then(|| callsite::fixed_slots(program, FuncId(Address::ram(addr))))
+            .flatten();
+    };
+    let mut out = callsite::arg_regs(conv, &facts.params, Some(live));
+    if !conv.positional {
+        let first = i64::from(conv.stack_arg_offset);
+        out.extend((0..i64::from(facts.params.stack)).filter_map(|j| {
+            let k = first.checked_add(j.checked_mul(8)?)?;
+            i32::try_from(k).ok().map(Loc::Stack)
+        }));
+    }
+    Some(out)
 }
 
 /// Gives the parameter count of `facts` with its source and its varargs flag.
@@ -314,7 +332,8 @@ impl Env for RenderEnv<'_> {
     }
 
     fn param_slots(&self, addr: u64) -> Option<Vec<Loc>> {
-        self.facts(addr).and_then(|f| param_slots(self.env.0, &f))
+        self.facts(addr)
+            .and_then(|f| param_slots(self.env.0, addr, &f))
     }
 
     fn jumptable_unresolved(&self, site: u64) -> bool {
