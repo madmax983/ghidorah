@@ -8,14 +8,32 @@
 //! | `string_bytes` | the bytes of the string fact |
 //! | `call_targets` | the targets of the call references from the site |
 //! | `syscall_name` | the x86-64 syscall table |
+//!
+//! The register of the result of a call comes from these facts too:
+//!
+//! | Callee | Result |
+//! |---|---|
+//! | a signature with a `float`, a `double` or an 8-byte `long double` return type | the floating return register, `xmm0` |
+//! | a signature with another return type | `rax` |
+//! | a signature with no return value | none |
+//! | no signature: the caller reads the `xmm0` def, and reads the `rax` def only as a return value | `xmm0` |
+//! | no signature, another caller | `rax` |
+//!
+//! Each return of L1 reads `rax`. So a return of the `rax` def of a call tells nothing about
+//! the callee.
 
-use ghidorah_analysis::cc::conv_of;
+use std::collections::BTreeSet;
+
+use ghidorah_analysis::cc::{conv_of, loc_of};
 use ghidorah_base::{Address, FuncId, VarId};
 use ghidorah_db::{CommentKind, Types};
+use ghidorah_ir::Loc;
 use ghidorah_types::{CallConv, DataModel, Prim, Sig, Type, TypeId, TypeStore};
 
 use super::{PrintEnv, Signature, body_units};
-use crate::lattice::{Store, Ty};
+use crate::expr::{Call, Expr, Stmt, VarIdx};
+use crate::lattice::{Store, Stores, Ty};
+use crate::view::View;
 use crate::{Env, ProgramEnv};
 
 /// The comment kinds that the text shows, in kind order.
@@ -40,6 +58,59 @@ fn signature(sig: &Sig, store: &TypeStore, which: Store) -> Signature {
         ret: (!void).then(|| ty(sig.ret)),
         variadic: sig.variadic,
     }
+}
+
+/// Gives the first floating return register of `conv`: `xmm0` in each convention.
+fn float_ret(conv: &CallConv) -> Option<Loc> {
+    conv.float_ret.first().and_then(|n| loc_of(n))
+}
+
+/// Gives the register of the result of a callee with the signature `sig` (see the module
+/// doc). A signature with no return value gives `None`.
+#[must_use]
+pub(crate) fn ret_loc(sig: &Signature, stores: &Stores<'_>, conv: &CallConv) -> Option<Loc> {
+    let ret = sig.ret?;
+    let float = float_ret(conv).filter(|_| stores.is_float(ret));
+    Some(float.unwrap_or(Loc::RAX))
+}
+
+/// Gives the register of the result of the call `c` with no signature (see the module doc).
+/// `reads` holds the variables that a statement reads other than as a return value.
+#[must_use]
+pub(crate) fn caller_ret_loc(c: &Call, reads: &BTreeSet<VarIdx>, conv: &CallConv) -> Loc {
+    let def = |loc: Loc| c.rets.iter().find(|(l, _)| *l == loc).map(|(_, v)| *v);
+    match float_ret(conv) {
+        Some(f) if def(f).is_some() && !def(Loc::RAX).is_some_and(|v| reads.contains(&v)) => f,
+        _ => Loc::RAX,
+    }
+}
+
+/// Gives the variables that the statements, conditions and switch values of `view` read. A
+/// variable that is the full value of a return is not a read of that return.
+#[must_use]
+pub(crate) fn reads(view: &View) -> BTreeSet<VarIdx> {
+    let mut roots: Vec<&Expr> = Vec::new();
+    for n in &view.nodes {
+        roots.extend([&n.cond, &n.target, &n.index].into_iter().flatten());
+        for s in &n.stmts {
+            match s {
+                Stmt::Return { uses, .. } => roots.extend(
+                    uses.iter()
+                        .map(|(_, e)| e)
+                        .filter(|e| !matches!(e, Expr::Var { .. })),
+                ),
+                _ => roots.extend(s.exprs()),
+            }
+        }
+    }
+    roots
+        .into_iter()
+        .flat_map(Expr::preorder)
+        .filter_map(|x| match x {
+            Expr::Var { var, .. } => Some(*var),
+            _ => None,
+        })
+        .collect()
 }
 
 impl PrintEnv for ProgramEnv<'_> {
