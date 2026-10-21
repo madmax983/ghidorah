@@ -1,17 +1,18 @@
 //! `analysis_run` over MCP: progress per fuel slice and cancellation (AC-172, AC-173).
 //!
-//! The server runs in the test process with the shipped backend. The emit function of the
-//! cancel test sets the cancel flag at the first progress notification, as a client does.
+//! The server runs in the test process with the shipped backend. The cancel test first runs
+//! the dispatcher of the server with a cancel flag that is set at the start. Then the emit
+//! function sets the cancel flag at the first progress notification, as a client does.
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, mpsc};
 
 use ghidorah_base::FixedClock;
 use ghidorah_cli::mcp::rpc::{self, Message, Request};
 use ghidorah_cli::mcp::server::Server;
 use ghidorah_cli::shipped::Shipped;
 use ghidorah_cli::{Backend, Options};
-use ghidorah_json::Value;
+use ghidorah_json::{Object, Value};
 use ghidorah_tools::ContentMode;
 use ghidorah_tools::handlers::analysis_run::SLICE_STEPS;
 
@@ -108,14 +109,20 @@ fn ac_173_progress_monotonic() {
         Some(&used),
         "the last slice reports every unit"
     );
+    // The sliced loop gives each slice `f = SLICE_STEPS.max(used / 4)` fuel, with `used` the
+    // work of the call so far. A slice uses its fuel, and its last step can run past it: a
+    // step that starts always ends. Two slices between two reports use at least `2 f`, so
+    // the bound `< 2 f` fails a report every second slice.
     let mut before = 0;
     for (i, v) in values.iter().enumerate() {
+        let fuel = SLICE_STEPS.max(before / 4);
         if i + 1 < values.len() {
-            assert!(
-                v - before >= SLICE_STEPS,
-                "a slice uses its fuel: {values:?}"
-            );
+            assert!(v - before >= fuel, "a slice uses its fuel: {values:?}");
         }
+        assert!(
+            v - before < 2 * fuel,
+            "one report per slice: {before} to {v} in {values:?}"
+        );
         before = *v;
     }
     // No token: no notification.
@@ -125,8 +132,84 @@ fn ac_173_progress_monotonic() {
     assert!(quiet.lock().expect("the lock").is_empty());
 }
 
+/// Gives a shipped backend with the workspace root and the fixture loaded with no analysis.
+fn backend_with_fixture(name: &str) -> Shipped {
+    let mut options = Options::new(&env(name), "mcp-1");
+    options.roots = vec![root()];
+    let mut backend = <Shipped as Backend>::open(&options).expect("the backend opens");
+    let args = format!(r#"{{"path":"{FIXTURE}","analysis":"none"}}"#);
+    let load = tool_call(&mut backend, "binary_load", &args, None);
+    assert_eq!(load.get("ok"), Some(&Value::Bool(true)), "{load}");
+    backend
+}
+
+/// Runs one tool call on `backend` through the dispatcher of the server, with the cancel flag
+/// `cancel`. Gives the envelope JSON.
+fn tool_call(
+    backend: &mut Shipped,
+    tool: &str,
+    args: &str,
+    cancel: Option<&Arc<AtomicBool>>,
+) -> Value {
+    let args = ghidorah_json::parse(args, &ghidorah_json::Limits::DEFAULT).expect("JSON");
+    let mut call = ghidorah_tools::Request::new(tool, args);
+    call.cancel = cancel.cloned();
+    ghidorah_tools::dispatch(backend, &call).to_json()
+}
+
 #[test]
 fn ac_172_cancellation() {
+    // A cancel flag that is set when the tool starts stops the run at the first fuel
+    // checkpoint: the end of the first slice. The dispatcher is the one of the server, which
+    // gives no reply to such a call (see the case below). The one report gives the work of
+    // the slice, which equals the work of a run with the fuel of one slice.
+    let mut b = backend_with_fixture("analysis_cancel_first");
+    let set = Arc::new(AtomicBool::new(true));
+    let (sender, reports) = mpsc::channel();
+    let mut run = ghidorah_tools::Request::new("analysis_run", Value::Object(Object::new()));
+    run.cancel = Some(Arc::clone(&set));
+    run.progress = Some(sender);
+    let envelope = ghidorah_tools::dispatch(&mut b, &run).to_json();
+    drop(run);
+    let values: Vec<u64> = reports.iter().map(|p| p.progress).collect();
+    assert_eq!(values.len(), 1, "the run stops after one slice: {values:?}");
+    assert_eq!(
+        envelope.pointer("/data/steps_used").and_then(Value::as_u64),
+        values.first().copied(),
+        "{envelope}"
+    );
+    let id = envelope
+        .get("binary_id")
+        .and_then(Value::as_str)
+        .expect("an ID");
+    let after = tool_call(
+        &mut b,
+        "binary_load",
+        &format!(r#"{{"binary_id":"{id}"}}"#),
+        None,
+    );
+    assert_eq!(
+        after
+            .pointer("/data/analysis/state")
+            .and_then(Value::as_str),
+        Some("budget_stopped"),
+        "{after}"
+    );
+    let mut one = backend_with_fixture("analysis_one_slice");
+    let slice = tool_call(
+        &mut one,
+        "analysis_run",
+        &format!(r#"{{"max_steps":{SLICE_STEPS}}}"#),
+        None,
+    );
+    assert_eq!(
+        slice.pointer("/data/steps_used").and_then(Value::as_u64),
+        values.first().copied(),
+        "the cancelled run does the work of one slice: {slice}"
+    );
+
+    // A cancel at the first report over MCP: the forwarder thread sets the flag, so the stop
+    // can come a slice later. No reply follows. The run stops before its end and resumes.
     let mut s = server("analysis_cancel");
     let id = load(&mut s);
     let flag = Arc::new(AtomicBool::new(false));
