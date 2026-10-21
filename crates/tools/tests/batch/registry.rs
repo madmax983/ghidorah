@@ -15,10 +15,10 @@ use ghidorah_tools::hints::{MAX_NEXT, check};
 use ghidorah_tools::profiles::{MAX_FULL, MAX_FULL_CHARS, MAX_MINI, MAX_MINI_CHARS};
 use ghidorah_tools::registry::lint;
 use ghidorah_tools::{
-    ArgKind, ArgSpec, Fit, Profile, ProfileSet, Registry, Session, ToolSpec, handlers,
+    ArgKind, ArgSpec, Fit, Host, Profile, ProfileSet, Registry, Session, ToolSpec, handlers,
 };
 
-use crate::support::{call, call_value, chars, demo, full_registry, json, root, text_at};
+use crate::support::{call, call_value, chars, demo, demo_in, full_registry, json, root, text_at};
 
 /// The characters that the catalog keeps free for a tool of a later WP: `func_similar` when
 /// it is not in the registry yet.
@@ -107,14 +107,39 @@ fn ac_024_full_registry_text() {
 /// The tools whose examples need a committed edit of the session first.
 const NEEDS_EDIT: [&str; 2] = ["history_list", "history_undo"];
 
-/// Gives the envelope of each example of the full registry on the analyzed demo:
-/// `(tool, args, envelope)`.
-fn example_envelopes() -> Vec<(&'static ToolSpec<Session>, &'static str, Value)> {
+/// Gives the tools of one example call: the tool, the tools of its batch steps and the tool
+/// that `tool_search` reads by name.
+fn example_tools(tool: &str, args: &str) -> Vec<String> {
+    let mut out = vec![tool.to_owned()];
+    let value = json(args);
+    if tool == "tool_search" {
+        out.extend(value.get("name").and_then(Value::as_str).map(str::to_owned));
+    }
+    for step in value
+        .get("steps")
+        .and_then(Value::as_array)
+        .unwrap_or_default()
+    {
+        out.push(text_at(step, "/tool"));
+    }
+    out
+}
+
+/// Gives the envelope of each example of the full registry on the analyzed demo in
+/// `profile`: `(tool, args, envelope)`. An example with a tool or a batch step outside the
+/// profile does not run. The edit before an example runs only when the profile holds
+/// `symbol_rename`.
+fn example_envelopes(profile: Profile) -> Vec<(&'static ToolSpec<Session>, &'static str, Value)> {
     let mut out = Vec::new();
+    let active = demo_in(profile);
     for tool in full_registry().tools() {
         for example in tool.examples {
-            let mut s = demo();
-            if NEEDS_EDIT.contains(&tool.name) {
+            let tools = example_tools(tool.name, example.args);
+            if !tools.iter().all(|t| active.in_profile(t)) {
+                continue;
+            }
+            let mut s = demo_in(profile);
+            if NEEDS_EDIT.contains(&tool.name) && s.in_profile("symbol_rename") {
                 let rename = call(
                     &mut s,
                     "symbol_rename",
@@ -154,27 +179,88 @@ fn walk(value: &Value, f: &mut dyn FnMut(&str, &Value)) {
     }
 }
 
-/// Gives the problems of the hints of one envelope (AC-143).
-fn hint_problems(registry: &Registry<Session>, envelope: &Value) -> Vec<String> {
-    let mut out = Vec::new();
-    let all = |_: &str| true;
-    let mut lists = vec![envelope.get("next").cloned().unwrap_or_default()];
-    if let Some(entries) = envelope.pointer("/data/steps").and_then(Value::as_array) {
-        lists.extend(entries.iter().filter_map(|e| e.get("next").cloned()));
-    }
-    for list in lists {
-        let calls = list.as_array().unwrap_or_default();
-        if calls.len() > MAX_NEXT {
-            out.push(format!("{} next calls", calls.len()));
+/// Adds each member named `next` or `remedy` of `value` at any depth to `out`, with its
+/// pointer. The walk does not go into these members.
+fn hint_members(value: &Value, path: &str, out: &mut Vec<(String, Value)>) {
+    match value {
+        Value::Object(object) => {
+            for (key, member) in object.iter() {
+                let sub = format!("{path}/{key}");
+                if matches!(key, "next" | "remedy") {
+                    out.push((sub, member.clone()));
+                } else {
+                    hint_members(member, &sub, out);
+                }
+            }
         }
-        for c in calls {
+        Value::Array(items) => {
+            for (i, item) in items.iter().enumerate() {
+                hint_members(item, &format!("{path}/{i}"), out);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Gives the pointer `path` with `*` in place of each array index.
+fn shape_of(path: &str) -> String {
+    path.split('/')
+        .map(|part| {
+            if !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit()) {
+                "*"
+            } else {
+                part
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+/// Gives the problems of the hints of one envelope (AC-143), and adds the pointers of the
+/// hint members below the top level to `nested`, with `*` for each index. Each member named
+/// `next` or `remedy` at any depth is one call or a list of at most 3 calls. Each call names
+/// a tool of the active profile, passes the strict parser of the tool and has a `why`.
+fn hint_problems(
+    registry: &Registry<Session>,
+    in_profile: &dyn Fn(&str) -> bool,
+    envelope: &Value,
+    nested: &mut BTreeSet<String>,
+) -> Vec<String> {
+    let mut members = Vec::new();
+    hint_members(envelope, "", &mut members);
+    nested.extend(
+        members
+            .iter()
+            .filter(|(path, _)| path != "/next")
+            .map(|(path, _)| shape_of(path)),
+    );
+    let mut out = Vec::new();
+    for (path, member) in members {
+        let calls = match member {
+            Value::Array(items) => {
+                if items.len() > MAX_NEXT {
+                    out.push(format!("{path}: {} calls", items.len()));
+                }
+                items
+            }
+            Value::Object(_) => vec![member],
+            other => {
+                out.push(format!("{path}: {other} is not a call"));
+                continue;
+            }
+        };
+        for c in &calls {
+            let why = text_at(c, "/why");
+            if why.is_empty() {
+                out.push(format!("{path}: {c} has no why"));
+            }
             let call = ghidorah_tools::Call::new(
                 &text_at(c, "/tool"),
                 c.get("args").cloned().unwrap_or_default(),
-                &text_at(c, "/why"),
+                &why,
             );
-            if let Err(e) = check(registry, &all, &call) {
-                out.push(format!("{c}: {e}"));
+            if let Err(e) = check(registry, in_profile, &call) {
+                out.push(format!("{path}: {c}: {e}"));
             }
         }
     }
@@ -183,9 +269,28 @@ fn hint_problems(registry: &Registry<Session>, envelope: &Value) -> Vec<String> 
 
 #[test]
 fn ac_132a_137_143_full_registry_examples() {
+    for profile in Profile::ALL {
+        let nested = profile_examples(profile);
+        // The walk reaches the hints inside the data, not only the top-level next.
+        for path in [
+            "/data/coverage/worklist/items/*/remedy",
+            "/data/sections/omitted/next",
+        ] {
+            assert!(nested.contains(path), "{}: {nested:?}", profile.as_str());
+        }
+    }
+}
+
+/// Checks the examples of the tools of `profile` (AC-132a, AC-137, AC-143). Gives the
+/// pointers of the hint members below the top level, with `*` for each index.
+fn profile_examples(profile: Profile) -> BTreeSet<String> {
     let registry = full_registry();
-    let envelopes = example_envelopes();
-    assert!(envelopes.len() >= 60, "{} examples", envelopes.len());
+    let session = demo_in(profile);
+    let in_profile = |name: &str| session.in_profile(name);
+    let envelopes = example_envelopes(profile);
+    let least = if profile == Profile::Full { 60 } else { 20 };
+    assert!(envelopes.len() >= least, "{} examples", envelopes.len());
+    let mut nested = BTreeSet::new();
     for (tool, args, envelope) in &envelopes {
         assert_eq!(
             envelope.get("ok"),
@@ -226,8 +331,57 @@ fn ac_132a_137_143_full_registry_examples() {
             }
         });
         assert!(bad.is_empty(), "AC-137 {} {args}: {bad:?}", tool.name);
-        let hints = hint_problems(&registry, envelope);
-        assert!(hints.is_empty(), "AC-143 {} {args}: {hints:?}", tool.name);
+        let hints = hint_problems(&registry, &in_profile, envelope, &mut nested);
+        assert!(
+            hints.is_empty(),
+            "AC-143 {} {} {args}: {hints:?}",
+            profile.as_str(),
+            tool.name
+        );
+    }
+    nested
+}
+
+/// Each worklist remedy of `binary_survey` is a complete call with a `why`. It names a tool
+/// of the active profile and passes the strict parser (found by the round 4 review).
+#[test]
+fn regress_survey_worklist_remedies_parse() {
+    let registry = full_registry();
+    for profile in Profile::ALL {
+        let mut s = demo_in(profile);
+        let envelope = call(&mut s, "binary_survey", r#"{"include":["coverage"]}"#);
+        let items = envelope
+            .pointer("/data/coverage/worklist/items")
+            .and_then(Value::as_array)
+            .unwrap_or_default();
+        assert!(items.len() >= 3, "{envelope}");
+        let mut remedies = 0;
+        for item in items {
+            let Some(remedy) = item.get("remedy") else {
+                continue;
+            };
+            remedies += 1;
+            let why = text_at(remedy, "/why");
+            assert!(!why.is_empty(), "{} {remedy}", profile.as_str());
+            let found = ghidorah_tools::Call::new(
+                &text_at(remedy, "/tool"),
+                remedy.get("args").cloned().unwrap_or_default(),
+                &why,
+            );
+            check(&registry, &|name| s.in_profile(name), &found)
+                .unwrap_or_else(|e| panic!("{} {remedy}: {e}", profile.as_str()));
+            // The agent can send the remedy as it is.
+            let mut fresh = demo_in(profile);
+            let sent = call_value(&mut fresh, &found.tool, found.args.clone());
+            assert_eq!(
+                sent.get("ok"),
+                Some(&Value::Bool(true)),
+                "{} {remedy}: {sent}",
+                profile.as_str()
+            );
+        }
+        // Each indirect site keeps a remedy: an edit with its targets, or a read call.
+        assert!(remedies >= 3, "{} {envelope}", profile.as_str());
     }
 }
 

@@ -171,16 +171,10 @@
           "name": ".init",
           "start": "0x1000",
           "size": "0x1b"
-        },
-        {
-          "id": "sec:13:.plt",
-          "name": ".plt",
-          "start": "0x1020",
-          "size": "0x30"
         }
       ],
       "omitted": {
-        "count": 17,
+        "count": 18,
         "next": {
           "tool": "search",
           "args": {
@@ -470,8 +464,12 @@
               "tool": "func_edit",
               "args": {
                 "action": "set_call_targets",
-                "at": "0x1014"
-              }
+                "at": "0x1014",
+                "targets": [
+                  "imp:__gmon_start__"
+                ]
+              },
+              "why": "Set the targets of the indirect jump or call. Make sure that each target is correct."
             }
           },
           {
@@ -481,9 +479,13 @@
             "remedy": {
               "tool": "func_edit",
               "args": {
-                "action": "set_jumptable",
-                "at": "0x112f"
-              }
+                "action": "set_call_targets",
+                "at": "0x112f",
+                "targets": [
+                  "imp:_ITM_deregisterTMCloneTable"
+                ]
+              },
+              "why": "Set the targets of the indirect jump or call. Make sure that each target is correct."
             }
           },
           {
@@ -493,9 +495,13 @@
             "remedy": {
               "tool": "func_edit",
               "args": {
-                "action": "set_jumptable",
-                "at": "0x1170"
-              }
+                "action": "set_call_targets",
+                "at": "0x1170",
+                "targets": [
+                  "imp:_ITM_registerTMCloneTable"
+                ]
+              },
+              "why": "Set the targets of the indirect jump or call. Make sure that each target is correct."
             }
           },
           {
@@ -506,7 +512,8 @@
               "args": {
                 "action": "create",
                 "target": "0x11d0"
-              }
+              },
+              "why": "Make a function at the start of the gap. Make sure that the code is a function entry."
             }
           }
         ]
