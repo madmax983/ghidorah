@@ -1,16 +1,18 @@
 //! Executable hints (AC-143).
 
-use ghidorah_base::{ErrorCode, WarningCode};
+use std::path::PathBuf;
+
+use ghidorah_base::{ErrorCode, FixedClock, WarningCode};
 use ghidorah_json::Value;
 use ghidorah_tools::args::parse_strict;
 use ghidorah_tools::errors::Inactive;
 use ghidorah_tools::hints::{HintError, MAX_NEXT, check, keep_valid};
 use ghidorah_tools::{
-    AnalysisInfo, AnalysisState, Args, Call, Candidate, Ctx, Payload, Registry, Request, ToolError,
-    ToolSpec, Warning, dispatch_with,
+    AnalysisInfo, AnalysisState, Args, Call, Candidate, Ctx, Host, Payload, Profile, ProfileSet,
+    Registry, Request, Roots, Session, SessionConfig, ToolError, ToolSpec, Warning, dispatch_with,
 };
 
-use crate::common::{json, run_on, text};
+use crate::common::{code, json, root, run_on, text};
 use crate::test_registry::{ECHO_VALUE, ITEM_GET, ITEM_LIST, TestHost, registry};
 
 fn call(tool: &str, args: &str) -> Call {
@@ -236,4 +238,62 @@ fn regress_hint_has_tool_free_sentence() {
         }
     }
     assert!(empty.is_empty(), "these hints are empty: {empty:?}");
+}
+
+/// Gives a session of the shipped registry in `profile` with `config`.
+fn shipped_in(profile: Profile, mut config: SessionConfig) -> Session {
+    config.profile = ProfileSet::new(profile, None);
+    Session::with_registry(
+        <Session as Host>::registry(),
+        config,
+        Box::new(FixedClock::new(0)),
+    )
+}
+
+/// Runs one call on `s` through its active registry and gives the envelope JSON.
+fn send(s: &mut Session, tool: &str, args: &str) -> Value {
+    let registry = s.active_registry();
+    dispatch_with(&registry, s, &Request::new(tool, json(args))).to_json()
+}
+
+/// Gives the text at `pointer` of `value`, or an empty text.
+fn text_at(value: &Value, pointer: &str) -> String {
+    value
+        .pointer(pointer)
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_owned()
+}
+
+/// The mini profile has no `history_list`, so a `CONFLICT` has no `next`. Its hint then tells
+/// the agent to read the current facts first. Only then does it send the call again with
+/// `details.current_rev`, in line with the message (r3-surface-09).
+#[test]
+fn regress_conflict_hint_reads_first() {
+    let roots = Roots::new(&root(), &[PathBuf::from(".")]).expect("the root is valid");
+    let mut s = shipped_in(Profile::Mini, SessionConfig::new(roots));
+    assert_eq!(
+        code(&send(&mut s, "binary_load", r#"{"builtin":"demo"}"#)),
+        ""
+    );
+    let first = r#"{"target":"0x1090","name":"read_input"}"#;
+    assert_eq!(code(&send(&mut s, "symbol_rename", first)), "");
+    let stale = r#"{"target":"0x1090","name":"read_line","expected_rev":0}"#;
+    let conflict = send(&mut s, "symbol_rename", stale);
+    assert_eq!(code(&conflict), "CONFLICT", "{conflict}");
+    assert!(conflict.get("next").is_none(), "{conflict}");
+    let message = text_at(&conflict, "/error/message");
+    assert!(
+        message.contains("Read the later edits before"),
+        "{conflict}"
+    );
+    let hint = text_at(&conflict, "/error/hint");
+    let read = hint.find("Read the current facts of the target");
+    let resend = hint.find("details.current_rev");
+    assert!(
+        read.is_some() && resend.is_some() && read < resend,
+        "the hint reads first: {hint}"
+    );
+    assert!(hint.starts_with("Read"), "{hint}");
+    assert!(!hint.contains("history_list"), "{hint}");
 }

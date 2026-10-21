@@ -212,7 +212,7 @@ pub(crate) const fn info(code: ErrorCode) -> CodeInfo {
             "The call conflicts with the current state. The expected_rev differs from the current rev, or a later transaction changed the same facts. Read the later edits before you send the call again.",
             "Send next[0] to read the later edits. The candidates hold the call with the current rev or the later transactions.",
         )
-        .with_plain("Call history_list to read the later edits. Read rev in this result. Send the call again with that rev as expected_rev."),
+        .with_plain("Call history_list to read the later edits. Read the current facts of the target first. Then send the call again with details.current_rev as expected_rev."),
         E::BlockedByHigherPrioritySource => row(
             code,
             "BLOCKED_BY_HIGHER_PRIORITY_SOURCE",
