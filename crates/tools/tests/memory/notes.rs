@@ -264,12 +264,80 @@ fn findings_and_errors() {
     }
 }
 
+/// Gives the ID and the `func_get` record of the jump table of `apply_op` at `0x1200` in
+/// `switch.gcc-O2`. Truth gives the 9 targets of this resolved table in case order.
+fn apply_op_table(session: &mut Session) -> (String, Value) {
+    let tables = call(session, "search", r#"{"kind":"jumptable"}"#);
+    let table = data(&tables)
+        .get("items")
+        .and_then(Value::as_array)
+        .and_then(|l| l.iter().find(|i| str_of(i, "func") == "fn:0x1200"))
+        .unwrap_or_else(|| panic!("the table of apply_op: {tables}"));
+    let jt = str_of(table, "id");
+    assert!(jt.starts_with("jt:"), "{tables}");
+    let get = call(
+        session,
+        "func_get",
+        r#"{"target":"fn:0x1200","include":["jumptables"]}"#,
+    );
+    let record = data(&get)
+        .get("jumptables")
+        .and_then(Value::as_array)
+        .and_then(|l| l.iter().find(|t| str_of(t, "id") == jt))
+        .cloned()
+        .unwrap_or_else(|| panic!("func_get gives the table {jt}: {get}"));
+    (jt, record)
+}
+
+/// Checks the `search {ids}` item of the note of `ac_218_search_ids` by value.
+fn check_note_item(note: &Value) {
+    assert_eq!(str_of(note, "id"), "note:1");
+    assert_eq!(str_of(note, "text"), "The switch has a default case.");
+    for key in [
+        "kind", "status", "tags", "evidence", "claims", "src", "session", "rev",
+    ] {
+        assert!(
+            note.get("extra").and_then(|e| e.get(key)).is_some(),
+            "{key}: {note}"
+        );
+    }
+    let extra = |key: &str| note.pointer(&format!("/extra/{key}")).cloned();
+    assert_eq!(extra("kind"), Some(Value::from("hypothesis")), "{note}");
+    assert_eq!(extra("evidence"), Some(json(r#"["fn:0x1080"]"#)), "{note}");
+    assert_eq!(extra("tags"), Some(json(r#"["switch"]"#)), "{note}");
+    assert_eq!(
+        extra("claims"),
+        Some(json(r#"[{"rel":"noreturn","args":["fn:0x1080"]}]"#)),
+        "{note}"
+    );
+}
+
+/// Checks the `search {ids}` item of the table `jt` against its `func_get` record `record`
+/// and the truth table of `apply_op`.
+fn check_table_item(item: &Value, jt: &str, record: &Value) {
+    assert_eq!(str_of(item, "id"), jt);
+    assert_eq!(Some(str_of(item, "addr").as_str()), jt.strip_prefix("jt:"));
+    assert_eq!(str_of(item, "func"), "fn:0x1200", "{item}");
+    assert_eq!(item.get("extra"), Some(record), "the record of func_get");
+    let truth = json(
+        &std::fs::read_to_string(crate::support::root().join("fixtures/truth/switch.gcc-O2.json"))
+            .expect("the truth file reads"),
+    );
+    let want = truth
+        .get("jump_tables")
+        .and_then(Value::as_array)
+        .and_then(|l| l.iter().find(|t| str_of(t, "func") == "apply_op"))
+        .expect("the truth table of apply_op");
+    assert_eq!(record.get("targets"), want.get("targets"), "{record}");
+    assert_eq!(record.get("count"), want.get("entries"), "{record}");
+    assert_eq!(str_of(record, "method"), "a", "{record}");
+    assert_eq!(record.get("resolved"), Some(&Value::Bool(true)), "{record}");
+}
+
 #[test]
 fn ac_218_search_ids() {
     let (mut session, _) = fixture("switch.gcc-O2");
-    let tables = call(&mut session, "search", r#"{"kind":"jumptable"}"#);
-    let jt = text_at(&tables, "/data/items/0/id");
-    assert!(jt.starts_with("jt:"), "{tables}");
+    let (jt, record) = apply_op_table(&mut session);
     let note = call(
         &mut session,
         "note_write",
@@ -306,17 +374,7 @@ fn ac_218_search_ids() {
         1 + 1 + 120 + 1,
         "a record, a set record, 120 members, a table"
     );
-    let record = &all[0];
-    assert_eq!(str_of(record, "id"), "note:1");
-    assert_eq!(str_of(record, "text"), "The switch has a default case.");
-    for key in [
-        "kind", "status", "tags", "evidence", "claims", "src", "session", "rev",
-    ] {
-        assert!(
-            record.get("extra").and_then(|e| e.get(key)).is_some(),
-            "{key}: {record}"
-        );
-    }
+    check_note_item(&all[0]);
     let set_record = &all[1];
     assert_eq!(str_of(set_record, "id"), "set:big");
     assert_eq!(
@@ -330,5 +388,5 @@ fn ac_218_search_ids() {
     let mut want = members;
     want.sort_by_key(|v| v.as_str().unwrap_or_default().to_owned());
     assert_eq!(paged, want, "the cursor pages every member once");
-    assert_eq!(str_of(&all[122], "id"), jt);
+    check_table_item(&all[122], &jt, &record);
 }
