@@ -267,6 +267,100 @@ fn alias_order_holds(list: &[Fixture], name: &str) -> bool {
     true
 }
 
+/// The fixtures of the import-order regression. A reverse of the import list moves the
+/// varargs or noreturn flags of their PLT stubs when a slot names its import by position.
+const IMPORT_FIXTURES: [&str; 4] = [
+    "switch.gcc-O2",
+    "recursion.clang-O2",
+    "adversarial_names.clang-O2",
+    "func_ptrs.gcc-O2.noeh",
+];
+
+/// Gives the reads of the import facts of `path` after a full analysis with `engine`.
+///
+/// Each import gives the `func_get` read of its PLT stub and of each function that reads its
+/// slot. The read has the name, the flags with `varargs` and `noreturn`, and the parameters.
+/// Each EXTERNAL address shows as its import ID, because the import order sets the address.
+fn import_reads(path: &str, engine: Engine) -> BTreeMap<String, Value> {
+    let roots = Roots::new(&root(), &[PathBuf::from(".")]).expect("the root");
+    let mut session = Session::new(SessionConfig::new(roots), Box::new(FixedClock::new(0)));
+    session.set_engine(Box::new(engine));
+    let registry = session.active_registry();
+    let load = Request::new("binary_load", args(&format!(r#"{{"path":"{path}"}}"#)));
+    assert!(
+        dispatch_with(&registry, &mut session, &load).ok(),
+        "{path} loads"
+    );
+    let program = &session
+        .binaries()
+        .next()
+        .expect("the binary is open")
+        .program;
+    let mut ext: Vec<(String, String)> = program
+        .imports()
+        .values()
+        .map(|r| (r.ext.to_string(), format!("ext:{}", r.id)))
+        .collect();
+    // A longer address goes first, so `ext:0x1` does not cut `ext:0x10`.
+    ext.sort_by_key(|(from, _)| std::cmp::Reverse(from.len()));
+    let mut targets = Vec::new();
+    for row in program.imports().values() {
+        if let Some(stub) = row.stub {
+            targets.push((format!("{} stub", row.id), stub.to_string()));
+        }
+        for r in row.slot.map(|s| program.refs_to(s)).unwrap_or_default() {
+            if let Some(owner) = program.owner_of(r.value.key.from) {
+                let key = format!("{} slot {}", row.id, r.value.key.from);
+                targets.push((key, owner.0.to_string()));
+            }
+        }
+    }
+    let mut out = BTreeMap::new();
+    for (key, target) in targets {
+        let get = Request::new(
+            "func_get",
+            args(&format!(
+                r#"{{"target":"{target}","include":["summary","decomp","vars"],"max_chars":60000}}"#
+            )),
+        );
+        let read = dispatch_with(&registry, &mut session, &get).to_json();
+        let read = map_strings(&read, &|t| {
+            ext.iter()
+                .fold(t.to_owned(), |acc, (from, to)| acc.replace(from, to))
+        });
+        out.insert(key, read);
+    }
+    out
+}
+
+#[test]
+fn regress_import_order_keeps_stub_facts() {
+    let list = fixtures("T1");
+    for name in IMPORT_FIXTURES {
+        let f = list.iter().find(|f| f.name == name).expect("the fixture");
+        let shipped = import_reads(&f.path, Engine::default());
+        let reversed = import_reads(
+            &f.path,
+            Engine::with_model_edit(|binary| binary.imports.reverse()),
+        );
+        assert!(
+            shipped.keys().any(|k| k.ends_with(" stub")),
+            "{name} has PLT stubs"
+        );
+        assert_eq!(
+            shipped.keys().collect::<Vec<_>>(),
+            reversed.keys().collect::<Vec<_>>(),
+            "{name}: the same stubs and slot reads"
+        );
+        for (key, a) in &shipped {
+            assert_eq!(a.get("ok"), Some(&Value::Bool(true)), "{name} {key}: {a}");
+            if let Some(diff) = first_difference(a, &reversed[key]) {
+                panic!("{name} {key}: the import order changes the read:{diff}");
+            }
+        }
+    }
+}
+
 #[test]
 fn ac_189b_strip() {
     let t1 = fixtures("T1");

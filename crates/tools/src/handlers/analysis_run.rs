@@ -101,6 +101,8 @@ pub struct Engine {
     schedulers: BTreeMap<BinaryId, Scheduler>,
     /// The seed of the analyzer order of a first analysis, or `None` for the shipped order.
     order: Option<u64>,
+    /// The change of the binary model before a first analysis, or `None`.
+    edit: Option<fn(&mut Binary)>,
 }
 
 impl Engine {
@@ -119,6 +121,19 @@ impl Engine {
             ..Self::default()
         }
     }
+
+    /// Makes an engine for a relation of the binary model (design Section 13.4).
+    ///
+    /// Before the first analysis of each binary, the engine makes the program again from a
+    /// copy of its binary model. `edit` changes the copy. The rebuild uses the default limits.
+    /// The analyzer order of the scheduler stays.
+    #[must_use]
+    pub fn with_model_edit(edit: fn(&mut Binary)) -> Self {
+        Self {
+            edit: Some(edit),
+            ..Self::default()
+        }
+    }
 }
 
 /// Gives the scheduler of the first analysis of a binary: the shipped analyzer order, or the
@@ -129,13 +144,24 @@ fn first_scheduler(order: Option<u64>) -> Scheduler {
     })
 }
 
-/// Makes `program` again with the seed lists of its binary in the order that `seed` shuffles.
-/// A program with commits stays the same, because the rebuild loses them.
-fn reseed(program: &mut Program, seed: u64) -> Result<(), ToolError> {
+/// Makes `program` again from a copy of its binary model. The copy has the seed lists in the
+/// order that `order` shuffles, and then the change `edit`. A program with commits stays the
+/// same, because the rebuild loses them.
+fn rebuild(
+    program: &mut Program,
+    order: Option<u64>,
+    edit: Option<fn(&mut Binary)>,
+) -> Result<(), ToolError> {
     if program.rev().0 != 0 {
         return Ok(());
     }
-    let binary = seeds_shuffled(program.binary(), seed);
+    let mut binary = order.map_or_else(
+        || program.binary().clone(),
+        |seed| seeds_shuffled(program.binary(), seed),
+    );
+    if let Some(edit) = edit {
+        edit(&mut binary);
+    }
     *program =
         Program::from_binary(binary, program.mem().clone(), &Limits::DEFAULT).map_err(|e| {
             ToolError::new(ErrorCode::InternalError).detail("reason", Value::from(e.to_string()))
@@ -155,8 +181,10 @@ fn seeds_shuffled(binary: &Binary, seed: u64) -> Binary {
 }
 
 /// Gives `symbols` with their address groups in the order that `seed` shuffles. The symbols
-/// at one address keep their table order. The `Symbols` analyzer takes the premise of the last
-/// function symbol at an address.
+/// at one address keep their table order. The `Symbols` analyzer takes the premise of the first
+/// function symbol at an address in the alias order. That order puts a global symbol first,
+/// then a weak, another and a local symbol. Inside one binding, it uses the byte order of the
+/// name.
 fn by_address(symbols: &[Sym], seed: u64) -> Vec<Sym> {
     let mut groups: Vec<Vec<Sym>> = Vec::new();
     let mut slots: BTreeMap<u64, usize> = BTreeMap::new();
@@ -233,14 +261,14 @@ impl AnalysisEngine for Engine {
             Until::Triage => Band::Triage,
             Until::Full => Band::Full,
         };
-        let order = self.order;
+        let (order, edit) = (self.order, self.edit);
         let scheduler = match self.schedulers.entry(binary.id) {
             Entry::Occupied(found) => found.into_mut(),
             Entry::Vacant(slot) => match binary.analysis.map(|a| a.state) {
                 // The first analysis after a load publishes after each run.
                 None => {
-                    if let Some(seed) = order {
-                        reseed(&mut binary.program, seed)?;
+                    if order.is_some() || edit.is_some() {
+                        rebuild(&mut binary.program, order, edit)?;
                     }
                     slot.insert(first_scheduler(order))
                 }

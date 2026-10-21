@@ -22,8 +22,9 @@
 //!
 //! A temporary file has a name of this process: `<base>.<pid>.<n>`. `n` counts up in the
 //! process. So two processes never use the same temporary file. A process that stops between
-//! the create and the rename leaves its temporary file. A write open removes these files with
-//! `remove_dead_temps`. It keeps the temporary files of live processes.
+//! the create and the rename leaves its temporary file. A write open removes these files from
+//! the project directory and its `bin` and `crash` directories with `remove_dead_temps`. It
+//! keeps the temporary files of live processes.
 //!
 //! [`RealFs`] never writes through a symbolic link. `create_new`, `append`, `write_all` and
 //! `truncate` give [`FsError::WrongKind`] for a path that is not a regular file.
@@ -325,13 +326,28 @@ pub(crate) fn remove_dead_temps(
     bases: &[&str],
     dead: fn(&mut dyn Fs, u32) -> bool,
 ) -> usize {
+    let pid_of = |name: &str| bases.iter().find_map(|base| temp_pid(name, base));
+    remove_dead_temps_by(fs, dir, &pid_of, dead)
+}
+
+/// Removes the temporary files of dead processes from the directory `dir`, with the names
+/// that `pid_of` accepts.
+///
+/// `pid_of` gives the process ID of a temporary file name, or `None` for another name. The
+/// other rules are the rules of [`remove_dead_temps`]. Gives the number of removed files.
+pub(crate) fn remove_dead_temps_by(
+    fs: &mut dyn Fs,
+    dir: &Path,
+    pid_of: &dyn Fn(&str) -> Option<u32>,
+    dead: fn(&mut dyn Fs, u32) -> bool,
+) -> usize {
     let Ok(names) = fs.list(dir) else {
         return 0;
     };
     let me = std::process::id();
     let mut removed: usize = 0;
     for name in names.iter().take(SWEEP_MAX) {
-        let Some(pid) = bases.iter().find_map(|base| temp_pid(name, base)) else {
+        let Some(pid) = pid_of(name) else {
             continue;
         };
         let path = dir.join(name);

@@ -98,7 +98,7 @@ impl Project {
         if self.read_only {
             return Err(ProjectError::ReadOnly);
         }
-        if id.is_empty() || id.len() > 64 || !id.bytes().all(|b| b.is_ascii_hexdigit()) {
+        if !super::is_crash_id(id) {
             return Err(ProjectError::BadMeta("the crash ID is not hex".to_owned()));
         }
         let dir = self.dir.join(CRASH_DIR);
