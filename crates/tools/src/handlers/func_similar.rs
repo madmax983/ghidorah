@@ -25,13 +25,14 @@
 //!
 //! A fuel stop gives `BUDGET_EXCEEDED`, and `next[0]` sends the same call again. The vectors
 //! of the worker thread stay in its cache, so the second call continues. Before each target
-//! the call checks the cancel flag and the `max_ms` guard. A cancel also gives
-//! `BUDGET_EXCEEDED` with the same `next[0]`. `details.stopped_by` is `fuel` or `cancel`.
+//! the call checks the cancel flag. A cancel also gives `BUDGET_EXCEEDED` with the same
+//! `next[0]`. `details.stopped_by` is `fuel` or `cancel`.
 //!
-//! A `max_ms` stop follows design Section 10.11 rule 3. The result holds the items of the
-//! targets before the stop, `stopped_by: "time"`, `deterministic: false` and `W_TIME_STOP`.
-//! `next[0]` and the remedy of the warning send the same call again. Eval mode turns the time
-//! guard off.
+//! A `max_ms` stop follows design Section 10.11 rule 3. The guard starts after the index pass.
+//! It fires only between targets, after the first target, so each call gives at least one
+//! item. The result holds the items of the targets before the stop, `stopped_by: "time"`,
+//! `deterministic: false` and `W_TIME_STOP`. `next[0]` and the remedy of the warning send the
+//! call again with only the targets after the stop. Eval mode turns the time guard off.
 
 mod find;
 mod render;
@@ -81,7 +82,7 @@ pub const WHY_RENAME: &str = "Apply the proposed names with their evidence in on
 pub const WHY_RETRY: &str = "Send the call again. It continues with the vectors that it built.";
 
 /// The `why` of the call after a time stop.
-pub const WHY_TIME: &str = "Send the call again. It continues with the vectors that it built. A higher max_ms gives it more time.";
+pub const WHY_TIME: &str = "Send this call for the targets after the stop. It uses the vectors that the first call built. A higher max_ms gives it more time.";
 
 /// The label of the transaction of the batch hint.
 pub const RENAME_LABEL: &str = "func_similar renames";
@@ -230,8 +231,18 @@ pub const SPEC: ToolSpec<Session> = ToolSpec {
     ..ToolSpec::base("func_similar", run)
 };
 
+/// Gives the call after a time stop: the arguments of `args` with only the targets after the
+/// `done` targets.
+fn rest_call(args: &Args, done: usize) -> Call {
+    let mut rest = args.canonical().clone();
+    if let (Value::Object(object), Some(list)) = (&mut rest, args.list("targets")) {
+        let left = list.get(done..).unwrap_or_default().to_vec();
+        let _ = object.insert("targets", Value::Array(left));
+    }
+    Call::new("func_similar", rest, WHY_TIME)
+}
+
 fn run(session: &mut Session, args: &Args, ctx: &mut Ctx) -> Result<Payload, ToolError> {
-    let began = session.clock().monotonic_ms();
     let bound = session.bound(&ctx.frame)?.id;
     if let Some(binary) = session.binary(bound) {
         fs::x86_only(&binary.program)?;
@@ -247,6 +258,9 @@ fn run(session: &mut Session, args: &Args, ctx: &mut Ctx) -> Result<Payload, Too
             ))
     };
     let index = state::index(&programs, &mut ctx.fuel).map_err(|_| retry(find::Halt::Fuel))?;
+    // The time guard starts after the index pass, so a resend does not spend its time on the
+    // same pass before its first target.
+    let began = session.clock().monotonic_ms();
     let mut items = Vec::new();
     let timed_out = match find::find(session, &index, bound, args, ctx, began, &mut items) {
         Ok(()) => false,
@@ -265,11 +279,11 @@ fn run(session: &mut Session, args: &Args, ctx: &mut Ctx) -> Result<Payload, Too
     };
     let mut out = render::render(&view, &items, ctx);
     if timed_out {
-        // A time stop is not deterministic (design Section 10.11 rule 3). The same call
-        // continues with the vectors that it built.
+        // A time stop is not deterministic (design Section 10.11 rule 3). The resend holds
+        // only the targets after the stop, and it uses the vectors that this call built.
         out.push("stopped_by", Value::from(find::Halt::Time.name()));
         out.push("deterministic", Value::Bool(false));
-        let resend = Call::new("func_similar", args.canonical().clone(), WHY_TIME);
+        let resend = rest_call(args, items.len());
         ctx.warn(Warning {
             remedy: Some(resend.clone()),
             ..Warning::new(WarningCode::TimeStop)

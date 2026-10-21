@@ -137,8 +137,10 @@ impl From<OutOfFuel> for Halt {
 }
 
 /// Puts the result of each target of the call in `out`, in input order. Before each target
-/// the loop checks the cancel flag and the `max_ms` guard of `ctx`: the call started at the
-/// monotonic time `began`. After a stop, `out` holds the results of the targets before it.
+/// the loop checks the cancel flag. Before each target after the first, it checks the
+/// `max_ms` guard of `ctx`: the guard started at the monotonic time `began`. So the first
+/// target always runs, and each call makes progress. After a stop, `out` holds the results of
+/// the targets before it.
 ///
 /// # Errors
 ///
@@ -169,7 +171,7 @@ pub fn find(
         if ctx.cancelled() {
             return Err(Halt::Cancel);
         }
-        if session.past_max_ms(began, ctx.max_ms) {
+        if i > 0 && session.past_max_ms(began, ctx.max_ms) {
             return Err(Halt::Time);
         }
         let path = if name == "targets" {
