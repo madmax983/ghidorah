@@ -439,17 +439,29 @@ fn ac_189b_strip() {
     }
 }
 
+/// The ID of the survey read with the default budget. Its cut can fall at another item after
+/// a rename, so the rename relation checks it with [`is_cut_of`].
+const SURVEY_CUT: &str = "survey cut";
+
 /// Gives the read lines of the binary `id`: the function list, the survey and one `func_get`
-/// and one `xref_list` for each function of `funcs`.
+/// and one `xref_list` for each function of `funcs`. Each read has the hard budget cap, so it
+/// gives full lists. One more survey read has the default budget.
 fn reads(id: &str, funcs: &[String]) -> Vec<String> {
     let mut lines = vec![
         request(
             "list",
             "func_list",
-            args(&format!(r#"{{"binary_id":"{id}","limit":1000}}"#)),
+            args(&format!(
+                r#"{{"binary_id":"{id}","limit":1000,"max_chars":60000}}"#
+            )),
         ),
         request(
             "survey",
+            "binary_survey",
+            args(&format!(r#"{{"binary_id":"{id}","max_chars":60000}}"#)),
+        ),
+        request(
+            SURVEY_CUT,
             "binary_survey",
             args(&format!(r#"{{"binary_id":"{id}"}}"#)),
         ),
@@ -466,11 +478,135 @@ fn reads(id: &str, funcs: &[String]) -> Vec<String> {
             &format!("xrefs {f}"),
             "xref_list",
             args(&format!(
-                r#"{{"binary_id":"{id}","target":"{f}","limit":1000}}"#
+                r#"{{"binary_id":"{id}","target":"{f}","limit":1000,"max_chars":60000}}"#
             )),
         ));
     }
     lines
+}
+
+/// Gives the pointer of the first cut mark of `value` below `at`: an `omitted` member, or
+/// `truncated: true`.
+fn cut_mark(value: &Value, at: &str) -> Option<String> {
+    match value {
+        Value::Object(members) => members.iter().find_map(|(key, item)| {
+            let path = format!("{at}/{key}");
+            let mark = key == "omitted" || (key == "truncated" && *item == Value::Bool(true));
+            if mark {
+                Some(path)
+            } else {
+                cut_mark(item, &path)
+            }
+        }),
+        Value::Array(items) => items
+            .iter()
+            .enumerate()
+            .find_map(|(i, item)| cut_mark(item, &format!("{at}/{i}"))),
+        _ => None,
+    }
+}
+
+/// Tells if `cut` is `full` with some lists cut, for any cut. A cut list is the `items` of an
+/// object with `omitted: { count }`. It keeps the first items of the full list, and `count`
+/// is the number of the dropped items. Every other value is equal.
+fn is_cut_of(cut: &Value, full: &Value) -> bool {
+    match (cut, full) {
+        (Value::Object(kept), Value::Object(whole)) => {
+            let dropped = kept
+                .get("omitted")
+                .and_then(|o| o.get("count"))
+                .and_then(Value::as_u64);
+            let same_keys = kept.iter().filter(|(k, _)| *k != "omitted").count() == whole.len();
+            same_keys
+                && whole.iter().all(|(key, all)| {
+                    let Some(part) = kept.get(key) else {
+                        return false;
+                    };
+                    match (dropped, key, part, all) {
+                        (Some(count), "items", Value::Array(first), Value::Array(every)) => {
+                            let gone = every.len().checked_sub(first.len());
+                            gone.and_then(|g| u64::try_from(g).ok()) == Some(count)
+                                && every.starts_with(first)
+                        }
+                        _ => is_cut_of(part, all),
+                    }
+                })
+        }
+        (Value::Array(kept), Value::Array(whole)) => {
+            kept.len() == whole.len() && kept.iter().zip(whole).all(|(x, y)| is_cut_of(x, y))
+        }
+        _ => cut == full,
+    }
+}
+
+/// Makes sure that [`is_cut_of`] keeps a prefix with the count of the dropped items, and
+/// nothing else.
+fn check_cut_relation() {
+    let full = args(r#"{"total":3,"items":[1,2,3]}"#);
+    assert!(is_cut_of(&full, &full));
+    assert!(is_cut_of(
+        &args(r#"{"total":3,"items":[1],"omitted":{"count":2}}"#),
+        &full
+    ));
+    for bad in [
+        r#"{"total":3,"items":[2],"omitted":{"count":2}}"#,
+        r#"{"total":3,"items":[1],"omitted":{"count":1}}"#,
+        r#"{"total":2,"items":[1],"omitted":{"count":2}}"#,
+        r#"{"total":3,"items":[1,2]}"#,
+    ] {
+        assert!(!is_cut_of(&args(bad), &full), "{bad}");
+    }
+}
+
+/// Compares the reads of fixture `name` before and after the rename. `back` maps each new
+/// name to its old name.
+///
+/// Each full read is equal modulo names, and its `rev` rises by one. The cut of the survey
+/// with the default budget can fall at another item in each run. So each run keeps the
+/// first items of its own full survey, and the full surveys are equal modulo names.
+fn compare_renamed(
+    name: &str,
+    before: &BTreeMap<String, Value>,
+    after: &BTreeMap<String, Value>,
+    back: &BTreeMap<String, String>,
+) {
+    for (id, b) in before {
+        if id == "load" {
+            continue;
+        }
+        let a = &after[id];
+        let rev = |v: &Value| v.get("rev").and_then(Value::as_u64);
+        assert_eq!(
+            rev(a),
+            rev(b).map(|r| r + 1),
+            "{name} {id}: the rev rises by one"
+        );
+        if id == SURVEY_CUT {
+            for (run, results) in [("before", before), ("after", after)] {
+                let data = |v: &Value| v.get("data").cloned().unwrap_or_default();
+                let (cut, full) = (data(&results[id]), data(&results["survey"]));
+                assert!(
+                    is_cut_of(&cut, &full),
+                    "{name} {run}: {cut} is not a cut of {full}"
+                );
+            }
+            continue;
+        }
+        for v in [a, b] {
+            assert_eq!(
+                cut_mark(v, ""),
+                None,
+                "{name} {id}: a full read is not cut: {v}"
+            );
+        }
+        let norm_a = map_strings(&without(&unhinted(a), &["rev", "named"]), &|t| {
+            replace_tokens(t, back)
+        });
+        let norm_b = without(&unhinted(b), &["rev", "named"]);
+        if let Some(diff) = first_difference(&norm_b, &norm_a) {
+            panic!("{name} {id} differs modulo names:{diff}");
+        }
+    }
 }
 
 /// Gives the `(id, name)` of each function of the fixture `f`.
@@ -524,6 +660,7 @@ fn renamed(old: &str) -> String {
 
 #[test]
 fn ac_189c_rename() {
+    check_cut_relation();
     let t1 = fixtures("T1");
     for name in [
         "hello.gcc-O2.stripped",
@@ -576,25 +713,7 @@ fn ac_189c_rename() {
             .iter()
             .map(|(_, old)| (renamed(old), old.clone()))
             .collect();
-        for (id, b) in &before {
-            if id == "load" {
-                continue;
-            }
-            let a = &after[id];
-            let rev = |v: &Value| v.get("rev").and_then(Value::as_u64);
-            assert_eq!(
-                rev(a),
-                rev(b).map(|r| r + 1),
-                "{name} {id}: the rev rises by one"
-            );
-            let norm_a = map_strings(&without(&unhinted(a), &["rev", "named"]), &|t| {
-                replace_tokens(t, &back)
-            });
-            let norm_b = without(&unhinted(b), &["rev", "named"]);
-            if let Some(diff) = first_difference(&norm_b, &norm_a) {
-                panic!("{name} {id} differs modulo names:{diff}");
-            }
-        }
+        compare_renamed(name, &before, &after, &back);
     }
 }
 

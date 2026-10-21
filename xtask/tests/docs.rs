@@ -7,7 +7,8 @@
 )]
 
 use std::collections::BTreeSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use xtask::ac::{self, AcRow, Evidence, Op, Tier};
 use xtask::acrun::table::{self, Row};
@@ -270,6 +271,11 @@ fn outcome(id: &str, kind: &'static str, status: Status) -> Outcome {
     }
 }
 
+/// Gives the set of fresh commits of the `stale` list.
+fn fresh(commits: &[&str]) -> BTreeSet<String> {
+    commits.iter().map(|c| (*c).to_owned()).collect()
+}
+
 fn gate_row(id: &str, evidence: Vec<Evidence>) -> AcRow {
     AcRow {
         id: id.to_owned(),
@@ -445,7 +451,7 @@ fn check_not_passed(design: &[AcRow], merged: &[Row]) {
         Value::Array(Vec::new())
     );
     assert_eq!(
-        table::stale(&during, &with_self, "c2"),
+        table::stale(&during, &with_self, &fresh(&["c2"])),
         Value::Array(Vec::new())
     );
     // After an older run, the rows of the `xtask:ac` items come last and do not count.
@@ -459,7 +465,7 @@ fn check_not_passed(design: &[AcRow], merged: &[Row]) {
         Value::Array(Vec::new())
     );
     assert_eq!(
-        table::stale(&after, &with_self, "c2"),
+        table::stale(&after, &with_self, &fresh(&["c2"])),
         Value::Array(Vec::new())
     );
     let failed_ci = vec![xtask_row("AC-020", Status::Fail, "c1")];
@@ -468,7 +474,7 @@ fn check_not_passed(design: &[AcRow], merged: &[Row]) {
         r#"[{"ac":"AC-020","kind":"xtask","status":"fail","tier":"T2"}]"#
     );
     assert_eq!(
-        table::stale(&failed_ci, &with_self, "c2")
+        table::stale(&failed_ci, &with_self, &fresh(&["c2"]))
             .as_array()
             .map(<[Value]>::len),
         Some(1)
@@ -557,11 +563,11 @@ fn ac_018b_evidence_passes() {
     assert_eq!(table::failed(&merged), Value::Array(Vec::new()));
     // The partial run at HEAD c2 keeps the AC-001 row of c1. That row is stale.
     assert_eq!(
-        json::write(&table::stale(&merged, &design, "c2")),
+        json::write(&table::stale(&merged, &design, &fresh(&["c2"]))),
         r#"[{"ac":"AC-001","commit":"c1","kind":"test","tier":"T1"}]"#
     );
     assert_eq!(
-        table::stale(&merged, &design, "c1")
+        table::stale(&merged, &design, &fresh(&["c1"]))
             .as_array()
             .map(<[Value]>::len),
         Some(2)
@@ -625,4 +631,84 @@ fn check_committed_table() {
     for id in &named {
         assert!(gates.contains(*id), "{id} is not an MVP AC");
     }
+}
+
+/// Runs `git` in `dir` with a fixed identity and gives its trimmed stdout. `None` means that
+/// `git` does not start: the hermetic run of `xtask ci` has no `git` on `PATH`.
+fn git(dir: &Path, args: &[&str]) -> Option<String> {
+    let out = Command::new("git")
+        .args(["-c", "user.name=t", "-c", "user.email=t@example.org"])
+        .args([
+            "-c",
+            "commit.gpgsign=false",
+            "-c",
+            "init.defaultBranch=main",
+        ])
+        .args(args)
+        .current_dir(dir)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .env_remove("GIT_INDEX_FILE")
+        .output()
+        .ok()?;
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "git {args:?}: {stderr}");
+    Some(String::from_utf8_lossy(&out.stdout).trim().to_owned())
+}
+
+/// Writes `text` to `rel` in `dir`, commits all files and gives the new commit.
+fn commit_file(dir: &Path, rel: &str, text: &str) -> String {
+    std::fs::write(dir.join(rel), text).expect("the file is written");
+    git(dir, &["add", "-A"]).expect("git runs");
+    git(dir, &["commit", "-q", "-m", rel]).expect("git runs");
+    git(dir, &["rev-parse", "HEAD"]).expect("git runs")
+}
+
+#[test]
+fn regress_table_only_commit_is_not_stale() {
+    let dir = std::env::temp_dir().join(format!("ghidorah-xtask-stale-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("docs")).expect("the directory is made");
+    if git(&dir, &["init", "-q"]).is_none() {
+        std::fs::remove_dir_all(&dir).expect("the directory is removed");
+        return;
+    }
+    let item = Evidence::Test {
+        krate: "xtask".to_owned(),
+        func: "ac_001_a".to_owned(),
+        tier: Tier::T1,
+    };
+    let design = vec![gate_row("AC-001", vec![item])];
+    commit_file(&dir, acrun::TABLE_PATH, "[]\n");
+    let run = commit_file(&dir, "code.rs", "fn a() {}\n");
+    let rows = vec![Row::new(&outcome("AC-001", "test", Status::Pass), &run)];
+    let stale_at = |head: &str, rows: &[Row]| {
+        let found = table::fresh_commits(&dir, rows, head);
+        let stale = table::stale(rows, &design, &found);
+        (found, stale)
+    };
+    // The commit that writes the table after the run changes no other file. No row is stale.
+    let written = commit_file(&dir, acrun::TABLE_PATH, "[\n]\n");
+    let (found, stale) = stale_at(&written, &rows);
+    assert_eq!(found, fresh(&[run.as_str(), written.as_str()]));
+    assert_eq!(stale, Value::Array(Vec::new()));
+    // A change outside the table makes the row stale.
+    let code = commit_file(&dir, "code.rs", "fn b() {}\n");
+    let (found, stale) = stale_at(&code, &rows);
+    assert_eq!(found, fresh(&[code.as_str()]));
+    assert_eq!(stale.as_array().map(<[Value]>::len), Some(1), "{stale}");
+    // An unknown commit and a text that is not a commit name stay stale.
+    let unknown = vec![
+        Row::new(&outcome("AC-001", "test", Status::Pass), &"0".repeat(40)),
+        Row::new(&outcome("AC-001", "test", Status::Pass), "--output=out.txt"),
+    ];
+    let (found, stale) = stale_at(&written, &unknown);
+    assert_eq!(found, fresh(&[written.as_str()]));
+    assert_eq!(stale.as_array().map(<[Value]>::len), Some(1), "{stale}");
+    assert!(!dir.join("out.txt").exists());
+    // A head that is not a commit name gives no fresh commit.
+    assert!(table::fresh_commits(&dir, &rows, "").is_empty());
+    std::fs::remove_dir_all(&dir).expect("the directory is removed");
 }

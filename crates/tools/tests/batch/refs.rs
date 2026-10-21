@@ -278,6 +278,129 @@ fn regress_type_mismatch_ref_has_candidates() {
     );
 }
 
+/// A batch whose references to the completed step `s1` fail at run time. The step `look`
+/// stops on a small fuel budget. The `keep` step binds the object at `/data/items/0/schema`.
+/// The `mismatch` step reads that object into a text argument. The `typo` step reads a path
+/// that the data does not have.
+const FAILING_REFS: &str = r#"[
+    {"id":"s1","tool":"tool_search","args":{"name":"calc","level":"full"}},
+    {"id":"look","tool":"search","args":{"kind":"name","query":"pass"}},
+    {"id":"keep","tool":"fact_check","args":{"claims":[{"rel":"calls",
+        "args":[{"$ref":"s1","ptr":"/data/items/0/schema"},"main"]}]}},
+    {"id":"mismatch","tool":"calc","args":{"expr":{"$ref":"s1","ptr":"/data/items/0/schema"}}},
+    {"id":"typo","tool":"calc","args":{"expr":{"$ref":"s1","ptr":"/data/items/0/schema/nope"}}}
+]"#;
+
+/// A replay of a batch that stopped on fuel gives the reference errors of a first run, with
+/// the same candidates (found by the round 5 review).
+#[test]
+fn regress_batch_resume_ref_keeps_candidates() {
+    let mut s = demo();
+    let unlimited = batch(&mut s, &format!(r#"{{"steps":{FAILING_REFS}}}"#));
+    let first = steps(&unlimited);
+    for entry in &first[3..] {
+        assert_eq!(
+            text_at(entry, "/error/code"),
+            "BAD_REFERENCE",
+            "{unlimited}"
+        );
+        let error = entry.get("error").cloned().unwrap_or_default();
+        assert!(!candidates(&error).is_empty(), "{unlimited}");
+    }
+    // The same batch stops on fuel after `s1`.
+    let fuel = first[0].get("fuel").and_then(Value::as_u64).unwrap_or(0);
+    let text = format!(
+        r#"{{"steps":{FAILING_REFS},"max_steps":{}}}"#,
+        fuel.saturating_add(1)
+    );
+    let stopped = batch(&mut s, &text);
+    let resume = stopped
+        .pointer("/data/resume")
+        .cloned()
+        .unwrap_or_else(|| panic!("the batch gives resume: {stopped}"));
+    assert_eq!(text_at(&resume, "/from_step"), "look", "{stopped}");
+    // The replay binds `s1` and gives the error of the first run at each failed reference.
+    let replay = Value::object([
+        ("steps", crate::support::json(FAILING_REFS)),
+        ("resume", resume.clone()),
+    ]);
+    let envelope = call_value(&mut s, "batch_run", replay);
+    let again = steps(&envelope);
+    assert_eq!(
+        again[0].get("resumed"),
+        Some(&Value::Bool(true)),
+        "{envelope}"
+    );
+    for (got, want) in again[3..].iter().zip(&first[3..]) {
+        assert_eq!(got.get("error"), want.get("error"), "{envelope}");
+    }
+    // A replay that stops again gives the same bindings, from the bindings of `s1`.
+    let replay = Value::object([
+        ("steps", crate::support::json(FAILING_REFS)),
+        ("resume", resume.clone()),
+        ("max_steps", Value::from(1)),
+    ]);
+    let envelope = call_value(&mut s, "batch_run", replay);
+    assert_eq!(
+        envelope.pointer("/data/resume"),
+        Some(&resume),
+        "{envelope}"
+    );
+}
+
+/// A replay reads a reference through the bindings of its source step, each at its pointer.
+/// A binding through a text or through a missing array item has no place.
+#[test]
+fn replay_reads_bindings_by_pointer() {
+    let mut s = demo();
+    let steps_text = r#"[
+        {"id":"s1","tool":"tool_search","args":{"name":"calc","level":"full"}},
+        {"id":"look","tool":"search","args":{"kind":"name","query":"pass"}},
+        {"id":"name","tool":"search","args":{"kind":"name","query":{"$ref":"s1","ptr":"/data/items/0/name"}}},
+        {"id":"mismatch","tool":"calc","args":{"expr":{"$ref":"s1","ptr":"/data/items/0/schema"}}},
+        {"id":"typo","tool":"calc","args":{"expr":{"$ref":"s1","ptr":"/data/items/0/schema/nope"}}}
+    ]"#;
+    let bindings = r#"[
+        {"step":"s1","ptr":"","value":{"data":{"items":[{"name":"calc"}]}}},
+        {"step":"s1","ptr":"/data/items/0","value":{"name":"calc","schema":{"type":"object"}}},
+        {"step":"s1","ptr":"/data/items/0/name/x","value":1},
+        {"step":"s1","ptr":"/data/items/0/name/x/y","value":2},
+        {"step":"s1","ptr":"/data/items/9","value":"lost"},
+        {"step":"s1","ptr":"/data/items/9/name","value":"lost"},
+        {"step":"s1","ptr":"/data/items/*/name","value":["calc"]}
+    ]"#;
+    let text = format!(
+        r#"{{"steps":{steps_text},"resume":{{"from_step":"look","bindings":{bindings}}}}}"#
+    );
+    let envelope = batch(&mut s, &text);
+    let entries = steps(&envelope);
+    assert_eq!(text_at(&entries[2], "/error/code"), "", "{envelope}");
+    let sorted = |i: usize| {
+        let error = entries[i].get("error").cloned().unwrap_or_default();
+        assert_eq!(text_at(&error, "/code"), "BAD_REFERENCE", "{envelope}");
+        let mut found = candidates(&error);
+        found.sort();
+        found
+    };
+    // The text paths of the bound data fit the text argument.
+    assert_eq!(
+        sorted(3),
+        ["/data/items/0/name", "/data/items/0/schema/type"],
+        "{envelope}"
+    );
+    // A missing path gives every path of the bound data.
+    assert_eq!(
+        sorted(4),
+        [
+            "/data/items",
+            "/data/items/0/name",
+            "/data/items/0/schema",
+            "/data/items/0/schema/type"
+        ],
+        "{envelope}"
+    );
+}
+
 /// The repair call of `PLUCK_TOO_LONG` runs: the source step gets a limit, and the reference
 /// accepts the truncated page (found by WP-26).
 #[test]
