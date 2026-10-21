@@ -435,6 +435,12 @@ fn regress_nested_std_group() {
     assert!(xtask::scan::layering(rel, clean).is_empty());
 }
 
+/// The program of the `xtask:` items of a test: the xtask binary that cargo built for it.
+/// So a test compiles nothing.
+fn built_xtask() -> acrun::XtaskProgram {
+    acrun::XtaskProgram::Binary(PathBuf::from(env!("CARGO_BIN_EXE_xtask")))
+}
+
 /// An `xtask:` item runs the xtask command, not the binary of the caller.
 ///
 /// A cargo step in a tier-2 run builds `target/debug/xtask` again, and in a test the caller
@@ -455,9 +461,39 @@ fn regress_xtask_evidence_runs_the_xtask_command() {
         closes: vec!["01".to_owned()],
         needs: Vec::new(),
     };
-    let outcomes = acrun::run_rows(&xtask::workspace::root(), &[row], true).expect("the item runs");
+    let outcomes = acrun::run_rows(&xtask::workspace::root(), &[row], true, &built_xtask())
+        .expect("the item runs");
     let statuses: Vec<Status> = outcomes.iter().map(|o| o.status).collect();
     assert_eq!(statuses, [Status::Pass]);
+}
+
+/// The child of an `xtask:` item requires proofs, as the test items of an evidence run do.
+/// So the `xtask:ac` item of AC-018b gives `fail` on a stale proof tree.
+#[test]
+fn regress_xtask_item_requires_proofs() {
+    let root = Path::new("/w");
+    let env = |cmd: &std::process::Command, key: &str| {
+        cmd.get_envs()
+            .find(|(k, _)| *k == key)
+            .and_then(|(_, v)| v.map(|v| v.to_string_lossy().into_owned()))
+    };
+    let args = |cmd: &std::process::Command| -> Vec<String> {
+        cmd.get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect()
+    };
+    let cargo = acrun::xtask_command(root, &acrun::XtaskProgram::Cargo, "ac");
+    assert_eq!(env(&cargo, "GHIDORAH_REQUIRE_PROOFS").as_deref(), Some("1"));
+    assert_eq!(
+        args(&cargo),
+        ["run", "--quiet", "--package", "xtask", "--", "ac"]
+    );
+    assert_eq!(cargo.get_current_dir(), Some(root));
+    let built = acrun::xtask_command(root, &built_xtask(), "ci");
+    assert_eq!(env(&built, "GHIDORAH_REQUIRE_PROOFS").as_deref(), Some("1"));
+    assert_eq!(built.get_program(), env!("CARGO_BIN_EXE_xtask"));
+    assert_eq!(args(&built), ["ci"]);
+    assert_eq!(built.get_current_dir(), Some(root));
 }
 
 #[test]

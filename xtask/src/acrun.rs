@@ -1,14 +1,15 @@
 //! The evidence runner of `xtask ac --run` and the table `docs/ac-evidence.json`.
 //!
 //! Tier-1 test items always run. Tier-2 test items, `cmd:` items and `xtask:` items run only
-//! with `--tier2`. Test items run with `GHIDORAH_REQUIRE_PROOFS=1`. A `record:` item gives `recorded` when its hash matches its named input
-//! ([`record`]). The module [`table`] reads, merges and writes the evidence table.
+//! with `--tier2`. Test items and `xtask:` items run with `GHIDORAH_REQUIRE_PROOFS=1`. A
+//! `record:` item gives `recorded` when its hash matches its named input ([`record`]). The
+//! module [`table`] reads, merges and writes the evidence table.
 
 pub mod record;
 pub mod table;
 
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::ac::{AcRow, Evidence, Op, Tier, is_template};
@@ -162,7 +163,7 @@ fn package_of(krate: &str) -> Option<&'static str> {
 /// So a stale proof record fails `ac_034_proof_freshness`. It does not give `pass` with a warning.
 fn evidence_cargo(root: &Path, args: &[&str]) -> Command {
     let mut cmd = proc::cargo_cmd(args);
-    cmd.env("GHIDORAH_REQUIRE_PROOFS", "1").current_dir(root);
+    cmd.env(record::REQUIRE_PROOFS, "1").current_dir(root);
     cmd
 }
 
@@ -228,18 +229,47 @@ fn run_template(root: &Path, krate: &str, func: &str) -> Result<Status, Error> {
     Ok(Status::Pass)
 }
 
+/// The program that runs the xtask command of an `xtask:` item.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum XtaskProgram {
+    /// `cargo run --quiet --package xtask --`. The CLI uses it, because the running binary can
+    /// be a test binary. Also, a cargo step of the same run can build `target/debug/xtask`
+    /// again.
+    Cargo,
+    /// A built xtask binary, for example `CARGO_BIN_EXE_xtask` in a test. It compiles nothing.
+    Binary(PathBuf),
+}
+
+/// Gives the command that runs the xtask command `sub` of an `xtask:` item.
+///
+/// The command sets `GHIDORAH_REQUIRE_PROOFS=1`, as the test items do. So the `xtask:ac` item
+/// reads the table with the proof rule of the evidence run (AC-018b).
+#[must_use]
+pub fn xtask_command(root: &Path, program: &XtaskProgram, sub: &str) -> Command {
+    match program {
+        XtaskProgram::Cargo => {
+            evidence_cargo(root, &["run", "--quiet", "--package", "xtask", "--", sub])
+        }
+        XtaskProgram::Binary(path) => {
+            let mut cmd = Command::new(path);
+            cmd.arg(sub)
+                .env(record::REQUIRE_PROOFS, "1")
+                .current_dir(root);
+            cmd
+        }
+    }
+}
+
 fn run_xtask(
     root: &Path,
+    program: &XtaskProgram,
     sub: &str,
     cache: &mut BTreeMap<String, Option<Value>>,
 ) -> Result<Option<Value>, Error> {
     if let Some(value) = cache.get(sub) {
         return Ok(value.clone());
     }
-    // Cargo runs the xtask command. The running binary can be a test binary.
-    // Also, a cargo step of the same run can build `target/debug/xtask` again.
-    let mut cmd = proc::cargo_cmd(&["run", "--quiet", "--package", "xtask", "--", sub]);
-    let out = proc::run(cmd.current_dir(root))?;
+    let out = proc::run(&mut xtask_command(root, program, sub))?;
     let value = json::parse(out.stdout.trim()).ok();
     cache.insert(sub.to_owned(), value.clone());
     Ok(value)
@@ -254,12 +284,18 @@ fn cmd_status(root: &Path, argv: &str) -> Result<Status, Error> {
     Ok(if out.ok() { Status::Pass } else { Status::Fail })
 }
 
-/// Runs the evidence of each row. Tier-2 items run only when `tier2` is true.
+/// Runs the evidence of each row. Tier-2 items run only when `tier2` is true. `xtask` is the
+/// program of the `xtask:` items.
 ///
 /// # Errors
 ///
 /// Returns an error when a process does not start.
-pub fn run_rows(root: &Path, rows: &[AcRow], tier2: bool) -> Result<Vec<Outcome>, Error> {
+pub fn run_rows(
+    root: &Path,
+    rows: &[AcRow],
+    tier2: bool,
+    xtask: &XtaskProgram,
+) -> Result<Vec<Outcome>, Error> {
     let mut tests: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
     for row in rows {
         for item in &row.evidence {
@@ -302,7 +338,7 @@ pub fn run_rows(root: &Path, rows: &[AcRow], tier2: bool) -> Result<Vec<Outcome>
                     op,
                     value,
                 } => {
-                    let report = run_xtask(root, sub, &mut cache)?;
+                    let report = run_xtask(root, xtask, sub, &mut cache)?;
                     let hit = report.as_ref().and_then(|r| r.pointer(pointer));
                     if hit.is_some_and(|v| compare(v, *op, value)) {
                         Status::Pass
