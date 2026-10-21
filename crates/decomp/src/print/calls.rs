@@ -107,8 +107,9 @@ impl Printer<'_> {
         })
     }
 
-    /// Tells if the statement `s` is a tail call with no return value of a callee that
-    /// returns. Its line is `f(..);`, so a `return;` line follows it.
+    /// Tells if the statement `s` is a tail call of a callee that returns, with no return
+    /// value of the callee or of the function. Its line is `f(..);`, so a `return;` line
+    /// follows it.
     pub(super) fn tail_return(&self, s: &Stmt) -> bool {
         let Stmt::Call(c) = s else {
             return false;
@@ -117,7 +118,7 @@ impl Printer<'_> {
             Callee::Direct(t) => !c.noreturn && !self.env.is_noreturn(t),
             _ => !c.noreturn,
         };
-        c.tail && returns && self.callee_value(c) == Some(RetValue::Void)
+        c.tail && returns && (self.void_ret || self.callee_value(c) == Some(RetValue::Void))
     }
 
     /// Gives the variable that gets the result of a call statement. A direct callee whose

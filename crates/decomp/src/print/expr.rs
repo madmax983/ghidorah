@@ -150,6 +150,7 @@ impl Printer<'_> {
                 let text = self.call_text(c, buf);
                 if c.tail {
                     match self.callee_value(c) {
+                        _ if self.void_ret => return format!("{text};"),
                         Some(RetValue::Void) => return format!("{text};"),
                         Some(RetValue::Float(k)) => self.tail_float = Some(k),
                         Some(RetValue::Int) | None => self.rets.push(64),

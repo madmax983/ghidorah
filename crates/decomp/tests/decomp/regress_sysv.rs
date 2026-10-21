@@ -307,6 +307,33 @@ fn regress_void_tail_call_is_no_return_value() {
     );
 }
 
+/// `run_command` of `switch` only tail calls `puts`, and `main` ignores its value. Each case
+/// printed `return puts(..);` in a `uint64_t` head. The function has no return value, so each
+/// case calls `puts`, then returns, and the call in `main` has no result.
+#[test]
+fn regress_tail_calls_of_void_function() {
+    let lines = lines_of("switch.gcc-O2", "run_command");
+    assert_eq!(lines[0], "void run_command(uint64_t param_1)", "{lines:?}");
+    assert!(
+        lines.iter().all(|l| !l.contains("return puts")),
+        "{lines:?}"
+    );
+    let start = lines
+        .iter()
+        .position(|l| l.trim() == "case 0:")
+        .expect("case 0");
+    assert_eq!(
+        lines[start + 1..start + 3],
+        ["        puts(\"start\");", "        return;"],
+        "{lines:?}"
+    );
+    let main = lines_of("switch.gcc-O2", "main");
+    assert!(
+        main.iter().any(|l| l.trim().starts_with("run_command(")),
+        "{main:?}"
+    );
+}
+
 /// An environment that knows only the return value of [`CALLEE`].
 struct RetEnv(RetValue);
 

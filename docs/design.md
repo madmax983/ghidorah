@@ -1194,6 +1194,8 @@ Floating return and return value (`analysis::fir::ret`):
 - A direct call that is the last event of `xmm0` gives the floating return of its callee. The callee value comes from its facts and its L0 body only, so the rule looks one call deep. An indirect call is no evidence.
 - With a floating return, each L1 `Ret` reads `xmm0` in place of `rax` (Section 7.12).
 - The return value of a function (`RetValue`) is no value, an integer value or a floating value. A `void` return type gives no value. With no signature, a function with no floating return gives no value when a `ret` returns the entry value of `rax`. A C function returns a value on each path or on none, so one such `ret` is enough.
+- Caller evidence: the value of a function can pass on from calls. Then the last event of `rax` before each `ret` is a call, or the function has no `ret`. A floating return of a callee gives a floating value. Else the callers decide.
+- The callers ignore the value when three conditions are true. Each reference to the function is a direct call. No export names it. After each call site, the caller writes `rax` and `xmm0` before any read, branch or return. A call writes both, and the scan reads at most 8 instructions.
 
 ### 7.11 Other analyzers
 
@@ -1283,7 +1285,7 @@ All passes are pure, named and switchable (`passes: { fold, sailr, canary, tailc
 1. Expression view: `Expr { Var, Const, Load, Un, Bin, Ite, Call, Str }` and `Stmt { Assign, Store, Call, If, Loop, Switch, Return, Goto, Label, Break, Continue }` with an `OpId` on each node. The decompiler builds the view again on demand. Passes never edit L1.
 2. Safe folding (angr rule): a def folds into its use only when four conditions are true. It has exactly 1 def and 1 use. The use is not a phi. No store, call or `Intrinsic` with a memory effect lies between def and use. The def does not leave a loop body. Other values become named variables (Ghidra `max_implied_ref = 2` for explicit versus implied).
 3. Out-of-SSA: SSA values merge into one variable when their live ranges do not intersect (interference coloring). Variable identity is storage-based (`VarId`), so agent renames and retypes survive (AC-105a).
-4. SAILR-lite passes: stack-canary removal (the `fs:0x28` load and the `__stack_chk_fail` branch), per-call-site noreturn, and tail calls printed as `return f(..);`. A tail call of a callee with no return value prints `f(..);`, then `return;`. A tail call of a callee that does not return prints `f(..);` only. Return duplication, loop-inversion cleanup and guard-clause flattening are stretch S31.
+4. SAILR-lite passes: stack-canary removal (the `fs:0x28` load and the `__stack_chk_fail` branch), per-call-site noreturn, and tail calls printed as `return f(..);`. A tail call of a callee with no return value, or in a function with no return value (Section 7.10), prints `f(..);`, then `return;`. A tail call of a callee that does not return prints `f(..);` only. Return duplication, loop-inversion cleanup and guard-clause flattening are stretch S31.
 5. Type lattice (Section 8.4).
 6. Structuring (Section 8.1).
 7. Self-check (always on): the CFG walker and an AST interpreter run with 8 branch oracles seeded from the function body hash. Their block traces must be equal. A mismatch switches the output to FLAT and adds `W_STRUCTURE_SELFCHECK`. The result carries `validation: { structure: ok | repaired }`.

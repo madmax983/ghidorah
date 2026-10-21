@@ -25,7 +25,8 @@
 //! - Call names come from symbols, stub names and `sys:` IDs. The argument count comes from
 //!   the signature or the Tier-0 prototype of the callee, then from the parameter recovery.
 //! - A tail call prints as `return f(..);`. A callee with no return value gives `f(..);`, then
-//!   `return;`. A callee that does not return gives `f(..);` only. A tail call of a callee
+//!   `return;`. So does a function with no return value: its facts or its callers tell it
+//!   ([`PrintEnv::ret_value`] of its entry). A callee that does not return gives `f(..);` only. A tail call of a callee
 //!   with a floating return gives the head its type when no other return gives a value.
 //! - The result of a call is its `rax` def, or its `xmm0` def for a floating result. The facts
 //!   of the callee and the reads of the caller give the register (the `env` module).
@@ -322,7 +323,8 @@ impl<'a> Printer<'a> {
         };
         p.mark_call_values();
         if sig_void.is_none() {
-            p.void_ret = p.returns_entry_rax();
+            let own = env.ret_value(d.view.entry) == Some(RetValue::Void);
+            p.void_ret = own || p.returns_entry_rax();
         }
         p
     }
