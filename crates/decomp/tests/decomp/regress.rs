@@ -501,3 +501,19 @@ fn regress_import_call_slot_load_has_no_statement() {
         assert!(dead_assigns(&text).is_empty(), "{text}");
     }
 }
+
+/// `_start` of `syscall_only` takes no register argument. The six reads of a `Syscall` op went
+/// up to it through the call reads. So its head had six parameters and it passed them on to
+/// `emit_banner` (r3-engine-03).
+#[test]
+fn regress_syscall_reads_its_arity_text() {
+    for fixture in [
+        "syscall_only.gcc-O0",
+        "syscall_only.gcc-O2",
+        "syscall_only.clang-O2",
+    ] {
+        let text = output_of(fixture, "_start").text();
+        assert!(text.starts_with("void _start(void)\n"), "{fixture}: {text}");
+        assert!(text.contains("emit_banner();"), "{fixture}: {text}");
+    }
+}

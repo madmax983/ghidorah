@@ -331,3 +331,20 @@ pub fn arg_regs(conv: &CallConv, p: &Params, live: Option<&BTreeSet<Loc>>) -> Ve
     out.extend(floats.into_iter().take(usize::from(p.float)));
     out
 }
+
+/// Gives the varargs flag that a base fact sets for the function `entry`: its agent
+/// signature, then the Tier-0 prototype of its base symbol name.
+pub(crate) fn known_varargs(program: &Program, entry: u64) -> Option<bool> {
+    let addr = Address::ram(entry);
+    if let Some(sig) = program
+        .base()
+        .funcs()
+        .get(FuncId(addr))
+        .and_then(|f| f.sig.as_ref())
+        .and_then(|s| program.types().sig(s.value))
+    {
+        return Some(sig.variadic);
+    }
+    let name = program.base().symbols().primary(addr)?;
+    Types::prototype(&name.name.value).map(|p| p.sig.variadic)
+}

@@ -319,3 +319,27 @@ fn regress_callee_solves_use_caller_fuel() {
         chain.used()
     );
 }
+
+/// A `Syscall` op read all six syscall argument registers. So each raw syscall wrapper had six
+/// parameters, and the call reads gave them to each caller, `_start` too (r3-engine-03). The
+/// op now reads only the registers of its number: the parameter count of the Tier-0
+/// prototype of its name.
+#[test]
+fn regress_syscall_reads_its_arity() {
+    let mut seen = 0;
+    for f in fixtures() {
+        if f.program != "syscall_only" {
+            continue;
+        }
+        let funcs = truth_funcs(&truth(&f.truth));
+        let p = cached(&f.path);
+        for name in ["_start", "emit_banner", "emit_status", "get_pid", "exit_ok"] {
+            let (params, source) = cc::params(p, fid(funcs[name]), &mut Fuel::new(10_000_000))
+                .unwrap_or_else(|e| panic!("{} {name}: {e}", f.path));
+            assert_eq!(source, ParamSource::Recovered, "{} {name}", f.path);
+            assert_eq!(params, Params::default(), "{} {name}", f.path);
+            seen += 1;
+        }
+    }
+    assert_eq!(seen, 30, "six builds of five functions");
+}

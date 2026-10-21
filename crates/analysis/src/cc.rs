@@ -16,6 +16,8 @@
 //!   registers of the save area are not named parameters.
 //! - A call or a tail jump reads each argument register of its callee that holds its entry
 //!   value at the call. So a function that passes a parameter on to a callee keeps it.
+//! - A `Syscall` op reads only the argument registers of its number: the parameter count of
+//!   the Tier-0 prototype of its name. An op with no known number reads all six.
 //!
 //! [`params`] gives the parameters of a function: an agent signature first, then the Tier-0
 //! prototype of its name, then the recovery with the callee reads of the last rule
@@ -28,9 +30,10 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use ghidorah_base::{Address, Fuel, FuncId};
-use ghidorah_db::{Program, Types};
-use ghidorah_ir::{Arena, Arg, IntrinsicId, Loc, Node, Op, OpId, Opc, Val, local, rpo};
+use ghidorah_base::{Fuel, FuncId};
+use ghidorah_db::Program;
+use ghidorah_ir::{Arena, Arg, IntrinsicId, Loc, Memory, NoMemory, Node, Op, OpId, Opc, Val};
+use ghidorah_ir::{local, rpo};
 use ghidorah_kernel::RangeSet;
 use ghidorah_loader::Format;
 use ghidorah_types::CallConv;
@@ -152,6 +155,7 @@ struct Uses<'a> {
     arena: &'a Arena,
     saved: BTreeSet<Loc>,
     args: &'a BTreeSet<Loc>,
+    skip: &'a BTreeMap<OpId, BTreeSet<Loc>>,
     src: BTreeMap<Val, BTreeSet<Loc>>,
     out: BlockUse,
 }
@@ -233,11 +237,13 @@ impl Uses<'_> {
                 self.read(op.a[1]);
                 if let Some(e) = self.arena.effect(op) {
                     let scalar = is_scalar_into(e.name);
+                    let skip = self.skip.get(&op.id);
                     for loc in e.uses.iter().filter(|l| l.is_gpr() || l.is_xmm()) {
                         // The conversion keeps the upper lanes of its destination, but it
                         // writes the lane of a parameter. So that use is no parameter read.
                         let dest = scalar && loc.is_xmm() && e.defs.contains(loc);
-                        if !dest && !self.out.defs.contains(&loc) {
+                        let unread = skip.is_some_and(|s| s.contains(&loc));
+                        if !dest && !unread && !self.out.defs.contains(&loc) {
                             self.out.uses.insert(loc);
                         }
                     }
@@ -256,8 +262,15 @@ impl Uses<'_> {
 }
 
 /// Gives the use summary of each block of `fir`. With `any_push`, the push of any one
-/// register is not a read. Else only the push of a callee-saved register is not a read.
-pub(crate) fn summaries(fir: &FuncIr, conv: &CallConv, any_push: bool) -> Vec<BlockUse> {
+/// register is not a read. Else only the push of a callee-saved register is not a read. A
+/// `Syscall` op reads only the registers of its number in `mem` ([`crate::syscalls`]).
+pub(crate) fn summaries(
+    fir: &FuncIr,
+    conv: &CallConv,
+    any_push: bool,
+    mem: &dyn Memory,
+) -> Vec<BlockUse> {
+    let skip = crate::syscalls::unread(fir, mem);
     let saved: BTreeSet<Loc> = if any_push {
         (0..16u8).filter_map(Loc::gpr).collect()
     } else {
@@ -272,6 +285,7 @@ pub(crate) fn summaries(fir: &FuncIr, conv: &CallConv, any_push: bool) -> Vec<Bl
             arena: &fir.arena,
             saved: saved.clone(),
             args: &args,
+            skip: &skip,
             src: BTreeMap::new(),
             out: BlockUse::default(),
         };
@@ -331,7 +345,7 @@ pub fn obeys(fir: &FuncIr, conv: &CallConv) -> bool {
         .filter_map(|n| loc_of(n))
         .collect();
     allowed.extend(loc_of("rsp"));
-    let live = flow(fir, &summaries(fir, conv, true), &[]);
+    let live = flow(fir, &summaries(fir, conv, true, &NoMemory), &[]);
     live.iter().all(|l| allowed.contains(l))
 }
 
@@ -436,7 +450,11 @@ fn stack_slots(frame: &crate::stack::Frame, first: i64) -> BTreeSet<i64> {
 /// argument register here: [`params`] adds the reads of the callees.
 #[must_use]
 pub fn recover(fir: &FuncIr, conv: &CallConv) -> Params {
-    from_live(fir, conv, &flow(fir, &summaries(fir, conv, false), &[]))
+    from_live(
+        fir,
+        conv,
+        &flow(fir, &summaries(fir, conv, false, &NoMemory), &[]),
+    )
 }
 
 /// Gives the parameters of `fir` with the live-in registers `live`.
@@ -517,23 +535,6 @@ pub fn params(
     Ok((f.params, f.source))
 }
 
-/// Gives the varargs flag that a base fact sets for the function `entry`: its agent
-/// signature, then the Tier-0 prototype of its base symbol name.
-fn known_varargs(program: &Program, entry: u64) -> Option<bool> {
-    let addr = Address::ram(entry);
-    if let Some(sig) = program
-        .base()
-        .funcs()
-        .get(FuncId(addr))
-        .and_then(|f| f.sig.as_ref())
-        .and_then(|s| program.types().sig(s.value))
-    {
-        return Some(sig.variadic);
-    }
-    let name = program.base().symbols().primary(addr)?;
-    Types::prototype(&name.name.value).map(|p| p.sig.variadic)
-}
-
 /// The fuel of one function IR of the analyzer.
 const IR_FUEL: u64 = 1_000_000;
 
@@ -548,7 +549,7 @@ pub fn run(ctx: &mut AnalysisCtx<'_>, ranges: &RangeSet) -> Step {
     let mut work = 1u64;
     for entry in ctx.touching(ranges) {
         work = work.saturating_add(1);
-        let varargs = match known_varargs(program, entry) {
+        let varargs = match crate::fir::callsite::known_varargs(program, entry) {
             Some(v) => v,
             None => match work_ir(ctx, entry, &mut Fuel::new(IR_FUEL)) {
                 Ok(ir) => {

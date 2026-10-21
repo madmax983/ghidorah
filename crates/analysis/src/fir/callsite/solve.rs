@@ -25,7 +25,7 @@ use ghidorah_types::CallConv;
 
 use super::{arg_regs, call_targets, fixed, from_sig};
 use crate::cc::{self, BlockUse, Params, loc_of};
-use crate::fir::{self, FirError, FuncIr, Opts};
+use crate::fir::{self, FirError, FuncIr, Image, Opts};
 
 /// The largest count of functions of one [`solve`].
 pub const MAX_SOLVE: usize = 32;
@@ -94,7 +94,7 @@ impl Base {
         ir: FuncIr,
         fuel: &mut Fuel,
     ) -> Result<Self, OutOfFuel> {
-        let blocks = cc::summaries(&ir, conv, false);
+        let blocks = cc::summaries(&ir, conv, false, &Image(program));
         let mut known: BTreeMap<u64, Callee> = BTreeMap::new();
         let mut callees = BTreeMap::new();
         for (id, t) in call_targets(&ir) {
