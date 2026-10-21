@@ -159,7 +159,22 @@ fn example_envelopes(profile: Profile) -> Vec<(&'static ToolSpec<Session>, &'sta
 }
 
 /// The keys whose values are addresses in every result.
-const ADDRESS_KEYS: [&str; 8] = ["addr", "entry", "at", "from", "to", "start", "end", "va"];
+const ADDRESS_KEYS: [&str; 14] = [
+    "addr",
+    "entry",
+    "at",
+    "from",
+    "to",
+    "start",
+    "end",
+    "va",
+    "image_base",
+    "stub",
+    "slot",
+    "file_off",
+    "file_offset",
+    "base",
+];
 
 /// Calls `f` for each object member of `value` with its key.
 fn walk(value: &Value, f: &mut dyn FnMut(&str, &Value)) {
@@ -315,11 +330,23 @@ fn profile_examples(profile: Profile) -> BTreeSet<String> {
                 v.as_str()
                     .is_some_and(ghidorah_tools::outshape::is_addr_text)
             };
+            // A null address is an address that does not exist, for example the file
+            // offset of an address outside the file.
             let ok = match value {
                 Value::Array(items) => items.iter().all(hex),
+                Value::Null => true,
                 other => hex(other),
             };
             if address && !ok {
+                bad.push(format!("{key} = {value}"));
+            }
+            // A target is an address, an ID or a name. A number or a bad hex text fails.
+            let target = match value {
+                Value::Number(_) => false,
+                Value::String(text) if text.starts_with("0x") => hex(value),
+                _ => true,
+            };
+            if key == "target" && !target {
                 bad.push(format!("{key} = {value}"));
             }
             if let Value::Number(n) = value {
