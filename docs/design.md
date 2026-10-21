@@ -1171,7 +1171,7 @@ Seeds in confidence order. Each start keeps `start_reason`, a `Why` and a confid
 - A register that a call or a tail jump passes to a callee that reads it counts as read. A callee is a direct target or a tail jump out of the body. It is also the import slot of an indirect call or jump at stack height 0.
 - A syscall reads only the argument registers that its number takes: the parameter count of the Tier-0 prototype of its name. A syscall reads all six registers when block-local evaluation does not give its number, or when its name has no Tier-0 prototype.
 - A callee with a parameter count keeps only those argument registers at its calls. A count comes from a signature, a Tier-0 prototype or the recovery.
-- An import with no Tier-0 prototype has no parameter count. A function whose tail jump at stack height 0 goes to a callee with no count has no count either, as a thunk.
+- An import with no Tier-0 prototype has no parameter count. A function whose tail jump at stack height 0 goes to a callee with no count also has no count, for example a thunk.
 - A call to a callee with no count keeps every argument register. Its text shows the arguments that the caller sets. The facts of `cc::params` do not change.
 - `cc::params` solves the callees first, depth first, up to 32 functions. It runs again in that fixed order until no count changes.
 - For a positional convention (MS x64), the parameter count is the highest used slot + 1. The integer and the float register of a slot share the slot. So a live-in `r8` or `xmm2` means at least 3 parameters, and a read of a stack slot at `k >= 0x28` adds stack parameters.
