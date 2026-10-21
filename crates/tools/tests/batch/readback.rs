@@ -69,7 +69,7 @@ const ROWS: &[Row] = &[
         notes: &[],
         steps: r#"[
             {"id":"w","tool":"type_edit","args":{"target":"fn:0x11e0","signature":"int check_password(const char *input)"}},
-            {"id":"r","tool":"func_get","args":{"target":"fn:0x11e0"},"expect":[{"ptr":"/data/signature","op":"exists"}]}
+            {"id":"r","tool":"func_get","args":{"target":"fn:0x11e0"},"expect":[{"ptr":"/data/signature","op":"eq","value":"int (const char *input)"}]}
         ]"#,
     },
     Row {
@@ -85,8 +85,8 @@ const ROWS: &[Row] = &[
         notes: &[],
         steps: r#"[
             {"id":"w","tool":"func_edit","args":{"action":"set_jumptable","at":"0x1170","targets":["0x1178"]}},
-            {"id":"r1","tool":"func_get","args":{"target":"fn:0x1140","include":["jumptables"]},"expect":[{"ptr":"/data/jumptables","op":"len_gt","value":0}]},
-            {"id":"r2","tool":"search","args":{"ids":["jt:0x1170"]},"expect":[{"ptr":"/data/items","op":"len_eq","value":1}]}
+            {"id":"r1","tool":"func_get","args":{"target":"fn:0x1140","include":["jumptables"]},"expect":[{"ptr":"/data/jumptables","op":"len_eq","value":1},{"ptr":"/data/jumptables/0/at","op":"eq","value":"0x1170"},{"ptr":"/data/jumptables/0/targets","op":"eq","value":["0x1178"]},{"ptr":"/data/jumptables/0/source","op":"eq","value":"agent"}]},
+            {"id":"r2","tool":"search","args":{"ids":["jt:0x1170"]},"expect":[{"ptr":"/data/items","op":"len_eq","value":1},{"ptr":"/data/items/0/extra/targets","op":"eq","value":["0x1178"]},{"ptr":"/data/items/0/extra/source","op":"eq","value":"agent"}]}
         ]"#,
     },
     Row {
