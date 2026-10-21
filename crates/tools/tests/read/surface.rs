@@ -1,14 +1,21 @@
 //! Rules over every read tool: partial results, hostile text, mangled names, default loads
 //! and output budgets (AC-115a, AC-133, AC-145, AC-146a to AC-146d, AC-209).
 
+use std::collections::{BTreeMap, BTreeSet};
+
+use ghidorah_db::Program;
 use ghidorah_json::Value;
+use ghidorah_loader::SegmentKind;
 use ghidorah_testkit::elf::{ElfBuilder, ImportKind, Loc, Section, Symbol};
 use ghidorah_tools::Session;
 
 use crate::support::{
-    WP17B, call, call_value, chars, code, fixture, is_bin_text, items, json, load_bytes, session,
-    str_of, t1_fixtures, t2_fixtures, text_at, truth, walk, warnings,
+    WP17B, addr_of, analyzed, call, call_value, chars, code, fixture, is_bin_text, items, json,
+    load_bytes, root, session, str_of, t1_fixtures, t2_fixtures, text_at, truth, walk, warnings,
 };
+
+/// The `p_type` of a loadable program header.
+const PT_LOAD: u32 = 1;
 
 /// One call of every read tool that works on any loaded ELF file.
 const READS: [(&str, &str); 8] = [
@@ -233,38 +240,103 @@ fn ac_146b_capped() {
     }
 }
 
+/// The hex cap of a binary text in bytes (design Section 10.9).
+const HEX_CAP: usize = 512;
+
+/// Gives the `n` bytes of the file `file` at the address `at`, through the file offsets of the
+/// `PT_LOAD` program headers of `program`.
+fn file_bytes(file: &[u8], program: &Program, at: u64, n: usize) -> Vec<u8> {
+    let seg = program
+        .binary()
+        .segments
+        .iter()
+        .find(|s| {
+            s.kind == SegmentKind::Elf(PT_LOAD) && at >= s.vaddr && at - s.vaddr < s.file_size
+        })
+        .unwrap_or_else(|| panic!("a PT_LOAD maps {at:#x}"));
+    let off = usize::try_from(seg.file_off + (at - seg.vaddr)).expect("a file offset");
+    file.get(off..off + n)
+        .unwrap_or_else(|| panic!("{n} file bytes at {at:#x}"))
+        .to_vec()
+}
+
+/// Checks the hex of the binary text `v`: it decodes, it is not empty when `len > 0`, and it
+/// holds `min(len, 512)` bytes. Gives the hex and that byte count.
+fn checked_hex(name: &str, v: &Value) -> (String, usize) {
+    let hex = str_of(v, "hex");
+    let len = v
+        .get("len")
+        .and_then(Value::as_u64)
+        .expect("a binary text has len");
+    let len = usize::try_from(len).expect("a length");
+    assert!(
+        ghidorah_base::hex::decode(&hex).is_ok(),
+        "{name}: the hex decodes: {v}"
+    );
+    assert!(len == 0 || !hex.is_empty(), "{name}: the hex is empty: {v}");
+    let shown = len.min(HEX_CAP);
+    assert_eq!(
+        hex.len() / 2,
+        shown,
+        "{name}: the hex holds min(len, 512) bytes: {v}"
+    );
+    (hex, shown)
+}
+
 #[test]
 fn ac_146c_exact_hex() {
     for name in HOSTILE {
-        let want: Vec<(String, String)> = truth(name)
+        let want: BTreeMap<u64, String> = truth(name)
             .get("strings")
             .and_then(Value::as_array)
             .expect("truth strings")
             .iter()
-            .map(|s| (str_of(s, "addr"), str_of(s, "hex")))
+            .map(|s| (addr_of(&str_of(s, "addr")), str_of(s, "hex")))
             .collect();
-        let mut seen = vec![false; want.len()];
+        let file = std::fs::read(root().join("fixtures/bin").join(name)).expect("the file reads");
+        let program = &analyzed(name).program;
+        let mut seen = BTreeSet::new();
+        let (mut texts, mut from_file) = (0, 0);
         for envelope in hostile_outputs(name) {
             walk(&envelope, &mut |v| {
-                if let Some(text) = v.get("text").filter(|t| is_bin_text(t)) {
-                    let hex = str_of(text, "hex");
-                    assert!(
-                        ghidorah_base::hex::decode(&hex).is_ok(),
-                        "{name}: the hex decodes: {text}"
-                    );
-                    let addr = str_of(v, "addr");
-                    for (i, (a, h)) in want.iter().enumerate() {
-                        if *a == addr && str_of(v, "id").starts_with("str:") {
-                            assert!(h.starts_with(&hex), "{name} {a}: {hex} against {h}");
-                            seen[i] = true;
-                        }
-                    }
+                if is_bin_text(v) {
+                    checked_hex(name, v);
+                    texts += 1;
+                }
+                let Some(text) = v.get("text").filter(|t| is_bin_text(t)) else {
+                    return;
+                };
+                let id = str_of(v, "id");
+                let at = id
+                    .strip_prefix("str:")
+                    .map_or_else(|| str_of(v, "addr"), str::to_owned);
+                if at.is_empty() {
+                    return;
+                }
+                let at = addr_of(&at);
+                let (hex, shown) = checked_hex(name, text);
+                let truth_hex = want.get(&at).filter(|_| id.starts_with("str:"));
+                if let Some(h) = truth_hex {
+                    let cut = h.get(..shown * 2).unwrap_or(h);
+                    assert_eq!(hex, cut, "{name} {id}: the hex is the truth bytes");
+                    seen.insert(at);
+                } else {
+                    let bytes = file_bytes(&file, program, at, shown);
+                    let exact = ghidorah_base::hex::encode(&bytes);
+                    assert_eq!(hex, exact, "{name} {at:#x}: the hex is the file bytes: {v}");
+                    from_file += 1;
                 }
             });
         }
-        assert!(
-            seen.iter().all(|s| *s),
+        assert_eq!(
+            seen.len(),
+            want.len(),
             "{name}: every truth string shows its hex"
+        );
+        assert!(texts >= 20, "{name}: {texts} binary texts");
+        assert!(
+            from_file >= 9,
+            "{name}: {from_file} texts against the file bytes"
         );
     }
 }
