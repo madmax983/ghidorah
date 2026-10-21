@@ -160,6 +160,19 @@ fn ac_002_offline_config() {
     assert!(manifest::offline("[net]\noffline = true\n").is_empty());
     assert_eq!(manifest::offline("[net]\noffline = false\n").len(), 1);
     assert_eq!(manifest::offline("").len(), 1);
+    // The step passes only when the build passes and the config sets `net.offline`.
+    let config = repo()
+        .read(ci::CARGO_CONFIG)
+        .expect("the cargo config reads");
+    assert!(ci::offline_build_ok(true, &config));
+    assert!(!ci::offline_build_ok(false, &config));
+    let online = config.replace("offline = true", "offline = false");
+    assert!(
+        !ci::offline_build_ok(true, &online),
+        "the build passes, the config does not"
+    );
+    assert!(!ci::offline_build_ok(true, "[alias]\nx = \"run\"\n"));
+    assert!(!ci::offline_build_ok(true, ""));
     let root = workspace::root();
     let cmd = ci::command(&root, Step::OfflineBuild);
     let args: Vec<String> = cmd

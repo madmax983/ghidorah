@@ -194,6 +194,14 @@ fn ac_021_tier1_cap() {
     assert!(ci::tier1_within_cap(0));
     assert!(ci::tier1_within_cap(120_000));
     assert!(!ci::tier1_within_cap(120_001));
+    // A run that fails early is fast, but it does not finish tier 1.
+    assert!(ci::tier1_ok(true, 120_000));
+    assert!(
+        !ci::tier1_ok(false, 1_000),
+        "a failed run is not within the cap"
+    );
+    assert!(!ci::tier1_ok(true, 120_001));
+    assert!(!ci::tier1_ok(false, 120_001));
 }
 
 #[test]
@@ -222,8 +230,60 @@ fn ac_224_test_times() {
         name: "c::edge".to_owned(),
         ms: ci::TEST_CAP_MS,
         ok: true,
+        ignored: false,
     };
     assert!(ci::over_cap(&[at_cap]).is_empty(), "the cap itself passes");
+    // The second binary has no summary line, so one timed test has no count.
+    assert_eq!(ci::summary_ran(&lines), 2);
+    assert!(!ci::each_reported(&times, &lines));
+    check_each_reported();
+}
+
+fn timed(lines: &[(u64, &str)]) -> Vec<(u64, String)> {
+    lines
+        .iter()
+        .map(|(at, line)| (*at, (*line).to_owned()))
+        .collect()
+}
+
+/// Checks that `each_reported` needs a time for each test that libtest counts (AC-224).
+fn check_each_reported() {
+    let complete = timed(&[
+        (0, "running 4 tests"),
+        (10, "test a::one ... ok"),
+        (20, "test a::two ... FAILED"),
+        (30, "test a::three ... ignored, tier2"),
+        (40, "test a::four ... ok"),
+        (
+            50,
+            "test result: FAILED. 2 passed; 1 failed; 1 ignored; 0 measured; 0 filtered out",
+        ),
+        (60, "running 1 test"),
+        (70, "test crates/x/src/lib.rs - f (line 3) ... ok"),
+        (
+            80,
+            "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out",
+        ),
+    ]);
+    let times = ci::parse_test_times(&complete);
+    assert_eq!(times.len(), 5);
+    assert_eq!(ci::summary_ran(&complete), 4);
+    assert!(ci::each_reported(&times, &complete));
+    // One result line has no time entry: the test prints over its own result line.
+    let mut garbled = complete.clone();
+    garbled[4] = (40, "noise from a child process ok".to_owned());
+    let times = ci::parse_test_times(&garbled);
+    assert_eq!(times.len(), 4);
+    assert!(
+        !ci::each_reported(&times, &garbled),
+        "a test without a time"
+    );
+    // A run with no tests reports no time.
+    let empty = timed(&[
+        (0, "running 0 tests"),
+        (1, "test result: ok. 0 passed; 0 failed"),
+    ]);
+    assert!(!ci::each_reported(&ci::parse_test_times(&empty), &empty));
 }
 
 #[test]
