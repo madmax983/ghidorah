@@ -305,6 +305,14 @@ pub struct Memo {
     solved: BTreeMap<u64, Solved>,
 }
 
+impl Memo {
+    /// Gives the L0 IR of the base of the function at `entry`, when the memo holds one.
+    #[must_use]
+    pub fn ir(&self, entry: u64) -> Option<&FuncIr> {
+        self.bases.get(&entry)?.as_ref().map(|b| &b.ir)
+    }
+}
+
 /// Builds the base of the function at `addr`. A function whose IR does not build gives
 /// `None`.
 ///

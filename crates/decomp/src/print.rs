@@ -24,6 +24,8 @@
 //!   the escapes of `BinText`.
 //! - Call names come from symbols, stub names and `sys:` IDs. The argument count comes from
 //!   the signature or the Tier-0 prototype of the callee, then from the parameter recovery.
+//! - A tail call prints as `return f(..);`. A callee with no return value gives `f(..);`, then
+//!   `return;`. A callee that does not return gives `f(..);` only.
 //! - The result of a call is its `rax` def, or its `xmm0` def for a floating result. The facts
 //!   of the callee and the reads of the caller give the register (the `env` module).
 //! - A function with a floating return ([`View::float_ret`]) returns its `xmm0` value. Its
@@ -36,6 +38,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use ghidorah_analysis::fir::ret::RetValue;
 use ghidorah_base::{FuncId, VarId};
 use ghidorah_db::{CodeUnit, CommentKind, Program};
 use ghidorah_ir::{IntrinsicNames, Loc, Node, OpId};
@@ -124,6 +127,13 @@ pub trait PrintEnv: Env {
     /// Gives the calling convention of the binary.
     fn conv(&self) -> &'static CallConv {
         &SYSV_X86_64
+    }
+
+    /// Gives the return value of the function or the import at `addr` that its facts or the
+    /// recovery give ([`ghidorah_analysis::fir::ret::ret_value_in`]). The default knows none.
+    fn ret_value(&self, addr: u64) -> Option<RetValue> {
+        let _ = addr;
+        None
     }
 }
 
@@ -390,6 +400,7 @@ impl<'a> Printer<'a> {
             }
             let mut buf = Buf::default();
             let text = self.stmt(s, &mut buf);
+            let tail_return = self.tail_return(s);
             let def = match s {
                 Stmt::Call(c) if !c.tail => self.result_var(c),
                 Stmt::Assign {
@@ -403,6 +414,9 @@ impl<'a> Printer<'a> {
                 self.call_defs.push((self.lines.len(), v));
             }
             self.push(&text, LineKind::Stmt, depth, buf);
+            if tail_return {
+                self.push("return;", LineKind::Stmt, depth, Buf::default());
+            }
         }
     }
 

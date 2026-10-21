@@ -24,6 +24,9 @@
 //!
 //! A call writes both registers, so the value after a call is no evidence. A write of
 //! `xmm0` by another op, for example an integer vector op, is no evidence too.
+//!
+//! [`ret_value`] gives the return value of a function: no value, an integer value or a
+//! floating value (the `value` module).
 
 use std::collections::BTreeSet;
 
@@ -34,6 +37,10 @@ use ghidorah_types::{DataModel, Prim, Type, TypeId, TypeStore};
 use ghidorah_x86::Mnem;
 
 use super::FuncIr;
+
+mod value;
+
+pub use value::{RetValue, recover_value, ret_value, ret_value_in};
 
 /// The kind of a floating return value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -205,13 +212,13 @@ pub fn recover(l0: &FuncIr) -> Option<FloatRet> {
     let rets: Vec<usize> = (0..l0.body.blocks.len())
         .filter(|&n| ends_in_ret(l0, n))
         .collect();
-    let int = events(l0, &preds, &rets, Loc::RAX)
+    let int = events(l0, &preds, &rets, Loc::RAX, true)
         .iter()
         .any(|e| matches!(e, Event::Write(_)));
     if int {
         return None;
     }
-    events(l0, &preds, &rets, xmm0)
+    events(l0, &preds, &rets, xmm0, true)
         .into_iter()
         .filter_map(|e| match e {
             Event::Write(k) => k,
@@ -242,9 +249,10 @@ fn ends_in_ret(l0: &FuncIr, n: usize) -> bool {
 }
 
 /// Gives the last event of `loc` on each path from the end of a block of `starts` back to the
-/// entry. `preds` holds the predecessors of each block. The paths share one walk, so the walk
-/// reads each block once, also for a function with many `ret` blocks.
-fn events(l0: &FuncIr, preds: &[Vec<Node>], starts: &[usize], loc: Loc) -> Vec<Event> {
+/// entry. With `reads` off, a read is no event. `preds` holds the predecessors of each block.
+/// The paths share one walk, so the walk reads each block once, also for a function with many
+/// `ret` blocks.
+fn events(l0: &FuncIr, preds: &[Vec<Node>], starts: &[usize], loc: Loc, reads: bool) -> Vec<Event> {
     let entry = l0.body.cfg.entry().index();
     let mut out = Vec::new();
     let mut seen: BTreeSet<usize> = BTreeSet::new();
@@ -254,7 +262,11 @@ fn events(l0: &FuncIr, preds: &[Vec<Node>], starts: &[usize], loc: Loc) -> Vec<E
             continue;
         }
         let ops = block_ops(l0, n);
-        if let Some(e) = ops.iter().rev().find_map(|op| event(&l0.arena, op, loc)) {
+        let found = ops
+            .iter()
+            .rev()
+            .find_map(|op| event(&l0.arena, op, loc).filter(|e| reads || *e != Event::Read));
+        if let Some(e) = found {
             out.push(e);
             continue;
         }

@@ -24,13 +24,14 @@
 //! its first def.
 
 use ghidorah_analysis::cc::loc_of;
+use ghidorah_analysis::fir::ret::{FloatRet, RetValue};
 use ghidorah_base::WarningCode;
 use ghidorah_ir::{Loc, Opc};
 
 use super::expr::{safe, wrap};
 use super::{Arity, Buf, CallRow, CallTarget, Printer, env};
 use crate::Warning;
-use crate::expr::{Call, Callee, Expr, VarIdx};
+use crate::expr::{Call, Callee, Expr, Stmt, VarIdx};
 use crate::lattice::{calls_of, sig_regs};
 use crate::precedence::UNARY;
 
@@ -76,11 +77,44 @@ impl Printer<'_> {
                 .map(|(l, _)| *l),
             Callee::Direct(t) => match self.env.signature(t) {
                 Some(sig) => env::ret_loc(&sig, &self.stores, conv),
+                None if self.env.ret_value(t) == Some(RetValue::Void) => None,
                 None => Some(env::caller_ret_loc(c, &self.reads, conv)),
             },
             Callee::Indirect(_) => Some(env::caller_ret_loc(c, &self.reads, conv)),
             Callee::Syscall | Callee::Unimpl => Some(Loc::RAX),
         }
+    }
+
+    /// Gives the return value of the direct callee of `c`: the return type of its signature,
+    /// else its facts ([`super::PrintEnv::ret_value`]). Another callee gives `None`.
+    pub(super) fn callee_value(&self, c: &Call) -> Option<RetValue> {
+        let Callee::Direct(t) = c.callee else {
+            return None;
+        };
+        let Some(sig) = self.env.signature(t) else {
+            return self.env.ret_value(t);
+        };
+        Some(match sig.ret {
+            None => RetValue::Void,
+            Some(ty) if self.stores.is_float(ty) => {
+                let kind = self.stores.float_kind(ty).unwrap_or(FloatRet::Double);
+                RetValue::Float(kind)
+            }
+            Some(_) => RetValue::Int,
+        })
+    }
+
+    /// Tells if the statement `s` is a tail call with no return value of a callee that
+    /// returns. Its line is `f(..);`, so a `return;` line follows it.
+    pub(super) fn tail_return(&self, s: &Stmt) -> bool {
+        let Stmt::Call(c) = s else {
+            return false;
+        };
+        let returns = match c.callee {
+            Callee::Direct(t) => !c.noreturn && !self.env.is_noreturn(t),
+            _ => !c.noreturn,
+        };
+        c.tail && returns && self.callee_value(c) == Some(RetValue::Void)
     }
 
     /// Gives the variable that gets the result of a call statement. A direct callee whose

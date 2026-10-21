@@ -15,6 +15,7 @@ use std::sync::Arc;
 
 use ghidorah_analysis::cc::conv_of;
 use ghidorah_analysis::fir::callsite::{self, Memo, ParamFacts};
+use ghidorah_analysis::fir::ret::{RetValue, ret_value_in};
 use ghidorah_base::{Address, Fnv1a64, Fuel, FuncId, Rev, VarId};
 use ghidorah_db::{CommentKind, Program};
 use ghidorah_ir::{IntrinsicNames, Loc};
@@ -259,6 +260,8 @@ pub(crate) struct RenderEnv<'a> {
     memo: RefCell<Memo>,
     /// The parameter facts of each function so far.
     facts: RefCell<BTreeMap<u64, Option<ParamFacts>>>,
+    /// The return value of each callee so far.
+    rets: RefCell<BTreeMap<u64, Option<RetValue>>>,
     /// The fuel of the parameter queries.
     fuel: RefCell<Fuel>,
 }
@@ -270,6 +273,7 @@ impl<'a> RenderEnv<'a> {
             env: ProgramEnv(program),
             memo: RefCell::new(Memo::default()),
             facts: RefCell::new(BTreeMap::new()),
+            rets: RefCell::new(BTreeMap::new()),
             fuel: RefCell::new(Fuel::new(fuel.remaining().min(PARAM_FUEL))),
         }
     }
@@ -376,5 +380,19 @@ impl PrintEnv for RenderEnv<'_> {
 
     fn conv(&self) -> &'static CallConv {
         self.env.conv()
+    }
+
+    fn ret_value(&self, addr: u64) -> Option<RetValue> {
+        if let Some(found) = self.rets.borrow().get(&addr) {
+            return *found;
+        }
+        let found = ret_value_in(
+            self.env.0,
+            addr,
+            &mut self.memo.borrow_mut(),
+            &mut self.fuel.borrow_mut(),
+        );
+        self.rets.borrow_mut().insert(addr, found);
+        found
     }
 }

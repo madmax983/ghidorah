@@ -105,6 +105,25 @@ impl Stores<'_> {
                 .is_some_and(|s| s.size.saturating_mul(8) == u64::from(bits))
     }
 
+    /// Gives the floating kind of `ty`: `float` for a `float`, `double` for a `double` or a
+    /// `long double` of 8 bytes. Another type gives `None`.
+    #[must_use]
+    pub fn float_kind(&self, ty: Ty) -> Option<FloatRet> {
+        let Some((_, Type::Prim(p))) = self.resolved(ty) else {
+            return None;
+        };
+        match p {
+            Prim::Float => Some(FloatRet::Float),
+            Prim::Double => Some(FloatRet::Double),
+            Prim::LongDouble => self
+                .model()
+                .prim(*p)
+                .filter(|s| s.size == 8)
+                .map(|_| FloatRet::Double),
+            _ => None,
+        }
+    }
+
     /// Tells if `ty` is a `float`, a `double` or a `long double` of 8 bytes. A call returns
     /// such a value in the first floating return register.
     #[must_use]
