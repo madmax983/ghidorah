@@ -500,12 +500,14 @@ fn execute(
     let old = table::read(root)?;
     let ran: BTreeSet<String> = selected.iter().map(|r| r.id.clone()).collect();
     let (first, last) = acrun::split_self(selected);
-    let mut outcomes = acrun::run_rows(root, &first, tier2)?;
+    // The running binary can be a test binary, so cargo runs the `xtask:` items.
+    let xtask = acrun::XtaskProgram::Cargo;
+    let mut outcomes = acrun::run_rows(root, &first, tier2, &xtask)?;
     let to_rows = |list: &[acrun::Outcome]| -> Vec<table::Row> {
         list.iter().map(|o| table::Row::new(o, &commit)).collect()
     };
     table::write(root, &table::merge(&old, &ran, &to_rows(&outcomes), rows))?;
-    outcomes.extend(acrun::run_rows(root, &last, tier2)?);
+    outcomes.extend(acrun::run_rows(root, &last, tier2, &xtask)?);
     let merged = table::merge(&old, &ran, &to_rows(&outcomes), rows);
     Ok((outcomes, merged))
 }

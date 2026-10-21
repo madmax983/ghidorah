@@ -515,11 +515,14 @@ One parser in `base::id` reads every ID kind and every address expression (Secti
 | Revision | `Rev(u64)` | integer field `rev` | `"rev": 57` |
 | Why rule | `RuleCode` | `R_` + UPPER_SNAKE | `R_FDE_START` |
 
-- Quoted names (ADR-0008): a name part of a symbol, import, export or section ID can hold a character that `BinText` escapes, or start with a double quote. Then the part shows in the quoted form.
+- Quoted names (ADR-0008): a name part of a symbol, import, export or section ID can hold a character that `BinText` escapes, or start with a double quote. It can also start or end with ASCII white space. Then the part shows in the quoted form.
+- The parser trims the ASCII white space at both ends of an input. So only the quoted form keeps the outer white space of a name.
 - The quoted form is a double quote, the name with escapes and a closing double quote. The escapes are `\\`, `\"`, `\xNN` for C0, DEL and C1, and `\u{hex}` for each other escaped code point.
 - Example: `sym:"\x1b[2J"`. The parser undoes the quotes, and a bad quoted form gives `INVALID_ARGUMENT`. Every other name keeps its exact text.
 - The parser also accepts the quoted form of a name that needs no quotes. An ELF import name with `!` shows as `imp:!<name>`.
 - An emitted `sym:` or `sec:` ID comes from the `Display` form of its ID type, never from the escaped display name. When the ID type refuses a name, the output gives the function ID or the address.
+- An emitted `sym:` ID names a symbol only when its name resolves to exactly that address. Otherwise the output gives the function ID at the address, else the address when it is not 0.
+- `search kind=symbol` gives the `imp:` ID of the import for an undefined ELF symbol. A symbol with no ID, for example a file symbol at 0, gives no item.
 
 ### 3.6 Source ranks and provenance
 
@@ -632,8 +635,9 @@ Default projects root: `$XDG_DATA_HOME/ghidorah/projects` (fallback `$HOME/.loca
 - All file access goes through the `Fs` trait at the `db` edge: `create_new`, `append`, `write_all`, `sync_file`, `rename`, `sync_dir`, `remove`, `read`. Production uses `RealFs`. Tests use `RecordingFs` (an operation log) and `CrashFs` (stops after operation k and drops every write that has no sync).
 - A commit is `append` of one journal line, then `sync_file`.
 - A snapshot is `create_new` of its temp file in the same directory, `write_all`, `sync_file`, `rename` and `sync_dir` (AC-120a). The session writes a snapshot after each completed analysis run, every 256 journal lines and at clean shutdown.
-- Temp files: the snapshot, the input copy, `project.json`, the journal and the lock write their temp files with the per-process name `<base>.<pid>.<n>`. `<base>` is the name of the target file, and `<n>` counts the temp files of the process.
-- So two processes never write to the same temp file. A write open removes the temp files of dead processes.
+- Temp files: the snapshot, the input copy, `project.json`, the journal, the lock and each crash record write their temp files with the per-process name `<base>.<pid>.<n>`.
+- `<base>` is the name of the target file, and `<n>` counts the temp files of the process. A crash record `crash/<id>.json` uses the base `<id>.tmp`.
+- So two processes never write to the same temp file. A write open removes the temp files of dead processes from the project directory, `bin/` and `crash/`.
 - `project.json` member `load` is `Auto` or `Raw { base, entry }`. A reopen loads the input copy the same way again.
 - `snapshot.json` member `journal_lines` is the count of journal lines that the snapshot covers. A valid snapshot has two properties. `journal_lines` is at most the line count of the journal. The rev of the last covered line equals the snapshot `rev`.
 - `format_version` starts at 1. Each later version ships a migration function and a golden v1 project fixture (AC-120c).
@@ -1165,9 +1169,14 @@ Seeds in confidence order. Each start keeps `start_reason`, a `Why` and a confid
 - MS x64: the first four arguments are positional. Argument n (n = 1 to 4) uses `rcx`, `rdx`, `r8` or `r9` for an integer or a pointer, and `xmm0` to `xmm3` for a float or a double. Later arguments are on the stack from `[rsp+0x28]` at entry. Returns use `rax`, or `xmm0` for a float or a double. The caller owns a 32-byte shadow space above the return address. Nonvolatile registers: `rbx rbp rdi rsi rsp r12-r15 xmm6-xmm15`. There is no red zone.
 - Parameters = live-in registers that are argument registers, minus callee-saved push and pop pairs and alignment pushes, filled up to the highest used register.
 - A register that a call or a tail jump passes to a callee that reads it counts as read. A callee is a direct target or a tail jump out of the body. It is also the import slot of an indirect call or jump at stack height 0.
+- A syscall reads only the argument registers that its number takes: the parameter count of the Tier-0 prototype of its name. A syscall reads all six registers when block-local evaluation does not give its number, or when its name has no Tier-0 prototype.
+- A callee with a parameter count keeps only those argument registers at its calls. A count comes from a signature, a Tier-0 prototype or the recovery.
+- An import with no Tier-0 prototype has no parameter count. A function whose tail jump at stack height 0 goes to a callee with no count also has no count, for example a thunk.
+- A call to a callee with no count keeps every argument register. Its text shows the arguments that the caller sets. The facts of `cc::params` do not change.
 - `cc::params` solves the callees first, depth first, up to 32 functions. It runs again in that fixed order until no count changes.
 - For a positional convention (MS x64), the parameter count is the highest used slot + 1. The integer and the float register of a slot share the slot. So a live-in `r8` or `xmm2` means at least 3 parameters, and a read of a stack slot at `k >= 0x28` adds stack parameters.
 - Varargs: the `test al, al` prologue that guards the XMM save area sets `varargs`. MS x64 has no varargs rule in the MVP.
+- The stores of the register save area read no parameter. A signature or a Tier-0 prototype gives the exact parameter count of the head. The parameter list of a varargs head ends with `...`.
 - Known prototypes (Tier-0, Section 9.4) and agent signatures override recovery for imports and for functions whose name matches a prototype.
 - The call-site cross-check and `W_CC_CONFLICT` are stretch S16.
 
@@ -1546,10 +1555,13 @@ A string resolves by the first rule that matches, in this order:
 
 - A string of digits only is never guessed. It gives `ADDRESS_BASE_AMBIGUOUS`. The candidates list both readings (decimal and hex) with their mapped state.
 - A JSON integer of 2^53 or more gives `ADDRESS_INVALID`. `next[0]` repeats the call with the hex string.
-- A name with several matches gives `AMBIGUOUS_NAME`. Candidates are `{ value, label, id, addr, kind }` in address order, at most 5, plus `candidates_total`. Each `value` is the `sym:` or `name@0x..` form that resolves to that candidate.
+- A name with several matches gives `AMBIGUOUS_NAME`. Candidates are `{ value, label, id, addr, kind }` in address order, at most 5, plus `candidates_total`.
+- Each `value` resolves to that candidate. It is the `name@0x..` form of a symbol or the `sec:` ID of a section, else the address.
 - An unknown name gives `NOT_FOUND` with did-you-mean candidates (Damerau-Levenshtein, top 5, under fuel).
-- A binary name that `BinText` changes starts with a double quote or holds an escaped character. Its candidate never shows the raw name. The label is the escaped name.
+- A hostile binary name starts with a double quote, holds a character that `BinText` escapes, or starts or ends with ASCII white space. Its candidate never shows the raw name. The label is the escaped name.
 - For such a name, the `value` of an `AMBIGUOUS_NAME` candidate is the address. The `value` of a `NOT_FOUND` candidate is the quoted `sym:` or `sec:` ID (Section 3.5).
+- A candidate value has at most 256 characters, so the error object never cuts it. A longer `AMBIGUOUS_NAME` value becomes the address of the candidate.
+- A longer `NOT_FOUND` value gives one candidate for each address of the name: the function ID at the address, else the address. A longer ID of an ID list gives no candidate.
 - A valid address that is not mapped gives `ADDRESS_UNMAPPED` with the nearest mapped VAs as candidates.
 - `calc` uses the same grammar inside expressions, with parentheses and the operators of Section 10.4.
 - Fixture `adversarial_names` holds `x@plt`, `puts@GLIBC_2.2.5`, a real `FUN_00401000`, a symbol named like a section and `foo.cold`. A property test checks that each name resolves through its `sym:` form. The bare form of each name resolves by the rule order or gives `AMBIGUOUS_NAME` (AC-215).
@@ -1638,7 +1650,7 @@ Repair classes: **R** (repair): `next[0]` is the complete corrected call, so a c
 | 6 | `ADDRESS_INVALID` | R* | no | Address text does not parse, or a JSON integer is 2^53 or more. | `next[0]` for a large integer (hex string) or hex text with letters and no `0x` (prefix added). |
 | 7 | `ADDRESS_UNMAPPED` | C | no | Address is not in a mapped region. | Candidates: nearest mapped VAs. |
 | 8 | `ADDRESS_BASE_AMBIGUOUS` | C | no | A string of digits only. | Candidates: both readings. |
-| 9 | `AMBIGUOUS_NAME` | C | no | A name matches more than one entity. | Candidates with `sym:` or `name@0x..` values. |
+| 9 | `AMBIGUOUS_NAME` | C | no | A name matches more than one entity. | Candidates with `name@0x..` or `sec:` values. A hostile name or a value above 256 characters gives the address (Section 10.5). |
 | 10 | `NOT_FOUND` | C | no | ID, name, type, note or set does not exist. | `details.kind`. Candidates: did-you-mean. |
 | 11 | `UNKNOWN_BINARY` | R* | no | `binary_id` is not open. | Candidates: open binaries and projects. `next[0]`: `binary_load { binary_id }` when the project exists. |
 | 12 | `BINARY_REQUIRED` | R | no | More than one binary is open and the call names none. | Candidates. `next[0]`: the call with the most recently used `binary_id`. |
@@ -1790,15 +1802,19 @@ ADR-0006 fixes this behavior. One module (`crates/cli/src/mcp/era.rs`, about 300
 | JSON array (batch) | -32600 (no advertised version allows batches). |
 | Unparseable line | -32700 with `id: null`. |
 | Line above 16 MiB | -32600 with `id: null`. The server keeps running. |
+| Request with a string `id` above 256 characters | -32600 with `id: null`. The reply does not echo the ID. |
 | Unknown method | -32601. |
 | `ping` with the modern version key | -32601. `ping` exists only in the legacy era. |
 
 - Legacy results carry no `resultType`.
 - The reader thread puts each request into a work queue of 64 requests. The reader never waits on a full queue. A request that finds the queue full gets a -32603 error reply at once.
-- So the reader reads each cancel notification (AC-172), and a flood of requests does not grow the memory.
+- So the reader reads each cancel notification (AC-172).
+- The out channel to the writer holds at most 64 lines. It fills only when the client reads stdout slower than the server writes. At that bound the reader and the worker wait for the writer, because a cancel cannot help.
+- So a flood of requests does not grow the memory without a limit, also when the client does not read stdout.
 - A broken pipe or another I/O error on stdout stops the worker. The running request gets its cancel flag, and the server waits at most 5 s for the worker. Then the session writes its snapshot and releases the project lock.
 - A cancelled request whose call committed (a `tx`, or `noop: false`) still gets its reply. A cancelled `analysis_run` gets no reply (AC-172).
 - Progress: when a request carries `_meta.progressToken`, the server sends `notifications/progress { progressToken, progress, total?, message }` per fuel slice. `progress` increases strictly.
+- A request ID and a progress token are a string of at most 256 characters or an integer. A longer progress token gives no progress notifications.
 - Capabilities: only `tools`. No prompts, resources, logging, completions or tasks.
 - stdout carries only protocol lines. Logs go to stderr. Library crates deny `clippy::print_stdout` and `clippy::print_stderr`.
 
@@ -2199,7 +2215,8 @@ AC-006b checks that a function with a `cfg_attr` loop invariant and a `proof!{}`
 - `tree_sha256` is the SHA-256 over the sorted `(path, bytes)` pairs of `crates/kernel/src/**` and `crates/spec/src/**`, plus the Verus argv string. So a change to a shared spec function, to the stub crate or to the flags makes the proof stale.
 - Test `ac_034_proof_freshness` computes the tree hash and compares it with `results.json`. A mismatch is a warning in plain `cargo test` and a failure under `GHIDORAH_REQUIRE_PROOFS=1`. `xtask ci` sets that variable for its child `cargo` process.
 - The live record check of `xtask ac` and of test `ac_018b_failed_is_empty` follows the same rule. A stale tree gives `skipped` and a warning on stderr. Under `GHIDORAH_REQUIRE_PROOFS=1`, it gives `fail`.
-- An evidence run (`xtask ac --run`) requires proofs, as its test items do. So a stale tree gives `fail` there.
+- An evidence run (`xtask ac --run`) requires proofs. Its test items and its `xtask:` items run with `GHIDORAH_REQUIRE_PROOFS=1`.
+- So a stale tree gives `fail` there, also for the `xtask:ac` item of AC-018b.
 - Test `ac_035_no_proof_cheats` scans the kernel (AC-035a to AC-035c).
 - CLAUDE.md records the Verus commit, the z3 version and the source-build steps, because the Verus binary on the build host is in temporary storage.
 
@@ -2311,6 +2328,7 @@ ADR-0026 fixes the std-only bench harness (`testkit::bench`):
 - `xtask fuzz` (long fuzz runs), `xtask bench` (benchmarks) and `xtask cov` (coverage) are separate commands. `ci.yml` runs each of them as a separate step.
 - `[profile.test]` sets `opt-level = 1` for the workspace. `[profile.dev.package]` and `[profile.test.package]` set `opt-level = 2` for `ghidorah-x86`, `ghidorah-ir`, `ghidorah-analysis` and `ghidorah-decomp`.
 - `xtask ci` records the time of each test and fails any tier-1 test above 15 s.
+- A tier-1 test compiles nothing. A test that runs an xtask command starts the built binary `CARGO_BIN_EXE_xtask`, not `cargo run`. So its time does not change with the build cache.
 - `.github/workflows/ci.yml` has the jobs `tier1`, `tier2` and `verus`. The `tier1` job also runs `cargo xtask ac` and `cargo xtask fixtures check`.
 - The `tier2` job also runs `cargo xtask ac --run --tier2`. It fails when the `failed` list of that run is not empty. The `verus` job checks the proof record (Section 13.3).
 

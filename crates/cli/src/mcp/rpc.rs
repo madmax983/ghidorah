@@ -7,10 +7,12 @@
 //! | Not JSON | -32700 with `id: null` |
 //! | A JSON array (batch) | -32600 with `id: null` |
 //! | Not an object, no `jsonrpc: "2.0"`, a bad `method` or a bad `id` | -32600 |
+//! | A string `id` above [`MAX_ID_CHARS`] characters | -32600 with `id: null` |
 //! | `params` that is not an object | -32602 |
 //!
-//! A request ID is a string or an integer. A message with `result` or `error` and no
-//! `method` is a reply of the client. The server ignores it.
+//! A request ID is a string of at most [`MAX_ID_CHARS`] characters or an integer. So a reply
+//! never echoes a long ID. A message with `result` or `error` and no `method` is a reply of
+//! the client. The server ignores it.
 
 use std::fmt;
 
@@ -35,6 +37,9 @@ pub const UNSUPPORTED_VERSION: i64 = -32_022;
 /// The parse limits of one line: depth 128 and 16 MiB.
 pub const LIMITS: Limits = Limits::DEFAULT;
 
+/// The most characters of a string ID: 256. A longer string is not an ID.
+pub const MAX_ID_CHARS: usize = 256;
+
 /// The ID of a request.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum RequestId {
@@ -45,11 +50,14 @@ pub enum RequestId {
 }
 
 impl RequestId {
-    /// Gives the ID of a JSON value: a string or an integer, else `None`.
+    /// Gives the ID of a JSON value: a string of at most [`MAX_ID_CHARS`] characters or an
+    /// integer, else `None`.
     #[must_use]
     pub fn of(value: &Value) -> Option<Self> {
         match value {
-            Value::String(text) => Some(Self::Str(text.clone())),
+            Value::String(text) if text.chars().nth(MAX_ID_CHARS).is_none() => {
+                Some(Self::Str(text.clone()))
+            }
             Value::Number(n) if n.is_integer() => n
                 .as_i64()
                 .map(i128::from)
@@ -154,6 +162,10 @@ const BATCH: &str = "The line holds a batch array. No supported protocol version
 /// The message of a message that is not a valid request.
 const NOT_REQUEST: &str = "The message is not a valid JSON-RPC 2.0 request. Send an object with jsonrpc \"2.0\", a string method and a string or integer id.";
 
+/// The message of a string ID above the cap.
+const ID_TOO_LONG: &str =
+    "The string id is longer than 256 characters. Send an id of at most 256 characters.";
+
 /// The message of params that are not an object.
 const PARAMS_NOT_OBJECT: &str = "The params member is not an object. Send the params as an object.";
 
@@ -172,9 +184,14 @@ pub fn classify(line: &[u8]) -> Result<Message, Value> {
     };
     let id = match object.get("id") {
         None => None,
-        Some(raw) => Some(
-            RequestId::of(raw).ok_or_else(|| error(None, INVALID_REQUEST, NOT_REQUEST, None))?,
-        ),
+        Some(raw) => Some(RequestId::of(raw).ok_or_else(|| {
+            let message = if raw.as_str().is_some() {
+                ID_TOO_LONG
+            } else {
+                NOT_REQUEST
+            };
+            error(None, INVALID_REQUEST, message, None)
+        })?),
     };
     if object.get("jsonrpc").and_then(Value::as_str) != Some(JSONRPC) {
         return Err(error(id.as_ref(), INVALID_REQUEST, NOT_REQUEST, None));

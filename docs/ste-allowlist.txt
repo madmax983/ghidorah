@@ -32,7 +32,6 @@ docs/design.md STE-2 L0 op arena, locations, flag semantics, fusion through
 docs/design.md STE-2 Scheduler and analyzers, L0 and L1 function IR
 docs/design.md STE-2 WP-30 puts the PE parser in `loader` (`pe/`),
 docs/design.md STE-4 Derived data (decoded instructions, L0, CFG, the IR
-docs/design.md STE-2 Caches are LRU maps with a size bound
 docs/design.md STE-4 Derived data (decoded instructions, L0, CFG, IR views,
 docs/design.md STE-4 Resource, LoadConfig, BoundImport, IAT (12) and CLR are
 docs/design.md STE-4 An overflow gives `E_OVERFLOW`, and the item is
