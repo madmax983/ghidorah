@@ -129,6 +129,7 @@ fn fold_stops_at_intrinsic_memory() {
         tail_calls: &tails,
         conv: None,
         guards: &std::collections::BTreeMap::new(),
+        float_ret: None,
     };
     let d = ghidorah_decomp::from_input(&input, &NoEnv, &Opts::default(), &mut Fuel::unlimited())
         .expect("the decompile");

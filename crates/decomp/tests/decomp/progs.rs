@@ -515,6 +515,7 @@ pub fn decompile(p: &Program, ssa: &Ssa, opts: &Opts) -> Decomp {
         tail_calls: &tails,
         conv: None,
         guards: &std::collections::BTreeMap::new(),
+        float_ret: None,
     };
     ghidorah_decomp::from_input(&input, &NoEnv, opts, &mut Fuel::unlimited())
         .expect("the decompile")

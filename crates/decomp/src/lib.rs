@@ -380,6 +380,7 @@ pub fn from_l1(
         tail_calls: &ir.tail_calls,
         conv,
         guards: &ir.guards,
+        float_ret: ir.float_ret,
     };
     from_input(&input, env, opts, fuel)
 }

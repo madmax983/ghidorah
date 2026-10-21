@@ -121,12 +121,14 @@ impl Printer<'_> {
             .map_or_else(|| format!("v_{}", v.0), |n| n.0.clone())
     }
 
-    /// Tells if `e` is the entry value of `loc` or a value that a call leaves behind in it.
+    /// Tells if `e` is the entry value of `loc` or a value that a call leaves behind in it. The
+    /// entry value of an XMM register is a floating parameter, so it is no such value.
     pub(super) fn untouched(&self, e: &Expr, loc: Loc) -> bool {
         let Expr::Var { var, .. } = e else {
             return false;
         };
-        self.clobbers.contains(var) || self.view().var(*var).is_some_and(|v| v.input == Some(loc))
+        let entry = !loc.is_xmm() && self.view().var(*var).is_some_and(|v| v.input == Some(loc));
+        self.clobbers.contains(var) || entry
     }
 
     /// Gives the text of a statement with its `;` and adds its parts to `buf`.
@@ -161,9 +163,10 @@ impl Printer<'_> {
                 }
             }
             Stmt::Return { uses, .. } => {
-                let value = uses.iter().find(|(l, _)| *l == Loc::RAX).map(|(_, e)| e);
+                let loc = self.ret_loc;
+                let value = uses.iter().find(|(l, _)| *l == loc).map(|(_, e)| e);
                 match value {
-                    Some(e) if !self.void_ret && !self.untouched(e, Loc::RAX) => {
+                    Some(e) if !self.void_ret && !self.untouched(e, loc) => {
                         self.rets.push(e.width());
                         format!("return {};", self.expr(e, buf).0)
                     }

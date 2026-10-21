@@ -6,11 +6,12 @@
 
 use std::collections::BTreeSet;
 
+use ghidorah_analysis::fir::ret::FloatRet;
 use ghidorah_base::{Fuel, VarId};
 use ghidorah_db::Types;
 use ghidorah_decomp::lattice::{Store, Ty};
 use ghidorah_decomp::print::{self, PrintEnv, Signature};
-use ghidorah_decomp::{Call, Callee, Exit, Expr, NoEnv, Opts, Stmt, Tree, VarIdx, View};
+use ghidorah_decomp::{Call, Callee, Exit, Expr, NoEnv, Opts, Stmt, Tree, Var, VarIdx, View};
 use ghidorah_ir::{Loc, LocSet, NoNames};
 
 use crate::fixtures::{fid, program};
@@ -324,4 +325,132 @@ fn regress_rax_read_keeps_rax_result() {
     let (lines, _) = call_then_store(&NoEnv, &[0, 1]);
     assert_eq!(lines[2], "    v1 = FUN_00002000();", "{lines:?}");
     assert_eq!(lines[5], "    return v1;", "{lines:?}");
+}
+
+/// Gives the output of the function at `entry` of `fixture`, or of the function `name` when
+/// `entry` is 0.
+fn render_of(fixture: &str, entry: u64, name: &str) -> ghidorah_decomp::Output {
+    let p = program(fixture);
+    let at = if entry == 0 {
+        crate::fixtures::entry_of(p, name)
+    } else {
+        entry
+    };
+    ghidorah_decomp::render(
+        p,
+        fid(at),
+        &Opts::default(),
+        &NoNames,
+        &mut Fuel::new(50_000_000),
+    )
+    .unwrap_or_else(|e| panic!("{fixture} {at:#x}: {e}"))
+}
+
+/// A function that returns a `double` or a `float` gives its value in `xmm0`. The L1 return
+/// read only `rax`. So `f1` of `pe_cc.exe` printed as `void FUN_140001100(uint128_t)`, and
+/// the text lost the result of its `addsd`. Now the head gives the floating type, and the
+/// return reads the result. The variable of the result has the floating type too.
+#[test]
+fn regress_float_return_is_printed() {
+    let cases = [
+        ("pe/pe_cc.exe", 0x1_4000_1100, "double"),
+        ("pe/pe_cc.exe", 0x1_4000_1170, "double"),
+        ("pe/pe_cc.exe", 0x1_4000_11c0, "float"),
+        ("varargs.gcc-O2", 0, "double"),
+        ("varargs.gcc-O0", 0, "double"),
+        ("varargs.clang-O2", 0, "double"),
+    ];
+    for (fixture, entry, ty) in cases {
+        let out = render_of(fixture, entry, "scale");
+        let text = out.text();
+        assert!(text.starts_with(&format!("{ty} ")), "{fixture}:\n{text}");
+        let ret = text
+            .lines()
+            .map(str::trim)
+            .rfind(|l| l.starts_with("return "))
+            .unwrap_or_else(|| panic!("{fixture}: no return value:\n{text}"));
+        let var = ret
+            .strip_prefix("return ")
+            .and_then(|r| r.strip_suffix(';'))
+            .unwrap_or_default();
+        assert!(
+            text.lines()
+                .any(|l| l.trim().starts_with(&format!("{var} = "))),
+            "{fixture}: {var} has no def:\n{text}"
+        );
+        let row = out.vars.iter().find(|r| r.name == var);
+        assert_eq!(row.map(|r| r.ty.as_str()), Some(ty), "{fixture}:\n{text}");
+    }
+}
+
+/// Gives the text lines of a function with a floating return of the kind `kind`. Its body
+/// holds `stmts` over the variables `vars`.
+fn float_fn(
+    kind: Option<FloatRet>,
+    stmts: Vec<Stmt>,
+    vars: Vec<Var>,
+    env: &dyn PrintEnv,
+) -> Vec<String> {
+    let mut d = decomp(
+        vec![Spec::new(Exit::Stop, stmts)],
+        vars,
+        Tree::Block(node(0)),
+    );
+    d.view.float_ret = kind;
+    let out = print::print(&d, env, &NoNames, "f");
+    out.lines.into_iter().map(|l| l.text).collect()
+}
+
+/// A floating return reads `xmm0`. The result of a call in `xmm0` and the entry value of
+/// `xmm0`, a floating parameter, are return values. A value that a call leaves in `xmm0` is
+/// not one.
+#[test]
+fn float_return_reads_xmm0() {
+    let call = |rets: Vec<(Loc, VarIdx)>| {
+        Stmt::Call(Call {
+            callee: Callee::Direct(CALLEE),
+            args: Vec::new(),
+            set: LocSet::EMPTY,
+            push: None,
+            imm: Vec::new(),
+            mem: None,
+            rets,
+            ret: None,
+            noreturn: false,
+            tail: false,
+            at: op(0, 0, 0),
+        })
+    };
+    let ret = |x: u32| Stmt::Return {
+        uses: vec![(xmm0(), v(x, 128))],
+        at: op(0, 1, 0),
+    };
+    let vars = || vec![temp("rax", ENTRY, 64), temp("xmm0", ENTRY, 128)];
+    let result = vec![
+        call(vec![(Loc::RAX, VarIdx(0)), (xmm0(), VarIdx(1))]),
+        ret(1),
+    ];
+    let lines = float_fn(Some(FloatRet::Float), result.clone(), vars(), &NoEnv);
+    assert_eq!(lines[0], "float f(void)", "{lines:?}");
+    assert_eq!(lines[2], "    v2 = FUN_00002000();", "{lines:?}");
+    assert_eq!(lines[3], "    return v2;", "{lines:?}");
+    let atof = returns_like("atof");
+    let lines = float_fn(Some(FloatRet::Double), result, vars(), &atof);
+    assert_eq!(lines[3], "    return v2;", "{lines:?}");
+    let mut entry = vars();
+    if let Some(x) = entry.get_mut(1) {
+        x.input = Some(xmm0());
+    }
+    let lines = float_fn(Some(FloatRet::Double), vec![ret(1)], entry, &NoEnv);
+    assert_eq!(lines[0], "double f(void)", "{lines:?}");
+    assert_eq!(lines[2], "    return v2;", "{lines:?}");
+    let left = vec![call(vec![(xmm0(), VarIdx(1))]), ret(1)];
+    let lines = float_fn(
+        Some(FloatRet::Double),
+        left,
+        vars(),
+        &returns_like("strlen"),
+    );
+    assert_eq!(lines[0], "void f(void)", "{lines:?}");
+    assert_eq!(lines[3], "    return;", "{lines:?}");
 }

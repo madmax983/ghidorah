@@ -59,18 +59,27 @@ impl Printer<'_> {
         c.rets.iter().find(|(l, _)| *l == loc).map(|(_, v)| *v)
     }
 
-    /// Adds the `rax` def of each call with a result in another register to the values that a
-    /// call leaves behind. So a return of that def gives no value.
-    pub(super) fn leave_rax_defs(&mut self) {
+    /// Updates the values that a call leaves behind. The `rax` def of each call with a result
+    /// in another register is such a value, so a return of that def gives no value. The
+    /// result of a call is no such value, so a floating return of it gives the result.
+    pub(super) fn mark_call_values(&mut self) {
         let mut left = Vec::new();
+        let mut results = Vec::new();
         let calls = self.view().nodes.iter().flat_map(|n| &n.stmts);
         for c in calls.flat_map(calls_of) {
+            if matches!(c.callee, Callee::Intrinsic(_)) {
+                continue;
+            }
             if self.result_loc(c).is_some_and(|l| l != Loc::RAX) {
                 let rax = c.rets.iter().filter(|(l, _)| *l == Loc::RAX);
                 left.extend(rax.map(|(_, v)| *v));
             }
+            results.extend(self.result_var(c));
         }
         self.clobbers.extend(left);
+        for v in results {
+            self.clobbers.remove(&v);
+        }
     }
 
     /// Gives the printed name of the callee `t` and adds a mangled-name warning at `site`.

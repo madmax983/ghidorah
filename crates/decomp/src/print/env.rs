@@ -61,7 +61,7 @@ fn signature(sig: &Sig, store: &TypeStore, which: Store) -> Signature {
 }
 
 /// Gives the first floating return register of `conv`: `xmm0` in each convention.
-fn float_ret(conv: &CallConv) -> Option<Loc> {
+pub(super) fn float_ret(conv: &CallConv) -> Option<Loc> {
     conv.float_ret.first().and_then(|n| loc_of(n))
 }
 

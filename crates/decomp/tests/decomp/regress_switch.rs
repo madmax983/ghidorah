@@ -221,6 +221,7 @@ fn decompile_switch(p: &Program, guard: GuardInfo) -> Decomp {
         tail_calls: &tails,
         conv: None,
         guards: &guards,
+        float_ret: None,
     };
     ghidorah_decomp::from_input(&input, &NoEnv, &Opts::default(), &mut Fuel::unlimited())
         .expect("the decompile")

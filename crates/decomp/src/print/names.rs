@@ -146,11 +146,14 @@ impl Printer<'_> {
                 .ret
                 .and_then(|t| self.stores.text(t))
                 .unwrap_or_else(|| "void".to_owned()),
-            None => self
-                .rets
-                .iter()
-                .max()
-                .map_or_else(|| "void".to_owned(), |w| width_type(*w)),
+            None => match view.float_ret {
+                Some(k) if !self.rets.is_empty() => k.c_name().to_owned(),
+                _ => self
+                    .rets
+                    .iter()
+                    .max()
+                    .map_or_else(|| "void".to_owned(), |w| width_type(*w)),
+            },
         };
         let list = if texts.is_empty() {
             "void".to_owned()

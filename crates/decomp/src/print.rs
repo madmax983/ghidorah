@@ -26,6 +26,8 @@
 //!   the signature or the Tier-0 prototype of the callee, then from the parameter recovery.
 //! - The result of a call is its `rax` def, or its `xmm0` def for a floating result. The facts
 //!   of the callee and the reads of the caller give the register (the `env` module).
+//! - A function with a floating return ([`View::float_ret`]) returns its `xmm0` value. Its
+//!   head gives the type of the signature, else `float` or `double`.
 //! - Default variable names: `param_N`, `local_<hex>` for a stack slot and `v<N>` for a
 //!   register value. An agent name wins.
 //! - Comments: a PLATE comment comes before the function, a PRE comment before the first line
@@ -250,6 +252,7 @@ pub(crate) struct Printer<'a> {
     reads: BTreeSet<VarIdx>,
     arity: BTreeMap<u64, Option<Arity>>,
     void_ret: bool,
+    ret_loc: Loc,
     rets: Vec<u8>,
     lines: Vec<Line>,
     warnings: Vec<Warning>,
@@ -295,11 +298,16 @@ impl<'a> Printer<'a> {
             reads: env::reads(&d.view),
             arity: BTreeMap::new(),
             void_ret: sig_void.unwrap_or(false),
+            ret_loc: d
+                .view
+                .float_ret
+                .and_then(|_| env::float_ret(env.conv()))
+                .unwrap_or(Loc::RAX),
             rets: Vec::new(),
             lines: Vec::new(),
             warnings: Vec::new(),
         };
-        p.leave_rax_defs();
+        p.mark_call_values();
         if sig_void.is_none() {
             p.void_ret = p.returns_entry_rax();
         }
