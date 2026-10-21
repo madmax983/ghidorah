@@ -20,7 +20,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use ghidorah_base::{Address, Fuel, FuncId, OutOfFuel};
 use ghidorah_db::{Program, Types};
-use ghidorah_ir::{Loc, OpId, rpo};
+use ghidorah_ir::{Loc, OpId, Opc, rpo};
 use ghidorah_types::CallConv;
 
 use super::{arg_regs, call_targets, fixed, from_sig};
@@ -37,6 +37,8 @@ enum Callee {
     Fixed(Vec<Loc>),
     /// A function with no parameter fact. The solve recovers it.
     Func(u64),
+    /// An import with no Tier-0 prototype. It has no count, and the call reads no register.
+    Import,
     /// A target with no facts. The call reads no register.
     Unknown,
 }
@@ -53,7 +55,7 @@ fn callee_of(program: &Program, conv: &CallConv, addr: u64) -> Callee {
             .id
             .name()
             .and_then(Types::prototype)
-            .map_or(Callee::Unknown, |p| {
+            .map_or(Callee::Import, |p| {
                 Callee::Fixed(arg_regs(conv, &from_sig(&p.sig), None))
             });
     }
@@ -82,6 +84,8 @@ struct Base {
     params: Params,
     /// The callees of step 1 of the module doc, in address order.
     children: Vec<u64>,
+    /// The callees of the tail jumps at stack height 0.
+    tails: Vec<Callee>,
     /// The fuel of one pass over the blocks: one unit for each block and each call op.
     cost: u64,
 }
@@ -104,6 +108,7 @@ impl Base {
                 .clone();
             callees.insert(id, c);
         }
+        let tails = tail_callees(&ir, &callees);
         let ops = blocks.iter().map(|b| b.free.len()).sum::<usize>();
         let cost = u64::try_from(blocks.len().saturating_add(ops)).unwrap_or(u64::MAX);
         let mut base = Self {
@@ -113,6 +118,7 @@ impl Base {
             live: BTreeSet::new(),
             params: Params::default(),
             children: Vec::new(),
+            tails,
             cost,
         };
         base.live = base.live_with(&base.reads(conv, &BTreeMap::new()), fuel)?;
@@ -154,7 +160,7 @@ impl Base {
                     Some(n) => arg_regs(conv, &n.params, Some(&n.live)),
                     None => continue,
                 },
-                Callee::Unknown => continue,
+                Callee::Import | Callee::Unknown => continue,
             };
             out.insert(*id, regs);
         }
@@ -185,6 +191,58 @@ impl Base {
         }
         Ok(out.into_iter().collect())
     }
+}
+
+/// Gives the callees of the tail jumps of `ir` at stack height 0, in op order.
+fn tail_callees(ir: &FuncIr, callees: &BTreeMap<OpId, Callee>) -> Vec<Callee> {
+    let jump = |id: OpId| {
+        let op = ir.op_index(id).and_then(|i| ir.arena.op(i));
+        op.is_some_and(|o| matches!(o.opc, Opc::Jump | Opc::JumpInd))
+    };
+    let height = |id: OpId| ir.frame.as_ref().and_then(|f| f.sp_at(id.addr));
+    callees
+        .iter()
+        .filter(|(id, _)| jump(**id) && height(**id) == Some(0))
+        .map(|(_, c)| c.clone())
+        .collect()
+}
+
+/// Tells if the function at `root` has no count. Such a function has a tail jump at stack
+/// height 0 to an import with no Tier-0 prototype, or to a function with no count. The jump
+/// passes its registers on. A thunk of such an import is such a function. The walk takes at most [`MAX_SOLVE`]
+/// functions.
+///
+/// # Errors
+///
+/// Returns [`FirError::Fuel`] when the fuel runs out.
+fn is_open(
+    program: &Program,
+    conv: &CallConv,
+    root: u64,
+    memo: &mut Memo,
+    fuel: &mut Fuel,
+) -> Result<bool, FirError> {
+    let mut seen = BTreeSet::from([root]);
+    let mut stack = vec![root];
+    while let Some(at) = stack.pop() {
+        let tails = match memo.bases.get(&at) {
+            Some(Some(b)) => b.tails.clone(),
+            _ => continue,
+        };
+        for c in tails {
+            match c {
+                Callee::Import => return Ok(true),
+                Callee::Func(t) if seen.len() < MAX_SOLVE && seen.insert(t) => {
+                    if let Entry::Vacant(slot) = memo.bases.entry(t) {
+                        slot.insert(build(program, conv, t, fuel)?);
+                    }
+                    stack.push(t);
+                }
+                _ => {}
+            }
+        }
+    }
+    Ok(false)
 }
 
 /// Gives, for each block, the registers of `regs` that a path from the entry to the start of
@@ -230,6 +288,9 @@ pub struct Solved {
     pub params: Params,
     /// The live-in registers, with the reads of the calls.
     pub live: BTreeSet<Loc>,
+    /// The function has no count (see `is_open`). A tail jump passes its registers on to an
+    /// import with no Tier-0 prototype.
+    pub open: bool,
 }
 
 /// The memo of the solves of one caller.
@@ -352,7 +413,14 @@ pub fn solve_in(
         if let Some(Some(b)) = bases.get(u) {
             let live = b.live.clone();
             let params = b.params;
-            state.insert(*u, Solved { params, live });
+            state.insert(
+                *u,
+                Solved {
+                    params,
+                    live,
+                    open: false,
+                },
+            );
         }
     }
     let rounds = order.len().saturating_mul(4).saturating_add(4);
@@ -368,14 +436,22 @@ pub fn solve_in(
                 continue;
             }
             let params = cc::from_live(&base.ir, conv, &live);
-            state.insert(*u, Solved { params, live });
+            state.insert(
+                *u,
+                Solved {
+                    params,
+                    live,
+                    open: false,
+                },
+            );
             changed = true;
         }
         if !changed {
             break;
         }
     }
-    let out = state.remove(&root).unwrap_or_default();
+    let mut out = state.remove(&root).unwrap_or_default();
+    out.open = is_open(program, conv, root, memo, fuel)?;
     memo.solved.insert(root, out.clone());
     Ok(out)
 }

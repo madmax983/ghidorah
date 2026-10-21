@@ -4,7 +4,7 @@
 //!
 //! | Uses | Rule |
 //! |---|---|
-//! | the integer argument registers | the count of the callee, or all of them for an unknown or variadic callee |
+//! | the integer argument registers | the count of the callee, or all of them for a callee with no count or a variadic callee |
 //! | the floating argument registers | every call |
 //! | the varargs register (`al`) | only a call whose callee can take a variable argument list |
 //! | the stack arguments | the slots `Stack(k + 8j)` above the stack pointer at the call that the block writes before the call, while no slot is missing |
@@ -18,9 +18,11 @@
 //! a callee-saved register in the entry block is not an argument. A slot that escapes stays
 //! in memory, so it has no `Stack` location.
 //!
-//! The caller can write integer argument registers in the block of the call, after the call
-//! before it. The call keeps each register up to the last such one. So a short callee count
-//! drops no argument that the caller sets.
+//! A callee has a count when its signature, its Tier-0 prototype or the recovery gives one
+//! ([`callee_arity_in`]). The call then keeps only that count of integer argument registers.
+//! A callee with no count reads all of them. An unknown target has no count. So has an import
+//! with no Tier-0 prototype. So has a function whose tail jump at stack height 0 passes its
+//! registers on to such an import, as a thunk does.
 //!
 //! [`solve`] recovers the parameters of a function with the reads of its calls and tail
 //! calls (the `solve` module).
@@ -62,7 +64,7 @@ pub struct Arity {
 /// Gives the use list of each call op of `arena` (see the module doc).
 ///
 /// `arena` is the arena of `l0` with its tail jumps as calls. `callee` gives the arity of the
-/// direct callee at an address, or `None` for a callee with no facts. The callee of an
+/// direct callee at an address, or `None` for a callee with no count. The callee of an
 /// indirect call through an import slot is the slot. Another indirect call has no facts.
 #[must_use]
 pub fn uses(
@@ -85,7 +87,6 @@ pub fn uses(
         let first_insn = usize::try_from(block.first).unwrap_or(usize::MAX);
         let count = usize::try_from(block.count).unwrap_or(0);
         let mut written: BTreeSet<i64> = BTreeSet::new();
-        let mut set: BTreeSet<Loc> = BTreeSet::new();
         for span in arena.insns().iter().skip(first_insn).take(count) {
             for k in 0..span.count {
                 let Some(index) = span.first.checked_add(k) else {
@@ -101,7 +102,6 @@ pub fn uses(
                         {
                             written.insert(i64::from(slot));
                         }
-                        set.extend(op.a[0].as_loc().filter(|l| ints.contains(l)));
                     }
                     Opc::Call | Opc::CallInd => {
                         let direct = match (op.opc, op.a[0]) {
@@ -110,9 +110,7 @@ pub fn uses(
                         };
                         let mut list = base.clone();
                         if let Some(a) = direct.and_then(callee).filter(|a| !a.varargs) {
-                            let top = ints.iter().rposition(|l| set.contains(l));
-                            let keep = top.map_or(0, |i| i.saturating_add(1));
-                            let keep = keep.max(usize::from(a.int));
+                            let keep = usize::from(a.int);
                             let unread: BTreeSet<Loc> = ints.iter().skip(keep).copied().collect();
                             list.retain(|l| !al.contains(l) && !unread.contains(l));
                         }
@@ -132,7 +130,6 @@ pub fn uses(
                         }
                         out.insert(index, list);
                         written.clear();
-                        set.clear();
                     }
                     _ => {}
                 }
@@ -160,7 +157,8 @@ pub fn callee_arity(program: &Program, addr: u64, conv: &CallConv) -> Option<Ari
 /// memo `memo` of the caller.
 ///
 /// The recovery takes its fuel from `fuel`, at most [`CALLEE_FUEL`] units. A recovery that
-/// needs more units gives `None`.
+/// needs more units gives `None`. So does a function with no count ([`Solved::open`]), and an
+/// import with no Tier-0 prototype.
 ///
 /// # Errors
 ///
@@ -187,6 +185,7 @@ pub fn callee_arity_in(
     let found = param_facts(program, FuncId(at), memo, &mut part);
     fuel.take(part.used())?;
     let p = match found {
+        Ok(f) if f.open => return Ok(None),
         Ok(f) => f.params,
         Err(FirError::Fuel(e)) if fuel.is_empty() => return Err(e),
         Err(_) => return Ok(None),
@@ -215,6 +214,8 @@ pub struct ParamFacts {
     /// The live-in registers of a recovered count, with the reads of the calls. A signature
     /// or a prototype gives `None`.
     pub live: Option<BTreeSet<Loc>>,
+    /// The function has no count ([`Solved::open`]). A signature or a prototype gives `false`.
+    pub open: bool,
 }
 
 /// Gives the parameter facts of the published function `id`: its signature, then the Tier-0
@@ -238,6 +239,7 @@ pub fn param_facts(
             params,
             source,
             live: None,
+            open: false,
         });
     }
     let s = solve_in(program, id, conv_of(program), memo, fuel)?;
@@ -245,6 +247,7 @@ pub fn param_facts(
         params: s.params,
         source: ParamSource::Recovered,
         live: Some(s.live),
+        open: s.open,
     })
 }
 

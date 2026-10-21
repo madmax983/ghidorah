@@ -177,20 +177,25 @@ impl Cache {
 /// The largest fuel of the parameter queries of one render.
 const PARAM_FUEL: u64 = 1_000_000;
 
-/// Gives the count of the parameter slots of `facts` (see [`Env::param_count`]).
-pub(crate) fn slot_count(program: &Program, facts: &ParamFacts) -> u8 {
+/// Gives the count of the parameter slots of `facts` (see [`Env::param_count`]). A function
+/// with no count gives `None`: it passes its registers on to an import with no Tier-0
+/// prototype in a tail jump, as a thunk does.
+pub(crate) fn slot_count(program: &Program, facts: &ParamFacts) -> Option<u8> {
     let p = facts.params;
     let conv = conv_of(program);
+    if facts.open {
+        return None;
+    }
     if p.stack > 0 {
         let regs = u8::try_from(conv.int_args.len()).unwrap_or(u8::MAX);
-        return regs.saturating_add(p.stack);
+        return Some(regs.saturating_add(p.stack));
     }
     // A positional slot is its position, so the count holds the floating slots too.
-    if conv.positional {
+    Some(if conv.positional {
         p.int.saturating_add(p.float)
     } else {
         p.int
-    }
+    })
 }
 
 /// Gives the parameter facts of the function at `addr` with the solve memo `memo`.
@@ -281,7 +286,7 @@ impl Env for RenderEnv<'_> {
     }
 
     fn param_count(&self, addr: u64) -> Option<u8> {
-        self.facts(addr).map(|f| slot_count(self.env.0, &f))
+        self.facts(addr).and_then(|f| slot_count(self.env.0, &f))
     }
 
     fn jumptable_unresolved(&self, site: u64) -> bool {

@@ -517,3 +517,44 @@ fn regress_syscall_reads_its_arity_text() {
         assert!(text.contains("emit_banner();"), "{fixture}: {text}");
     }
 }
+
+/// A call of a callee with a short count kept each argument register up to the last one that
+/// the caller writes. The text printed none of those registers. But the uses kept scratch
+/// values alive, so the values did not fold (r3-engine-02). A known count is now the use
+/// list of the call.
+#[test]
+fn regress_known_count_keeps_folds() {
+    let f0152 = output_of("large.clang-O2", "f0152").text();
+    assert!(
+        f0152.contains("return f0011(0xf97f86ef * param_2, 0xbb1bcd8a ^ param_1);"),
+        "{f0152}"
+    );
+    let copy = output_of("canary.gcc-O0", "copy_name").text();
+    assert!(!copy.contains("= v12 - 0x30;"), "{copy}");
+}
+
+/// An import with no Tier-0 prototype has no count. The thunk of `Sleep` got a recovered
+/// count of 0. So a caller printed `Sleep();` and dropped the argument that `mov ecx, eax`
+/// sets (r3-engine-04).
+#[test]
+fn regress_open_import_count_keeps_set_args() {
+    let p = crate::fixtures::program("pe/pe_main.exe");
+    let out = ghidorah_decomp::render(
+        p,
+        crate::fixtures::fid(0x1_4000_10b0),
+        &Opts::default(),
+        &ghidorah_ir::NoNames,
+        &mut ghidorah_base::Fuel::new(50_000_000),
+    )
+    .expect("the text of FUN_1400010b0");
+    let line = out
+        .lines
+        .iter()
+        .find(|l| {
+            l.calls
+                .iter()
+                .any(|c| c.target == ghidorah_decomp::CallTarget::Addr(0x1_4000_11e0))
+        })
+        .expect("the call of the Sleep thunk");
+    assert_eq!(arg_count(&line.text, "Sleep"), 1, "{}", out.text());
+}

@@ -282,7 +282,7 @@ impl Env for ProgramEnv<'_> {
     fn param_count(&self, addr: u64) -> Option<u8> {
         let mut fuel = Fuel::new(PARAM_FUEL);
         let facts = cache::param_facts(self.0, addr, &mut Memo::default(), &mut fuel)?;
-        Some(cache::slot_count(self.0, &facts))
+        cache::slot_count(self.0, &facts)
     }
 
     fn jumptable_unresolved(&self, site: u64) -> bool {
