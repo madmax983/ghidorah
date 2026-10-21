@@ -46,17 +46,6 @@ const PE_CC_FLOATS: [u64; 7] = [
     0x1_4000_11c0,
 ];
 
-/// The callees of `cc_start` whose floating result the L1 form keeps to the sum: `f2`, `m3`,
-/// `m4`, `m6` and `g2`. L1 takes `xmm6` .. `xmm15` as call defs, so the next call kills the
-/// copies of the results of `f1` and `m5` in `xmm8` and `xmm11`.
-const PE_CC_SUMMED: [u64; 5] = [
-    0x1_4000_1120,
-    0x1_4000_1130,
-    0x1_4000_1150,
-    0x1_4000_11a0,
-    0x1_4000_11c0,
-];
-
 /// The address of the callee of the hand-made calls.
 const CALLEE: u64 = 0x2000;
 
@@ -95,24 +84,69 @@ fn xmm0_defs(view: &View) -> BTreeSet<VarId> {
         .collect()
 }
 
-/// Gives the text of the function at `entry` of `fixture`, with the names of the variables
-/// that hold the `xmm0` def of a call.
-fn text_and_results(fixture: &str, entry: u64) -> (String, BTreeSet<String>) {
+/// The text of a function with the names of two kinds of its variables.
+struct Rendered {
+    /// The text.
+    text: String,
+    /// The variables that hold the `xmm0` def of a call.
+    results: BTreeSet<String>,
+    /// The variables that hold the entry value of a register.
+    inputs: BTreeSet<String>,
+}
+
+/// Gives the text of the function at `entry` of `fixture` with the names of its result and
+/// entry-value variables.
+fn text_of(fixture: &str, entry: u64) -> Rendered {
     let p = program(fixture);
     let id = fid(entry);
     let d = ghidorah_decomp::decompile(p, id, &Opts::default(), &mut Fuel::new(50_000_000))
         .unwrap_or_else(|e| panic!("{fixture} {entry:#x}: {e}"));
     let defs = xmm0_defs(&d.view);
+    let inputs: BTreeSet<VarId> = d
+        .view
+        .vars
+        .iter()
+        .filter(|v| v.input.is_some())
+        .map(|v| v.id.clone())
+        .collect();
     let env = ghidorah_decomp::ProgramEnv(p);
     let body = print::body_units(p, id);
     let out = ghidorah_decomp::finish(d, &env, &NoNames, "f", &body);
-    let names = out
-        .vars
-        .iter()
-        .filter(|r| defs.contains(&r.id))
-        .map(|r| r.name.clone())
-        .collect();
-    (out.text(), names)
+    let names = |ids: &BTreeSet<VarId>| {
+        out.vars
+            .iter()
+            .filter(|r| ids.contains(&r.id))
+            .map(|r| r.name.clone())
+            .collect()
+    };
+    Rendered {
+        results: names(&defs),
+        inputs: names(&inputs),
+        text: out.text(),
+    }
+}
+
+/// Gives the text of the function at `entry` of `fixture`, with the names of the variables
+/// that hold the `xmm0` def of a call.
+fn text_and_results(fixture: &str, entry: u64) -> (String, BTreeSet<String>) {
+    let t = text_of(fixture, entry);
+    (t.text, t.results)
+}
+
+/// Asserts that `text` binds the result of each callee of `callees` and reads it.
+fn assert_summed(text: &str, callees: &[u64]) {
+    for callee in callees {
+        let call = format!("FUN_{callee:08x}(");
+        let line = text
+            .lines()
+            .map(str::trim)
+            .find(|l| l.contains(&call))
+            .unwrap_or_else(|| panic!("no call of {call}:\n{text}"));
+        let (var, _) = line
+            .split_once(" = ")
+            .unwrap_or_else(|| panic!("the call binds no result: {line}\n{text}"));
+        assert!(word_count(text, var) >= 2, "no read of {var}:\n{text}");
+    }
 }
 
 /// Gives the count of the words `word` in `text`.
@@ -123,8 +157,8 @@ fn word_count(text: &str, word: &str) -> usize {
 }
 
 /// No function text of the PE fixtures or the varargs builds reads a variable with no def
-/// that holds the `xmm0` def of a call. `cc_start` of `pe_cc.exe` binds each floating result
-/// that L1 keeps, and the sum reads it.
+/// that holds the `xmm0` def of a call. `cc_start` of `pe_cc.exe` binds each floating result,
+/// and the sum reads it.
 #[test]
 fn regress_float_call_result_is_bound() {
     let mut bad = Vec::new();
@@ -147,23 +181,25 @@ fn regress_float_call_result_is_bound() {
     }
     assert!(bad.is_empty(), "{} texts:\n{}", bad.len(), bad.join("\n"));
     let (text, _) = text_and_results("pe/pe_cc.exe", PE_CC_MAIN);
-    for callee in PE_CC_FLOATS {
-        assert!(text.contains(&format!("FUN_{callee:08x}(")), "{text}");
-    }
-    for callee in PE_CC_SUMMED {
-        let call = format!("FUN_{callee:08x}(");
-        let line = text
-            .lines()
-            .map(str::trim)
-            .find(|l| l.contains(&call))
-            .unwrap_or_else(|| panic!("no call of {call}:\n{text}"));
-        let (var, _) = line
-            .split_once(" = ")
-            .unwrap_or_else(|| panic!("the call binds no result: {line}\n{text}"));
-        assert!(word_count(&text, var) >= 2, "no read of {var}:\n{text}");
-    }
+    assert_summed(&text, &PE_CC_FLOATS);
     assert!(text.lines().any(|l| l.trim() == "return;"), "{text}");
     assert!(text.starts_with("void f(void)\n"), "{text}");
+}
+
+/// MS x64 keeps `xmm6` .. `xmm15` across a call. L1 took each XMM register as a call def. So
+/// in `cc_start`, the next call killed the results of `f1` and `m5` in `xmm8` and `xmm11`.
+/// The constants in `xmm6`, `xmm7` and `xmm9` had no def after a call. Now the sum reads each
+/// floating result, and each value with no def is an entry value.
+#[test]
+fn regress_ms_x64_xmm_kept_across_calls() {
+    let t = text_of("pe/pe_cc.exe", PE_CC_MAIN);
+    assert_summed(&t.text, &PE_CC_FLOATS);
+    let undefined = undefined_reads(&t.text);
+    let lost: Vec<&String> = undefined
+        .iter()
+        .filter(|n| !t.inputs.contains(*n))
+        .collect();
+    assert!(lost.is_empty(), "{lost:?} have no def:\n{}", t.text);
 }
 
 /// An environment with one name and one signature for [`CALLEE`].

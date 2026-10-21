@@ -15,7 +15,7 @@
 //! |---|---|
 //! | `Ret` reads | the first integer return register |
 //! | A call reads | the integer and floating argument registers, the varargs register when the callee can take a variable argument list, and its stack arguments ([`callsite`]) |
-//! | A call writes | each general register that the callee does not keep, each XMM register and the flags |
+//! | A call writes | each general and XMM register that the callee does not keep, and the flags. MS x64 keeps `xmm6` .. `xmm15`. `SysV` keeps no XMM register. |
 //! | A call pops | 8 bytes from `rsp` on return: the return address that the call pushes |
 //!
 //! The result is derived data: the journal never holds it.
@@ -96,9 +96,9 @@ pub fn ssa_opts(conv: &CallConv) -> ssa::Opts {
     let kept = regs(conv.callee_saved);
     let mut call_defs: LocSet = (0..16u8)
         .filter_map(Loc::gpr)
+        .chain((0..16u8).filter_map(Loc::xmm))
         .filter(|l| !kept.contains(*l))
         .collect();
-    call_defs = call_defs.union((0..16u8).filter_map(Loc::xmm).collect());
     let _ = call_defs.insert(Loc::Flags);
     ssa::Opts {
         ret_uses,
