@@ -19,8 +19,11 @@
 //! | no signature: the caller reads the `xmm0` def, and reads the `rax` def only as a return value | `xmm0` |
 //! | no signature, another caller | `rax` |
 //!
-//! Each return of L1 reads `rax`. So a return of the `rax` def of a call tells nothing about
-//! the callee.
+//! The `rax` def of a call with no `rax` result is a value that the call leaves behind. A
+//! return of it gives no value, so the path prints `return;`.
+//!
+//! Each return of L1 with no floating return reads `rax`. So a return of the `rax` def of a
+//! call tells nothing about the callee.
 
 use std::collections::BTreeSet;
 

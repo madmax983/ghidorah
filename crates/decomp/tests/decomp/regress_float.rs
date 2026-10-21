@@ -12,7 +12,7 @@ use std::collections::BTreeSet;
 
 use ghidorah_analysis::fir::ret::FloatRet;
 use ghidorah_base::{Fuel, VarId};
-use ghidorah_db::Types;
+use ghidorah_db::{Edit, SessionLabel, Source, Types};
 use ghidorah_decomp::lattice::{Store, Ty};
 use ghidorah_decomp::print::{self, PrintEnv, Signature};
 use ghidorah_decomp::{Call, Callee, Exit, Expr, NoEnv, Opts, Stmt, Tree, Var, VarIdx, View};
@@ -600,4 +600,55 @@ fn varargs_float_args_follow_al() {
     let set = [Loc::RDI, xmm0(), xmm1];
     assert_eq!(printf_line(v(2, 64), &set), "printf(0x3000, v1, v2);");
     assert_eq!(printf_line(v(2, 64), &rdi), "printf(0x3000);");
+}
+
+/// Gives the text of the function `name` of `p`.
+fn text_named(p: &ghidorah_db::Program, name: &str) -> String {
+    let entry = crate::fixtures::entry_of(p, name);
+    ghidorah_decomp::render(
+        p,
+        fid(entry),
+        &Opts::default(),
+        &NoNames,
+        &mut Fuel::new(50_000_000),
+    )
+    .unwrap_or_else(|e| panic!("{name}: {e}"))
+    .text()
+}
+
+/// A callee with a `void` signature leaves no value in `rax`. A return of its `rax` def
+/// printed `return vN;` with no def of `vN`, and the caller got a return type from it. Now
+/// that path prints `return;`, and the caller stays `void`.
+#[test]
+fn regress_void_callee_result_is_not_returned() {
+    let void = Signature {
+        params: Vec::new(),
+        names: Vec::new(),
+        ret: None,
+        variadic: false,
+    };
+    let (lines, _) = call_then_store(&SigEnv("finish", void), &[]);
+    assert_eq!(
+        lines,
+        ["void f(void)", "{", "    finish();", "    return;", "}"]
+    );
+    let mut p = program("hello.gcc-O0").clone();
+    let finish = crate::fixtures::entry_of(&p, "finish");
+    let label = SessionLabel::new("test").expect("a label");
+    let mut tx = p.begin("edit", Source::User, label).expect("a transaction");
+    let parsed = tx
+        .parse_sig("void finish(int code)")
+        .expect("the signature");
+    let edit = Edit::SetSignature {
+        id: fid(finish),
+        sig: Some(tx.fact(parsed.ty)),
+    };
+    tx.apply(edit).expect("the edit applies");
+    tx.commit().expect("the commit");
+    let run = text_named(&p, "run");
+    assert!(run.starts_with("void run("), "{run}");
+    assert!(run.lines().any(|l| l.trim() == "return;"), "{run}");
+    assert!(undefined_reads(&run).is_empty(), "{run}");
+    let before = text_named(program("hello.gcc-O0"), "run");
+    assert!(before.starts_with("uint64_t run("), "{before}");
 }

@@ -78,16 +78,19 @@ impl Printer<'_> {
     }
 
     /// Gives the variable that gets the result of a call statement. A direct callee whose
-    /// signature has no return value gives `None`. Its `rax` holds no result. So a later read
-    /// of the variable reads a value with no def.
+    /// signature has no return value gives `None`. Its `rax` holds no result: a return of it
+    /// gives no value ([`Self::mark_call_values`]).
     pub(super) fn result_var(&self, c: &Call) -> Option<VarIdx> {
         let loc = self.result_loc(c)?;
         c.rets.iter().find(|(l, _)| *l == loc).map(|(_, v)| *v)
     }
 
-    /// Updates the values that a call leaves behind. The `rax` def of each call with a result
-    /// in another register is such a value, so a return of that def gives no value. The
-    /// result of a call is no such value, so a floating return of it gives the result.
+    /// Updates the values that a call leaves behind.
+    ///
+    /// The `rax` def of each call with no result in `rax` is such a value. Examples are a call
+    /// with a result in another register and a call of a `void` callee. A return of that def
+    /// gives no value, and the head gets no return type from it. The result of a call is no
+    /// such value, so a floating return of it gives the result.
     pub(super) fn mark_call_values(&mut self) {
         let mut left = Vec::new();
         let mut results = Vec::new();
@@ -96,7 +99,7 @@ impl Printer<'_> {
             if matches!(c.callee, Callee::Intrinsic(_)) {
                 continue;
             }
-            if self.result_loc(c).is_some_and(|l| l != Loc::RAX) {
+            if self.result_loc(c) != Some(Loc::RAX) {
                 let rax = c.rets.iter().filter(|(l, _)| *l == Loc::RAX);
                 left.extend(rax.map(|(_, v)| *v));
             }
