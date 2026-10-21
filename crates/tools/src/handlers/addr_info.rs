@@ -336,7 +336,7 @@ fn run(session: &mut Session, args: &Args, ctx: &mut Ctx) -> Result<Payload, Too
     };
     let namer = Namer::new();
     let out = if let Some(targets) = args.list("targets") {
-        fs::per_item("targets", targets, |i, input| {
+        fs::per_item(&ctx.inactive, "targets", targets, |i, input| {
             info(p, input, &fs::item_path("targets", i), parts, &namer)
         })
     } else {

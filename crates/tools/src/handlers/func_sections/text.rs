@@ -11,7 +11,7 @@ use crate::args::Format;
 use crate::content::cost;
 use crate::dispatch::Ctx;
 use crate::envelope::Warning;
-use crate::errors::ToolError;
+use crate::errors::{Inactive, ToolError};
 use crate::resolve::Site;
 
 /// The largest number of characters of a name in output.
@@ -179,7 +179,11 @@ pub fn x86_only(program: &Program) -> Result<(), ToolError> {
 
 /// Gives the per-item result of a list input: `{ items: [{ input, ok, data | error }],
 /// ok_count, error_count }` in input order (AC-144). `one` renders one item.
+///
+/// An item error drops each hint sentence that names a tool of `inactive`, the set of the
+/// call ([`Ctx::inactive`]).
 pub fn per_item(
+    inactive: &Inactive,
     name: &str,
     inputs: &[Value],
     mut one: impl FnMut(usize, &Value) -> Result<Value, ToolError>,
@@ -201,7 +205,7 @@ pub fn per_item(
                     error.field_path = Some(item_path(name, i));
                 }
                 item.push("ok", Value::Bool(false));
-                item.push("error", error.to_json());
+                item.push("error", error.item_json(inactive));
             }
         }
         list.push(Value::Object(item));

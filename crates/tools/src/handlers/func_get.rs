@@ -378,7 +378,7 @@ fn run(session: &mut Session, args: &Args, ctx: &mut Ctx) -> Result<Payload, Too
             let wrap = ITEM_WRAPPER.saturating_mul(u64::try_from(n).unwrap_or(u64::MAX));
             let shares = split_even(room.saturating_sub(wrap), n);
             let fuel = &mut ctx.fuel;
-            let out = fs::per_item("targets", targets, |i, input| {
+            let out = fs::per_item(&ctx.inactive, "targets", targets, |i, input| {
                 let path = fs::item_path("targets", i);
                 let func = func_of(program, input, &path)?;
                 let share = shares.get(i).copied().unwrap_or(0);

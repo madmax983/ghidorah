@@ -26,7 +26,7 @@ use crate::args::Args;
 use crate::content::ContentMode;
 use crate::dispatch::{Ctx, Payload, StepLimits, StepRun, run_step};
 use crate::envelope::{Mutation, Warning};
-use crate::errors::{ToolError, int};
+use crate::errors::{Inactive, ToolError, int};
 use crate::handlers::symbol_rename::edits::diff;
 use crate::hints::Call;
 use crate::registry::Registry;
@@ -76,6 +76,8 @@ struct Run<'p> {
     ran: u64,
     fuel: u64,
     returned_chars: u64,
+    /// The registered tools outside the active profile ([`Ctx::inactive`]).
+    inactive: Inactive,
 }
 
 /// Gives the error of a step that refers to the failed step `failed`.
@@ -101,7 +103,7 @@ fn calls_of(envelope: &Value) -> Vec<Call> {
 }
 
 impl<'p> Run<'p> {
-    fn new(plan: &'p Plan, registry: Registry<Session>) -> Self {
+    fn new(plan: &'p Plan, registry: Registry<Session>, inactive: Inactive) -> Self {
         let count = plan.steps.len();
         Self {
             plan,
@@ -113,6 +115,7 @@ impl<'p> Run<'p> {
             ran: 0,
             fuel: 0,
             returned_chars: 0,
+            inactive,
         }
     }
 
@@ -140,7 +143,7 @@ impl<'p> Run<'p> {
         entry.push("chars", int(0));
         entry.push("fuel", int(0));
         if let Some(e) = error {
-            entry.push("error", e.to_json());
+            entry.push("error", e.item_json(&self.inactive));
         }
         self.entries.push(Value::Object(entry));
         self.set(i, Slot::Failed);
@@ -394,7 +397,7 @@ pub fn run(session: &mut Session, args: &Args, ctx: &mut Ctx) -> Result<Payload,
     if let Some(id) = batch {
         session.batch_begin(id, &plan.label)?;
     }
-    let mut run = Run::new(&plan, registry);
+    let mut run = Run::new(&plan, registry, ctx.inactive.clone());
     run.all(session, ctx, binary.as_deref(), args.globals().max_ms);
     if plan.mutating {
         let error = match (run.failure.clone(), run.stop) {

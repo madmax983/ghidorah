@@ -29,7 +29,7 @@ use crate::api::{Host, Progress, Request};
 use crate::args::{self, Args, Format, Globals};
 use crate::budget::Budget;
 use crate::envelope::{Body, Envelope, Frame, Mutation, Warning};
-use crate::errors::{Candidate, ToolError, not_in_profile};
+use crate::errors::{Candidate, Inactive, ToolError, not_in_profile};
 use crate::hints::{Call, WHY_ANALYSIS, WHY_FIRST_PAGE, check, keep_valid};
 use crate::registry::Registry;
 use crate::spec::{ArgKind, ToolSpec};
@@ -200,12 +200,17 @@ pub struct Ctx {
     pub next: Vec<Call>,
     /// The edit members of a mutating call.
     pub mutation: Option<Mutation>,
+    /// The registered tools outside the active profile. The dispatcher sets them after
+    /// [`Ctx::new`]. Each error object in the data of the call drops the hint sentences that
+    /// name them ([`ToolError::item_json`]).
+    pub inactive: Inactive,
     cancel: Option<Arc<AtomicBool>>,
     progress: Option<Sender<Progress>>,
 }
 
 impl Ctx {
-    /// Makes a context. The dispatcher calls it. Tests of handlers can call it too.
+    /// Makes a context with no inactive tool. The dispatcher calls it. Tests of handlers can
+    /// call it too.
     #[must_use]
     pub fn new(frame: Frame, fuel: Fuel, budget: Budget) -> Self {
         Self {
@@ -217,6 +222,7 @@ impl Ctx {
             warnings: Vec::new(),
             next: Vec::new(),
             mutation: None,
+            inactive: Inactive::default(),
             cancel: None,
             progress: None,
         }
@@ -443,6 +449,7 @@ fn run_with<S: Host>(
     ctx.format = globals.format;
     ctx.max_ms = globals.max_ms;
     ctx.warnings = parsed.warnings;
+    ctx.inactive = Inactive::of(registry, &|name| host.in_profile(name));
     ctx.cancel.clone_from(&request.cancel);
     ctx.progress.clone_from(&request.progress);
     let result = catch_unwind(AssertUnwindSafe(|| {

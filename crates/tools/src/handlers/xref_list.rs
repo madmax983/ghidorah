@@ -187,7 +187,8 @@ fn run(session: &mut Session, args: &Args, ctx: &mut Ctx) -> Result<Payload, Too
     };
     let namer = Namer::new();
     let family = if to { Family::XrefTo } else { Family::XrefFrom };
-    let found = sites::resolve_all(p, args.list("targets").unwrap_or_default(), family);
+    let targets = args.list("targets").unwrap_or_default();
+    let found = sites::resolve_all(p, targets, family, &ctx.inactive);
     let mut list = items::ref_items(p, &found.refs, &q, &namer, &mut ctx.fuel);
     list.extend(items::syscall_items(
         p,

@@ -1,6 +1,6 @@
 //! Profiles, catalog sizes and the server instructions (AC-130a to AC-131c).
 
-use ghidorah_base::{ErrorCode, FixedClock};
+use ghidorah_base::{BinaryId, ErrorCode, FixedClock};
 use ghidorah_json::{Value, write_pretty};
 use ghidorah_testkit::golden::{self, Header};
 use ghidorah_testkit::ste::check_agent_text;
@@ -8,10 +8,13 @@ use ghidorah_tools::instructions::{self, LINES, MAX_CHARS};
 use ghidorah_tools::profiles::{MAX_FULL, MAX_FULL_CHARS, MAX_MINI, MAX_MINI_CHARS, parse_profile};
 use ghidorah_tools::spec::{ArgKind, ArgSpec, BinaryArg, Role};
 use ghidorah_tools::{
-    Args, Ctx, Host, Payload, Profile, ProfileSet, Registry, Session, ToolError, ToolSpec,
+    Args, Ctx, Host, OpenBinary, Payload, Profile, ProfileSet, Registry, Session, ToolError,
+    ToolSpec,
 };
 
-use crate::support::{call, code, config, demo, json, registry, root, session_with};
+use crate::support::{
+    DEMO_ID, call, code, config, demo, json, registry, root, session_with, text_at,
+};
 
 /// The 23 tools of the catalog in `tools/list` order (design Section 10.3).
 pub const CATALOG: [&str; 23] = [
@@ -573,11 +576,98 @@ fn assert_active_hint(envelope: &Value, profile: Profile) {
     }
 }
 
+/// Makes a session of the shipped registry that runs `profile`, with the demo binary open.
+fn demo_in(profile: Profile) -> Session {
+    let full = demo();
+    let id = BinaryId::parse(DEMO_ID).expect("the demo binary ID");
+    let open = full.binary(id).expect("the demo binary is open");
+    let mut s = in_profile(registry(), profile);
+    let label = s.new_label();
+    s.open(OpenBinary {
+        id,
+        program: open.program.clone(),
+        file_name: open.file_name.clone(),
+        read_only: false,
+        label,
+        analysis: open.analysis,
+    });
+    s
+}
+
+/// Makes sure that each `hint` of `envelope`, at any depth, names only tools of `profile`.
+fn assert_active_hints(envelope: &Value, profile: Profile) {
+    let reg = registry();
+    let set = ProfileSet::new(profile, None);
+    let mut stack = vec![envelope];
+    while let Some(value) = stack.pop() {
+        match value {
+            Value::Array(list) => stack.extend(list),
+            Value::Object(object) => {
+                for (key, v) in object.iter() {
+                    if let (true, Some(hint)) = (key == "hint", v.as_str()) {
+                        for tool in tools_of(hint) {
+                            let active = set.holds(&reg, tool);
+                            assert!(active, "{}: {tool}: {envelope}", profile.as_str());
+                        }
+                    }
+                    stack.push(v);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
 /// A hint names only tools of the active profile (r2-surface-04). Each code fails once in
 /// each shipped profile. The mini `CONFLICT` and the readonly `UNKNOWN_BINARY` also come from
 /// real calls.
+///
+/// The error of an item of a list input takes the same filter (r3-surface-01). In readonly
+/// and mini, the item error of `func_get { targets: ["0x1"] }` names no `func_edit`. Its hint
+/// is the hint of the single target. The item errors of `addr_info`, `xref_list`,
+/// `fact_check` and `func_similar` take the filter too.
 #[test]
 fn regress_plain_hint_names_active_tools() {
+    for profile in [Profile::Readonly, Profile::Mini] {
+        let mut s = demo_in(profile);
+        let one = call(&mut s, "func_get", r#"{"target":"0x1"}"#);
+        assert_eq!(code(&one), "NOT_IN_FUNCTION", "{one}");
+        assert_active_hint(&one, profile);
+        let list = call(&mut s, "func_get", r#"{"targets":["0x1"]}"#);
+        assert_eq!(code(&list), "", "{list}");
+        assert_eq!(
+            text_at(&list, "/data/items/0/error/code"),
+            "NOT_IN_FUNCTION",
+            "{list}"
+        );
+        assert_active_hints(&list, profile);
+        assert_eq!(
+            text_at(&list, "/data/items/0/error/hint"),
+            text_at(&one, "/error/hint"),
+            "{}: {list}",
+            profile.as_str()
+        );
+        for (tool, args) in [
+            ("addr_info", r#"{"targets":["zz_none"]}"#),
+            ("xref_list", r#"{"targets":["zz_none"]}"#),
+            ("xref_list", r#"{"targets":["0x1"],"direction":"from"}"#),
+            ("fact_check", r#"{"explain":["fn:0x1"]}"#),
+            (
+                "fact_check",
+                r#"{"claims":[{"rel":"calls","args":["0x1","0x1080"]}]}"#,
+            ),
+            ("func_similar", r#"{"targets":["0x1"]}"#),
+        ] {
+            let envelope = call(&mut s, tool, args);
+            assert_active_hints(&envelope, profile);
+        }
+    }
+    // Outside a call, an error object names only the tools of every profile.
+    let outside = ToolError::new(ErrorCode::NotInFunction).to_json();
+    assert_eq!(
+        text_at(&outside, "/hint"),
+        "Use an address inside a function body."
+    );
     let mut tools: Vec<&'static ToolSpec<Session>> = registry().tools().to_vec();
     tools.push(&RAISE);
     let with_raise = Registry::new(Box::leak(tools.into_boxed_slice()));

@@ -18,7 +18,7 @@ use super::{Ctx, Invocation, StepRun, with_arg};
 use crate::api::Host;
 use crate::content::result_chars;
 use crate::envelope::{Body, Envelope, Frame};
-use crate::errors::{Candidate, ToolError, int};
+use crate::errors::{Candidate, Inactive, ToolError, int};
 use crate::hints::{
     Call, MAX_NEXT, WHY_BINARY, WHY_BRIEF, WHY_CONFLICT, WHY_HISTORY, WHY_SCHEMA, WHY_SEARCH,
     keep_valid,
@@ -222,7 +222,7 @@ pub(super) fn failure<S: Host>(
         let calls = helper.map(|(name, args, why)| Call::new(name, args, why));
         next = keep_valid(registry, &in_profile, calls.into_iter().collect());
     }
-    let inactive = |word: &str| registry.get(word).is_some() && !in_profile(word);
+    let inactive = Inactive::of(registry, &in_profile);
     Envelope {
         frame,
         body: Body::Err(error.to_json_in(!next.is_empty(), &inactive)),

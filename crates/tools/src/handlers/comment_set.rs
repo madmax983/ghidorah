@@ -185,6 +185,7 @@ fn run(session: &mut Session, args: &Args, ctx: &mut Ctx) -> Result<Payload, Too
         }
     }
     let none = Value::Null;
+    let inactive = ctx.inactive.clone();
     let (mut out, committed) = edits::commit(session, args, ctx, |tx| {
         if single {
             let c = Comment {
@@ -200,7 +201,7 @@ fn run(session: &mut Session, args: &Args, ctx: &mut Ctx) -> Result<Payload, Too
             return Ok(out);
         }
         let inputs = args.list("items").unwrap_or_default();
-        Ok(fs::per_item("items", inputs, |i, input| {
+        Ok(fs::per_item(&inactive, "items", inputs, |i, input| {
             let c = Comment {
                 target: input.get("target").unwrap_or(&none),
                 kind: text(input.get("kind")),
