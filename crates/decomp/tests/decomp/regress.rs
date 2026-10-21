@@ -660,3 +660,19 @@ fn regress_varargs_head_keeps_fact_count() {
     let puts = renamed_text("varargs.gcc-O2", 0x1300, "puts");
     assert_eq!(head_params(&puts).len(), 1, "{puts}");
 }
+
+/// The namer picked the integer or the floating register of an MS x64 slot from the L1 uses.
+/// `cc::params` picks it from the L0 live-in registers. The delay-load helper stores `rcx` ..
+/// `r9` and `xmm0` .. `xmm3` to its frame, and L1 drops the integer stores. So the head
+/// printed four `uint128_t` parameters while the facts say int:4 float:0 (r3-engine-05).
+#[test]
+fn regress_slot_kind_matches_facts() {
+    for fixture in ["pe/pe_main.exe", "pe/pe_flags.exe"] {
+        let text = text_at(fixture, 0x1_4000_1242);
+        let params = head_params(&text);
+        assert_eq!(params.len(), 4, "{fixture}: {text}");
+        for p in &params {
+            assert!(p.starts_with("uint64_t param_"), "{fixture}: {text}");
+        }
+    }
+}

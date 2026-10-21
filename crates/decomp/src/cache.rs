@@ -17,7 +17,7 @@ use ghidorah_analysis::cc::conv_of;
 use ghidorah_analysis::fir::callsite::{self, Memo, ParamFacts};
 use ghidorah_base::{Address, Fnv1a64, Fuel, FuncId, Rev, VarId};
 use ghidorah_db::{CommentKind, Program};
-use ghidorah_ir::IntrinsicNames;
+use ghidorah_ir::{IntrinsicNames, Loc};
 use ghidorah_types::{CallConv, DataModel, TypeId, TypeStore};
 
 use crate::{DecompError, Env, Opts, Output, ParamInfo, PrintEnv, ProgramEnv, Signature};
@@ -198,6 +198,17 @@ pub(crate) fn slot_count(program: &Program, facts: &ParamFacts) -> Option<u8> {
     })
 }
 
+/// Gives the argument register of each parameter slot of `facts`: the choice of the recovery
+/// ([`callsite::arg_regs`]). A signature, a prototype or a function with no count gives `None`.
+pub(crate) fn param_slots(program: &Program, facts: &ParamFacts) -> Option<Vec<Loc>> {
+    let live = facts.live.as_ref().filter(|_| !facts.open)?;
+    Some(callsite::arg_regs(
+        conv_of(program),
+        &facts.params,
+        Some(live),
+    ))
+}
+
 /// Gives the parameter count of `facts` with its source and its varargs flag.
 pub(crate) fn param_info(program: &Program, facts: &ParamFacts) -> Option<ParamInfo> {
     Some(ParamInfo {
@@ -300,6 +311,10 @@ impl Env for RenderEnv<'_> {
 
     fn param_info(&self, addr: u64) -> Option<ParamInfo> {
         self.facts(addr).and_then(|f| param_info(self.env.0, &f))
+    }
+
+    fn param_slots(&self, addr: u64) -> Option<Vec<Loc>> {
+        self.facts(addr).and_then(|f| param_slots(self.env.0, &f))
     }
 
     fn jumptable_unresolved(&self, site: u64) -> bool {

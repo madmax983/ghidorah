@@ -241,6 +241,14 @@ impl From<ViewError> for DecompError {
 #[derive(Debug, Clone, Copy)]
 pub struct ProgramEnv<'a>(pub &'a Program);
 
+impl ProgramEnv<'_> {
+    /// Gives the parameter facts of the function at `addr` with a fresh memo and fuel tank.
+    fn param_facts(self, addr: u64) -> Option<ghidorah_analysis::fir::callsite::ParamFacts> {
+        let mut fuel = Fuel::new(PARAM_FUEL);
+        cache::param_facts(self.0, addr, &mut Memo::default(), &mut fuel)
+    }
+}
+
 impl Env for ProgramEnv<'_> {
     fn callee_name(&self, addr: u64) -> Option<String> {
         let at = Address::ram(addr);
@@ -280,15 +288,15 @@ impl Env for ProgramEnv<'_> {
     }
 
     fn param_count(&self, addr: u64) -> Option<u8> {
-        let mut fuel = Fuel::new(PARAM_FUEL);
-        let facts = cache::param_facts(self.0, addr, &mut Memo::default(), &mut fuel)?;
-        cache::slot_count(self.0, &facts)
+        cache::slot_count(self.0, &self.param_facts(addr)?)
+    }
+
+    fn param_slots(&self, addr: u64) -> Option<Vec<ghidorah_ir::Loc>> {
+        cache::param_slots(self.0, &self.param_facts(addr)?)
     }
 
     fn param_info(&self, addr: u64) -> Option<ParamInfo> {
-        let mut fuel = Fuel::new(PARAM_FUEL);
-        let facts = cache::param_facts(self.0, addr, &mut Memo::default(), &mut fuel)?;
-        cache::param_info(self.0, &facts)
+        cache::param_info(self.0, &self.param_facts(addr)?)
     }
 
     fn jumptable_unresolved(&self, site: u64) -> bool {

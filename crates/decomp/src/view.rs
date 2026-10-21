@@ -73,6 +73,15 @@ pub trait Env {
         None
     }
 
+    /// Gives the argument register of each parameter slot of the function at `addr`, in slot
+    /// order: the choice of the parameter recovery. In a positional convention, a slot is a
+    /// floating slot when the recovery reads only its floating register. A count of a signature
+    /// or a prototype, and the default, give `None`.
+    fn param_slots(&self, addr: u64) -> Option<Vec<Loc>> {
+        let _ = addr;
+        None
+    }
+
     /// Gives the parameter count of the function at `addr` with its source and its varargs
     /// flag. The default takes [`Env::param_count`] as a recovered count with no varargs.
     fn param_info(&self, addr: u64) -> Option<ParamInfo> {
@@ -324,6 +333,7 @@ pub fn build(
             let n = u16::from(i.count);
             if i.grows() { n.max(read) } else { n }
         }),
+        slots: env.param_slots(entry),
     };
     let assigned = vars::assign(&cx);
     let mut warnings = Vec::new();

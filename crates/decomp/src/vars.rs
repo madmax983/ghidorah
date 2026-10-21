@@ -49,6 +49,8 @@ pub(crate) struct Ctx<'a> {
     /// least the count of the slots that the L1 body reads. An entry value of a later slot is
     /// not a parameter.
     pub(crate) params: Option<u16>,
+    /// The argument register of each parameter slot of the facts ([`crate::Env::param_slots`]).
+    pub(crate) slots: Option<Vec<Loc>>,
 }
 
 /// Gives the values that a statement reads.
