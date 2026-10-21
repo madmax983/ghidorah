@@ -54,8 +54,8 @@ pub struct Stub {
     pub kind: StubKind,
     /// The import slot. A lazy stub has the slot of its `DT_JMPREL` entry. PLT0 has none.
     pub slot: Option<u64>,
-    /// The import of the slot: its index in [`Binary::imports`], from
-    /// [`imports::slots`](crate::imports::slots). PLT0 has none.
+    /// The import of the slot: its index in [`Binary::imports`], from [`imports::slots`].
+    /// PLT0 has none.
     pub import: Option<usize>,
 }
 
