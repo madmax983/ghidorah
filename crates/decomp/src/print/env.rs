@@ -18,6 +18,7 @@
 //! | a signature with another return type | `rax` |
 //! | a signature with no return value | none |
 //! | no signature, and the recovery gives no return value | none |
+//! | no signature, and the recovery gives a floating return value | `xmm0` |
 //! | no signature: the caller reads the `xmm0` def, and reads the `rax` def only as a return value | `xmm0` |
 //! | no signature, another caller | `rax` |
 //!

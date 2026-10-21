@@ -22,21 +22,26 @@
 //! - The function returns a floating value when a `ret` has a floating return value and no
 //!   `ret` has an integer return value.
 //!
-//! A call writes both registers, so the value after a call is no evidence. A write of
-//! `xmm0` by another op, for example an integer vector op, is no evidence too.
+//! A call writes both registers, so the value after a call is no evidence for [`recover`]. A
+//! write of `xmm0` by another op, for example an integer vector op, is no evidence too.
+//!
+//! [`float_ret`] also reads the callees: a direct call whose callee returns a floating value
+//! ([`ret_value_in`]) is a floating write of its kind. The callee value comes from the facts
+//! and the L0 body of the callee only, so the rule looks one call deep.
 //!
 //! [`ret_value`] gives the return value of a function: no value, an integer value or a
 //! floating value (the `value` module).
 
 use std::collections::BTreeSet;
 
-use ghidorah_base::FuncId;
+use ghidorah_base::{Fuel, FuncId};
 use ghidorah_db::Program;
 use ghidorah_ir::{Arena, Arg, IntrinsicId, Loc, Node, Op, Opc};
 use ghidorah_types::{DataModel, Prim, Type, TypeId, TypeStore};
 use ghidorah_x86::Mnem;
 
 use super::FuncIr;
+use super::callsite::{CALLEE_FUEL, Memo};
 
 mod value;
 
@@ -166,21 +171,38 @@ enum Event {
     Read,
     /// An op writes the register. A floating write has its kind.
     Write(Option<FloatRet>),
-    /// A call writes the register.
-    Call,
+    /// A call writes the register. A direct call has its target.
+    Call(Option<u64>),
     /// The path reaches the function entry.
     Entry,
 }
 
 /// Gives the floating return of the published function `id` with the L0 IR `l0`.
 ///
-/// The signature fact comes first, then the Tier-0 prototype of the name, then [`recover`].
+/// The signature fact comes first, then the Tier-0 prototype of the name, then the recovery
+/// with the floating returns of the callees (see the module doc).
 #[must_use]
 pub fn float_ret(program: &Program, id: FuncId, l0: &FuncIr) -> Option<FloatRet> {
-    match declared_ret(program, id) {
-        Some((store, ty)) => kind_of(store, program.types().model(), ty),
-        None => recover(l0),
+    let mut fuel = Fuel::new(CALLEE_FUEL);
+    float_ret_in(program, id, l0, &mut Memo::default(), &mut fuel)
+}
+
+/// Gives the floating return like [`float_ret`], with the solve memo `memo` of the caller.
+/// The recovery of each callee takes its fuel from `fuel`.
+pub fn float_ret_in(
+    program: &Program,
+    id: FuncId,
+    l0: &FuncIr,
+    memo: &mut Memo,
+    fuel: &mut Fuel,
+) -> Option<FloatRet> {
+    if let Some((store, ty)) = declared_ret(program, id) {
+        return kind_of(store, program.types().model(), ty);
     }
+    recover_with(l0, &mut |t| match ret_value_in(program, t, memo, fuel) {
+        Some(RetValue::Float(k)) => Some(k),
+        _ => None,
+    })
 }
 
 /// Gives the return type that a fact gives the function `id`, with its store: the signature,
@@ -204,9 +226,16 @@ pub(crate) fn kind_of(store: &TypeStore, model: &DataModel, ty: TypeId) -> Optio
     }
 }
 
-/// Recovers the floating return of `l0` by the rules of the module doc.
+/// Recovers the floating return of `l0` by the rules of the module doc. A call is no
+/// evidence.
 #[must_use]
 pub fn recover(l0: &FuncIr) -> Option<FloatRet> {
+    recover_with(l0, &mut |_| None)
+}
+
+/// Recovers the floating return of `l0` like [`recover`]. A direct call that is the last event
+/// of `xmm0` before a `ret` gives the kind `callee(target)`.
+fn recover_with(l0: &FuncIr, callee: &mut dyn FnMut(u64) -> Option<FloatRet>) -> Option<FloatRet> {
     let xmm0 = Loc::xmm(0)?;
     let preds = l0.body.cfg.preds();
     let rets: Vec<usize> = (0..l0.body.blocks.len())
@@ -222,7 +251,8 @@ pub fn recover(l0: &FuncIr) -> Option<FloatRet> {
         .into_iter()
         .filter_map(|e| match e {
             Event::Write(k) => k,
-            Event::Read | Event::Call | Event::Entry => None,
+            Event::Call(Some(t)) => callee(t),
+            Event::Read | Event::Call(None) | Event::Entry => None,
         })
         .max()
 }
@@ -288,7 +318,8 @@ fn events(l0: &FuncIr, preds: &[Vec<Node>], starts: &[usize], loc: Loc, reads: b
 /// Gives the event of the op `op` for `loc`, or `None` when the op does not touch it.
 fn event(arena: &Arena, op: &Op, loc: Loc) -> Option<Event> {
     match op.opc {
-        Opc::Call | Opc::CallInd => Some(Event::Call),
+        Opc::Call => Some(Event::Call(op.a[0].as_k())),
+        Opc::CallInd => Some(Event::Call(None)),
         Opc::Get if op.a[0].as_loc() == Some(loc) => Some(Event::Read),
         Opc::Put if op.a[0].as_loc() == Some(loc) => {
             Some(Event::Write(Some(move_kind(arena, op.a[1]))))

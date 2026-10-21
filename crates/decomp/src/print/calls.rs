@@ -77,8 +77,11 @@ impl Printer<'_> {
                 .map(|(l, _)| *l),
             Callee::Direct(t) => match self.env.signature(t) {
                 Some(sig) => env::ret_loc(&sig, &self.stores, conv),
-                None if self.env.ret_value(t) == Some(RetValue::Void) => None,
-                None => Some(env::caller_ret_loc(c, &self.reads, conv)),
+                None => match self.env.ret_value(t) {
+                    Some(RetValue::Void) => None,
+                    Some(RetValue::Float(_)) => env::float_ret(conv).or(Some(Loc::RAX)),
+                    Some(RetValue::Int) | None => Some(env::caller_ret_loc(c, &self.reads, conv)),
+                },
             },
             Callee::Indirect(_) => Some(env::caller_ret_loc(c, &self.reads, conv)),
             Callee::Syscall | Callee::Unimpl => Some(Loc::RAX),

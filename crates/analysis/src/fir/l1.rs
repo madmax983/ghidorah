@@ -230,7 +230,7 @@ pub fn lift_with(
 }
 
 /// Builds the L1 form of the published function `id` with the convention of its format. The
-/// floating return comes from [`ret::float_ret`].
+/// floating return comes from [`ret::float_ret`], with the floating returns of the callees.
 ///
 /// # Errors
 ///
@@ -276,7 +276,7 @@ pub fn build_in(
         }
     }
     let imports = crate::tailcall::import_jumps(program, id, &l0);
-    let float_ret = ret::float_ret(program, id, &l0);
+    let float_ret = ret::float_ret_in(program, id, &l0, memo, fuel);
     lift_with(
         l0,
         conv,

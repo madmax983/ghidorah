@@ -8,6 +8,7 @@
 //! | a parameter of the function signature | the type of the parameter |
 //! | a variable that is an argument of a call | the parameter type of the callee signature or prototype, by the register of its class ([`sig_regs`]) |
 //! | the result of a call: the `rax` def, or the `xmm0` def for a floating return type | the return type of the callee |
+//! | the `xmm0` def of a call of a callee with no signature and a recovered floating return | `float` or `double` |
 //! | a variable that a floating return of the function gives | the return type of the signature, else `float` or `double` ([`View::float_ret`]) |
 //! | a parameter that holds the entry value of an XMM register, when the function has no signature | `float` when each scalar op that reads it reads `float` values, else `double` |
 //!
@@ -20,8 +21,9 @@
 
 use std::collections::BTreeSet;
 
+use ghidorah_analysis::cc::loc_of;
 use ghidorah_analysis::fir::callsite::sig_slots;
-use ghidorah_analysis::fir::ret::{FloatRet, operand_kind};
+use ghidorah_analysis::fir::ret::{FloatRet, RetValue, operand_kind};
 use ghidorah_base::Storage;
 use ghidorah_ir::Loc;
 use ghidorah_types::{CallConv, DataModel, Prim, Tier0, Type, TypeId, TypeStore, layout};
@@ -175,10 +177,23 @@ fn call_seeds(call: &Call, env: &dyn PrintEnv, stores: &Stores<'_>, seeds: &mut 
     let Callee::Direct(target) = call.callee else {
         return;
     };
+    let conv = env.conv();
     let Some(sig) = env.signature(target) else {
+        let xmm0 = conv.float_ret.first().and_then(|n| loc_of(n));
+        if let (Some(RetValue::Float(k)), Some(tier0)) = (env.ret_value(target), stores.tier0)
+            && let Some((_, v)) = call.rets.iter().find(|(l, _)| Some(*l) == xmm0)
+        {
+            let id = tier0.store().prim(k.prim());
+            seeds.add(
+                *v,
+                Ty {
+                    store: Store::Tier0,
+                    id,
+                },
+            );
+        }
         return;
     };
-    let conv = env.conv();
     let regs = sig_regs(&sig, stores, conv);
     for (ty, loc) in sig.params.iter().zip(regs) {
         // A stack slot of the callee has no location of the caller.

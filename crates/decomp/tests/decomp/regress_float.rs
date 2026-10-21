@@ -246,7 +246,7 @@ fn returns_like(proto: &'static str) -> SigEnv {
 
 /// Gives the text lines and the variable rows of `rax = v0, xmm0 = v1` after a call of
 /// [`CALLEE`]. A store reads each def in `stored`. The return reads `v0`.
-fn call_then_store(env: &dyn PrintEnv, stored: &[u32]) -> (Vec<String>, Vec<(String, String)>) {
+pub fn call_then_store(env: &dyn PrintEnv, stored: &[u32]) -> (Vec<String>, Vec<(String, String)>) {
     let call = Call {
         callee: Callee::Direct(CALLEE),
         args: Vec::new(),

@@ -6,6 +6,7 @@
 //! `SysV` numbers its integer and floating parameter slots apart. The recovery gave the
 //! floating slots, but the namer gave them no parameter, and a call dropped their arguments.
 
+use ghidorah_analysis::fir::ret::{FloatRet, RetValue};
 use ghidorah_analysis::{RunState, Scheduler, Until};
 use ghidorah_base::{Fuel, Limits, Storage};
 use ghidorah_db::{Edit, Program, SessionLabel, Source};
@@ -19,7 +20,7 @@ use ghidorah_types::Prim;
 use crate::fixtures::{entry_of, fid, program};
 use crate::out_print::{ENTRY, Spec, decomp, k, op, temp, v};
 use crate::regress::undefined_reads;
-use crate::regress_float::{CALLEE, SigEnv, call_args, render_of, xmm0};
+use crate::regress_float::{CALLEE, SigEnv, call_args, call_then_store, render_of, xmm0};
 use crate::shapes::node;
 
 /// The builds of the varargs fixture with a symbol table.
@@ -301,6 +302,77 @@ fn regress_void_tail_call_is_no_return_value() {
             "    FUN_00400020(param_1, param_2);",
             "    FUN_00400030(1, 2);",
             "    return;",
+            "}",
+        ]
+    );
+}
+
+/// An environment that knows only the return value of [`CALLEE`].
+struct RetEnv(RetValue);
+
+impl ghidorah_decomp::Env for RetEnv {
+    fn callee_name(&self, _addr: u64) -> Option<String> {
+        None
+    }
+    fn is_noreturn(&self, _addr: u64) -> bool {
+        false
+    }
+    fn is_string(&self, _addr: u64) -> bool {
+        false
+    }
+}
+
+impl print::PrintEnv for RetEnv {
+    fn ret_value(&self, addr: u64) -> Option<RetValue> {
+        (addr == CALLEE).then_some(self.0)
+    }
+}
+
+/// A caller bound the floating result of a callee with no signature only from its own reads.
+/// So a caller that reads the `rax` def of the call, or that only returns the result, lost
+/// the `double` of the callee.
+///
+/// Now the recovered floating return of the callee gives the result in `xmm0`. In the blob,
+/// `g` calls `f` and returns its result, and `h` tail calls `f`. The function `f` converts
+/// `edi` to a `double` in `xmm0`. So `g` and `h` return a `double` too.
+#[test]
+fn regress_float_result_from_recovered_return() {
+    let (lines, rows) = call_then_store(&RetEnv(RetValue::Float(FloatRet::Double)), &[0, 1]);
+    assert_eq!(lines[2], "    v2 = FUN_00002000();", "{lines:?}");
+    assert!(
+        rows.contains(&("v2".to_owned(), "double".to_owned())),
+        "{rows:?}"
+    );
+    let (lines, _) = call_then_store(&RetEnv(RetValue::Int), &[0, 1]);
+    assert_eq!(lines[2], "    v1 = FUN_00002000();", "{lines:?}");
+    // 0x00 e: call g; call h; ret. 0x10 g: sub rsp, 8; call f; add rsp, 8; ret.
+    // 0x20 h: jmp f. 0x30 f: cvtsi2sd xmm0, edi; ret.
+    let mut bytes = vec![0xcc; 0x35];
+    bytes[..0x0b].copy_from_slice(&[0xe8, 0x0b, 0, 0, 0, 0xe8, 0x16, 0, 0, 0, 0xc3]);
+    bytes[0x10..0x1e].copy_from_slice(&[
+        0x48, 0x83, 0xec, 0x08, 0xe8, 0x17, 0, 0, 0, 0x48, 0x83, 0xc4, 0x08, 0xc3,
+    ]);
+    bytes[0x20..0x25].copy_from_slice(&[0xe9, 0x0b, 0, 0, 0]);
+    bytes[0x30..0x35].copy_from_slice(&[0xf2, 0x0f, 0x2a, 0xc7, 0xc3]);
+    let p = blob(&bytes);
+    let g = lines_at(&p, BASE + 0x10);
+    assert_eq!(g[0], "double FUN_00400010(uint64_t param_1)", "{g:?}");
+    let call = g
+        .iter()
+        .find(|l| l.contains("FUN_00400030(param_1)"))
+        .unwrap_or_else(|| panic!("no call of f: {g:?}"));
+    let (var, _) = call
+        .trim()
+        .split_once(" = ")
+        .unwrap_or_else(|| panic!("the call binds no result: {g:?}"));
+    assert!(g.contains(&format!("    return {var};")), "{g:?}");
+    let h = lines_at(&p, BASE + 0x20);
+    assert_eq!(
+        h,
+        [
+            "double FUN_00400020(uint64_t param_1)",
+            "{",
+            "    return FUN_00400030(param_1);",
             "}",
         ]
     );

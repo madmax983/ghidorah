@@ -306,3 +306,29 @@ fn callee_return_values() {
         Some(RetValue::Int)
     );
 }
+
+/// A direct call whose callee returns a floating value is a floating write of its kind. `g`
+/// calls `f` and returns, and `f` converts `edi` to a `double` in `xmm0`. The L0 body of `g`
+/// alone gives no floating return. An indirect call is no evidence.
+#[test]
+fn float_return_follows_float_callee() {
+    // 0x00 g: sub rsp, 8; call f; add rsp, 8; ret. 0x10 f: cvtsi2sd xmm0, edi; ret.
+    let mut bytes = vec![0xcc; 0x15];
+    bytes[..0x0e].copy_from_slice(&[
+        0x48, 0x83, 0xec, 0x08, 0xe8, 0x07, 0, 0, 0, 0x48, 0x83, 0xc4, 0x08, RET,
+    ]);
+    bytes[0x10..0x15].copy_from_slice(&[0xf2, 0x0f, 0x2a, 0xc7, RET]);
+    let p = blob(&bytes);
+    let g = fir_of(&p, BASE);
+    assert_eq!(ret::recover(&g), None);
+    assert_eq!(ret::float_ret(&p, fid(BASE), &g), Some(FloatRet::Double));
+    assert_eq!(
+        ret::ret_value(&p, fid(BASE + 0x10), &fir_of(&p, BASE + 0x10)),
+        RetValue::Float(FloatRet::Double)
+    );
+    // sub rsp, 8; call rax; add rsp, 8; ret
+    let ind = blob(&[
+        0x48, 0x83, 0xec, 0x08, 0xff, 0xd0, 0x48, 0x83, 0xc4, 0x08, RET,
+    ]);
+    assert_eq!(ret::float_ret(&ind, fid(BASE), &fir_of(&ind, BASE)), None);
+}

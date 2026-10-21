@@ -25,7 +25,8 @@
 //! - Call names come from symbols, stub names and `sys:` IDs. The argument count comes from
 //!   the signature or the Tier-0 prototype of the callee, then from the parameter recovery.
 //! - A tail call prints as `return f(..);`. A callee with no return value gives `f(..);`, then
-//!   `return;`. A callee that does not return gives `f(..);` only.
+//!   `return;`. A callee that does not return gives `f(..);` only. A tail call of a callee
+//!   with a floating return gives the head its type when no other return gives a value.
 //! - The result of a call is its `rax` def, or its `xmm0` def for a floating result. The facts
 //!   of the callee and the reads of the caller give the register (the `env` module).
 //! - A function with a floating return ([`View::float_ret`]) returns its `xmm0` value. Its
@@ -38,7 +39,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use ghidorah_analysis::fir::ret::RetValue;
+use ghidorah_analysis::fir::ret::{FloatRet, RetValue};
 use ghidorah_base::{FuncId, VarId};
 use ghidorah_db::{CodeUnit, CommentKind, Program};
 use ghidorah_ir::{IntrinsicNames, Loc, Node, OpId};
@@ -264,6 +265,7 @@ pub(crate) struct Printer<'a> {
     void_ret: bool,
     ret_loc: Loc,
     rets: Vec<u8>,
+    tail_float: Option<FloatRet>,
     lines: Vec<Line>,
     warnings: Vec<Warning>,
 }
@@ -314,6 +316,7 @@ impl<'a> Printer<'a> {
                 .and_then(|_| env::float_ret(env.conv()))
                 .unwrap_or(Loc::RAX),
             rets: Vec::new(),
+            tail_float: None,
             lines: Vec::new(),
             warnings: Vec::new(),
         };

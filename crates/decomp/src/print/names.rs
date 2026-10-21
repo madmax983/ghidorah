@@ -162,9 +162,13 @@ impl Printer<'_> {
                 .ret
                 .and_then(|t| self.stores.text(t))
                 .unwrap_or_else(|| "void".to_owned()),
-            None => match view.float_ret {
-                Some(k) if !self.rets.is_empty() => k.c_name().to_owned(),
-                _ => self
+            None => match view
+                .float_ret
+                .filter(|_| !self.rets.is_empty())
+                .or_else(|| self.tail_float.filter(|_| self.rets.is_empty()))
+            {
+                Some(k) => k.c_name().to_owned(),
+                None => self
                     .rets
                     .iter()
                     .max()

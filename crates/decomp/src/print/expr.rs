@@ -149,10 +149,11 @@ impl Printer<'_> {
             Stmt::Call(c) => {
                 let text = self.call_text(c, buf);
                 if c.tail {
-                    if self.callee_value(c) == Some(RetValue::Void) {
-                        return format!("{text};");
+                    match self.callee_value(c) {
+                        Some(RetValue::Void) => return format!("{text};"),
+                        Some(RetValue::Float(k)) => self.tail_float = Some(k),
+                        Some(RetValue::Int) | None => self.rets.push(64),
                     }
-                    self.rets.push(64);
                     return format!("return {text};");
                 }
                 match self.result_var(c) {
