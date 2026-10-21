@@ -13,6 +13,8 @@
 mod inputs;
 mod output;
 
+use std::collections::BTreeSet;
+
 use ghidorah_base::{BinaryId, ErrorCode, WarningCode};
 use ghidorah_json::{Object, Value};
 
@@ -314,24 +316,44 @@ impl<'p> Run<'p> {
 
     /// Gives the resume member of a stop at step `from`: `{ from_step, bindings }`, or `None`
     /// when the bindings are too large.
+    ///
+    /// The bindings hold the value of each reference to a completed step. A reference that
+    /// does not resolve also adds the `data` and the `page` of its source step, when they
+    /// fit. So the replay gives the same error and the same candidates as a first run.
     fn resume(&self, from: usize) -> Option<Value> {
         let mut list = Vec::new();
-        for step in self.plan.steps.iter().skip(from) {
+        let mut failed = BTreeSet::new();
+        for (i, step) in self.plan.steps.iter().enumerate().skip(from) {
             for r in step.refs.iter().filter(|r| r.source < from) {
                 let Some(source) = self.plan.steps.get(r.source) else {
                     continue;
                 };
                 let value = match self.slots.get(r.source) {
-                    Some(Slot::Done(envelope)) => refs::resolve(r, envelope, r.source).ok(),
-                    Some(Slot::Resumed) => self.bound(r, r.source).ok(),
-                    _ => None,
+                    Some(Slot::Done(envelope)) => refs::resolve(r, envelope, i),
+                    Some(Slot::Resumed) => self.bound(r, i),
+                    _ => continue,
                 };
-                if let Some(value) = value {
-                    list.push((source.id.clone(), r.ptr.clone(), value));
+                match value {
+                    Ok(value) => list.push((source.id.clone(), r.ptr.clone(), value)),
+                    Err(_) => {
+                        failed.insert(r.source);
+                    }
                 }
             }
         }
-        let bindings = budget::bindings(list)?;
+        let mut full = list.clone();
+        for k in failed {
+            let (Some(source), Some(envelope)) = (self.plan.steps.get(k), self.source_envelope(k))
+            else {
+                continue;
+            };
+            for member in ["data", "page"] {
+                if let Some(value) = envelope.get(member) {
+                    full.push((source.id.clone(), format!("/{member}"), value.clone()));
+                }
+            }
+        }
+        let bindings = budget::bindings(full).or_else(|| budget::bindings(list))?;
         let id = self.plan.steps.get(from).map_or("", |s| s.id.as_str());
         Some(Value::object([
             ("from_step", Value::from(id)),

@@ -5,13 +5,14 @@
 //! | `max_chars` | The returned steps share it in step order. A step outside `return` gets the hard cap, so the batch does not trim it. |
 //! | `max_steps` | Each step gets the fuel that the batch still has. |
 //! | The result | The last fit drops data of returned steps from the end until the result fits. A step without its data keeps `omitted: { chars }`. |
-//! | `resume` | The values of the references to completed steps, at most [`MAX_BINDINGS_CHARS`] characters. |
+//! | `resume` | The values of the references to completed steps, at most [`MAX_BINDINGS`] items and [`MAX_BINDINGS_CHARS`] characters. |
 
 use ghidorah_json::{Object, Value};
 
 use super::MAX_BINDINGS_CHARS;
 use crate::budget::{Budget, HARD_MAX_CHARS};
 use crate::content::{chars, cost};
+use crate::handlers::batch_run::MAX_BINDINGS;
 
 /// The smallest budget of a returned step in characters.
 pub const MIN_STEP_CHARS: u64 = 1_000;
@@ -118,8 +119,9 @@ fn shrink(entry: &mut Object, pass: usize) -> bool {
     }
 }
 
-/// Gives the resume bindings `[{ step, ptr, value }]`, or `None` when they are larger than
-/// [`MAX_BINDINGS_CHARS`].
+/// Gives the resume bindings `[{ step, ptr, value }]`, or `None` when they hold more than
+/// [`MAX_BINDINGS`] items or more than [`MAX_BINDINGS_CHARS`] characters. A replay accepts
+/// at most [`MAX_BINDINGS`] items.
 #[must_use]
 pub fn bindings(list: Vec<(String, String, Value)>) -> Option<Value> {
     let mut out: Vec<Value> = Vec::new();
@@ -136,6 +138,7 @@ pub fn bindings(list: Vec<(String, String, Value)>) -> Option<Value> {
             ]));
         }
     }
+    let count = out.len();
     let value = Value::Array(out);
-    (size(&value) <= MAX_BINDINGS_CHARS).then_some(value)
+    (count <= MAX_BINDINGS && size(&value) <= MAX_BINDINGS_CHARS).then_some(value)
 }

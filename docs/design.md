@@ -1992,7 +1992,9 @@ flowchart TD
 
 - The global `max_chars` and `max_steps` of the batch cover all steps. Defaults: 24,000 characters and 2,000,000 fuel units. Hard caps: 60,000 characters and 20,000,000 fuel units.
 - The executor does not trim steps that are not in `return`. Their own `limit` and the batch fuel bound them. Returned steps share `max_chars` in step order. A truncated returned step keeps its own `next_cursor` (AC-181a).
-- When fuel runs out in a read-only batch, the result holds the completed steps, `stopped_by: "fuel"` and `resume: { from_step, bindings }`. `bindings` hold the referenced values of the completed steps, at most 8,000 characters. A replay with `resume` binds these values and runs only the remaining steps (AC-181b). When the bindings do not fit, `resume` is absent and the hint names a smaller batch.
+- When fuel runs out in a read-only batch, the result holds the completed steps, `stopped_by: "fuel"` and `resume: { from_step, bindings }`. `bindings` hold the referenced values of the completed steps, at most 64 items and 8,000 characters. A replay with `resume` binds these values and runs only the remaining steps (AC-181b). When the bindings do not fit, `resume` is absent and the hint names a smaller batch.
+- In a replay, the bindings of a completed step act as its envelope, with each value at its pointer. A reference with its own binding takes that value. A reference that does not resolve gives the `BAD_REFERENCE` error of Section 11.4, with candidates from the bound data.
+- A reference to a completed step can fail to resolve before the stop. Then `bindings` also hold the `data` and the `page` of that step, when they fit. So the replay gives the same error and the same candidates as a first run.
 - In a mutating batch, fuel exhaustion rolls back with `BUDGET_EXCEEDED`.
 - The result reports `budget_used: { chars, fuel, steps }`.
 

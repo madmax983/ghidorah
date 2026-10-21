@@ -485,11 +485,27 @@ pub fn resolve(r: &Reference, source: &Value, step: usize) -> Result<Value, Tool
             .cloned()
             .ok_or_else(|| missing(&r.ptr))?
     };
-    check(r, &value, step).map_err(|e| match r.spec {
+    check_in(r, &value, source, step)?;
+    Ok(value)
+}
+
+/// Checks a value of reference `r` of step `step` against its argument. The value comes from
+/// the envelope `source`.
+///
+/// # Errors
+///
+/// Returns `BAD_REFERENCE` with `details.expected` when the value does not fit. The candidates
+/// are the paths of the data of `source` whose values fit, or all its paths when no value fits.
+pub fn check_in(
+    r: &Reference,
+    value: &Value,
+    source: &Value,
+    step: usize,
+) -> Result<(), ToolError> {
+    check(r, value, step).map_err(|e| match r.spec {
         Some(spec) => e.candidates(ranked(&r.ptr, &fit_paths(r, &spec, source), "path")),
         None => e,
-    })?;
-    Ok(value)
+    })
 }
 
 /// Checks a resolved value of reference `r` against its argument.
