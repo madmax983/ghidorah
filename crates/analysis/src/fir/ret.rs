@@ -158,24 +158,22 @@ fn kind_of(store: &TypeStore, model: &DataModel, ty: TypeId) -> Option<FloatRet>
 pub fn recover(l0: &FuncIr) -> Option<FloatRet> {
     let xmm0 = Loc::xmm(0)?;
     let preds = l0.body.cfg.preds();
-    let mut found: Option<FloatRet> = None;
-    for n in 0..l0.body.blocks.len() {
-        if !ends_in_ret(l0, n) {
-            continue;
-        }
-        if events(l0, &preds, n, Loc::RAX)
-            .iter()
-            .any(|e| matches!(e, Event::Write(_)))
-        {
-            return None;
-        }
-        for e in events(l0, &preds, n, xmm0) {
-            if let Event::Write(Some(k)) = e {
-                found = Some(found.map_or(k, |f| f.max(k)));
-            }
-        }
+    let rets: Vec<usize> = (0..l0.body.blocks.len())
+        .filter(|&n| ends_in_ret(l0, n))
+        .collect();
+    let int = events(l0, &preds, &rets, Loc::RAX)
+        .iter()
+        .any(|e| matches!(e, Event::Write(_)));
+    if int {
+        return None;
     }
-    found
+    events(l0, &preds, &rets, xmm0)
+        .into_iter()
+        .filter_map(|e| match e {
+            Event::Write(k) => k,
+            Event::Read | Event::Call | Event::Entry => None,
+        })
+        .max()
 }
 
 /// Gives the ops of block `n` of `l0` in run order.
@@ -199,13 +197,14 @@ fn ends_in_ret(l0: &FuncIr, n: usize) -> bool {
     block_ops(l0, n).last().is_some_and(|op| op.opc == Opc::Ret)
 }
 
-/// Gives the last event of `loc` on each path from the end of block `start` back to the
-/// entry. `preds` holds the predecessors of each block. The walk reads each block once.
-fn events(l0: &FuncIr, preds: &[Vec<Node>], start: usize, loc: Loc) -> Vec<Event> {
+/// Gives the last event of `loc` on each path from the end of a block of `starts` back to the
+/// entry. `preds` holds the predecessors of each block. The paths share one walk, so the walk
+/// reads each block once, also for a function with many `ret` blocks.
+fn events(l0: &FuncIr, preds: &[Vec<Node>], starts: &[usize], loc: Loc) -> Vec<Event> {
     let entry = l0.body.cfg.entry().index();
     let mut out = Vec::new();
     let mut seen: BTreeSet<usize> = BTreeSet::new();
-    let mut work = vec![start];
+    let mut work = starts.to_vec();
     while let Some(n) = work.pop() {
         if !seen.insert(n) {
             continue;

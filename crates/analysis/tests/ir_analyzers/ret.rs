@@ -1,5 +1,7 @@
 //! The floating return of a function (design Section 7.10): the facts and the recovery.
 
+use std::time::{Duration, Instant};
+
 use ghidorah_analysis::fir::l1;
 use ghidorah_analysis::fir::ret::{self, FloatRet};
 use ghidorah_base::Address;
@@ -205,4 +207,29 @@ fn float_return_of_fixtures() {
             assert_eq!(got, want, "{build} {name}");
         }
     }
+}
+
+/// The count of the `ret` blocks of the long chain.
+const CHAIN: usize = 10_000;
+
+/// The walks from the `ret` blocks of a function share one visit of each block. A walk from
+/// each `ret` read the chain of jumps before it again, so a chain of many `ret` blocks took a
+/// quadratic time.
+#[test]
+fn regress_float_return_walk_is_linear() {
+    // CHAIN times `jne +1; ret`, then `addsd xmm0, xmm1; ret`.
+    let mut bytes = Vec::new();
+    for _ in 0..CHAIN {
+        bytes.extend([0x75, 0x01, RET]);
+    }
+    bytes.extend(ADDSD);
+    bytes.push(RET);
+    let p = blob(&bytes);
+    let ir = fir_of(&p, BASE);
+    assert!(ir.body.blocks.len() > 2 * CHAIN, "{}", ir.body.blocks.len());
+    let start = Instant::now();
+    let got = ret::recover(&ir);
+    let took = start.elapsed();
+    assert_eq!(got, Some(FloatRet::Double));
+    assert!(took < Duration::from_secs(1), "the walk took {took:?}");
 }
