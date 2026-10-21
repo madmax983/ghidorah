@@ -318,8 +318,23 @@ impl From<FsError> for ProjectError {
     }
 }
 
-/// Removes the temporary files of dead processes from the project directory `dir` and its
-/// `bin` directory. The caller holds the lock.
+/// Tells if `id` is a crash ID: 1 to 64 ASCII hex digits.
+fn is_crash_id(id: &str) -> bool {
+    !id.is_empty() && id.len() <= 64 && id.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+/// Gives the process ID of a temporary file name of a crash record: `<id>.tmp.<pid>.<n>` with
+/// a crash ID. Gives `None` for a name of another shape.
+fn crash_temp_pid(name: &str) -> Option<u32> {
+    let (id, rest) = name.split_once('.')?;
+    if !is_crash_id(id) {
+        return None;
+    }
+    crate::fs::temp_pid(rest, "tmp")
+}
+
+/// Removes the temporary files of dead processes from the project directory `dir`, its `bin`
+/// directory and its `crash` directory. The caller holds the lock.
 ///
 /// The step does nothing when the process files do not give the lock owner `me`. So a system
 /// with no readable process files keeps all temporary files.
@@ -340,6 +355,9 @@ fn remove_dead_temps(fs: &mut dyn Fs, dir: &Path, meta: &ProjectMeta, me: &LockI
     let input = format!("{}.tmp", hex::encode(&meta.sha256));
     let bin = dir.join(BIN_DIR);
     let _ = crate::fs::remove_dead_temps(fs, &bin, &[input.as_str()], lock::pid_dead);
+    // The crash records use `<id>.tmp` as the base, with a crash ID of 1 to 64 hex digits.
+    let crash = dir.join(CRASH_DIR);
+    let _ = crate::fs::remove_dead_temps_by(fs, &crash, &crash_temp_pid, lock::pid_dead);
 }
 
 /// One project directory.

@@ -19,7 +19,7 @@ use super::{
     check_root, list,
 };
 use crate::edit::Edit;
-use crate::fs::Fs;
+use crate::fs::{EntryKind, Fs, FsError};
 use crate::hash::StateHash;
 use crate::history::{History, Scope};
 use crate::journal::{JOURNAL_FILE, Line, TxLine};
@@ -999,5 +999,138 @@ fn regress_stale_temp_removed_on_open() {
         fs.get(&bin.join(&live_bin)).is_some(),
         "the input copy of a live process stays"
     );
+    drop(opened);
+}
+
+/// A file system over a [`SimFs`] that shows each path of `links` as a symbolic link.
+#[derive(Clone)]
+struct LinkFs {
+    sim: SimFs,
+    links: Vec<PathBuf>,
+}
+
+impl Fs for LinkFs {
+    fn create_dir_all(&mut self, path: &Path) -> Result<(), FsError> {
+        self.sim.create_dir_all(path)
+    }
+    fn create_new(&mut self, path: &Path) -> Result<(), FsError> {
+        self.sim.create_new(path)
+    }
+    fn append(&mut self, path: &Path, bytes: &[u8]) -> Result<(), FsError> {
+        self.sim.append(path, bytes)
+    }
+    fn write_all(&mut self, path: &Path, bytes: &[u8]) -> Result<(), FsError> {
+        self.sim.write_all(path, bytes)
+    }
+    fn truncate(&mut self, path: &Path, len: u64) -> Result<(), FsError> {
+        self.sim.truncate(path, len)
+    }
+    fn sync_file(&mut self, path: &Path) -> Result<(), FsError> {
+        self.sim.sync_file(path)
+    }
+    fn rename(&mut self, from: &Path, to: &Path) -> Result<(), FsError> {
+        self.sim.rename(from, to)
+    }
+    fn link_new(&mut self, src: &Path, dst: &Path) -> Result<(), FsError> {
+        self.sim.link_new(src, dst)
+    }
+    fn sync_dir(&mut self, path: &Path) -> Result<(), FsError> {
+        self.sim.sync_dir(path)
+    }
+    fn remove(&mut self, path: &Path) -> Result<(), FsError> {
+        self.sim.remove(path)
+    }
+    fn read(&mut self, path: &Path) -> Result<Vec<u8>, FsError> {
+        self.sim.read(path)
+    }
+    fn set_read_only(&mut self, path: &Path) -> Result<(), FsError> {
+        self.sim.set_read_only(path)
+    }
+    fn list(&mut self, dir: &Path) -> Result<Vec<String>, FsError> {
+        self.sim.list(dir)
+    }
+    fn exists(&mut self, path: &Path) -> bool {
+        self.sim.exists(path)
+    }
+    fn kind(&mut self, path: &Path) -> Option<EntryKind> {
+        if self.links.iter().any(|l| l == path) {
+            return Some(EntryKind::Other);
+        }
+        self.sim.kind(path)
+    }
+    fn boxed(&self) -> Box<dyn Fs> {
+        Box::new(self.clone())
+    }
+}
+
+#[test]
+fn regress_sweep_removes_dead_crash_temps() {
+    // A writer that dies, a live process and the process of the next open. No ID is the ID
+    // of the test process.
+    let me = std::process::id();
+    let pids: Vec<u32> = (7..).filter(|p| *p != me).take(3).collect();
+    let (dead, live, next) = (pids[0], pids[1], pids[2]);
+    let fs = sim(&[live, next]);
+    let (mut project, program) = create_breaking(&fs, dead).unwrap();
+    let dir = Project::dir_of(Path::new(ROOT), program.meta().binary_id);
+    let crash = dir.join(super::CRASH_DIR);
+    // A crash record of a handler panic, then a crash between create_temp and rename.
+    let record = Value::object([("code", Value::from("E_INTERNAL"))]);
+    assert_eq!(
+        project.write_crash("a1", &record).unwrap(),
+        format!("{}/a1.json", super::CRASH_DIR)
+    );
+    fs.crash_after("create_new b2.tmp.");
+    assert!(project.write_crash("b2", &record).is_err());
+    drop(project);
+    fs.resume();
+    // The test process stays alive, so its temporary file gets the ID of the dead writer.
+    let mut raw = fs.boxed();
+    let mut moved = Vec::new();
+    for name in temps_of(&fs, &crash, me) {
+        let to = name.replacen(&format!(".tmp.{me}."), &format!(".tmp.{dead}."), 1);
+        raw.rename(&crash.join(&name), &crash.join(&to)).unwrap();
+        moved.push(to);
+    }
+    assert_eq!(moved.len(), 1, "one temporary file of the crash: {moved:?}");
+    let id64 = "0123456789abcdef".repeat(4);
+    let stale = [
+        format!("{id64}.tmp.{dead}.0"),
+        format!("ABCDEF.tmp.{dead}.7"),
+    ];
+    // The files of live processes and the names of another shape stay.
+    let keep = [
+        format!("{id64}.tmp.{live}.0"),
+        format!("{id64}0.tmp.{dead}.0"),
+        format!("xyz.tmp.{dead}.0"),
+        format!(".tmp.{dead}.0"),
+        format!("a1.json.tmp.{dead}.0"),
+        format!("a1.tmp.{dead}.0.1"),
+        format!("a1.tmp.{dead}"),
+        format!("a1.tmp.+{dead}.0"),
+        "a1.json".to_owned(),
+    ];
+    for name in stale.iter().chain(&keep) {
+        fs.seed(&crash.join(name), b"x");
+    }
+    let folder = crash.join(format!("c3.tmp.{dead}.0"));
+    raw.create_dir_all(&folder).unwrap();
+    let link = crash.join(format!("d4.tmp.{dead}.0"));
+    fs.seed(&link, b"x");
+    let linked = LinkFs {
+        sim: fs.clone(),
+        links: vec![link.clone()],
+    };
+    let options = opts(Access::Write { break_lock: true }, next);
+    let opened = Project::open(linked.boxed(), &dir, &options).unwrap();
+    let names = fs.boxed().list(&crash).unwrap();
+    for name in moved.iter().chain(&stale) {
+        assert!(!names.contains(name), "{name} goes: {names:?}");
+    }
+    for name in &keep {
+        assert!(names.contains(name), "{name} stays: {names:?}");
+    }
+    assert!(raw.kind(&folder).is_some(), "a directory stays");
+    assert!(fs.get(&link).is_some(), "a symbolic link stays");
     drop(opened);
 }
