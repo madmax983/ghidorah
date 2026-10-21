@@ -1,18 +1,18 @@
 //! The work queue of the reader and the worker.
 
 use std::fmt::Write as _;
-use std::io::{BufRead, Cursor};
-use std::sync::atomic::Ordering;
-use std::sync::mpsc::{self, Receiver};
+use std::io::{self, BufRead, Cursor, Read};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use ghidorah_json::Value;
 
-use super::{Inlet, Log, QUEUE, QUEUE_FULL, ReaderOut, Work, read, work_queue};
+use super::{Inlet, Log, OUT, QUEUE, QUEUE_FULL, ReaderOut, Work, out_channel, read, work_queue};
 use crate::mcp::cancel::CancelMap;
-use crate::mcp::rpc::{INTERNAL_ERROR, RequestId};
+use crate::mcp::rpc::{INTERNAL_ERROR, INVALID_REQUEST, MAX_ID_CHARS, PARSE_ERROR, RequestId};
 
 /// The number of requests on stdin: more than the queue holds.
 const REQUESTS: usize = 200;
@@ -29,22 +29,27 @@ fn pings(count: usize) -> String {
     text
 }
 
-/// Starts the reader on `text` with a work queue of `size` items. No worker takes items.
-fn start(
-    text: String,
-    size: usize,
-) -> (
+/// The reader thread, the work queue end, the out channel end and the cancel map of a test.
+type Started = (
     thread::JoinHandle<()>,
     Receiver<Work>,
     Receiver<String>,
     CancelMap,
-) {
+);
+
+/// Starts the reader on `text` with a work queue of `size` items. No worker takes items.
+fn start(text: String, size: usize) -> Started {
+    start_on(Box::new(Cursor::new(text.into_bytes())), size)
+}
+
+/// Starts the reader on `stdin` with a work queue of `size` items. No worker takes items, and
+/// the out channel holds [`OUT`] lines.
+fn start_on(stdin: Box<dyn BufRead + Send>, size: usize) -> Started {
     let (work, items) = work_queue(size);
-    let (out_tx, out_rx) = mpsc::channel();
+    let (out_tx, out_rx) = out_channel(OUT);
     let cancels = CancelMap::new();
     let seen = cancels.clone();
-    let log = Log(Arc::new(Mutex::new(Box::new(std::io::sink()))));
-    let stdin: Box<dyn BufRead + Send> = Box::new(Cursor::new(text.into_bytes()));
+    let log = Log(Arc::new(Mutex::new(Box::new(io::sink()))));
     let reader = thread::spawn(move || {
         let out = ReaderOut::new(out_tx);
         let inlet = Inlet {
@@ -56,6 +61,31 @@ fn start(
         read(stdin, &inlet);
     });
     (reader, items, out_rx, cancels)
+}
+
+/// An input that counts the bytes that the reader takes.
+struct Counted {
+    inner: Cursor<Vec<u8>>,
+    taken: Arc<AtomicUsize>,
+}
+
+impl Read for Counted {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let n = self.inner.read(buf)?;
+        let _ = self.taken.fetch_add(n, Ordering::Relaxed);
+        Ok(n)
+    }
+}
+
+impl BufRead for Counted {
+    fn fill_buf(&mut self) -> io::Result<&[u8]> {
+        self.inner.fill_buf()
+    }
+
+    fn consume(&mut self, amount: usize) {
+        self.inner.consume(amount);
+        let _ = self.taken.fetch_add(amount, Ordering::Relaxed);
+    }
 }
 
 /// Gives the parsed reply line.
@@ -154,4 +184,114 @@ fn regress_cancel_read_while_queue_full() {
         "the refused request 3 has no cancel registration"
     );
     assert!(out.try_recv().is_err(), "request 3 gets one reply only");
+}
+
+#[test]
+fn regress_reader_replies_are_bounded() {
+    // A queue of 2 takes the first two pings. Each later line gets a reply of the reader: a
+    // bad line gets -32700, and a ping gets the full-queue error.
+    let late = 4 * OUT;
+    let mut text = pings(2);
+    for n in 0..late {
+        if n % 2 == 0 {
+            text.push_str("x\n");
+        } else {
+            let _ = writeln!(
+                text,
+                r#"{{"jsonrpc":"2.0","id":{},"method":"ping"}}"#,
+                n + 3
+            );
+        }
+    }
+    let total = text.len();
+    let lines: Vec<usize> = text
+        .bytes()
+        .enumerate()
+        .filter_map(|(i, b)| (b == b'\n').then_some(i + 1))
+        .collect();
+    let taken = Arc::new(AtomicUsize::new(0));
+    let stdin = Counted {
+        inner: Cursor::new(text.into_bytes()),
+        taken: Arc::clone(&taken),
+    };
+    let (reader, items, out, _cancels) = start_on(Box::new(stdin), 2);
+    // Nobody reads the out channel. The reader reads 2 lines for the queue, the bound of
+    // lines for the out channel and one more line whose reply waits.
+    let bound = lines.get(2 + OUT).copied().expect("enough lines");
+    let end = Instant::now() + WAIT;
+    while taken.load(Ordering::Relaxed) < bound && Instant::now() < end {
+        thread::sleep(Duration::from_millis(5));
+    }
+    thread::sleep(Duration::from_millis(200));
+    let read_bytes = taken.load(Ordering::Relaxed);
+    let read_lines = lines.iter().filter(|&&end| end <= read_bytes).count();
+    assert!(
+        read_bytes < total,
+        "the reader waits for the writer: it read {read_bytes} of {total} bytes"
+    );
+    assert!(
+        read_lines <= 2 + OUT + 1,
+        "at most {OUT} reader replies wait in the out channel: the reader read {read_lines} lines"
+    );
+    // The writer resumes. The reader then sends each later reply.
+    let mut replies = Vec::new();
+    while replies.len() < late {
+        let line = out
+            .recv_timeout(WAIT)
+            .expect("the reader sends each reply when the writer reads");
+        replies.push(parse(&line));
+    }
+    drop(items);
+    reader.join().expect("the reader thread");
+    for (n, reply) in replies.iter().enumerate() {
+        let code = reply.pointer("/error/code").and_then(Value::as_i64);
+        if n % 2 == 0 {
+            assert_eq!(code, Some(PARSE_ERROR), "the reply of line {n}: {reply:?}");
+        } else {
+            let id = u64::try_from(n + 3).expect("a small ID");
+            assert!(is_full_reply(reply, id), "the reply of line {n}: {reply:?}");
+        }
+    }
+    assert!(out.try_recv().is_err(), "the reader sends no other line");
+}
+
+/// Gives a ping request with the string ID `id`.
+fn ping_str(id: &str) -> String {
+    format!("{{\"jsonrpc\":\"2.0\",\"id\":\"{id}\",\"method\":\"ping\"}}\n")
+}
+
+#[test]
+fn regress_long_string_id_refused() {
+    let longest = "k".repeat(MAX_ID_CHARS);
+    let long = "q".repeat(MAX_ID_CHARS + 1);
+    let mut text = ping_str(&long);
+    text.push_str(&ping_str(&longest));
+    let (reader, items, out, cancels) = start(text, 2);
+    let first = items.recv_timeout(WAIT).expect("the reply of the long ID");
+    let second = items
+        .recv_timeout(WAIT)
+        .expect("the request of the longest ID");
+    let registered = cancels.len();
+    drop(items);
+    reader.join().expect("the reader thread");
+    let Work::Reply(line) = first else {
+        panic!("a string ID above {MAX_ID_CHARS} characters is not a request");
+    };
+    let reply = parse(&line);
+    assert_eq!(
+        reply.pointer("/error/code").and_then(Value::as_i64),
+        Some(INVALID_REQUEST),
+        "{reply:?}"
+    );
+    assert_eq!(reply.get("id"), Some(&Value::Null), "{reply:?}");
+    assert!(
+        !line.contains(&long),
+        "the reply does not echo the ID: {line}"
+    );
+    let Work::Request(request, _) = second else {
+        panic!("a string ID of {MAX_ID_CHARS} characters is a request");
+    };
+    assert_eq!(request.id, RequestId::Str(longest));
+    assert_eq!(registered, 1, "only the valid request has a cancel flag");
+    assert!(out.try_recv().is_err(), "the out channel holds no line");
 }

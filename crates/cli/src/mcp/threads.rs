@@ -3,11 +3,15 @@
 //! | Channel | From | To | Items |
 //! |---|---|---|---|
 //! | work | reader | worker | requests and the error replies of the reader, in input order, then a stop item at the end of stdin. The queue holds at most [`QUEUE`] items. |
-//! | out | worker, reader | writer | reply and notification lines. The reader sends only the replies that do not fit in the work queue. |
+//! | out | worker, reader | writer | reply and notification lines. The reader sends only the replies that do not fit in the work queue. The channel holds at most [`OUT`] lines. |
 //!
 //! The reader never waits for room in the work queue, so it reads each cancel notification
 //! at once (AC-172). A request that finds the queue full gets a -32603 reply ([`QUEUE_FULL`])
-//! through the out channel at once, and the reader removes its cancel registration.
+//! through the out channel, and the reader removes its cancel registration.
+//!
+//! When the out channel is full, the reader and the worker wait for room. The writer then
+//! waits for stdout, and a cancel cannot help. So a client that does not read stdout cannot
+//! grow the memory without a limit.
 //!
 //! The worker opens the backend, so the backend needs no `Send`. A broken pipe on stdout
 //! stops the worker: the running request gets its cancel flag, and the worker takes no next
@@ -44,9 +48,13 @@ const CANCELLED: &str = "notifications/cancelled";
 /// The longest wait for the worker after stdout fails.
 pub const STOP_WAIT: Duration = Duration::from_secs(5);
 
-/// The most work items that wait for the worker. A full queue refuses the next request, so a
-/// flood of large lines cannot grow the memory without a limit.
+/// The most work items that wait for the worker. A full queue refuses the next request. With
+/// the [`OUT`] bound, a flood of large lines cannot grow the memory without a limit.
 pub const QUEUE: usize = 64;
+
+/// The most lines that wait for the writer. At this bound the reader and the worker wait for
+/// room. So their replies use a bounded quantity of memory.
+pub const OUT: usize = 64;
 
 /// The message of the -32603 reply to a request that finds the work queue full.
 pub const QUEUE_FULL: &str = "The work queue is full. Send the request again later.";
@@ -54,6 +62,11 @@ pub const QUEUE_FULL: &str = "The work queue is full. Send the request again lat
 /// Makes the work queue: a channel that holds at most `size` items. The server uses
 /// [`QUEUE`].
 fn work_queue(size: usize) -> (SyncSender<Work>, Receiver<Work>) {
+    mpsc::sync_channel(size)
+}
+
+/// Makes the out channel: a channel that holds at most `size` lines. The server uses [`OUT`].
+fn out_channel(size: usize) -> (SyncSender<String>, Receiver<String>) {
     mpsc::sync_channel(size)
 }
 
@@ -131,17 +144,24 @@ impl Log {
 /// The out channel of the reader. The worker closes it at its end, also after a fault. So the
 /// writer does not wait for the end of stdin after the worker stops.
 #[derive(Clone)]
-struct ReaderOut(Arc<Mutex<Option<Sender<String>>>>);
+struct ReaderOut(Arc<Mutex<Option<SyncSender<String>>>>);
 
 impl ReaderOut {
-    fn new(out: Sender<String>) -> Self {
+    fn new(out: SyncSender<String>) -> Self {
         Self(Arc::new(Mutex::new(Some(out))))
     }
 
-    /// Sends `line` to the writer. Gives `false` after the end of the worker or the writer.
+    /// Sends `line` to the writer. When the out channel is full, it waits for room. Gives
+    /// `false` after the end of the worker or the writer.
+    ///
+    /// The wait occurs outside the lock, so the end of the worker does not wait for it.
     fn send(&self, line: String) -> bool {
-        let out = self.0.lock().unwrap_or_else(PoisonError::into_inner);
-        out.as_ref().is_some_and(|out| out.send(line).is_ok())
+        let out = self
+            .0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        out.is_some_and(|out| out.send(line).is_ok())
     }
 
     /// Drops the sender of the reader.
@@ -177,8 +197,9 @@ struct Inlet<'a> {
 }
 
 /// Puts `item` in the work queue with no wait. When the queue is full, a request gets the
-/// [`QUEUE_FULL`] reply, and an error reply goes to the writer at once. Only a stop item waits
-/// for room. Gives `false` after the end of the worker or the writer.
+/// [`QUEUE_FULL`] reply, and an error reply goes to the writer. Only a stop item waits for room
+/// in the work queue. A reply to the writer waits for room in the out channel. Gives `false`
+/// after the end of the worker or the writer.
 fn enqueue(item: Work, inlet: &Inlet<'_>) -> bool {
     let line = match inlet.work.try_send(item) {
         Ok(()) => return true,
@@ -250,7 +271,7 @@ fn read(stdin: Box<dyn BufRead + Send>, inlet: &Inlet<'_>) {
 /// The channels and the shared state of the worker.
 struct Lanes<'a> {
     items: &'a Receiver<Work>,
-    out: &'a Sender<String>,
+    out: &'a SyncSender<String>,
     cancels: &'a CancelMap,
     running: &'a Running,
     log: &'a Log,
@@ -312,7 +333,7 @@ struct WorkerChannels {
     /// The work queue.
     items: Receiver<Work>,
     /// The out channel of the worker.
-    out: Sender<String>,
+    out: SyncSender<String>,
     /// The result of the backend open.
     ready: Sender<Result<usize, OpenError>>,
     /// The out channel of the reader. The end of the worker thread closes it.
@@ -418,7 +439,7 @@ pub fn serve<B: Backend>(options: Options, serve: &ServeOptions, streams: Stream
         }
     };
     let (work_tx, work_rx) = work_queue(QUEUE);
-    let (out_tx, out_rx) = mpsc::channel();
+    let (out_tx, out_rx) = out_channel(OUT);
     let (ready_tx, ready_rx) = mpsc::channel();
     let reader_out = ReaderOut::new(out_tx.clone());
     let cancels = CancelMap::new();

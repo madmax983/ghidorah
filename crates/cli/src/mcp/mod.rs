@@ -9,8 +9,9 @@
 //! | writer | The only writer of stdout. It writes one line and flushes. |
 //!
 //! While the work queue has room, the reader sends each error reply through it, so the output
-//! order is the input order. When the queue is full, the reader sends the reply to the writer
-//! at once. A broken pipe on stdout ends the server with exit code 0.
+//! order is the input order. When the queue is full, the reader sends the reply to the writer.
+//! The out channel to the writer holds at most 64 lines. When it is full, the reader and the
+//! worker wait for the writer. A broken pipe on stdout ends the server with exit code 0.
 //! [`era`] holds every rule of the two protocol eras.
 
 pub mod cancel;
