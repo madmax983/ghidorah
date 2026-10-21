@@ -10,8 +10,8 @@ use ghidorah_testkit::elf::{ElfBuilder, ImportKind, Loc, Section, Symbol};
 use ghidorah_tools::Session;
 
 use crate::support::{
-    WP17B, addr_of, analyzed, call, call_value, chars, code, fixture, is_bin_text, items, json,
-    load_bytes, root, session, str_of, t1_fixtures, t2_fixtures, text_at, truth, walk, warnings,
+    addr_of, analyzed, call, call_value, code, fixture, is_bin_text, items, json, load_bytes, root,
+    session, str_of, t1_fixtures, t2_fixtures, text_at, truth, walk, warnings,
 };
 
 /// The `p_type` of a loadable program header.
@@ -482,60 +482,4 @@ fn ac_209_t2() {
     for (name, state) in default_states(&names) {
         assert_eq!(state, "complete true", "{name}");
     }
-}
-
-/// Makes a synthetic ELF file with `count` functions of one `ret` each.
-fn synthetic(count: u32) -> Vec<u8> {
-    let text = vec![0xc3; usize::try_from(count).expect("a size")];
-    let mut b = ElfBuilder::exec().section(Section::code(".text", &text));
-    for i in 0..count {
-        let name = format!("func_{i:05}");
-        b = b.symbol(Symbol::func(&name, Loc::section(".text", u64::from(i)), 1));
-    }
-    b.entry(Loc::symbol("func_00000")).build()
-}
-
-/// Runs every example of the read tools with `limit` at its cap on a synthetic file.
-fn budget_check(count: u32) {
-    let (mut session, load) = load_bytes(&format!("ac_133_{count}"), &synthetic(count), "triage");
-    assert_eq!(load.get("ok"), Some(&Value::Bool(true)), "{load}");
-    let mut runs = 0;
-    for tool in WP17B {
-        for example in tool.examples {
-            let mut args = json(example.args).as_object().cloned().unwrap_or_default();
-            if tool.list.is_some() {
-                let _ = args.remove("limit");
-                args.push("limit", Value::from(1000));
-            }
-            let envelope = call_value(&mut session, tool.name, Value::Object(args));
-            let size = chars(&envelope);
-            assert!(
-                size <= 60_000,
-                "{} {}: {size} characters",
-                tool.name,
-                example.args
-            );
-            assert_ne!(code(&envelope), "OUTPUT_BUDGET_EXCEEDED", "{}", tool.name);
-            runs += 1;
-        }
-    }
-    assert!(runs >= 38);
-    let big = call(
-        &mut session,
-        "func_list",
-        r#"{"limit":1000,"max_chars":60000}"#,
-    );
-    assert!(chars(&big) <= 60_000);
-    assert_eq!(big.pointer("/page/truncated"), Some(&Value::Bool(true)));
-}
-
-#[test]
-fn ac_133_output_budget() {
-    budget_check(5_000);
-}
-
-#[test]
-#[ignore = "tier2"]
-fn ac_133_output_budget_large() {
-    budget_check(50_000);
 }

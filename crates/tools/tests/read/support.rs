@@ -197,6 +197,18 @@ pub fn load_bytes(name: &str, bytes: &[u8], analysis: &str) -> (Session, Value) 
     (session, envelope)
 }
 
+/// Writes `bytes` to the file `input.elf` of the test `name` and loads it with the
+/// `binary_load` arguments `args`.
+///
+/// Gives the session, whose one root is the directory of the file, and the load envelope.
+pub fn load_bytes_args(name: &str, bytes: &[u8], args: Value) -> (Session, Value) {
+    let dir = tmp(name);
+    std::fs::write(dir.join("input.elf"), bytes).expect("the file writes");
+    let mut session = session_with(config_at(&dir));
+    let envelope = call_value(&mut session, "binary_load", args);
+    (session, envelope)
+}
+
 /// One analyzed fixture.
 pub struct Analyzed {
     /// The program after the default load.

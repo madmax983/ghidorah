@@ -179,8 +179,10 @@ fn regress_xref_list_second_got_slot() {
         items(&envelope)
             .iter()
             .find(|i| addr_of(&str_of(i, "from")) == from && str_of(i, "kind") == kind)
-            .map(|i| str_of(i, "via"))
-            .unwrap_or_else(|| panic!("a {kind} item from {from:#x}: {envelope}"))
+            .map_or_else(
+                || panic!("a {kind} item from {from:#x}: {envelope}"),
+                |i| str_of(i, "via"),
+            )
     };
     assert_eq!(
         via_of(built.main + 5, "unconditional_call"),
