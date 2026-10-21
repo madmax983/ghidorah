@@ -6,15 +6,20 @@
 //!
 //! A slot of a positional convention prints its floating register when the caller sets only
 //! that register of the slot. Else it prints its integer register.
+//!
+//! The result of a call is a def of the register that the `env` module gives: `rax`, or
+//! `xmm0` for a floating result. The result of an opaque instruction is its `rax` def, else
+//! its first def.
 
 use ghidorah_analysis::cc::loc_of;
 use ghidorah_base::WarningCode;
 use ghidorah_ir::Loc;
 
 use super::expr::{safe, wrap};
-use super::{Arity, Buf, CallRow, CallTarget, Printer};
+use super::{Arity, Buf, CallRow, CallTarget, Printer, env};
 use crate::Warning;
 use crate::expr::{Call, Callee, Expr, VarIdx};
+use crate::lattice::calls_of;
 use crate::precedence::UNARY;
 
 /// The registers of the arguments of a system call in order.
@@ -25,30 +30,47 @@ fn is_mangled(name: &str) -> bool {
     name.starts_with("_Z") || name.starts_with("_R") || name.starts_with('?')
 }
 
-/// Gives the variable that gets the result of a call statement: the `rax` result, or the
-/// first result of an opaque instruction.
-fn call_ret(c: &Call) -> Option<VarIdx> {
-    c.rets
-        .iter()
-        .find(|(l, _)| *l == Loc::RAX)
-        .or_else(|| match c.callee {
-            Callee::Intrinsic(_) => c.rets.first(),
-            _ => None,
-        })
-        .map(|(_, v)| *v)
-}
-
 impl Printer<'_> {
+    /// Gives the register of the result of the call `c` (see the module doc). A direct callee
+    /// whose signature has no return value gives `None`.
+    fn result_loc(&self, c: &Call) -> Option<Loc> {
+        let conv = self.env.conv();
+        match c.callee {
+            Callee::Intrinsic(_) => c
+                .rets
+                .iter()
+                .find(|(l, _)| *l == Loc::RAX)
+                .or_else(|| c.rets.first())
+                .map(|(l, _)| *l),
+            Callee::Direct(t) => match self.env.signature(t) {
+                Some(sig) => env::ret_loc(&sig, &self.stores, conv),
+                None => Some(env::caller_ret_loc(c, &self.reads, conv)),
+            },
+            Callee::Indirect(_) => Some(env::caller_ret_loc(c, &self.reads, conv)),
+            Callee::Syscall | Callee::Unimpl => Some(Loc::RAX),
+        }
+    }
+
     /// Gives the variable that gets the result of a call statement. A direct callee whose
     /// signature has no return value gives `None`. Its `rax` holds no result. So a later read
     /// of the variable reads a value with no def.
     pub(super) fn result_var(&self, c: &Call) -> Option<VarIdx> {
-        if let Callee::Direct(t) = c.callee
-            && self.env.signature(t).is_some_and(|s| s.ret.is_none())
-        {
-            return None;
+        let loc = self.result_loc(c)?;
+        c.rets.iter().find(|(l, _)| *l == loc).map(|(_, v)| *v)
+    }
+
+    /// Adds the `rax` def of each call with a result in another register to the values that a
+    /// call leaves behind. So a return of that def gives no value.
+    pub(super) fn leave_rax_defs(&mut self) {
+        let mut left = Vec::new();
+        let calls = self.view().nodes.iter().flat_map(|n| &n.stmts);
+        for c in calls.flat_map(calls_of) {
+            if self.result_loc(c).is_some_and(|l| l != Loc::RAX) {
+                let rax = c.rets.iter().filter(|(l, _)| *l == Loc::RAX);
+                left.extend(rax.map(|(_, v)| *v));
+            }
         }
-        call_ret(c)
+        self.clobbers.extend(left);
     }
 
     /// Gives the printed name of the callee `t` and adds a mangled-name warning at `site`.
