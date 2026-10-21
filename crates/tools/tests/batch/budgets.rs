@@ -62,6 +62,80 @@ fn ac_181a_budgets() {
         int_at(&envelope, "/data/budget_used/chars"),
         int_at(&entries[1], "/chars")
     );
+    shared_returned_steps();
+}
+
+/// The number of items of the data of a step entry.
+fn items_of(entry: &Value) -> usize {
+    entry
+        .pointer("/data/items")
+        .and_then(Value::as_array)
+        .map_or(0, <[Value]>::len)
+}
+
+/// Three returned list steps share a budget of 3,000 characters in step order (AC-181a).
+fn shared_returned_steps() {
+    const MAX: u64 = 3_000;
+    let mut s = demo();
+    let text = r#"{"steps":[
+        {"id":"s1","tool":"search","args":{"kind":"name","query":"","limit":40}},
+        {"id":"s2","tool":"search","args":{"kind":"name","query":"","limit":40}},
+        {"id":"s3","tool":"search","args":{"kind":"name","query":"","limit":40}}
+    ],"return":["s1","s2","s3"],"max_chars":3000}"#;
+    let envelope = batch(&mut s, text);
+    let entries = steps(&envelope);
+    assert_eq!(entries.len(), 3, "{envelope}");
+    assert!(chars(&envelope) <= MAX, "{} characters", chars(&envelope));
+    // The steps that keep their data fit the budget together.
+    let kept: Vec<&Value> = entries.iter().filter(|e| e.get("data").is_some()).collect();
+    let sum: u64 = kept.iter().map(|e| int_at(e, "/chars")).sum();
+    assert!(
+        !kept.is_empty() && sum <= MAX,
+        "{sum} characters: {envelope}"
+    );
+    // The first step gets its share first: it keeps its data and shows the most items.
+    assert!(entries[0].get("data").is_some(), "{envelope}");
+    let first = items_of(&entries[0]);
+    assert!(first > 0, "{envelope}");
+    for later in &entries[1..] {
+        assert!(items_of(later) <= first, "{envelope}");
+        // A later step gets the room that the earlier steps leave, so it is smaller.
+        assert!(
+            int_at(later, "/chars") < int_at(&entries[0], "/chars"),
+            "{envelope}"
+        );
+    }
+    // A step that the last fit cuts keeps the size of its data in omitted.chars.
+    let dropped: Vec<&Value> = entries.iter().filter(|e| e.get("data").is_none()).collect();
+    assert!(!dropped.is_empty(), "{envelope}");
+    for entry in &dropped {
+        let omitted = int_at(entry, "/omitted/chars");
+        assert!(omitted > 0 && omitted < u64::MAX, "{entry}");
+    }
+    // Each truncated step keeps its own cursor, and the cursor gives the next page.
+    let mut cursors = Vec::new();
+    for entry in &entries {
+        if entry.pointer("/page/truncated") != Some(&Value::Bool(true)) {
+            continue;
+        }
+        let cursor = text_at(entry, "/page/next_cursor");
+        assert!(!cursor.is_empty(), "{entry}");
+        let next = call_value(
+            &mut s,
+            "search",
+            Value::object([
+                ("kind", Value::from("name")),
+                ("query", Value::from("")),
+                ("limit", Value::from(40)),
+                ("cursor", Value::from(cursor.as_str())),
+            ]),
+        );
+        assert_eq!(next.get("ok"), Some(&Value::Bool(true)), "{next}");
+        cursors.push(cursor);
+    }
+    assert_eq!(cursors.len(), 3, "{envelope}");
+    // The first step shows more items, so its cursor starts later than the others.
+    assert_ne!(cursors[0], cursors[1], "{envelope}");
 }
 
 const RESUMABLE: &str = r#"[
