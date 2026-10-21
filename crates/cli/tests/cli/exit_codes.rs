@@ -70,12 +70,45 @@ fn ac_150_cli_exit_codes() {
         candidate.stderr
     );
 
+    // Code 2: a protocol error of `jsonl`. Stdout holds only envelope lines.
+    let calc = r#"{"id":1,"tool":"calc","args":{"expr":"0x1"}}"#;
+    let jsonl = run_binary(&["jsonl"], &format!("{{not json\n{calc}\n"));
+    assert_eq!(jsonl.code, 2, "{}", jsonl.stderr);
+    let lines = jsonl.lines();
+    assert_eq!(lines.len(), 2, "one line per request: {}", jsonl.stdout);
+    for line in &lines {
+        let envelope = json(line);
+        assert!(
+            envelope
+                .get("ok")
+                .and_then(ghidorah_json::Value::as_bool)
+                .is_some(),
+            "an envelope line: {line}"
+        );
+    }
+    assert_eq!(
+        json(lines[0])
+            .pointer("/error/code")
+            .and_then(|v| v.as_str()),
+        Some("INVALID_ARGUMENT"),
+        "{}",
+        lines[0]
+    );
+    assert_eq!(
+        json(lines[1]).pointer("/data/value"),
+        Some(&json(r#""0x1""#))
+    );
+
     // A broken pipe on stdout gives code 0.
     assert_eq!(closed_stdout(&["--help"], "").code(), Some(0));
     let init = r#"{"jsonrpc":"2.0","id":1,"method":"server/discover"}"#;
     let lines = format!("{init}\n").repeat(64);
     assert_eq!(closed_stdout(&["mcp"], &lines).code(), Some(0));
     assert_eq!(closed_stdout(&["tools", "--json"], "").code(), Some(0));
+    let args = r#"{"expr":"0x1"}"#;
+    assert_eq!(closed_stdout(&["call", "calc", args], "").code(), Some(0));
+    let lines = format!("{calc}\n").repeat(64);
+    assert_eq!(closed_stdout(&["jsonl"], &lines).code(), Some(0));
 }
 
 #[test]

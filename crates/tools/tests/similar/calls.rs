@@ -1,5 +1,5 @@
-//! `func_similar` calls: determinism (AC-239), the caps of `min_score` and `limit`, the
-//! output members and the `next` hints without binary names.
+//! `func_similar` calls: determinism (AC-239), tiny functions (AC-242), the caps of `min_score`
+//! and `limit`, the output members and the `next` hints without binary names.
 
 use std::collections::BTreeSet;
 
@@ -429,4 +429,91 @@ fn regress_similar_time_stop_makes_progress() {
         args = resend.get("args").cloned().unwrap_or_default();
     }
     panic!("the resends of next[0] do not end: {done:?}");
+}
+
+/// The base address of the raw blobs of `ac_242_func_similar_tiny`.
+const BLOB_BASE: u64 = 0x40_0000;
+
+/// Writes `bytes` to a new directory of the test `name` and loads it as a raw x86-64 blob at
+/// [`BLOB_BASE`] with its entry there. Gives the session, whose one root is that directory.
+fn blob_session(name: &str, bytes: &[u8]) -> ghidorah_tools::Session {
+    let dir = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+        .join("similar")
+        .join(name);
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("the temp directory exists");
+    std::fs::write(dir.join("blob.bin"), bytes).expect("the blob writes");
+    let roots = ghidorah_tools::Roots::new(&dir, &[std::path::PathBuf::from(".")])
+        .expect("the root is valid");
+    let mut s = ghidorah_tools::Session::with_registry(
+        crate::support::registry(),
+        ghidorah_tools::SessionConfig::new(roots),
+        Box::new(ghidorah_base::FixedClock::new(0)),
+    );
+    ghidorah_tools::handlers::analysis_run::install(&mut s);
+    let load = call_value(
+        &mut s,
+        "binary_load",
+        Value::object([
+            ("path", Value::from("blob.bin")),
+            ("file_format", Value::from("raw")),
+            ("arch", Value::from("x86_64")),
+            ("base", Value::from(format!("{BLOB_BASE:#x}"))),
+            ("entry", Value::from(format!("{BLOB_BASE:#x}"))),
+        ]),
+    );
+    data(&load);
+    s
+}
+
+/// Gives the one item of a `func_similar` result.
+fn one_item(envelope: &Value) -> Value {
+    let items = list_at(data(envelope), "/items");
+    assert_eq!(items.len(), 1, "one item: {envelope}");
+    items[0].clone()
+}
+
+#[test]
+fn ac_242_func_similar_tiny() {
+    // A `ret` at the entry, int3 padding, and two bytes that do not decode at 0x10.
+    let mut bytes = vec![0xc3];
+    bytes.resize(0x10, 0xcc);
+    bytes.extend_from_slice(&[0x06, 0x06, 0xc3]);
+    let mut s = blob_session("ac_242_tiny", &bytes);
+    let at = format!("{:#x}", BLOB_BASE + 0x10);
+    let create = call(
+        &mut s,
+        "func_edit",
+        &format!(r#"{{"action":"create","target":"{at}"}}"#),
+    );
+    data(&create);
+    let empty = format!("fn:{at}");
+    for scope in ["binary", "open"] {
+        let envelope = call(
+            &mut s,
+            "func_similar",
+            &format!(r#"{{"target":"{empty}","scope":"{scope}","min_score":0}}"#),
+        );
+        let item = one_item(&envelope);
+        assert_eq!(text_at(&item, "/query/id"), empty, "{envelope}");
+        assert_eq!(
+            int_at(&item, "/query/features"),
+            0,
+            "a zero vector: {envelope}"
+        );
+        assert_eq!(item.get("matches"), Some(&json("[]")), "{envelope}");
+    }
+    let mut one = blob_session("ac_242_one", &[0xc3]);
+    let envelope = call(
+        &mut one,
+        "func_similar",
+        &format!(r#"{{"target":"fn:{BLOB_BASE:#x}","scope":"binary","min_score":0}}"#),
+    );
+    let item = one_item(&envelope);
+    assert_eq!(item.get("matches"), Some(&json("[]")), "{envelope}");
+    assert_eq!(
+        int_at(data(&envelope), "/corpus/functions"),
+        1,
+        "{envelope}"
+    );
 }

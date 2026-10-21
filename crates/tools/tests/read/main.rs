@@ -11,6 +11,7 @@
 #![allow(clippy::panic, reason = "a test fails through a panic")]
 
 mod addr_info;
+mod budget;
 mod func_get;
 mod func_list;
 mod mem_read;

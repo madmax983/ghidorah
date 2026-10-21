@@ -197,6 +197,18 @@ pub fn load_bytes(name: &str, bytes: &[u8], analysis: &str) -> (Session, Value) 
     (session, envelope)
 }
 
+/// Writes `bytes` to the file `input.elf` of the test `name` and loads it with the
+/// `binary_load` arguments `args`.
+///
+/// Gives the session, whose one root is the directory of the file, and the load envelope.
+pub fn load_bytes_args(name: &str, bytes: &[u8], args: Value) -> (Session, Value) {
+    let dir = tmp(name);
+    std::fs::write(dir.join("input.elf"), bytes).expect("the file writes");
+    let mut session = session_with(config_at(&dir));
+    let envelope = call_value(&mut session, "binary_load", args);
+    (session, envelope)
+}
+
 /// One analyzed fixture.
 pub struct Analyzed {
     /// The program after the default load.
@@ -276,6 +288,19 @@ pub fn t2_fixtures() -> Vec<&'static str> {
         .filter(|e| e.path().is_file())
         .map(|e| e.file_name().to_string_lossy().into_owned())
         .filter(|n| n.starts_with("large."))
+        .collect();
+    names.sort();
+    names.into_iter().map(leak).collect()
+}
+
+/// Gives the names of the PE fixture binaries in name order: every file of `fixtures/bin/pe`,
+/// with the `pe/` prefix.
+pub fn pe_fixtures() -> Vec<&'static str> {
+    let mut names: Vec<String> = std::fs::read_dir(root().join("fixtures/bin/pe"))
+        .expect("the PE fixture directory reads")
+        .filter_map(Result::ok)
+        .filter(|e| e.path().is_file())
+        .map(|e| format!("pe/{}", e.file_name().to_string_lossy()))
         .collect();
     names.sort();
     names.into_iter().map(leak).collect()

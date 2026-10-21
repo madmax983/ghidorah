@@ -3,8 +3,11 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use ghidorah_base::FuncId;
+use ghidorah_analysis::code::{decode_at, slot_of};
+use ghidorah_base::{Address, FuncId};
+use ghidorah_db::Program;
 use ghidorah_json::Value;
+use ghidorah_x86::Flow;
 
 use crate::support::{
     addr_of, all_items, call, code, data, fixture, json, program, root, str_of, text_at,
@@ -57,25 +60,59 @@ fn golden_calls() -> (BTreeMap<u64, BTreeSet<u64>>, BTreeMap<u64, BTreeSet<u64>>
     (direct, slots)
 }
 
+/// Checks the thunks of `p` against the 6 truth thunks of `pe_main.exe`. A called thunk is a
+/// function. Each thunk that is a function has the thunk flag and the truth name. Each
+/// discovered function that starts with `jmp [rip+IAT]` is a truth thunk (design Section 4.11).
+///
+/// Gives the entry of each called thunk by its import ID.
+fn checked_thunks(p: &Program, t: &Value) -> BTreeMap<String, u64> {
+    let thunks = list(t, "thunks");
+    assert_eq!(thunks.len(), 6, "the truth thunks");
+    let mut truth_at = BTreeSet::new();
+    let mut thunk_of: BTreeMap<String, u64> = BTreeMap::new();
+    for th in thunks {
+        let at = addr_of(&str_of(th, "addr"));
+        let import = str_of(th, "import");
+        let called = th.get("called") == Some(&Value::Bool(true));
+        truth_at.insert(at);
+        let Some(f) = p.func(FuncId(Address::ram(at))) else {
+            assert!(!called, "the called thunk {import} is a function");
+            continue;
+        };
+        assert!(f.func.flags.thunk, "{import}: the thunk flag");
+        let name = p.name(Address::ram(at)).expect("a name");
+        assert_eq!(name.text, str_of(th, "name"), "{import}");
+        if called {
+            thunk_of.insert(import, at);
+        }
+    }
+    let iat: BTreeSet<Address> = p.imports().values().filter_map(|r| r.slot).collect();
+    let mut discovered = 0;
+    for f in p.funcs() {
+        let entry = f.id().0;
+        let jumps_through_iat = decode_at(p, entry.off).is_some_and(|insn| {
+            insn.flow() == Flow::IJmp
+                && slot_of(&insn).is_some_and(|s| iat.contains(&Address::ram(s)))
+        });
+        if jumps_through_iat {
+            assert!(truth_at.contains(&entry.off), "{entry} is a truth thunk");
+            assert!(f.func.flags.thunk, "{entry}: the thunk flag");
+            discovered += 1;
+        }
+    }
+    assert_eq!(
+        discovered,
+        thunk_of.len(),
+        "the discovered thunks are the called ones"
+    );
+    thunk_of
+}
+
 #[test]
 fn ac_249_iat_naming() {
     let (mut session, id) = fixture(MAIN);
     let t = main_truth();
-    let p = program(&session, &id);
-    let mut thunk_of: BTreeMap<String, u64> = BTreeMap::new();
-    for th in list(&t, "thunks") {
-        let at = addr_of(&str_of(th, "addr"));
-        let import = str_of(th, "import");
-        if th.get("called") == Some(&Value::Bool(true)) {
-            let f = p
-                .func(FuncId(ghidorah_base::Address::ram(at)))
-                .unwrap_or_else(|| panic!("the thunk {import} is a function"));
-            assert!(f.func.flags.thunk, "{import}: the thunk flag");
-            let name = p.name(ghidorah_base::Address::ram(at)).expect("a name");
-            assert_eq!(name.text, str_of(th, "name"), "{import}");
-            thunk_of.insert(import, at);
-        }
-    }
+    let thunk_of = checked_thunks(program(&session, &id), &t);
     assert_eq!(thunk_of.len(), 2, "pe_main calls two thunks");
     let (direct, slots) = golden_calls();
     for imp in list(&t, "imports") {
