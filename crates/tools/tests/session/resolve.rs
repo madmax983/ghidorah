@@ -242,6 +242,105 @@ fn regress_hostile_candidates_escape_and_resolve() {
     }
 }
 
+/// Writes the file of `b` to a new directory `dir` and loads it. Gives the session and the
+/// binary ID.
+fn open_elf(dir: &str, b: &ElfBuilder) -> (Session, String) {
+    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(dir);
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("the temp directory exists");
+    std::fs::write(dir.join("input.elf"), b.build()).expect("the file writes");
+    let roots = Roots::new(&dir, &[PathBuf::from(".")]).expect("the root is valid");
+    let mut s = session_with(SessionConfig::new(roots));
+    let load = call_value(
+        &mut s,
+        "binary_load",
+        Value::object([("path", Value::from("input.elf"))]),
+    );
+    assert_eq!(code(&load), "", "{load}");
+    let id = text_at(&load, "/data/binary_id");
+    (s, id)
+}
+
+/// A candidate value has at most 256 characters, the cut of a candidate text. A longer value
+/// takes the rule of a hostile name: the `AMBIGUOUS_NAME` value is the address, and the
+/// `NOT_FOUND` value is the function ID or the address. Each value resolves (k3-04).
+#[test]
+fn regress_long_name_candidates_resolve() {
+    let twice = format!("t{}", "x".repeat(299));
+    let func = format!("o{}", "y".repeat(257));
+    let object = format!("d{}", "w".repeat(257));
+    let quoted = format!("\u{202e}{}", "z".repeat(250));
+    let at = |off| Loc::section(".text", off);
+    let b = ElfBuilder::exec()
+        .section(Section::code(".text", &[0xc3; 8]))
+        .section(Section::rodata(".rodata", &[1, 2, 3, 4]))
+        .symbol(Symbol::func("main", at(0), 1))
+        .symbol(Symbol::func(&twice, at(1), 1))
+        .symbol(Symbol::func(&twice, at(2), 1).local())
+        .symbol(Symbol::func(&func, at(3), 1))
+        .symbol(Symbol::func(&quoted, at(4), 1))
+        .symbol(Symbol::object(&object, Loc::section(".rodata", 0), 4))
+        .entry(Loc::symbol("main"));
+    let (mut s, id) = open_elf("session_long_candidates", &b);
+    let entry = program(&s, &id)
+        .addrs_named(&func)
+        .first()
+        .copied()
+        .expect("the long function name has an address");
+    add_function(&mut s, &id, entry.off, 1);
+    let p = program(&s, &id);
+    let cut = |name: &str, n: usize| name.chars().take(n).collect::<String>();
+    let cases = [
+        (twice.clone(), "AMBIGUOUS_NAME", p.addrs_named(&twice)),
+        (cut(&func, 256), "NOT_FOUND", p.addrs_named(&func)),
+        (cut(&object, 256), "NOT_FOUND", p.addrs_named(&object)),
+        (cut(&quoted, 250), "NOT_FOUND", p.addrs_named(&quoted)),
+    ];
+    for (input, want, items) in &cases {
+        assert!(!items.is_empty(), "{input}");
+        let args = Value::object([("target", Value::from(input.as_str()))]);
+        let envelope = call_value(&mut s, "addr_info", args);
+        assert_eq!(code(&envelope), *want, "{envelope}");
+        let candidates = envelope
+            .pointer("/error/candidates")
+            .and_then(Value::as_array)
+            .map(<[Value]>::to_vec)
+            .unwrap_or_default();
+        assert!(!candidates.is_empty(), "{envelope}");
+        let p = program(&s, &id);
+        let mut found = Vec::new();
+        for c in &candidates {
+            let value = c.get("value").and_then(Value::as_str).unwrap_or_default();
+            assert!(value.chars().count() <= 256, "{value:?}");
+            let got = targets(p, value);
+            assert!(
+                got.iter().all(|a| items.contains(a)),
+                "{value:?} gives {got:?}, not {items:?}"
+            );
+            found.extend(got);
+        }
+        found.sort();
+        found.dedup();
+        assert_eq!(&found, items, "{envelope}");
+    }
+    let envelope = call_value(
+        &mut s,
+        "addr_info",
+        Value::object([("target", Value::from(cut(&func, 256)))]),
+    );
+    let value = text_at(&envelope, "/error/candidates/0/value");
+    assert_eq!(value, FuncId(entry).to_string(), "{envelope}");
+    let data = program(&s, &id).addrs_named(&object);
+    let envelope = call_value(
+        &mut s,
+        "addr_info",
+        Value::object([("target", Value::from(cut(&object, 256)))]),
+    );
+    let value = text_at(&envelope, "/error/candidates/0/value");
+    let want: Vec<String> = data.iter().map(ToString::to_string).collect();
+    assert_eq!(vec![value], want, "{envelope}");
+}
+
 #[test]
 fn resolver_rule_order() {
     let s = demo();

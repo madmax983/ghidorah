@@ -1,9 +1,15 @@
 //! The errors of the resolver and their candidates (design Section 10.5).
 //!
 //! Candidate labels and values carry addresses, IDs, binary names and the input text of the
-//! agent. A hostile binary name starts with `"` or holds a character that `BinText` escapes.
-//! Its candidate value is an ID or an address, and its label is the escaped name (AC-146a).
-//! So no candidate holds a raw control or bidi character from the binary.
+//! agent. A hostile binary name starts with `"`, holds a character that `BinText` escapes, or
+//! starts or ends with ASCII white space. Its candidate value is an ID or an address, and its
+//! label is the escaped name (AC-146a). So no candidate holds a raw control or bidi character
+//! from the binary.
+//!
+//! A candidate value has at most [`MAX_TEXT_CHARS`] characters, so it never gets cut. A name
+//! whose value is longer takes the address form: the `AMBIGUOUS_NAME` value is the address,
+//! and the `NOT_FOUND` value is the function ID or the address. An ID of a list that is longer
+//! gives no candidate.
 
 use std::collections::BTreeSet;
 
@@ -17,7 +23,7 @@ use ghidorah_json::Value;
 
 use super::Site;
 use super::table::{Family, accepted};
-use crate::errors::{Candidate, ToolError};
+use crate::errors::{Candidate, MAX_TEXT_CHARS, ToolError};
 use crate::handlers::func_sections::safe;
 use crate::hints::{Call, WHY_HEX};
 
@@ -170,25 +176,32 @@ fn hostile(name: &str) -> bool {
         || name.chars().any(escapes)
 }
 
+/// Tells if the candidate value `value` has more than [`MAX_TEXT_CHARS`] characters. The error
+/// object cuts such a value, so the cut value does not resolve.
+fn too_long(value: &str) -> bool {
+    value.chars().count() > MAX_TEXT_CHARS
+}
+
 /// Gives `AMBIGUOUS_NAME` for a symbol name with the addresses `addrs` in address order.
 ///
-/// The value of each candidate is `<name>@<addr>`. For a hostile name, the value is the
-/// address, and the label is the escaped name.
+/// The value of each candidate is `<name>@<addr>`. For a hostile name, or a value above
+/// [`MAX_TEXT_CHARS`] characters, the value is the address, and the label is the escaped name.
 pub(super) fn ambiguous(
     program: &Program,
     name: &str,
     addrs: &[Address],
     site: &Site<'_>,
 ) -> ToolError {
-    let shown = hostile(name).then(|| safe(name));
     let candidates = addrs
         .iter()
         .map(|addr| {
             let func = program.func(FuncId(*addr)).is_some();
             let kind = if func { "function" } else { "symbol" };
-            let mut c = match &shown {
-                Some(label) => Candidate::text(&addr.to_string(), label),
-                None => Candidate::text(&format!("{name}@{addr}"), &format!("{kind} at {addr}")),
+            let value = format!("{name}@{addr}");
+            let mut c = if hostile(name) || too_long(&value) {
+                Candidate::text(&addr.to_string(), &safe(name))
+            } else {
+                Candidate::text(&value, &format!("{kind} at {addr}"))
             };
             c.id = func.then(|| FuncId(*addr).to_string());
             c.addr = Some(addr.to_string());
@@ -202,13 +215,16 @@ pub(super) fn ambiguous(
     )
 }
 
-/// Gives `AMBIGUOUS_NAME` for a section name with the IDs `ids` of its sections.
+/// Gives `AMBIGUOUS_NAME` for a section name with the IDs `ids` of its sections. An ID above
+/// [`MAX_TEXT_CHARS`] characters gives the start address of its section as the value.
 pub(super) fn ambiguous_ids(ids: Vec<(String, Address)>, site: &Site<'_>) -> ToolError {
     let candidates = ids
         .into_iter()
         .map(|(id, addr)| {
-            let mut c = Candidate::text(&id, &format!("section at {addr}"));
-            c.id = Some(id);
+            let long = too_long(&id);
+            let value = if long { addr.to_string() } else { id.clone() };
+            let mut c = Candidate::text(&value, &format!("section at {addr}"));
+            c.id = (!long).then_some(id);
             c.addr = Some(addr.to_string());
             c.kind = Some("section".to_owned());
             c
@@ -248,31 +264,61 @@ impl<'a> Pool<'a> for Names<'a> {
     }
 }
 
-/// Gives the candidate of the hostile binary name `name`. The value is the `sym:` ID of a
-/// symbol, else the `sec:` ID of the first section with this name. The label is the escaped
-/// name. A name with no such ID gives `None`.
-fn escaped(program: &Program, name: &str) -> Option<Candidate> {
-    let (id, kind) = if program.addrs_named(name).is_empty() {
-        let id = program
+/// Gives the candidates of the binary name `name` that is hostile or long. The label is the
+/// escaped name.
+///
+/// The value is the `sym:` ID of a symbol, else the `sec:` ID of the first section with this
+/// name. When that ID has more than [`MAX_TEXT_CHARS`] characters, each address of the name
+/// gives one candidate: the function ID at it, else the address. A name with no such ID and
+/// no address gives no candidate.
+fn escaped(program: &Program, name: &str) -> Vec<Candidate> {
+    let symbols = program.addrs_named(name);
+    let (id, kind, addrs) = if symbols.is_empty() {
+        let section = program
             .binary()
             .sections
             .iter()
             .filter(|s| s.name.as_str() == Some(name))
-            .find_map(|s| SectionId::new(u16::try_from(s.index).ok()?, name).ok())?;
-        (id.to_string(), "section")
+            .find_map(|s| {
+                let id = SectionId::new(u16::try_from(s.index).ok()?, name).ok()?;
+                Some((id, s.va.map(|va| Address::ram(va.first))))
+            });
+        let Some((id, start)) = section else {
+            return Vec::new();
+        };
+        (Some(id.to_string()), "section", start.into_iter().collect())
     } else {
-        (SymId::new(name).ok()?.to_string(), "symbol")
+        let id = SymId::new(name).ok().map(|id| id.to_string());
+        (id, "symbol", symbols)
     };
-    let mut c = Candidate::text(&id, &safe(name));
-    c.id = Some(id);
-    c.kind = Some(kind.to_owned());
-    Some(c)
+    let label = safe(name);
+    if let Some(id) = id.filter(|id| !too_long(id)) {
+        let mut c = Candidate::text(&id, &label);
+        c.id = Some(id);
+        c.kind = Some(kind.to_owned());
+        return vec![c];
+    }
+    addrs
+        .iter()
+        .map(|addr| {
+            let func = program
+                .func(FuncId(*addr))
+                .map(|_| FuncId(*addr).to_string());
+            let mut c = Candidate::text(func.as_deref().unwrap_or(&addr.to_string()), &label);
+            c.id = func;
+            c.addr = Some(addr.to_string());
+            c.kind = Some(kind.to_owned());
+            c
+        })
+        .collect()
 }
 
 /// Gives `NOT_FOUND` of `kind` with the did-you-mean candidates of `query` among `names`.
 ///
-/// The value of each candidate is the matched text. A hostile binary name of [`names`] gives
-/// its ID instead, with the escaped name as the label.
+/// The value of each candidate is the matched text. A hostile binary name of [`names`], or a
+/// name above [`MAX_TEXT_CHARS`] characters, gives its ID or its addresses instead, with the
+/// escaped name as the label ([`escaped`]). An ID of a list above [`MAX_TEXT_CHARS`]
+/// characters gives no candidate.
 pub(super) fn not_found<'a>(
     kind: &str,
     query: &str,
@@ -283,9 +329,10 @@ pub(super) fn not_found<'a>(
     let mut fuel = Fuel::new(DYM_FUEL);
     let candidates = did_you_mean(query, texts, &mut fuel)
         .into_iter()
-        .filter_map(|s| match program.filter(|_| hostile(&s.name)) {
-            Some(p) => escaped(p, &s.name),
-            None => Some(Candidate::text(&s.name, kind)),
+        .flat_map(|s| match program {
+            Some(p) if hostile(&s.name) || too_long(&s.name) => escaped(p, &s.name),
+            _ if too_long(&s.name) => Vec::new(),
+            _ => vec![Candidate::text(&s.name, kind)],
         })
         .collect();
     at(
