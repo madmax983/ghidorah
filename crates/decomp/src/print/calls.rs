@@ -7,6 +7,12 @@
 //! A slot of a positional convention prints its floating register when the caller sets only
 //! that register of the slot. Else it prints its integer register.
 //!
+//! A call of another convention (`SysV`) that is not variadic takes its arguments from the
+//! slots of the callee ([`Printer::callee_slots`]). A signature or a prototype gives each
+//! parameter the next register of its class. The recovery gives its integer registers, then
+//! its floating registers, then its stack slots. So `scale(double x, int k)` with no
+//! signature prints `scale(k, x)`. Each stack slot takes the next stack argument of the call.
+//!
 //! A variadic call of a convention with a varargs register (`al` in `SysV`) passes its
 //! floating arguments in the floating argument registers. They follow the integer arguments in
 //! the text. A constant `al`, or the low byte of a `mov al, k`, gives their count. Else the
@@ -25,7 +31,7 @@ use super::expr::{safe, wrap};
 use super::{Arity, Buf, CallRow, CallTarget, Printer, env};
 use crate::Warning;
 use crate::expr::{Call, Callee, Expr, VarIdx};
-use crate::lattice::calls_of;
+use crate::lattice::{calls_of, sig_regs};
 use crate::precedence::UNARY;
 
 /// The registers of the arguments of a system call in order.
@@ -147,6 +153,50 @@ impl Printer<'_> {
             });
         self.arity.insert(t, found);
         found
+    }
+
+    /// Gives the slots of the direct callee `t` in a convention that numbers its integer and
+    /// floating slots apart. A signature gives the registers of the classes of its parameters.
+    /// Else the parameter facts give the slots ([`crate::Env::param_slots`]). A positional
+    /// convention and a callee with no facts give `None`.
+    fn callee_slots(&self, t: u64) -> Option<Vec<Loc>> {
+        let conv = self.env.conv();
+        if conv.positional {
+            return None;
+        }
+        match self.env.signature(t) {
+            Some(sig) => Some(sig_regs(&sig, &self.stores, conv)),
+            None => self.env.param_slots(t),
+        }
+    }
+
+    /// Gives the argument texts of the call `c` from the slots `slots` of its callee. A
+    /// register slot prints the value that the call passes in it, or `0`. A stack slot prints
+    /// the next stack argument of the call. A tail call with no argument list passes the
+    /// parameters of the function on, so a missing value prints as `param_N`.
+    fn slot_args(&mut self, c: &Call, slots: &[Loc], buf: &mut Buf) -> String {
+        let forward = c.tail && c.args.is_empty();
+        let mut stack = c
+            .args
+            .iter()
+            .filter(|(l, _)| matches!(l, Loc::Stack(_)))
+            .map(|(_, e)| e);
+        let mut out = Vec::new();
+        for (k, slot) in slots.iter().enumerate() {
+            let value = if matches!(slot, Loc::Stack(_)) {
+                stack.next()
+            } else {
+                c.args.iter().find(|(l, _)| l == slot).map(|(_, e)| e)
+            };
+            let text = match value {
+                Some(e) => self.expr(e, buf).0,
+                None if forward => format!("param_{}", k.saturating_add(1)),
+                None if matches!(slot, Loc::Stack(_)) => break,
+                None => "0".to_owned(),
+            };
+            out.push(text);
+        }
+        out.join(", ")
     }
 
     /// Gives the argument register of each slot of the call `c` (see the module doc).
@@ -285,6 +335,17 @@ impl Printer<'_> {
                 let name = self.callee_name(*t, site);
                 let set = Self::set_count(c, &regs);
                 let arity = self.arity(*t);
+                let slots = self
+                    .callee_slots(*t)
+                    .filter(|_| !arity.is_some_and(|a| a.variadic));
+                if let Some(slots) = slots {
+                    buf.calls.push(CallRow {
+                        target: CallTarget::Addr(*t),
+                        name: name.clone(),
+                    });
+                    let args = self.slot_args(c, &slots, buf);
+                    return format!("{name}({args})");
+                }
                 let count = match arity {
                     Some(a) if a.variadic => a.named.max(set),
                     Some(a) => a.named,

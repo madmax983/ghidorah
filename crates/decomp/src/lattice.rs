@@ -6,7 +6,7 @@
 //! |---|---|
 //! | an agent type on the `var:` ID | the type of the fact. It always wins. |
 //! | a parameter of the function signature | the type of the parameter |
-//! | a variable that is an argument of a call | the parameter type of the callee signature or prototype |
+//! | a variable that is an argument of a call | the parameter type of the callee signature or prototype, by the register of its class ([`sig_regs`]) |
 //! | the result of a call: the `rax` def, or the `xmm0` def for a floating return type | the return type of the callee |
 //! | a variable that a floating return of the function gives | the return type of the signature, else `float` or `double` ([`View::float_ret`]) |
 //! | a parameter that holds the entry value of an XMM register, when the function has no signature | `float` when each scalar op that reads it reads `float` values, else `double` |
@@ -20,11 +20,11 @@
 
 use std::collections::BTreeSet;
 
-use ghidorah_analysis::cc::loc_of;
+use ghidorah_analysis::fir::callsite::sig_slots;
 use ghidorah_analysis::fir::ret::{FloatRet, operand_kind};
 use ghidorah_base::Storage;
 use ghidorah_ir::Loc;
-use ghidorah_types::{DataModel, Prim, Tier0, Type, TypeId, TypeStore, layout};
+use ghidorah_types::{CallConv, DataModel, Prim, Tier0, Type, TypeId, TypeStore, layout};
 
 use crate::expr::{Call, Callee, Expr, Stmt, VarIdx};
 use crate::print::{PrintEnv, Signature, ret_loc};
@@ -140,8 +140,18 @@ impl Seeds {
     }
 }
 
-/// Adds the seeds of one call: its argument variables and its result variable. The result
-/// is in the register of [`ret_loc`].
+/// Gives the location of each parameter of the signature `sig` in the convention `conv`: the
+/// next register of its class, or a stack slot ([`sig_slots`]). A parameter has the floating
+/// class when [`Stores::is_float`] tells so.
+#[must_use]
+pub(crate) fn sig_regs(sig: &Signature, stores: &Stores<'_>, conv: &CallConv) -> Vec<Loc> {
+    let floats: Vec<bool> = sig.params.iter().map(|t| stores.is_float(*t)).collect();
+    sig_slots(conv, &floats)
+}
+
+/// Adds the seeds of one call: its argument variables and its result variable. An argument
+/// is in the register of the class of its parameter. The result is in the register of
+/// [`ret_loc`].
 fn call_seeds(call: &Call, env: &dyn PrintEnv, stores: &Stores<'_>, seeds: &mut Seeds) {
     let Callee::Direct(target) = call.callee else {
         return;
@@ -150,10 +160,12 @@ fn call_seeds(call: &Call, env: &dyn PrintEnv, stores: &Stores<'_>, seeds: &mut 
         return;
     };
     let conv = env.conv();
-    for (i, ty) in sig.params.iter().enumerate() {
-        let Some(loc) = conv.int_args.get(i).and_then(|n| loc_of(n)) else {
-            break;
-        };
+    let regs = sig_regs(&sig, stores, conv);
+    for (ty, loc) in sig.params.iter().zip(regs) {
+        // A stack slot of the callee has no location of the caller.
+        if matches!(loc, Loc::Stack(_)) {
+            continue;
+        }
         if let Some((_, Expr::Var { var, .. })) = call.args.iter().find(|(l, _)| *l == loc) {
             seeds.add(*var, *ty);
         }
