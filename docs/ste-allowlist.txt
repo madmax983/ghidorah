@@ -68,7 +68,6 @@ docs/design.md STE-2 The `next` batch of a `func_similar` call with
 docs/design.md STE-2 A function with no decodable instruction, a one-block
 docs/design.md STE-2 A query set of 2,000 functions over the
 docs/design.md STE-2 The `.pdata` function starts equal the `RUNTIME_FUNCTION` table
-docs/design.md STE-2 Each `jmp [rip+IAT]` thunk is a thunk function
 docs/design.md STE-2 TLS callbacks equal the `llvm-readobj --coff-tls-directory` golden and
 docs/design.md STE-2 The `pe_load` fuzz target passes 10,000 fixed-seed cases
 docs/design.md STE-2 On the `pe_cc` fixture, MS x64 parameter counts
