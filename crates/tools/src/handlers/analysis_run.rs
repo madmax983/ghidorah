@@ -181,8 +181,10 @@ fn seeds_shuffled(binary: &Binary, seed: u64) -> Binary {
 }
 
 /// Gives `symbols` with their address groups in the order that `seed` shuffles. The symbols
-/// at one address keep their table order. The `Symbols` analyzer takes the premise of the last
-/// function symbol at an address.
+/// at one address keep their table order. The `Symbols` analyzer takes the premise of the first
+/// function symbol at an address in the alias order. That order puts a global symbol first,
+/// then a weak, another and a local symbol. Inside one binding, it uses the byte order of the
+/// name.
 fn by_address(symbols: &[Sym], seed: u64) -> Vec<Sym> {
     let mut groups: Vec<Vec<Sym>> = Vec::new();
     let mut slots: BTreeMap<u64, usize> = BTreeMap::new();
