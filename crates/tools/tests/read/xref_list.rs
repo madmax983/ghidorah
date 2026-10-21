@@ -1,29 +1,41 @@
 //! `xref_list`: import sites against objdump, the cross view of calls, argument values,
 //! syscall sites, call-graph depth and bad targets (AC-085b, AC-086a).
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use ghidorah_analysis::cfg;
 use ghidorah_analysis::code::{decode_at, slot_of};
 use ghidorah_base::{Address, FuncId};
 use ghidorah_db::Program;
 use ghidorah_json::Value;
+use ghidorah_testkit::elf::{
+    ElfBuilder, FixupKind, ImportKind, Loc, Reloc, RelocTable, Section, Symbol,
+};
+use ghidorah_tools::Session;
 use ghidorah_x86::Flow;
 
 use crate::support::{
-    addr_of, all_items, call, call_value, data, fixture, items, json, pe_fixtures, program, root,
-    str_of, t1_fixtures, t2_fixtures, truth, truth_fixtures,
+    addr_of, all_items, call, call_value, data, fixture, items, json, load_bytes, pe_fixtures,
+    program, root, str_of, t1_fixtures, t2_fixtures, truth, truth_fixtures,
 };
+
+/// `R_X86_64_64`: a 64-bit absolute address.
+const R_X86_64_64: u32 = 1;
+
+/// `R_X86_64_GLOB_DAT`: a GOT slot that holds the address of a symbol.
+const R_X86_64_GLOB_DAT: u32 = 6;
 
 /// The PLT sections, which hold the stubs themselves.
 const PLT: [&str; 3] = [".plt", ".plt.sec", ".plt.got"];
 
-/// Gives the call sites of `import` in the objdump golden of `name`, outside the PLT.
-fn objdump_calls(name: &str, import: &str) -> BTreeSet<u64> {
+/// Gives the call sites of `import` in the objdump golden of `name`, outside the PLT, each
+/// with the `via` that the site must show: `plt` for a call of `<import@plt>` and `got` for a
+/// `call [rip+slot]` that objdump names `<import@GLIBC..>`.
+fn objdump_calls(name: &str, import: &str) -> BTreeMap<u64, String> {
     let text = std::fs::read_to_string(root().join(format!("tests/golden/objdump/{name}.txt")))
         .expect("the objdump golden reads");
     let mut section = String::new();
-    let mut out = BTreeSet::new();
+    let mut out = BTreeMap::new();
     let plt = format!("<{import}@plt>");
     let got = format!("<{import}@GLIBC");
     for line in text.lines() {
@@ -39,17 +51,87 @@ fn objdump_calls(name: &str, import: &str) -> BTreeSet<u64> {
         else {
             continue;
         };
-        if insn.starts_with("call") && (insn.contains(&plt) || insn.contains(&got)) {
+        let via = if insn.contains(&plt) {
+            "plt"
+        } else if insn.contains(&got) {
+            "got"
+        } else {
+            continue;
+        };
+        if insn.starts_with("call") {
             let addr = addr.trim().trim_end_matches(':');
-            out.insert(u64::from_str_radix(addr, 16).expect("a hex address"));
+            let at = u64::from_str_radix(addr, 16).expect("a hex address");
+            out.insert(at, via.to_owned());
         }
     }
     out
 }
 
+/// Gives `from` and `via` of each item of `xref_list { targets: ["imp:puts"], kinds: ["call"]
+/// }`.
+fn puts_call_sites(session: &mut Session) -> BTreeMap<u64, String> {
+    let args = json(r#"{"targets":["imp:puts"],"kinds":["call"]}"#);
+    let got = all_items(session, "xref_list", &args, 1000);
+    let sites: BTreeMap<u64, String> = got
+        .iter()
+        .map(|i| (addr_of(&str_of(i, "from")), str_of(i, "via")))
+        .collect();
+    assert_eq!(sites.len(), got.len(), "one item for each site: {got:?}");
+    sites
+}
+
+/// A built ELF file that calls `puts` in three ways.
+struct PutsSites {
+    /// The file bytes.
+    bytes: Vec<u8>,
+    /// The address of `main`.
+    main: u64,
+    /// The address of `.data`: the second slot of `puts`, then a data word.
+    data: u64,
+}
+
+/// Builds an ELF file whose `main` calls `puts` in three ways: through its PLT stub, through a
+/// second `GLOB_DAT` slot at `.data+0` and through its `.got.plt` slot. The word at `.data+8`
+/// holds the address of `puts` through an `R_X86_64_64` relocation, so it is not a slot.
+fn puts_sites_elf() -> PutsSites {
+    let code = [
+        0xe8, 0, 0, 0, 0, // call puts@plt
+        0xff, 0x15, 0, 0, 0, 0, // call [rip+.data]
+        0xff, 0x15, 0, 0, 0, 0,    // call [rip+puts@got]
+        0xc3, // ret
+    ];
+    let text = Section::code(".text", &code)
+        .fixup(1, FixupKind::Rel32, Loc::Plt("puts".into()))
+        .fixup(7, FixupKind::Rel32, Loc::section(".data", 0))
+        .fixup(13, FixupKind::Rel32, Loc::Got("puts".into()));
+    let reloc = |off: u64, kind: u32| Reloc {
+        table: RelocTable::Rela,
+        at: Loc::section(".data", off),
+        kind,
+        sym: Some("puts".into()),
+        addend: 0,
+    };
+    let (bytes, layout) = ElfBuilder::dyn_object()
+        .section(text)
+        .section(Section::data(".data", &[0; 16]))
+        .symbol(Symbol::func("main", Loc::section(".text", 0), 18))
+        .import("puts", ImportKind::Plt)
+        .reloc(reloc(0, R_X86_64_GLOB_DAT))
+        .reloc(reloc(8, R_X86_64_64))
+        .entry(Loc::symbol("main"))
+        .build_with_layout();
+    let addr = |name: &str| layout.section(name).expect("a built section").addr;
+    PutsSites {
+        bytes,
+        main: addr(".text"),
+        data: addr(".data"),
+    }
+}
+
 #[test]
 fn ac_085b_xref_list_imp_puts() {
     let mut checked = 0;
+    let mut vias = BTreeSet::new();
     for name in truth_fixtures() {
         let imports = truth(name);
         let has_puts = imports
@@ -61,22 +143,56 @@ fn ac_085b_xref_list_imp_puts() {
         }
         let want = objdump_calls(name, "puts");
         let (mut session, _) = fixture(name);
-        let args = json(r#"{"targets":["imp:puts"],"kinds":["call"]}"#);
-        let got = all_items(&mut session, "xref_list", &args, 1000);
-        let sites: BTreeSet<u64> = got.iter().map(|i| addr_of(&str_of(i, "from"))).collect();
-        assert_eq!(sites, want, "{name}");
-        for item in &got {
-            let via = str_of(item, "via");
-            assert!(
-                ["plt", "got", "direct"].contains(&via.as_str()),
-                "{name}: {item}"
-            );
-            let noplt = name.contains("noplt");
-            assert_eq!(via == "got", noplt, "{name}: {item}");
-        }
+        let sites = puts_call_sites(&mut session);
+        assert_eq!(sites, want, "{name}: the sites and their via");
+        let noplt = name.contains("noplt");
+        assert!(
+            sites.values().all(|via| (via == "got") == noplt),
+            "{name}: {sites:?}"
+        );
+        vias.extend(sites.into_values());
         checked += 1;
     }
     assert!(checked >= 10, "{checked} fixtures");
+    assert_eq!(vias, BTreeSet::from(["got".to_owned(), "plt".to_owned()]));
+    // No instruction can name the EXTERNAL space, so each ELF call site goes through the stub
+    // or a slot. A call through a second slot of the import is a GOT site too.
+    let built = puts_sites_elf();
+    let (mut session, load) = load_bytes("ac_085b", &built.bytes, "full");
+    data(&load);
+    let main = built.main;
+    let want = BTreeMap::from([
+        (main, "plt".to_owned()),
+        (main + 5, "got".to_owned()),
+        (main + 11, "got".to_owned()),
+    ]);
+    assert_eq!(puts_call_sites(&mut session), want);
+}
+
+#[test]
+fn regress_xref_list_second_got_slot() {
+    let built = puts_sites_elf();
+    let (mut session, load) = load_bytes("regress_second_got_slot", &built.bytes, "full");
+    data(&load);
+    let envelope = call(&mut session, "xref_list", r#"{"targets":["imp:puts"]}"#);
+    let via_of = |from: u64, kind: &str| {
+        items(&envelope)
+            .iter()
+            .find(|i| addr_of(&str_of(i, "from")) == from && str_of(i, "kind") == kind)
+            .map(|i| str_of(i, "via"))
+            .unwrap_or_else(|| panic!("a {kind} item from {from:#x}: {envelope}"))
+    };
+    assert_eq!(
+        via_of(built.main + 5, "unconditional_call"),
+        "got",
+        "a call through the second slot goes through the GOT"
+    );
+    assert_eq!(via_of(built.data, "data"), "got", "the second slot itself");
+    assert_eq!(
+        via_of(built.data + 8, "data"),
+        "direct",
+        "a data word that holds the address of puts is not a slot"
+    );
 }
 
 /// Gives the ID text of a call target: an import, a function or a bare address.

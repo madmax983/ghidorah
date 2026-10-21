@@ -6,8 +6,8 @@ use std::collections::BTreeSet;
 use ghidorah_analysis::code::slot_of;
 use ghidorah_analysis::facts::scope::is_gap;
 use ghidorah_analysis::{CallGraph, Callee};
-use ghidorah_base::{Address, ErrorCode, FuncId, ImportId, SyscallId};
-use ghidorah_db::{CodeUnit, Program, Ref, RefKey, RefType};
+use ghidorah_base::{Address, BinText, ErrorCode, FuncId, ImportId, SyscallId};
+use ghidorah_db::{CodeUnit, ImportRow, Program, Ref, RefKey, RefType};
 use ghidorah_json::Value;
 use ghidorah_loader::Format;
 
@@ -67,10 +67,34 @@ pub fn found(
         .collect()
 }
 
+/// Gives the ELF slots of the import `row`: its own slot and each slot of the slot map whose
+/// relocation symbol has the name of the import (design Section 7.5).
+fn elf_slots(p: &Program, row: &ImportRow) -> BTreeSet<Address> {
+    let imports = &p.binary().imports;
+    let name_of = |index: usize| {
+        imports
+            .get(index)
+            .and_then(|i| i.name.as_ref())
+            .map(BinText::as_bytes)
+    };
+    let mut out: BTreeSet<Address> = row.slot.into_iter().collect();
+    if let Some(own) = name_of(row.index) {
+        let slots = ghidorah_loader::imports::slots(p.binary());
+        out.extend(
+            slots
+                .iter()
+                .filter(|(_, s)| name_of(s.import) == Some(own))
+                .map(|(slot, _)| Address::ram(*slot)),
+        );
+    }
+    out
+}
+
 /// Gives the sites of an import: the stub sites (`plt`), the slot sites (`got`) and the sites
-/// of the EXTERNAL address (`got` through the slot, else `direct`). The references from the
-/// stub itself are not sites. A PE import gives `thunk` for the sites of its IAT thunk, `iat`
-/// for the slot sites and `direct` for a `call [rip+IAT]` site.
+/// of the EXTERNAL address. A site of the EXTERNAL address is `got` when it is a slot of the
+/// import or reads through one, else `direct`. The references from the stub itself are not
+/// sites. A PE import gives `thunk` for the sites of its IAT thunk, `iat` for the slot sites
+/// and `direct` for a `call [rip+IAT]` site.
 pub fn import_sites(p: &Program, target: usize, id: &ImportId) -> Result<Vec<Found>, ToolError> {
     let row = p.imports().get(id).ok_or_else(|| {
         ToolError::new(ErrorCode::NotFound)
@@ -93,15 +117,17 @@ pub fn import_sites(p: &Program, target: usize, id: &ImportId) -> Result<Vec<Fou
         let refs: Vec<_> = p.refs_to(slot).into_iter().filter(outside).collect();
         out.extend(found(target, &refs, Some(slot_via)));
     }
+    let slots = if pe {
+        BTreeSet::new()
+    } else {
+        elf_slots(p, row)
+    };
     for r in p.refs_to(row.ext).into_iter().filter(outside) {
         let from = r.value.key.from;
-        let through = !pe
-            && row.slot.is_some_and(|slot| {
-                from == slot
-                    || fs::decode(p, from.off)
-                        .and_then(|insn| slot_of(&insn))
-                        .is_some_and(|s| Address::ram(s) == slot)
-            });
+        let through = slots.contains(&from)
+            || fs::decode(p, from.off)
+                .and_then(|insn| slot_of(&insn))
+                .is_some_and(|s| slots.contains(&Address::ram(s)));
         out.extend(found(
             target,
             &[r],
