@@ -9,7 +9,8 @@
 #![allow(clippy::expect_used, reason = "test helpers fail through expect")]
 
 use ghidorah_analysis::analyzers::gaps;
-use ghidorah_base::Limits;
+use ghidorah_analysis::{RunState, Scheduler, Until};
+use ghidorah_base::{Fuel, Limits};
 use ghidorah_db::Program;
 use ghidorah_loader::{LoadOpts, load};
 use ghidorah_oracle::alloc::CountingAlloc;
@@ -60,4 +61,25 @@ fn regress_gap_sets_allocate_linearly() {
         stats.allocated_bytes
     };
     assert_linear("gaps::items", bytes(10_000), bytes(20_000));
+}
+
+/// A full analysis allocates in step with its functions. Two fixes keep it so:
+///
+/// - A step puts its event ranges in the inbox of each listener. A union for each event
+///   copied the whole pending set of the listener.
+/// - A step of `Disasm` takes the first range of a mirrored pending set, so it removes the
+///   last stored entry. A take from the front copied all other entries.
+#[test]
+fn regress_analysis_allocates_linearly() {
+    let bytes = |n: u64| {
+        let mut program = functions(n, false);
+        let (out, stats) = ALLOC.measure(|| {
+            Scheduler::new()
+                .run(&mut program, Until::Full, &mut Fuel::new(u64::MAX))
+                .expect("a run")
+        });
+        assert_eq!(out.state, RunState::Complete);
+        stats.allocated_bytes
+    };
+    assert_linear("a full analysis", bytes(5_000), bytes(10_000));
 }

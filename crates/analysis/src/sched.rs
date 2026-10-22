@@ -182,14 +182,42 @@ pub fn unit(spec: &AnalyzerSpec, pending: &RangeSet) -> RangeSet {
     }
 }
 
-/// Removes the ranges of one step of `spec` from its pending set: the same ranges as
-/// [`unit`], with no copy of the set.
-fn take(spec: &AnalyzerSpec, pending: &mut RangeSet) {
+/// Gives the mirror of `r`: each value `x` becomes `u64::MAX - x`.
+///
+/// The scheduler keeps the pending set of a [`Grain::Range`] analyzer as the mirror of the
+/// set. The mirror reverses the order and keeps overlaps and neighbors. So the first range
+/// of the set is the mirror of the last stored range. A step removes that last entry of the
+/// stored list with no copy of the other entries.
+const fn mirror(r: Range) -> Range {
+    Range {
+        first: u64::MAX - r.last,
+        last: u64::MAX - r.first,
+    }
+}
+
+/// Gives the ranges of one step of `spec` from its stored pending set: the ranges that
+/// [`unit`] gives for the set.
+fn unit_of(spec: &AnalyzerSpec, stored: &RangeSet) -> RangeSet {
     match spec.grain {
-        Grain::Whole => *pending = RangeSet::new(),
+        Grain::Whole => stored.clone(),
         Grain::Range => {
-            if let Some(first) = pending.first() {
-                pending.remove(first);
+            let mut out = RangeSet::new();
+            if let Some(last) = stored.ranges().last() {
+                out.insert(mirror(*last));
+            }
+            out
+        }
+    }
+}
+
+/// Removes the ranges of one step of `spec` from its stored pending set: the same ranges as
+/// [`unit_of`], with no copy of the set.
+fn take(spec: &AnalyzerSpec, stored: &mut RangeSet) {
+    match spec.grain {
+        Grain::Whole => *stored = RangeSet::new(),
+        Grain::Range => {
+            if let Some(last) = stored.ranges().last().copied() {
+                stored.remove(last);
             }
         }
     }
@@ -358,8 +386,15 @@ impl Scheduler {
 
     /// Adds the inbox of the analyzer at `i` to its pending set.
     fn drain(&mut self, i: usize) {
+        let mirrored = self.specs.get(i).is_some_and(|s| s.grain == Grain::Range);
         if let (Some(set), Some(ranges)) = (self.pending.get_mut(i), self.inbox.get_mut(i)) {
-            absorb(set, std::mem::take(ranges));
+            let mut ranges = std::mem::take(ranges);
+            if mirrored {
+                for r in &mut ranges {
+                    *r = mirror(*r);
+                }
+            }
+            absorb(set, ranges);
         }
     }
 
@@ -399,7 +434,12 @@ impl Scheduler {
                     set.len()
                 } else {
                     let mut set = set.clone();
-                    absorb(&mut set, ranges.clone());
+                    let mirrored = spec.grain == Grain::Range;
+                    let ranges = ranges
+                        .iter()
+                        .map(|r| if mirrored { mirror(*r) } else { *r })
+                        .collect();
+                    absorb(&mut set, ranges);
                     set.len()
                 };
                 AnalyzerRow {
@@ -418,7 +458,7 @@ impl Scheduler {
         self.drain(i);
         let spec = *self.specs.get(i)?;
         let current = self.pending.get_mut(i)?;
-        let ranges = unit(spec, current);
+        let ranges = unit_of(spec, current);
         take(spec, current);
         let mut ctx = AnalysisCtx::new(program, &mut self.work);
         let step = registry::run(spec.id, &mut ctx, &ranges);

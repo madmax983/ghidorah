@@ -408,23 +408,17 @@ fn many_fdes(n: u64) -> Program {
     program_of(&elf.build(), &LoadOpts::AUTO)
 }
 
-/// A pending set takes the event ranges of a step in place. A copy of the whole pending set
-/// for each event made the run quadratic in the number of functions: 40 s for 10000 FDEs.
+/// A run of 10,000 FDE functions completes and keeps every function. The cost of the run is
+/// in `tests/alloc_bounds.rs`.
 #[test]
-fn regress_pending_union_many_fdes() {
+fn many_fdes_complete() {
     const N: u64 = 10_000;
     let mut p = many_fdes(N);
-    let started = std::time::Instant::now();
     let (_, out) = analyze(&mut p);
-    let took = started.elapsed();
     assert_eq!(out.state, RunState::Complete);
     assert_eq!(
         p.analysis().funcs().len(),
         usize::try_from(N).expect("N fits")
-    );
-    assert!(
-        took < std::time::Duration::from_secs(10),
-        "the run of {N} FDE functions takes {took:?}"
     );
 }
 
