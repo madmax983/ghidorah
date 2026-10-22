@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use ghidorah_base::{Address, FuncId, JumpTableId, Limits, Range, Rev, Storage, TxId, VarId};
 use ghidorah_kernel::RangeSet;
@@ -245,7 +246,7 @@ fn layers_route_writes_by_source() {
 
     let mut fresh = AnalysisSet::default();
     fresh.strings.insert(0x2002, info());
-    let old = p.swap_analysis(Box::new(fresh));
+    let old = p.swap_analysis(Arc::new(fresh));
     assert_eq!(old.strings().get(0x2001), Some(&info()));
     assert_eq!(p.analysis().strings().get(0x2002), Some(&info()));
     assert!(p.analysis().strings().get(0x2001).is_none());

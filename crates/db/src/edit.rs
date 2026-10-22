@@ -42,6 +42,7 @@ mod rules;
 mod tests;
 
 use std::fmt;
+use std::sync::Arc;
 
 use ghidorah_base::{Address, ErrorCode, FuncId, JumpTableId, NoteId, VarId};
 use ghidorah_json::Value;
@@ -225,7 +226,7 @@ pub enum Edit {
         id: NoteId,
     },
     /// Puts a new analysis set in place of the analysis layer.
-    ReplaceAnalysis(Box<AnalysisSet>),
+    ReplaceAnalysis(Arc<AnalysisSet>),
 }
 
 /// The kind of an [`Edit`].

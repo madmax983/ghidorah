@@ -4,6 +4,8 @@
 //! blocks it. Then it puts the new fact with its own origin. A failed put puts the old fact
 //! back, so a failed edit changes nothing.
 
+use std::sync::Arc;
+
 use ghidorah_base::{Address, JumpTableId, NoteId, Rev, TxId, VarId};
 
 use super::rules::{evidence, gate, known, own, rule, same, starts_unit, targets, var_type};
@@ -142,7 +144,7 @@ pub(crate) fn apply(
             if **set == *program.analysis() {
                 return Ok(None);
             }
-            let old = program.swap_analysis(set.clone());
+            let old = program.swap_analysis(Arc::clone(set));
             Ok(Some(Edit::ReplaceAnalysis(old)))
         }
     }

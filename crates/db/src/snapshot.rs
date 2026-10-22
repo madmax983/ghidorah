@@ -26,6 +26,7 @@ mod tests;
 
 use std::fmt;
 use std::path::Path;
+use std::sync::Arc;
 
 use ghidorah_base::{Rev, Sha256, TxId, hex, sha256};
 use ghidorah_json::{Limits, Value, write_jcs};
@@ -181,7 +182,7 @@ impl Snapshot {
         if let Ok(base) = program.layer_mut(Source::Agent) {
             *base = self.base;
         }
-        program.swap_analysis(Box::new(self.analysis));
+        program.swap_analysis(Arc::new(self.analysis));
         *program.notes_mut() = self.notes;
         *program.progress_mut() = self.progress;
         program.set_rev(self.rev);

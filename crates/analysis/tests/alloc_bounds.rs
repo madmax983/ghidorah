@@ -83,3 +83,32 @@ fn regress_analysis_allocates_linearly() {
     };
     assert_linear("a full analysis", bytes(5_000), bytes(10_000));
 }
+
+/// A `ReplaceAnalysis` commit shares the new set between the program and the log of the
+/// transaction. A copy of the set for the program allocated as many bytes as the set.
+#[test]
+fn regress_replace_analysis_shares_the_set() {
+    use std::sync::Arc;
+
+    use ghidorah_db::{Edit, SessionLabel, Source};
+
+    let mut analyzed = functions(2_000, false);
+    Scheduler::new()
+        .run(&mut analyzed, Until::Full, &mut Fuel::new(u64::MAX))
+        .expect("a run");
+    let (set, copy) = ALLOC.measure(|| analyzed.analysis().clone());
+    let mut fresh = functions(2_000, false);
+    let label = SessionLabel::new(SessionLabel::ANALYSIS).expect("a label");
+    let mut tx = fresh
+        .begin("analysis", Source::Analysis, label)
+        .expect("a transaction");
+    let edit = Edit::ReplaceAnalysis(Arc::new(set));
+    let (applied, swap) = ALLOC.measure(|| tx.apply(edit));
+    applied.expect("the edit applies");
+    assert!(
+        swap.allocated_bytes * 10 < copy.allocated_bytes,
+        "the swap allocates {} bytes; a copy of the set is {} bytes",
+        swap.allocated_bytes,
+        copy.allocated_bytes
+    );
+}

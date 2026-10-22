@@ -18,6 +18,8 @@
 //! | `DeleteNote` | `id` |
 //! | `ReplaceAnalysis` | `set`: the tables of the analysis layer |
 
+use std::sync::Arc;
+
 use ghidorah_base::VarId;
 use ghidorah_json::Value;
 
@@ -201,7 +203,7 @@ pub(super) fn decode(v: &Value) -> Result<Edit, CodecError> {
         EditKind::WriteNote => Edit::WriteNote(o.get("note")?),
         EditKind::DeleteNote => Edit::DeleteNote { id: o.get("id")? },
         EditKind::ReplaceAnalysis => {
-            Edit::ReplaceAnalysis(Box::new(o.with("set", tables::decode)?))
+            Edit::ReplaceAnalysis(Arc::new(o.with("set", tables::decode)?))
         }
     })
 }

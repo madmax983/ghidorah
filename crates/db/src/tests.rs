@@ -7,6 +7,7 @@
 pub(crate) mod ops;
 
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::sync::OnceLock;
 
 use ghidorah_base::{Address, FuncId, JumpTableId, Limits, Range, StringId, TxId};
@@ -225,7 +226,7 @@ pub(crate) fn seeded() -> Program {
             let mut p = fixture("hello.gcc-O2");
             func_type(&mut p);
             let set = analysis_set(&p, 0);
-            p.swap_analysis(Box::new(set));
+            p.swap_analysis(Arc::new(set));
             p
         })
         .clone()

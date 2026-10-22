@@ -32,7 +32,7 @@ impl TestEngine {
             .program
             .begin("analysis_run", Source::Analysis, label)
             .expect("a transaction");
-        tx.apply(Edit::ReplaceAnalysis(Box::new(set)))
+        tx.apply(Edit::ReplaceAnalysis(Arc::new(set)))
             .expect("the set applies");
         tx.commit().expect("the commit works");
         Ok(())
