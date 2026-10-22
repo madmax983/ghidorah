@@ -571,7 +571,7 @@ Undo is a forward commit (ADR-0017). The model is one linear stack per session:
 Journal line (one per committed Tx):
 
 ```json
-{"v":1,"rev":58,"tx":42,"label":"symbol_rename","source":"agent","session":"mcp-1","force":false,
+{"v":2,"rev":58,"tx":42,"label":"symbol_rename","source":"agent","session":"mcp-1","force":false,
  "edits":[{"op":"SetName","addr":"0x401130","old":null,"new":"parse_cfg"}],
  "undo_of":null,"redo_of":null,"crc":"9c41d07a2f3e11b0"}
 ```
@@ -632,7 +632,7 @@ Default projects root: `$XDG_DATA_HOME/ghidorah/projects` (fallback `$HOME/.loca
   crash/<id>.json    crash repro: tool, args, rev, panic text
 ```
 
-- All file access goes through the `Fs` trait at the `db` edge: `create_new`, `append`, `write_all`, `sync_file`, `rename`, `sync_dir`, `remove`, `read`. Production uses `RealFs`. Tests use `RecordingFs` (an operation log) and `CrashFs` (stops after operation k and drops every write that has no sync).
+- All file access goes through the `Fs` trait at the `db` edge: `create_new`, `append`, `write_all`, `sync_file`, `rename`, `sync_dir`, `remove`, `read`, `age`. Production uses `RealFs`. Tests use `SimFs`: an operation log, a crash point that drops every write with no sync, and a clock.
 - A commit is `append` of one journal line, then `sync_file`.
 - A snapshot is `create_new` of its temp file in the same directory, `write_all`, `sync_file`, `rename` and `sync_dir` (AC-120a). The session writes a snapshot after each completed analysis run, every 256 journal lines and at clean shutdown.
 - Temp files: the snapshot, the input copy, `project.json`, the journal, the lock and each crash record write their temp files with the per-process name `<base>.<pid>.<n>`.
@@ -1174,7 +1174,7 @@ Seeds in confidence order. Each start keeps `start_reason`, a `Why` and a confid
 - Parameters = live-in registers that are argument registers, minus callee-saved push and pop pairs and alignment pushes, filled up to the highest used register.
 - A register that a call or a tail jump passes to a callee that reads it counts as read. A callee is a direct target or a tail jump out of the body. It is also the import slot of an indirect call or jump at stack height 0.
 - A syscall reads only the argument registers that its number takes: the parameter count of the Tier-0 prototype of its name. A syscall reads all six registers when block-local evaluation does not give its number, or when its name has no Tier-0 prototype.
-- A callee with a parameter count keeps only those argument registers at its calls. A count comes from a signature, a Tier-0 prototype or the recovery.
+- A callee with a parameter count keeps only those integer and floating argument registers at its calls. A count comes from a signature, a Tier-0 prototype or the recovery.
 - An import with no Tier-0 prototype has no parameter count. A function whose tail jump at stack height 0 goes to a callee with no count also has no count, for example a thunk.
 - A call to a callee with no count keeps every argument register. Its text shows the arguments that the caller sets. The facts of `cc::params` do not change.
 - `cc::params` solves the callees first, depth first, up to 32 functions. It runs again in that fixed order until no count changes.
@@ -1317,7 +1317,7 @@ decomp {
 - Call arguments: a known count (signature, prototype, recovery) gives the registers, then the stack arguments. Without a count, the arguments are the registers that the caller sets: a new value, or a write in the block of the call. The register of an indirect target is not an argument. A variadic call with all argument registers set also shows its stack arguments.
 - Staging register: a register that an op reads after its last `Put` in the block of the call is not an argument. An example is `rdx` in `mov rdx,[rbp-0x18]; mov rsi,rdx` of `-O0` code.
 - A `SysV` call that is not variadic takes its arguments from the slots of the callee (Section 7.10). A signature gives the register of the class of each parameter. The recovery gives the integer registers, then the floating registers, then the stack arguments. So the text keeps the slot order of the head of the callee.
-- A `SysV` variadic call passes its floating arguments in `xmm0` to `xmm7`, and `al` holds their count. A constant `al`, or the low byte of a `mov al, k`, gives the count. Else the count is the XMM argument registers that the caller sets. The XMM arguments follow the integer arguments. The `al` value is no argument and no read.
+- A `SysV` variadic call passes its floating arguments in `xmm0` to `xmm7`, and `al` holds their count. A constant `al`, or the low byte of a `mov al, k`, gives the count. Else the count is the XMM argument registers that the caller sets. A `printf` format string of a Tier-0 callee gives the order of the integer and the XMM arguments. Else the XMM arguments follow the integer arguments. The `al` value is no argument and no read.
 - An MS x64 slot prints its floating register when the caller sets only that register of the slot.
 - Call result: a signature with a floating return type gives `xmm0`, another type gives `rax`, and `void` gives no result. With no signature, a recovered floating return of the callee gives `xmm0`, and a recovered return with no value gives no result. Else `xmm0` is the result when the caller reads the `xmm0` def and reads the `rax` def only as a return value. Else the result is `rax`.
 - The `rax` def of a call with no `rax` result is a value that the call leaves behind. A return of it prints `return;`, and the head gets no return type from it.

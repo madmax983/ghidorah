@@ -47,7 +47,7 @@ How can the fix fail? Each failure has a guard.
 | F5 | A slow writer on a shared disk loses its temporary file. | The grace time is one hour. A file with no age stays. |
 | F6 | Clock skew gives a file a time in the future. | A future time gives age 0. The file stays. |
 | F7 | Mutual tail calls make the walk recurse without end. | Keep a set of the functions on the walk. A function on the walk gives no value. |
-| F8 | A hostile format string is long or bad. | Read at most 256 bytes. An unknown or positional conversion keeps the old order. |
+| F8 | A hostile format string is long or bad. | Read at most 4,096 bytes and 64 arguments. An unknown or positional conversion keeps the old order. |
 | F9 | The format string and the registers do not agree. | Use the new order only when the counts agree exactly. |
 | F10 | A wrong XMM count removes a live argument. | Narrow only with a known count: no varargs, no open solve and no stack arguments. |
 | F11 | The golden changes hide a regression. | Read each changed golden file in `git diff` before the commit. |
@@ -104,4 +104,4 @@ How can the fix fail? Each failure has a guard.
 | D6 | I6: B12 with `Fs::age` and a grace time of one hour. |
 | D7 | I2 stays deferred. It needs an ADR and waits for PR 7. Issue 4 keeps this item open. |
 
-Order of work: I5, I4, I3, I1, I6. Each item has a RED commit, a GREEN commit and, when necessary, a REFACTOR commit.
+Order of work: I5, I4, I3, I1, I6. Each step has a RED commit, a GREEN commit and, when necessary, a REFACTOR commit. Items I4 and I3 share one RED and one GREEN commit. So do items I1 and I6.
