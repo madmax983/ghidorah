@@ -29,7 +29,9 @@ use ghidorah_ir::Loc;
 use ghidorah_types::{DataModel, Prim, Type, TypeId, TypeStore};
 use ghidorah_x86::{Flow, Reg};
 
-use super::{Event, FloatRet, declared_ret, ends_in_ret, events, float_ret_in, kind_of, recover};
+use super::{
+    Event, Exits, FloatRet, RET_DEPTH, declared_ret, events, float_ret_in, kind_of, recover,
+};
 use crate::code::decode_at;
 use crate::fir::FuncIr;
 use crate::fir::callsite::{self, Memo};
@@ -132,11 +134,7 @@ fn recover_body(l0: &FuncIr) -> Body {
     if let Some(k) = recover(l0) {
         return Body::Value(RetValue::Float(k));
     }
-    let preds = l0.body.cfg.preds();
-    let rets: Vec<usize> = (0..l0.body.blocks.len())
-        .filter(|&n| ends_in_ret(l0, n))
-        .collect();
-    let last = events(l0, &preds, &rets, Loc::RAX, false);
+    let last = events(l0, &Exits::of(l0), Loc::RAX, false);
     if last.contains(&Event::Entry) {
         Body::Value(RetValue::Void)
     } else if last.iter().all(|e| matches!(e, Event::Call(_))) {
@@ -200,13 +198,32 @@ fn rax_dead_after(program: &Program, site: u64) -> bool {
 /// An import, through its stub or its slot, gives the return type of its Tier-0 prototype. A
 /// function gives [`ret_value`]. The recovery reads the L0 IR of the solve of the function,
 /// with fuel from `fuel`. An import with no prototype, a function whose IR does not build and
-/// another address give `None`.
+/// another address give `None`. So does a function on the walk of `memo`, any address when
+/// the walk holds [`RET_DEPTH`] functions, and an empty `fuel` (see the module doc of
+/// [`super`]).
+///
+/// `memo` keeps the result of each callee, so a walk visits each callee once. A callee on a
+/// cycle keeps the result of its first visit.
 pub fn ret_value_in(
     program: &Program,
     addr: u64,
     memo: &mut Memo,
     fuel: &mut Fuel,
 ) -> Option<RetValue> {
+    if memo.has_ret(addr) {
+        return memo.ret_of(addr);
+    }
+    if fuel.tick().is_err() || !memo.enter(addr, RET_DEPTH) {
+        return None;
+    }
+    let out = value_in(program, addr, memo, fuel);
+    memo.leave();
+    memo.keep_ret(addr, out);
+    out
+}
+
+/// Gives the return value of [`ret_value_in`] with `addr` on the walk of `memo`.
+fn value_in(program: &Program, addr: u64, memo: &mut Memo, fuel: &mut Fuel) -> Option<RetValue> {
     let at = Address::ram(addr);
     let model = program.types().model();
     if let Some(row) = program

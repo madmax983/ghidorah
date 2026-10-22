@@ -1,6 +1,6 @@
 //! The journal: one checksummed JSON line per commit (design Sections 3.7 and 3.10).
 //!
-//! The journal file `journal.jsonl` only grows. Each line is one JSON object with `"v":1`
+//! The journal file `journal.jsonl` only grows. Each line is one JSON object with `"v":2`
 //! and a checksum member `crc` at the end. `crc` is the first 16 hex digits of the SHA-256
 //! of the line text without the `crc` member.
 //!
@@ -22,6 +22,9 @@
 //! | each line ends with a line end and decodes | all lines |
 //! | the text after the last line end is not empty | the lines before it, and `torn: true` |
 //! | a line with a line end does not decode | [`JournalError::Corrupt`] with its line number |
+//!
+//! A line with `"v":1` also decodes. Its edits get the new `ext:` addresses of a map (the
+//! [`crate::migrate`] module).
 
 #[cfg(test)]
 mod tests;
@@ -35,13 +38,17 @@ use crate::codec::{CodecError, Json, Obj, Reason, edit_from_json, edit_to_json};
 use crate::edit::EditKind;
 use crate::fact::SessionLabel;
 use crate::meta::{META_KEY, MetaLine};
+use crate::migrate::ExtMap;
 use crate::snapshot::hash_from;
 use crate::source::Source;
 use crate::tx::{Applied, Commit, TxLabel};
 use crate::typesglue::TypeInput;
 
 /// The version member `v` of each line.
-pub const VERSION: u64 = 1;
+pub const VERSION: u64 = 2;
+
+/// The oldest version of a line that [`decode`] reads.
+pub const MIN_VERSION: u64 = 1;
 
 /// The file name of the journal in a project directory.
 pub const JOURNAL_FILE: &str = "journal.jsonl";
@@ -218,7 +225,7 @@ pub enum LineError {
     Json(String),
     /// The JSON has the wrong shape.
     Shape(CodecError),
-    /// The version member is not [`VERSION`].
+    /// The version member is not in [`MIN_VERSION`] to [`VERSION`].
     Version(u64),
 }
 
@@ -228,7 +235,10 @@ impl fmt::Display for LineError {
             Self::Crc => f.write_str("The line checksum does not match."),
             Self::Json(e) => write!(f, "The line is not JSON: {e}"),
             Self::Shape(e) => write!(f, "The line has a bad shape: {e}"),
-            Self::Version(v) => write!(f, "The line has the version {v}, not {VERSION}."),
+            Self::Version(v) => write!(
+                f,
+                "The line has the version {v}, not {MIN_VERSION} to {VERSION}."
+            ),
         }
     }
 }
@@ -370,18 +380,26 @@ fn checked_body(text: &str) -> Option<String> {
     (crc(&body) == sum).then_some(body)
 }
 
-/// Reads one line text without its line end.
+/// Reads one line text without its line end. The edits of a version 1 line get the new
+/// `ext:` addresses of `v1`.
 ///
 /// # Errors
 ///
 /// Returns [`LineError::Crc`] for a missing or wrong checksum, [`LineError::Json`] for text
 /// that is not JSON, [`LineError::Version`] for another version and [`LineError::Shape`] for a
 /// bad member.
-pub fn decode(text: &str) -> Result<Line, LineError> {
+pub fn decode(text: &str, v1: &ExtMap) -> Result<Line, LineError> {
     checked_body(text).ok_or(LineError::Crc)?;
-    let value =
+    let mut value =
         ghidorah_json::parse(text, &LINE_LIMITS).map_err(|e| LineError::Json(e.to_string()))?;
     match value.get("v").map(Value::as_u64) {
+        Some(Some(1)) => {
+            if let Value::Object(o) = &mut value
+                && let Some(edits) = o.get_mut("edits")
+            {
+                *edits = v1.remap(std::mem::take(edits));
+            }
+        }
         Some(Some(VERSION)) => {}
         Some(Some(v)) => return Err(LineError::Version(v)),
         Some(None) => return Err(LineError::Shape(CodecError::text("version").at("v"))),
@@ -399,13 +417,13 @@ pub fn decode(text: &str) -> Result<Line, LineError> {
     Ok(Line::Tx(Box::new(read_tx(&value)?)))
 }
 
-/// Reads a journal file.
+/// Reads a journal file. The edits of a version 1 line get the new `ext:` addresses of `v1`.
 ///
 /// # Errors
 ///
 /// Returns [`JournalError::Corrupt`] with the line number of the first line that ends with a
 /// line end and does not decode.
-pub fn parse(bytes: &[u8]) -> Result<Journal, JournalError> {
+pub fn parse(bytes: &[u8], v1: &ExtMap) -> Result<Journal, JournalError> {
     let mut out = Journal::default();
     let mut start = 0usize;
     let mut number = 0usize;
@@ -423,7 +441,7 @@ pub fn parse(bytes: &[u8]) -> Result<Journal, JournalError> {
         let line = rest.get(..end).unwrap_or_default();
         let text = std::str::from_utf8(line)
             .map_err(|_| corrupt(LineError::Json("the line is not UTF-8".to_owned())))?;
-        out.lines.push(decode(text).map_err(corrupt)?);
+        out.lines.push(decode(text, v1).map_err(corrupt)?);
         start = start.saturating_add(end).saturating_add(1);
         out.valid_len = start;
     }

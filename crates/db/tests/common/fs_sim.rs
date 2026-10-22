@@ -12,6 +12,10 @@
 //! the first operation with a given log entry. [`SimFs::crash_image`] gives a new file system
 //! with the durable view only.
 //!
+//! Each file has a change time on a clock that only [`SimFs::advance`] moves. A new file and
+//! a write take the time of the clock. [`SimFs::set_times_known`] makes [`Fs::modified`] give
+//! `None`.
+//!
 //! All handles of [`Fs::boxed`] share one state.
 
 #![allow(dead_code, reason = "each test uses a part of the helpers")]
@@ -20,6 +24,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::{Duration, SystemTime};
 
 use ghidorah_db::fs::{EntryKind, Fs, FsError};
 
@@ -29,6 +34,7 @@ struct Node {
     data: Vec<u8>,
     durable: Vec<u8>,
     read_only: bool,
+    changed: Duration,
 }
 
 /// The shared state.
@@ -43,6 +49,10 @@ struct State {
     tear: bool,
     /// The start of the log entry of the last operation before the crash.
     crash_on: Option<String>,
+    /// The simulated clock.
+    clock: Duration,
+    /// [`Fs::modified`] gives `None`.
+    no_times: bool,
 }
 
 impl State {
@@ -63,6 +73,14 @@ impl State {
         }
         self.log.push(entry);
         Ok(())
+    }
+
+    /// Gives the node of a file for a write, with the change time of the clock.
+    fn changed(&mut self, path: &Path) -> Result<&mut Node, FsError> {
+        let clock = self.clock;
+        let node = self.node(path)?;
+        node.changed = clock;
+        Ok(node)
     }
 
     fn node(&mut self, path: &Path) -> Result<&mut Node, FsError> {
@@ -117,13 +135,32 @@ impl SimFs {
             }
         }
         let id = s.nodes.len();
+        let changed = s.clock;
         s.nodes.push(Node {
             data: bytes.to_vec(),
             durable: bytes.to_vec(),
             read_only: false,
+            changed,
         });
         s.names.insert(path.to_path_buf(), id);
         s.durable_names.insert(path.to_path_buf(), id);
+    }
+
+    /// Moves the clock on by `by`.
+    pub fn advance(&self, by: Duration) {
+        let mut s = self.state();
+        s.clock = s.clock.saturating_add(by);
+    }
+
+    /// Sets if [`Fs::modified`] gives the change time of a file. With `false` it gives `None`.
+    pub fn set_times_known(&self, known: bool) {
+        self.state().no_times = !known;
+    }
+
+    /// Gives the time of the clock: the Unix epoch plus the advances.
+    #[must_use]
+    pub fn now(&self) -> SystemTime {
+        SystemTime::UNIX_EPOCH + self.state().clock
     }
 
     /// Gives the live bytes of a file, or `None`.
@@ -188,6 +225,7 @@ impl SimFs {
         let s = self.state();
         let mut out = State {
             dirs: s.dirs.clone(),
+            clock: s.clock,
             ..State::default()
         };
         for (path, id) in &s.durable_names {
@@ -197,6 +235,7 @@ impl SimFs {
                     data: node.durable.clone(),
                     durable: node.durable.clone(),
                     read_only: node.read_only,
+                    changed: node.changed,
                 });
                 out.names.insert(path.clone(), new);
                 out.durable_names.insert(path.clone(), new);
@@ -226,7 +265,11 @@ impl Fs for SimFs {
         }
         s.parent_ok(path)?;
         let id = s.nodes.len();
-        s.nodes.push(Node::default());
+        let changed = s.clock;
+        s.nodes.push(Node {
+            changed,
+            ..Node::default()
+        });
         s.names.insert(path.to_path_buf(), id);
         Ok(())
     }
@@ -235,7 +278,7 @@ impl Fs for SimFs {
         let mut s = self.state();
         s.step(format!("append {}", short(path)))?;
         let tear = std::mem::take(&mut s.tear);
-        let node = s.node(path)?;
+        let node = s.changed(path)?;
         if tear {
             let half = bytes.get(..bytes.len() / 2).unwrap_or_default();
             node.data.extend_from_slice(half);
@@ -252,14 +295,14 @@ impl Fs for SimFs {
     fn write_all(&mut self, path: &Path, bytes: &[u8]) -> Result<(), FsError> {
         let mut s = self.state();
         s.step(format!("write_all {}", short(path)))?;
-        s.node(path)?.data = bytes.to_vec();
+        s.changed(path)?.data = bytes.to_vec();
         Ok(())
     }
 
     fn truncate(&mut self, path: &Path, len: u64) -> Result<(), FsError> {
         let mut s = self.state();
         s.step(format!("truncate {} {len}", short(path)))?;
-        let node = s.node(path)?;
+        let node = s.changed(path)?;
         node.data
             .resize(usize::try_from(len).unwrap_or(usize::MAX), 0);
         node.durable = node.data.clone();
@@ -372,6 +415,15 @@ impl Fs for SimFs {
         } else {
             None
         }
+    }
+
+    fn modified(&mut self, path: &Path) -> Option<SystemTime> {
+        let mut s = self.state();
+        if s.no_times {
+            return None;
+        }
+        let node = s.node(path).ok()?;
+        Some(SystemTime::UNIX_EPOCH + node.changed)
     }
 
     fn boxed(&self) -> Box<dyn Fs> {

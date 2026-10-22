@@ -343,7 +343,8 @@ fn regress_tail_calls_of_void_function() {
 }
 
 /// `main` of `switch` named `v9` and `v10` with no declaration. Now the declarations come
-/// first, with the lattice type when one exists.
+/// first, with the lattice type when one exists. A call keeps no XMM value alive that its
+/// callee does not read, so the names start at `v1`.
 #[test]
 fn regress_main_declares_its_locals() {
     let p = program("switch.gcc-O2");
@@ -352,8 +353,8 @@ fn regress_main_declares_its_locals() {
         .map(|l| l.text)
         .collect();
     assert_eq!(lines[1], "{", "{lines:?}");
-    assert_eq!(lines[2], "    long v9;", "{lines:?}");
-    assert_eq!(lines[3], "    uint64_t v10;", "{lines:?}");
+    assert_eq!(lines[2], "    long v1;", "{lines:?}");
+    assert_eq!(lines[3], "    uint64_t v2;", "{lines:?}");
 }
 
 /// An environment that knows only the return value of [`CALLEE`].

@@ -99,7 +99,7 @@ impl LoadSpec {
 /// The content of `project.json`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProjectMeta {
-    /// The format version: [`FORMAT_VERSION`].
+    /// The format version: [`FORMAT_VERSION`], or an older version that a migration reads.
     pub format_version: u64,
     /// The binary ID.
     pub binary_id: BinaryId,
@@ -338,10 +338,17 @@ fn crash_temp_pid(name: &str) -> Option<u32> {
 ///
 /// The step does nothing when the process files do not give the lock owner `me`. So a system
 /// with no readable process files keeps all temporary files.
+///
+/// The time now is the change time of the lock file: the caller just wrote it. So the age of a
+/// temporary file uses one clock, the clock of the file system. A lock file with no change
+/// time keeps all temporary files.
 fn remove_dead_temps(fs: &mut dyn Fs, dir: &Path, meta: &ProjectMeta, me: &LockInfo) {
     if !lock::is_alive(fs, me) {
         return;
     }
+    let Some(now) = fs.modified(&lock::path(dir)) else {
+        return;
+    };
     // The disk module writes `<name>.tmp` as the base of `.gitignore` and the input copy.
     let ignore = format!("{GITIGNORE_FILE}.tmp");
     let bases = [
@@ -351,13 +358,13 @@ fn remove_dead_temps(fs: &mut dyn Fs, dir: &Path, meta: &ProjectMeta, me: &LockI
         LOCK_TMP,
         ignore.as_str(),
     ];
-    let _ = crate::fs::remove_dead_temps(fs, dir, &bases, lock::pid_dead);
+    let _ = crate::fs::remove_dead_temps(fs, dir, &bases, lock::pid_dead, now);
     let input = format!("{}.tmp", hex::encode(&meta.sha256));
     let bin = dir.join(BIN_DIR);
-    let _ = crate::fs::remove_dead_temps(fs, &bin, &[input.as_str()], lock::pid_dead);
+    let _ = crate::fs::remove_dead_temps(fs, &bin, &[input.as_str()], lock::pid_dead, now);
     // The crash records use `<id>.tmp` as the base, with a crash ID of 1 to 64 hex digits.
     let crash = dir.join(CRASH_DIR);
-    let _ = crate::fs::remove_dead_temps_by(fs, &crash, &crash_temp_pid, lock::pid_dead);
+    let _ = crate::fs::remove_dead_temps_by(fs, &crash, &crash_temp_pid, lock::pid_dead, now);
 }
 
 /// One project directory.
@@ -459,6 +466,9 @@ impl Project {
 
     /// Opens the project in `dir` (the open flow of design Section 3.10).
     ///
+    /// The open reads the project files of format version 1 too (the [`crate::migrate`]
+    /// module). After the load, a write open writes the project file at [`FORMAT_VERSION`].
+    ///
     /// # Errors
     ///
     /// Returns [`ProjectError::Locked`] for a held lock and [`ProjectError::BadMeta`] for a bad
@@ -495,6 +505,9 @@ impl Project {
             failed: None,
         };
         let loaded = project.load(&opts.limits)?;
+        if !project.read_only {
+            disk::upgrade_meta(&mut project)?;
+        }
         Ok(Opened {
             project,
             program: loaded.program,

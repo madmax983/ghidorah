@@ -4,8 +4,11 @@
 //!
 //! ```text
 //! {"analysis_inputs_hash": hex or null, "facts": {analysis, base, binary, notes, types},
-//!  "format_version": 1, "journal_lines": n, "marks": [..], "progress": [..], "rev": r}
+//!  "format_version": 2, "journal_lines": n, "marks": [..], "progress": [..], "rev": r}
 //! ```
+//!
+//! [`decode`] also reads format version 1. It maps the old `ext:` addresses of the `analysis`,
+//! `base` and `notes` facts to their new addresses (the [`crate::migrate`] module).
 //!
 //! - `facts` holds the tables of both layers with their counters, the note store, the SHA-256
 //!   of the input and the types. The types are a number of types, or the number and the C
@@ -32,6 +35,7 @@ use crate::codec::{
     tables_from_json, tables_to_json, types_from_json, types_to_json,
 };
 use crate::fs::{Fs, FsError, replace_file};
+use crate::migrate::ExtMap;
 use crate::notes::Notes;
 use crate::program::{AnalysisSet, Program, Tables};
 use crate::progress::Progress;
@@ -39,7 +43,10 @@ use crate::source::Source;
 use crate::typesglue::{TypeInput, Types};
 
 /// The format version of the project files.
-pub const FORMAT_VERSION: u64 = 1;
+pub const FORMAT_VERSION: u64 = 2;
+
+/// The oldest format version that a migration reads.
+pub const MIN_FORMAT_VERSION: u64 = 1;
 
 /// The file name of the snapshot.
 pub const SNAPSHOT_FILE: &str = "snapshot.json";
@@ -74,7 +81,7 @@ pub enum SnapshotError {
     Json(String),
     /// The JSON has the wrong shape.
     Shape(CodecError),
-    /// The format version is not [`FORMAT_VERSION`].
+    /// The format version is not in [`MIN_FORMAT_VERSION`] to [`FORMAT_VERSION`].
     Version(u64),
     /// The snapshot belongs to another input file.
     Binary,
@@ -220,24 +227,40 @@ pub fn encode(
     write_jcs(&all).map_err(|e| SnapshotError::Jcs(e.to_string()))
 }
 
-/// Reads a snapshot.
+/// Tells if `v` is a format version that a reader takes.
+const fn known(v: u64) -> bool {
+    MIN_FORMAT_VERSION <= v && v <= FORMAT_VERSION
+}
+
+/// Reads a snapshot. A version 1 snapshot gets the new `ext:` addresses of `v1`.
 ///
 /// # Errors
 ///
 /// Returns a [`SnapshotError`] for text that is not JSON, a bad shape or another version.
-pub fn decode(bytes: &[u8]) -> Result<Snapshot, SnapshotError> {
+pub fn decode(bytes: &[u8], v1: &ExtMap) -> Result<Snapshot, SnapshotError> {
     let text =
         std::str::from_utf8(bytes).map_err(|_| SnapshotError::Json("not UTF-8".to_owned()))?;
-    let value = ghidorah_json::parse(text, &SNAPSHOT_LIMITS)
+    let mut value = ghidorah_json::parse(text, &SNAPSHOT_LIMITS)
         .map_err(|e| SnapshotError::Json(e.to_string()))?;
-    if let Some(v) = value.get("format_version").and_then(Value::as_u64)
-        && v != FORMAT_VERSION
+    let version = value.get("format_version").and_then(Value::as_u64);
+    if let Some(v) = version
+        && !known(v)
     {
         return Err(SnapshotError::Version(v));
     }
+    if version == Some(1)
+        && let Value::Object(top) = &mut value
+        && let Some(Value::Object(facts)) = top.get_mut("facts")
+    {
+        for key in ["analysis", "base", "notes"] {
+            if let Some(part) = facts.get_mut(key) {
+                *part = v1.remap(std::mem::take(part));
+            }
+        }
+    }
     let o = Obj::new(&value, &SNAPSHOT_MEMBERS)?;
     let format: u64 = o.get("format_version")?;
-    if format != FORMAT_VERSION {
+    if !known(format) {
         return Err(SnapshotError::Version(format));
     }
     let f = Obj::new(o.member("facts")?, &FACT_MEMBERS).map_err(|e| e.at("facts"))?;

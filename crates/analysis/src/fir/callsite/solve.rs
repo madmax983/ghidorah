@@ -25,6 +25,7 @@ use ghidorah_types::CallConv;
 
 use super::{arg_regs, call_targets, fixed, proto_params};
 use crate::cc::{self, BlockUse, Params, loc_of};
+use crate::fir::ret::RetValue;
 use crate::fir::{self, FirError, FuncIr, Image, Opts};
 
 /// The largest count of functions of one [`solve`].
@@ -86,6 +87,9 @@ struct Base {
     children: Vec<u64>,
     /// The callees of the tail jumps at stack height 0.
     tails: Vec<Callee>,
+    /// Each call and tail jump has a callee with known reads: a function, or a callee with a
+    /// fixed count and no variable argument list.
+    closed: bool,
     /// The fuel of one pass over the blocks: one unit for each block and each call op.
     cost: u64,
 }
@@ -101,13 +105,26 @@ impl Base {
         let blocks = cc::summaries(&ir, conv, false, &Image(program));
         let mut known: BTreeMap<u64, Callee> = BTreeMap::new();
         let mut callees = BTreeMap::new();
+        let mut closed = true;
         for (id, t) in call_targets(&ir) {
             let c = known
                 .entry(t)
                 .or_insert_with(|| callee_of(program, conv, t))
                 .clone();
+            closed &= match c {
+                Callee::Fixed(_) => !variadic_at(program, t),
+                Callee::Func(_) => true,
+                Callee::Import | Callee::Unknown => false,
+            };
             callees.insert(id, c);
         }
+        // A call with no target, such as `call rax`, has no known reads.
+        closed &= ir
+            .arena
+            .ops()
+            .iter()
+            .filter(|op| matches!(op.opc, Opc::Call | Opc::CallInd))
+            .all(|op| callees.contains_key(&op.id));
         let tails = tail_callees(&ir, &callees);
         let ops = blocks.iter().map(|b| b.free.len()).sum::<usize>();
         let cost = u64::try_from(blocks.len().saturating_add(ops)).unwrap_or(u64::MAX);
@@ -119,6 +136,7 @@ impl Base {
             params: Params::default(),
             children: Vec::new(),
             tails,
+            closed,
             cost,
         };
         base.live = base.live_with(&base.reads(conv, &BTreeMap::new()), fuel)?;
@@ -245,6 +263,65 @@ fn is_open(
     Ok(false)
 }
 
+/// Tells if the callee at `addr` with a fixed count takes a variable argument list. An import
+/// uses its Tier-0 prototype. A function uses its signature or its prototype.
+fn variadic_at(program: &Program, addr: u64) -> bool {
+    let at = Address::ram(addr);
+    let import = program
+        .imports()
+        .values()
+        .find(|r| r.stub == Some(at) || r.slot == Some(at));
+    match import {
+        Some(row) => row
+            .id
+            .name()
+            .and_then(Types::prototype)
+            .is_some_and(|p| p.sig.variadic),
+        None => super::declared(program, FuncId(at)).is_some_and(|(sig, _, _)| sig.variadic),
+    }
+}
+
+/// Tells if the function at `root` is closed: it and each function that it calls, at most
+/// [`MAX_SOLVE`] functions, have only calls and tail jumps with known reads (`Base::closed`).
+/// A function with a variable argument list, or with no IR, is not closed. Then an XMM entry
+/// value can pass on to a callee that the solve does not see.
+///
+/// # Errors
+///
+/// Returns [`FirError::Fuel`] when the fuel runs out.
+pub(crate) fn is_closed(
+    program: &Program,
+    conv: &CallConv,
+    root: u64,
+    memo: &mut Memo,
+    fuel: &mut Fuel,
+) -> Result<bool, FirError> {
+    let mut seen = BTreeSet::from([root]);
+    let mut stack = vec![root];
+    while let Some(at) = stack.pop() {
+        if let Entry::Vacant(slot) = memo.bases.entry(at) {
+            slot.insert(build(program, conv, at, fuel)?);
+        }
+        let Some(Some(base)) = memo.bases.get(&at) else {
+            return Ok(false);
+        };
+        if !base.closed || base.params.varargs {
+            return Ok(false);
+        }
+        for c in base.callees.values() {
+            if let Callee::Func(t) = c
+                && seen.insert(*t)
+            {
+                if seen.len() > MAX_SOLVE {
+                    return Ok(false);
+                }
+                stack.push(*t);
+            }
+        }
+    }
+    Ok(true)
+}
+
 /// Gives, for each block, the registers of `regs` that a path from the entry to the start of
 /// the block does not write.
 fn unwritten(ir: &FuncIr, blocks: &[BlockUse], regs: &BTreeSet<Loc>) -> Vec<BTreeSet<Loc>> {
@@ -303,6 +380,10 @@ pub struct Memo {
     bases: BTreeMap<u64, Option<Base>>,
     /// The result of each solve, by the entry of its function.
     solved: BTreeMap<u64, Solved>,
+    /// The functions on the walk of the callee return values, in walk order.
+    walk: Vec<u64>,
+    /// The return value of each callee that a walk gave.
+    rets: BTreeMap<u64, Option<RetValue>>,
 }
 
 impl Memo {
@@ -310,6 +391,37 @@ impl Memo {
     #[must_use]
     pub fn ir(&self, entry: u64) -> Option<&FuncIr> {
         self.bases.get(&entry)?.as_ref().map(|b| &b.ir)
+    }
+
+    /// Puts the function `entry` on the walk of the callee return values. Gives `false`, and
+    /// changes nothing, when `entry` is on the walk or the walk holds `max` functions.
+    pub(crate) fn enter(&mut self, entry: u64, max: usize) -> bool {
+        if self.walk.len() >= max || self.walk.contains(&entry) {
+            return false;
+        }
+        self.walk.push(entry);
+        true
+    }
+
+    /// Removes the last function from the walk of the callee return values.
+    pub(crate) fn leave(&mut self) {
+        self.walk.pop();
+    }
+
+    /// Tells if the memo holds the return value of the callee `entry` from a walk.
+    pub(crate) fn has_ret(&self, entry: u64) -> bool {
+        self.rets.contains_key(&entry)
+    }
+
+    /// Gives the return value of the callee `entry` that a walk gave. A callee that the memo
+    /// does not hold gives `None`.
+    pub(crate) fn ret_of(&self, entry: u64) -> Option<RetValue> {
+        self.rets.get(&entry).copied().flatten()
+    }
+
+    /// Keeps the return value `value` of the callee `entry`.
+    pub(crate) fn keep_ret(&mut self, entry: u64, value: Option<RetValue>) {
+        self.rets.insert(entry, value);
     }
 }
 

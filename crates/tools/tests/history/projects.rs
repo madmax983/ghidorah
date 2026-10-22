@@ -404,6 +404,9 @@ impl Fs for HookFs {
     fn kind(&mut self, path: &Path) -> Option<EntryKind> {
         RealFs.kind(path)
     }
+    fn modified(&mut self, path: &Path) -> Option<std::time::SystemTime> {
+        RealFs.modified(path)
+    }
     fn boxed(&self) -> Box<dyn Fs> {
         Box::new(self.clone())
     }

@@ -17,7 +17,7 @@
 use ghidorah_base::FuncId;
 use ghidorah_db::{Program, Types};
 use ghidorah_ir::Loc;
-use ghidorah_types::{CallConv, DataModel, Sig, TypeStore};
+use ghidorah_types::{CallConv, DataModel, Sig, Type, TypeStore};
 
 use crate::cc::{ParamSource, Params, conv_of, loc_of};
 use crate::fir::ret;
@@ -52,6 +52,18 @@ pub fn sig_slots(conv: &CallConv, floats: &[bool]) -> Vec<Loc> {
         }
     }
     out
+}
+
+/// Tells if a parameter of `sig`, whose types are in `store`, is a record or an array. Such a
+/// parameter can travel in XMM registers. So the floating slots of `sig` stay unknown.
+pub(crate) fn has_aggregate(store: &TypeStore, sig: &Sig) -> bool {
+    sig.params.iter().any(|p| {
+        let id = store.resolve(p.ty).ok();
+        matches!(
+            id.and_then(|t| store.get(t)),
+            Some(Type::Record(_) | Type::Array { .. })
+        )
+    })
 }
 
 /// Gives the floating class of each parameter of `sig`, whose types are in `store`.

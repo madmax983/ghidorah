@@ -65,6 +65,10 @@ fn fuzz_finds_tlv_bug() {
     assert!(!report.crashes.is_empty());
     assert!(report.crashes.len() <= config.max_crashes);
     assert!(
+        report.crashes.windows(2).all(|w| w[0].case < w[1].case),
+        "the report keeps the first crashes in case order"
+    );
+    assert!(
         fuzz::panic_count() >= report.panics,
         "the hook counts each panic"
     );

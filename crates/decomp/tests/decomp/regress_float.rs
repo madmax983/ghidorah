@@ -665,3 +665,137 @@ fn regress_void_callee_result_is_not_returned() {
     let before = text_named(program("hello.gcc-O0"), "run");
     assert!(before.starts_with("uint64_t run("), "{before}");
 }
+
+/// The address of the format string of [`FmtEnv`].
+const FORMAT: u64 = 0x3000;
+
+/// An environment with the variadic callee `printf` at [`CALLEE`] and the format string
+/// `.1` at [`FORMAT`].
+struct FmtEnv(SigEnv, &'static [u8]);
+
+impl ghidorah_decomp::Env for FmtEnv {
+    fn callee_name(&self, addr: u64) -> Option<String> {
+        self.0.callee_name(addr)
+    }
+    fn is_noreturn(&self, _addr: u64) -> bool {
+        false
+    }
+    fn is_string(&self, addr: u64) -> bool {
+        addr == FORMAT
+    }
+}
+
+impl PrintEnv for FmtEnv {
+    fn signature(&self, addr: u64) -> Option<Signature> {
+        self.0.signature(addr)
+    }
+    fn string_bytes(&self, addr: u64) -> Option<Vec<u8>> {
+        (addr == FORMAT).then(|| self.1.to_vec())
+    }
+    fn printf_format(&self, addr: u64) -> Option<usize> {
+        (addr == CALLEE).then_some(0)
+    }
+}
+
+/// Gives the call line of `printf(fmt, ..)` with `al = 2`. The call reads `rdi`, `rsi`, `rdx`,
+/// `xmm0` and `xmm1`, and the caller sets them.
+fn format_line(fmt: &'static [u8]) -> String {
+    let xmm1 = Loc::xmm(1).expect("the register xmm1");
+    let call = Call {
+        callee: Callee::Direct(CALLEE),
+        args: vec![
+            (Loc::RDI, Expr::Str { addr: FORMAT }),
+            (Loc::RSI, v(2, 64)),
+            (Loc::RDX, v(3, 64)),
+            (xmm0(), v(0, 128)),
+            (xmm1, v(1, 128)),
+            (Loc::RAX, k(2, 64)),
+        ],
+        set: [Loc::RDI, Loc::RSI, Loc::RDX, xmm0(), xmm1]
+            .into_iter()
+            .collect(),
+        push: None,
+        imm: Vec::new(),
+        mem: None,
+        rets: Vec::new(),
+        ret: None,
+        noreturn: false,
+        tail: false,
+        at: op(0, 0, 0),
+    };
+    let ret = Stmt::Return {
+        uses: Vec::new(),
+        at: op(0, 1, 0),
+    };
+    let vars = vec![
+        temp("xmm0", ENTRY, 128),
+        temp("xmm1", ENTRY, 128),
+        temp("rsi", ENTRY, 64),
+        temp("rdx", ENTRY, 64),
+    ];
+    let d = decomp(
+        vec![Spec::new(Exit::Stop, vec![Stmt::Call(call), ret])],
+        vars,
+        Tree::Block(node(0)),
+    );
+    let out = print::print(&d, &FmtEnv(printf_env(), fmt), &NoNames, "f");
+    out.lines
+        .iter()
+        .find(|l| l.text.contains("printf("))
+        .map(|l| l.text.trim().to_owned())
+        .unwrap_or_default()
+}
+
+/// A `SysV` varargs call printed its integer arguments before its XMM arguments. Now the
+/// `printf` format string of a Tier-0 callee gives the C order of the two classes. A format
+/// with another count, or a form with no order, keeps the old order.
+#[test]
+fn regress_varargs_order_follows_format() {
+    assert_eq!(
+        format_line(b"%f %d %f %s\n"),
+        r#"printf("%f %d %f %s\n", v1, v3, v2, v4);"#
+    );
+    assert_eq!(
+        format_line(b"%d %f %s %f"),
+        r#"printf("%d %f %s %f", v3, v1, v4, v2);"#
+    );
+    for fmt in [
+        &b"%d %d %f"[..],
+        b"%f %f %f %d %d",
+        b"%1$f %2$d %3$f %4$s",
+        b"%Lf %d %f %s",
+    ] {
+        let text = String::from_utf8_lossy(fmt).replace('\n', "\\n");
+        assert_eq!(
+            format_line(fmt),
+            format!(r#"printf("{text}", v3, v4, v1, v2);"#),
+            "{text}"
+        );
+    }
+}
+
+/// The program environment gives the `printf` format index of a Tier-0 callee from its
+/// `fmt(printf, n)` attribute. A `scanf` format and a callee with no format give none.
+#[test]
+fn printf_format_of_program_callees() {
+    let cases: [(&str, &str, Option<usize>); 5] = [
+        ("hello.gcc-O0", "printf", Some(0)),
+        ("hello.gcc-O0", "puts", None),
+        ("hello.gcc-O2", "__printf_chk", Some(1)),
+        ("cold_split.gcc-O0", "fprintf", Some(1)),
+        ("cold_split.gcc-O2", "__fprintf_chk", Some(2)),
+    ];
+    for (fixture, name, want) in cases {
+        let p = program(fixture);
+        let stub = p
+            .imports()
+            .values()
+            .find(|r| r.id.name() == Some(name))
+            .and_then(|r| r.stub)
+            .unwrap_or_else(|| panic!("{fixture}: the stub of {name}"));
+        let env = ghidorah_decomp::ProgramEnv(p);
+        assert_eq!(env.printf_format(stub.off), want, "{fixture} {name}");
+    }
+    let scanf = Types::prototype("scanf").expect("the Tier-0 prototype scanf");
+    assert!(scanf.attrs.fmt.is_some(), "scanf has a format");
+}

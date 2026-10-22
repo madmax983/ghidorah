@@ -6,6 +6,7 @@
 //! | `comments` | the PLATE, PRE, POST and EOL comments at the instructions of the body |
 //! | `signature` | the signature fact of the function, then the Tier-0 prototype of its name |
 //! | `string_bytes` | the bytes of the string fact |
+//! | `printf_format` | the `fmt(printf, n)` attribute of the Tier-0 prototype of the callee name |
 //! | `call_targets` | the targets of the call references from the site; an import gives its stub, else its slot |
 //! | `syscall_name` | the x86-64 syscall table |
 //! | `ret_value` | the return value of a callee: its Tier-0 prototype, else the recovery ([`ret_value_in`]) |
@@ -36,6 +37,7 @@ use ghidorah_analysis::fir::ret::{RetValue, ret_value_in};
 use ghidorah_base::{Address, Fuel, FuncId, VarId};
 use ghidorah_db::{CommentKind, Types};
 use ghidorah_ir::Loc;
+use ghidorah_types::proto::FmtKind;
 use ghidorah_types::{CallConv, DataModel, Prim, Sig, Type, TypeId, TypeStore};
 
 use super::{PrintEnv, Signature, body_units};
@@ -189,6 +191,12 @@ impl PrintEnv for ProgramEnv<'_> {
     fn string_bytes(&self, addr: u64) -> Option<Vec<u8>> {
         let info = self.0.string(addr)?;
         ghidorah_analysis::analyzers::strings::bytes(self.0, addr, info)
+    }
+
+    fn printf_format(&self, addr: u64) -> Option<usize> {
+        let proto = Types::prototype(&self.callee_name(addr)?)?;
+        let fmt = proto.attrs.fmt.filter(|f| f.kind == FmtKind::Printf)?;
+        usize::from(fmt.index).checked_sub(1)
     }
 
     fn types(&self) -> Option<(&TypeStore, &DataModel)> {

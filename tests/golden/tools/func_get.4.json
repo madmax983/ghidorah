@@ -27,7 +27,7 @@
     "flags": [],
     "caveats": [],
     "decomp": {
-      "text": "uint64_t main(uint64_t param_1, uint64_t param_2)\n{\n    uint64_t v9;\n    uint64_t v18;\n    if ((int32_t)param_1 <= 1) {\n        puts(\"usage: crackme <password>\");\n        v18 = 2;\n    } else {\n        v9 = check_password(*(uint64_t *)(param_2 + 8));\n        if ((uint32_t)v9 != 0) {\n            puts(\"Access granted\");\n            v18 = 0;\n        } else {\n            puts(\"Access denied\");\n            v18 = 1;\n        }\n    }\n    return v18;\n}\n",
+      "text": "uint64_t main(uint64_t param_1, uint64_t param_2)\n{\n    uint64_t v1;\n    uint64_t v2;\n    if ((int32_t)param_1 <= 1) {\n        puts(\"usage: crackme <password>\");\n        v2 = 2;\n    } else {\n        v1 = check_password(*(uint64_t *)(param_2 + 8));\n        if ((uint32_t)v1 != 0) {\n            puts(\"Access granted\");\n            v2 = 0;\n        } else {\n            puts(\"Access denied\");\n            v2 = 1;\n        }\n    }\n    return v2;\n}\n",
       "line_start": 1,
       "line_count": 19,
       "total_lines": 19,
@@ -175,14 +175,14 @@
         },
         {
           "id": "var:0x1080/reg:tmp@0x1091",
-          "name": "v9",
+          "name": "v1",
           "type": "uint64_t",
           "storage": "reg:tmp@0x1091",
           "source": "default"
         },
         {
           "id": "var:0x1080/reg:tmp@0x10ab",
-          "name": "v18",
+          "name": "v2",
           "type": "uint64_t",
           "storage": "reg:tmp@0x10ab",
           "source": "default"

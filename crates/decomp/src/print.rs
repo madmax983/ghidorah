@@ -58,6 +58,7 @@ mod calls;
 mod comments;
 mod env;
 mod expr;
+mod format;
 mod names;
 mod walk;
 
@@ -107,6 +108,13 @@ pub trait PrintEnv: Env {
 
     /// Gives the bytes of the string literal at `addr`, without the terminator.
     fn string_bytes(&self, addr: u64) -> Option<Vec<u8>> {
+        let _ = addr;
+        None
+    }
+
+    /// Gives the parameter index, from 0, of the `printf` format string of the callee at
+    /// `addr`.
+    fn printf_format(&self, addr: u64) -> Option<usize> {
         let _ = addr;
         None
     }

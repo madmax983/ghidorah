@@ -5,7 +5,7 @@
 //! | Uses | Rule |
 //! |---|---|
 //! | the integer argument registers | the count of the callee, or all of them for a callee with no count or a variadic callee |
-//! | the floating argument registers | every call |
+//! | the floating argument registers | the floating count of the callee, or all of them for a callee with no count or a variadic callee |
 //! | the varargs register (`al`) | only a call whose callee can take a variable argument list |
 //! | the stack arguments | the slots `Stack(k + 8j)` above the stack pointer at the call that the block writes before the call, while no slot is missing |
 //!
@@ -19,10 +19,17 @@
 //! in memory, so it has no `Stack` location.
 //!
 //! A callee has a count when its signature, its Tier-0 prototype or the recovery gives one
-//! ([`callee_arity_in`]). The call then keeps only that count of integer argument registers.
-//! A callee with no count reads all of them. An unknown target has no count. So has an import
-//! with no Tier-0 prototype. So has a function whose tail jump at stack height 0 passes its
-//! registers on to such an import, as a thunk does.
+//! ([`callee_arity_in`]). The call then keeps only that count of integer and floating argument
+//! registers.
+//!
+//! A callee with no count reads all the argument registers. An unknown target has no count.
+//! So has an import with no Tier-0 prototype. So has a function whose tail jump at stack
+//! height 0 passes its registers on to such an import, as a thunk does.
+//!
+//! A recovered callee has a floating count only when it is closed. Then no call or tail jump of
+//! it, or of a function that it calls, goes to a target with unknown reads. No such target has
+//! a variable argument list. A signature with a record or an array parameter has no floating
+//! count. A callee with no floating count keeps every floating argument register.
 //!
 //! [`solve`] recovers the parameters of a function with the reads of its calls and tail
 //! calls (the `solve` module).
@@ -45,7 +52,7 @@ use crate::cc::{ParamSource, Params, conv_of, loc_of};
 mod slots;
 mod solve;
 
-pub(crate) use slots::{declared, fixed, proto_params};
+pub(crate) use slots::{declared, fixed, has_aggregate, proto_params};
 pub use slots::{fixed_slots, sig_slots};
 pub use solve::{MAX_SOLVE, Memo, Solved, solve, solve_in};
 
@@ -60,6 +67,9 @@ pub const CALLEE_FUEL: u64 = 1_000_000;
 pub struct Arity {
     /// The count of the integer argument registers that the callee reads.
     pub int: u8,
+    /// The count of the floating argument registers that the callee reads. In a positional
+    /// convention it is the slot count, like `int`.
+    pub float: u8,
     /// The callee can take a variable argument list.
     pub varargs: bool,
 }
@@ -79,6 +89,7 @@ pub fn uses(
     let base: Vec<Loc> = ssa_opts(conv).call_uses.iter().collect();
     let al: BTreeSet<Loc> = conv.varargs_reg.iter().filter_map(|r| loc_of(r)).collect();
     let ints: Vec<Loc> = conv.int_args.iter().filter_map(|r| loc_of(r)).collect();
+    let floats: Vec<Loc> = conv.float_args.iter().filter_map(|r| loc_of(r)).collect();
     let first = i64::from(conv.stack_arg_offset).saturating_sub(8);
     let saved: BTreeSet<i64> = l0
         .frame
@@ -113,8 +124,12 @@ pub fn uses(
                         };
                         let mut list = base.clone();
                         if let Some(a) = direct.and_then(callee).filter(|a| !a.varargs) {
-                            let keep = usize::from(a.int);
-                            let unread: BTreeSet<Loc> = ints.iter().skip(keep).copied().collect();
+                            let unread: BTreeSet<Loc> = ints
+                                .iter()
+                                .skip(usize::from(a.int))
+                                .chain(floats.iter().skip(usize::from(a.float)))
+                                .copied()
+                                .collect();
                             list.retain(|l| !al.contains(l) && !unread.contains(l));
                         }
                         let sp = l0.frame.as_ref().and_then(|f| f.sp_at(span.addr));
@@ -146,8 +161,8 @@ pub fn uses(
 /// function entry.
 ///
 /// An import uses its Tier-0 prototype. A function uses its parameters: its signature, its
-/// prototype or the recovery. A function with stack parameters reads every integer argument
-/// register. An address with no facts gives `None`.
+/// prototype or the recovery. A function with stack parameters reads every argument register.
+/// An address with no facts gives `None`.
 #[must_use]
 pub fn callee_arity(program: &Program, addr: u64, conv: &CallConv) -> Option<Arity> {
     let mut fuel = Fuel::new(CALLEE_FUEL);
@@ -174,15 +189,25 @@ pub fn callee_arity_in(
     fuel: &mut Fuel,
 ) -> Result<Option<Arity>, OutOfFuel> {
     let at = Address::ram(addr);
+    let float_regs = u8::try_from(conv.float_args.len()).unwrap_or(u8::MAX);
     if let Some(row) = program
         .imports()
         .values()
         .find(|r| r.stub == Some(at) || r.slot == Some(at))
     {
+        let tier0 = ghidorah_types::proto::builtin().ok();
         return Ok(row.id.name().and_then(Types::prototype).map(|proto| {
             let p = proto_params(program, conv, &proto.sig);
+            let aggregate = tier0.is_some_and(|t| has_aggregate(t.store(), &proto.sig));
             Arity {
                 int: p.int,
+                float: if aggregate {
+                    float_regs
+                } else if conv.positional {
+                    p.int
+                } else {
+                    p.float
+                },
                 varargs: p.varargs,
             }
         }));
@@ -190,22 +215,32 @@ pub fn callee_arity_in(
     let mut part = Fuel::new(fuel.remaining().min(CALLEE_FUEL));
     let found = param_facts(program, FuncId(at), memo, &mut part);
     fuel.take(part.used())?;
-    let p = match found {
+    let (p, source) = match found {
         Ok(f) if f.open => return Ok(None),
-        Ok(f) => f.params,
+        Ok(f) => (f.params, f.source),
         Err(FirError::Fuel(e)) if fuel.is_empty() => return Err(e),
         Err(_) => return Ok(None),
     };
-    let regs = u8::try_from(conv.int_args.len()).unwrap_or(u8::MAX);
-    let int = if p.stack > 0 {
-        regs
-    } else if conv.positional {
-        p.int.saturating_add(p.float)
+    let known_floats = if source == ParamSource::Recovered {
+        let mut part = Fuel::new(fuel.remaining().min(CALLEE_FUEL));
+        let closed = solve::is_closed(program, conv, addr, memo, &mut part);
+        fuel.take(part.used())?;
+        matches!(closed, Ok(true))
     } else {
-        p.int
+        declared(program, FuncId(at)).is_some_and(|(sig, store, _)| !has_aggregate(store, sig))
+    };
+    let regs = u8::try_from(conv.int_args.len()).unwrap_or(u8::MAX);
+    let (int, float) = if p.stack > 0 {
+        (regs, float_regs)
+    } else if conv.positional {
+        let slots = p.int.saturating_add(p.float);
+        (slots, slots)
+    } else {
+        (p.int, p.float)
     };
     Ok(Some(Arity {
         int,
+        float: if known_floats { float } else { float_regs },
         varargs: p.varargs,
     }))
 }

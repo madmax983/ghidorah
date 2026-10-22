@@ -9,6 +9,11 @@
 //! A tier-1 run writes it into a new directory under the system temp directory,
 //! so two runs in one checkout do not share the file.
 //!
+//! A tier-1 run uses at most [`WORKERS`] case threads. One generator makes the inputs in
+//! case order, so the inputs do not change. Each case thread writes its own pending file
+//! `pending-<k>.bin`. The report sums the counts of the threads and keeps the first crashes
+//! in case order, so it does not depend on the threads.
+//!
 //! Each case returns the deepest stage that it reached. The report counts the
 //! cases per stage. A panic hook counts every panic in the test binary, also
 //! the panics that a target catches. Put each fuzz target in its own test binary.
@@ -18,6 +23,7 @@
 //! [`REPORT_ENV`], the batch also writes its count of passed cases.
 
 mod havoc;
+mod parallel;
 
 use std::cell::Cell;
 use std::fmt;
@@ -27,7 +33,9 @@ use std::sync::Once;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::pbt::panic_text;
-use crate::rng::{Xoshiro256ss, below, fnv1a64};
+use crate::rng::{Xoshiro256ss, fnv1a64};
+
+use self::parallel::{empty_report, next_input, run_parallel};
 
 /// The number of case panics that the hook prints with the previous hook.
 const PRINTED_PANICS: u64 = 8;
@@ -48,6 +56,9 @@ pub const PENDING_FILE: &str = "pending.bin";
 
 /// The default stack size of the case thread (256 KiB).
 pub const DEFAULT_STACK: usize = 256 * 1024;
+
+/// The largest number of case threads of a tier-1 run.
+pub const WORKERS: usize = 4;
 
 /// The default largest input length.
 pub const DEFAULT_MAX_LEN: usize = 4096;
@@ -421,7 +432,11 @@ where
     install_panic_counter();
     let batch = env_batch();
     let Some(dir) = &config.pending_dir else {
-        return run_cases(config, corpus, &target, batch, None);
+        return if batch.is_some() {
+            run_cases(config, corpus, &target, batch, None)
+        } else {
+            run_parallel(config, corpus, &target, None)
+        };
     };
     if batch.is_some() {
         std::fs::create_dir_all(dir).map_err(|e| io_error(dir, &e))?;
@@ -436,13 +451,7 @@ where
     let scratch = scratch_dir();
     let own = scratch.join(file_part(&config.target));
     std::fs::create_dir_all(&own).map_err(|e| io_error(&own, &e))?;
-    let report = run_cases(
-        config,
-        corpus,
-        &target,
-        batch,
-        Some(&own.join(PENDING_FILE)),
-    );
+    let report = run_parallel(config, corpus, &target, Some(&own));
     let removed = std::fs::remove_dir_all(&scratch).map_err(|e| io_error(&scratch, &e));
     let report = report?;
     removed?;
@@ -491,20 +500,9 @@ where
 {
     in_thread(&config.target, config.stack_size, || {
         let mut rng = Xoshiro256ss::seed_from_u64(batch_seed(config.seed, batch));
-        let mut report = Report {
-            target: config.target.clone(),
-            reached: vec![0; config.stages.len()],
-            ..Report::default()
-        };
-        let count = u64::try_from(corpus.len()).unwrap_or(u64::MAX);
+        let mut report = empty_report(config);
         for case in 0..config.cases {
-            let seed: &[u8] = if count == 0 {
-                &[]
-            } else {
-                let i = usize::try_from(below(&mut rng, count)).unwrap_or(0);
-                corpus.get(i).map_or(&[], Vec::as_slice)
-            };
-            let input = mutate(&mut rng, seed, config.max_len);
+            let input = next_input(&mut rng, corpus, config.max_len);
             run_case(
                 pending,
                 case,
