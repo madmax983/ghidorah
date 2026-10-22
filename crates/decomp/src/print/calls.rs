@@ -14,10 +14,13 @@
 //! signature prints `scale(k, x)`. Each stack slot takes the next stack argument of the call.
 //!
 //! A variadic call of a convention with a varargs register (`al` in `SysV`) passes its
-//! floating arguments in the floating argument registers. They follow the integer arguments in
-//! the text. A constant `al`, or the low byte of a `mov al, k`, gives their count. Else the
-//! count is the floating argument registers that the caller sets. The text keeps no order
-//! between the integer and the floating arguments.
+//! floating arguments in the floating argument registers. A constant `al`, or the low byte of
+//! a `mov al, k`, gives their count. Else the count is the floating argument registers that
+//! the caller sets.
+//!
+//! The registers do not tell the order of the integer and the floating arguments. A `printf`
+//! format string gives it ([`Printer::format_order`]). Else the floating arguments follow the
+//! integer arguments in the text.
 //!
 //! The result of a call is a def of the register that the `env` module gives: `rax`, or
 //! `xmm0` for a floating result. The result of an opaque instruction is its `rax` def, else
@@ -29,6 +32,7 @@ use ghidorah_base::WarningCode;
 use ghidorah_ir::{Loc, Opc};
 
 use super::expr::{safe, wrap};
+use super::format::{self, Class};
 use super::{Arity, Buf, CallRow, CallTarget, Printer, env};
 use crate::Warning;
 use crate::expr::{Call, Callee, Expr, Stmt, VarIdx};
@@ -270,6 +274,45 @@ impl Printer<'_> {
         floats.into_iter().take(count).collect()
     }
 
+    /// Gives the argument registers of the variadic call `c` of `t` in the order of its
+    /// `printf` format string.
+    ///
+    /// `ints` holds the integer argument registers and the named count. The order is the
+    /// named registers, then one register for each argument class of the format. These cases
+    /// give `None`:
+    ///
+    /// - The callee has no `printf` format, or the format argument is no string literal.
+    /// - The call has stack arguments.
+    /// - The classes do not fill the registers exactly.
+    fn format_order(
+        &self,
+        t: u64,
+        c: &Call,
+        (ints, named): (&[Loc], usize),
+        floats: &[Loc],
+        stack: usize,
+    ) -> Option<Vec<Loc>> {
+        if floats.is_empty() || stack > 0 {
+            return None;
+        }
+        let index = self.env.printf_format(t).filter(|i| *i < named)?;
+        let at = *ints.get(index).filter(|_| named <= ints.len())?;
+        let Some((_, Expr::Str { addr })) = c.args.iter().find(|(l, _)| *l == at) else {
+            return None;
+        };
+        let classes = format::classes(&self.env.string_bytes(*addr)?)?;
+        let (named_regs, rest) = ints.split_at(named);
+        let (mut i, mut f) = (rest.iter(), floats.iter());
+        let mut out = named_regs.to_vec();
+        for class in classes {
+            out.push(*match class {
+                Class::Int => i.next()?,
+                Class::Float => f.next()?,
+            });
+        }
+        (i.next().is_none() && f.next().is_none()).then_some(out)
+    }
+
     /// Gives the count of the argument registers that the caller sets: one more than the
     /// last one in the set of the call.
     fn set_count(c: &Call, regs: &[Loc]) -> usize {
@@ -395,8 +438,12 @@ impl Printer<'_> {
                     name: name.clone(),
                 });
                 let mut list: Vec<Loc> = regs.iter().take(count).copied().collect();
-                if arity.is_some_and(|a| a.variadic) {
-                    list.extend(self.vararg_floats(c));
+                if let Some(a) = arity.filter(|a| a.variadic) {
+                    let floats = self.vararg_floats(c);
+                    list = match self.format_order(*t, c, (&list, a.named), &floats, stack) {
+                        Some(order) => order,
+                        None => list.into_iter().chain(floats).collect(),
+                    };
                 }
                 let args = self.args(c, &list, (list.len(), stack), buf);
                 format!("{name}({args})")
