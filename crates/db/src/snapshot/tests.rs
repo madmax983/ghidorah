@@ -148,3 +148,23 @@ fn inputs_hash_follows_analysis_inputs() {
         result_hash(&crate::program::AnalysisSet::default())
     );
 }
+
+/// The streamed result hash equals the SHA-256 of the whole JCS text of the layer.
+#[test]
+fn result_hash_streams_the_jcs_text() {
+    let mut p = seeded();
+    p.layer_mut(Source::Analysis)
+        .expect("the analysis layer")
+        .comments
+        .set(
+            Address::ram(0x1080),
+            crate::comments::CommentKind::Eol,
+            Some("sys:write".to_owned()),
+            &crate::fact::Origin::analysis(),
+        )
+        .expect("a comment");
+    for set in [p.base(), p.analysis()] {
+        let text = ghidorah_json::write_jcs(&crate::codec::tables_to_json(set)).expect("JCS");
+        assert_eq!(result_hash(set), ghidorah_base::sha256(text.as_bytes()));
+    }
+}

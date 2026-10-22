@@ -301,7 +301,7 @@ Rules:
 - Every production crate can take `ghidorah-testkit` as a dev-dependency. Only the `loader` tests take `ghidorah-oracle` as a dev-dependency (counting allocator, AC-055).
 - The `decomp` tests take `ghidorah-loader` and `ghidorah-json` as dev-dependencies. They load the fixtures and read the truth files and the leaf vectors (AC-101).
 - `json` and `testkit` are leaves. They have no workspace dependencies.
-- `analysis` names `Address`, `FuncId` and `Fuel` of `base` and the `RangeSet` of `kernel`. It writes its analysis set through the JSON codec of `db`, so it also takes `json` (WP-15).
+- `analysis` names `Address`, `FuncId` and `Fuel` of `base` and the `RangeSet` of `kernel`. It writes its analysis set through the typed rows of the `db` codec (`tables_from_rows`). Its inputs hash and metrics use JSON values, so it also takes `json` (WP-15).
 - `decomp` names `Fuel`, `FuncId`, `VarId` and `WarningCode` of `base` (WP-21).
 - Pure core crates (`kernel`, `base`, `json`, `loader`, `x86`, `ir`, `types`, `analysis`, `decomp`) do not use `std::fs`, `std::net`, `std::process`, `std::env` or `std::time::SystemTime` (AC-017). `db`, `tools` and `cli` get file access and a clock from the edge.
 - No crate calls `std::env::set_var` or `std::env::remove_var` (AC-223). The `cli` crate reads every `GHIDORAH_*` variable once into `RunConfig` (Section 10.11).

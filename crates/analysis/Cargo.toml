@@ -17,7 +17,7 @@ test = false
 ghidorah-base = { path = "../base" }
 ghidorah-db = { path = "../db" }
 ghidorah-ir = { path = "../ir" }
-# The analysis set goes into the program through the JSON codec of `ghidorah-db`.
+# The inputs hash and the metrics use JSON values.
 ghidorah-json = { path = "../json" }
 ghidorah-kernel = { path = "../kernel" }
 ghidorah-loader = { path = "../loader" }

@@ -1,8 +1,9 @@
 //! The publish step: the analysis set of a work state and its `ReplaceAnalysis` commit
 //! (design Section 3.9).
 //!
-//! The step makes the JSON form of the analysis layer and reads it with the codec of
-//! `ghidorah-db`. So each row goes through the write rules of its table. Rules of the step:
+//! The step makes the typed rows of the analysis layer and gives them to
+//! [`tables_from_rows`]. So each row goes through the write rules of its table, with no JSON
+//! form between. Rules of the step:
 //!
 //! - Each fact has the origin `Analysis`, transaction 0, session `analysis`. So the set does
 //!   not depend on the number of commits (AC-092).
@@ -16,12 +17,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use ghidorah_base::{Address, FuncId, JumpTableId};
-use ghidorah_db::codec::{edit_to_json, key_to_json, tables_from_json};
+use ghidorah_db::codec::{SetRows, tables_from_rows};
+use ghidorah_db::listing::CodeUnit;
 use ghidorah_db::{
-    AnalysisSet, Commit, Edit, Fact, FactKey, FuncRecord, Function, JumpTable, Origin, Part,
-    PartKind, Program, Ref, RefKey, SessionLabel, Source, StartReason, StrInfo,
+    AnalysisSet, Commit, Edit, Fact, FactKey, Function, JumpTable, Origin, Part, PartKind, Program,
+    Ref, RefKey, SessionLabel, Source, StartReason, StrInfo,
 };
-use ghidorah_json::Value;
 
 use crate::AnalysisError;
 use crate::why::Why;
@@ -112,7 +113,7 @@ impl Inputs {
 /// The facts of a set with their why-records, before the order step.
 struct Facts {
     funcs: Vec<Function>,
-    units: Vec<Value>,
+    units: Vec<(u64, CodeUnit)>,
     refs: Vec<Ref>,
     whys: BTreeMap<FactKey, Why>,
     kept: BTreeSet<u64>,
@@ -166,12 +167,14 @@ fn collect(program: &Program, work: &Work) -> Facts {
         if !kept.contains(&u.owner) {
             continue;
         }
-        out.units.push(Value::object([
-            ("at", Value::from(Address::ram(*at).to_string())),
-            ("len", Value::from(u.len)),
-            ("flow", Value::from(u.flow.name())),
-            ("flags", Value::from(u.flags)),
-        ]));
+        out.units.push((
+            *at,
+            CodeUnit::Insn {
+                len: u.len,
+                flow: u.flow,
+                flags: u.flags,
+            },
+        ));
         out.whys.insert(FactKey::CodeUnit(*at), u.why.clone());
     }
     for (key, why) in &work.refs {
@@ -242,11 +245,6 @@ fn order(p: &Program, whys: &BTreeMap<FactKey, Why>) -> BTreeMap<FactKey, (u64, 
     out
 }
 
-/// Gives the JSON form of one fact of a forward edit: the member `name` of the edit form.
-fn member(edit: &Edit, name: &str) -> Value {
-    edit_to_json(edit).get(name).cloned().unwrap_or_default()
-}
-
 /// Gives the analysis set of `work`.
 ///
 /// # Errors
@@ -265,65 +263,30 @@ pub(crate) fn analysis_set(program: &Program, work: &Work) -> Result<AnalysisSet
     let extra = crate::irfacts::rows(program, work, &facts.funcs, &mut facts.whys);
     let origin = Origin::analysis();
     let ordered = order(program, &facts.whys);
-    let mut why_rows = Vec::with_capacity(ordered.len());
-    for (key, (n, premises)) in &ordered {
-        let Some(why) = facts.whys.get(key) else {
+    let why_next = u64::try_from(ordered.len()).unwrap_or(u64::MAX);
+    let mut why = Vec::with_capacity(ordered.len());
+    for (key, (n, premises)) in ordered {
+        let Some(found) = facts.whys.remove(&key) else {
             continue;
         };
-        why_rows.push(Value::object([
-            ("key", key_to_json(key)),
-            ("order", Value::from(*n)),
-            ("rule", Value::from(why.rule.code())),
-            (
-                "premises",
-                Value::Array(premises.iter().map(key_to_json).collect()),
-            ),
-        ]));
+        let record = ghidorah_db::why::Why {
+            rule: found.rule.rule_code()?,
+            premises,
+        };
+        why.push((key, n, record));
     }
-    let funcs = facts
-        .funcs
-        .into_iter()
-        .map(|func| {
-            let record = FuncRecord {
-                func,
-                vars: Vec::new(),
-                plate: None,
-            };
-            member(&Edit::CreateFunction(Box::new(record)), "func")
-        })
-        .collect();
-    let refs = facts
-        .refs
-        .into_iter()
-        .map(|r| {
-            member(
-                &Edit::AddRef {
-                    fact: origin.fact(r),
-                },
-                "ref",
-            )
-        })
-        .collect();
-    let empty = || Value::Array(Vec::new());
-    let value = Value::object([
-        ("comments", empty()),
-        ("data", Value::Array(data)),
-        ("funcs", Value::Array(funcs)),
-        ("jumptables", empty()),
-        ("overrides", empty()),
-        ("refs", Value::Array(refs)),
-        ("strings", Value::Array(strings)),
-        ("symbols", empty()),
-        ("units", Value::Array(facts.units)),
-        ("vars", empty()),
-        ("why", Value::Array(why_rows)),
-        (
-            "why_next",
-            Value::from(u64::try_from(ordered.len()).unwrap_or(u64::MAX)),
-        ),
-    ]);
-    let value = extra.merge(value);
-    Ok(tables_from_json(&value)?)
+    let mut rows = SetRows {
+        data,
+        funcs: facts.funcs,
+        refs: facts.refs.into_iter().map(|r| origin.fact(r)).collect(),
+        strings,
+        units: facts.units,
+        why,
+        why_next,
+        ..SetRows::default()
+    };
+    extra.add_to(&mut rows);
+    Ok(tables_from_rows(rows)?)
 }
 
 /// Commits the analysis set of `work` with one `ReplaceAnalysis` edit.

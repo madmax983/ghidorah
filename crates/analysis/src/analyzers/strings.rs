@@ -31,7 +31,6 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use ghidorah_base::{Address, BinText, Caps, Limits, Range, Rendered, StringId, hex};
 use ghidorah_db::{Encoding, FactKey, Program, StrInfo};
-use ghidorah_json::Value;
 use ghidorah_kernel::RangeSet;
 use ghidorah_loader::{Perms, SectionKind};
 
@@ -528,20 +527,11 @@ pub fn run(ctx: &mut AnalysisCtx<'_>, ranges: &RangeSet) -> Step {
 }
 
 /// Adds the strings of `work` to the why-records of a publish step. Gives the string rows.
-pub(crate) fn collect(work: &Work, whys: &mut BTreeMap<FactKey, Why>) -> Vec<Value> {
+pub(crate) fn collect(work: &Work, whys: &mut BTreeMap<FactKey, Why>) -> Vec<(u64, StrInfo)> {
     let mut rows = Vec::with_capacity(work.strings.len());
     for (at, (info, why)) in &work.strings {
-        let addr = Address::ram(*at);
-        let fields = Value::object([
-            ("encoding", Value::from(info.encoding.name())),
-            ("len", Value::from(info.len)),
-            ("referenced", Value::from(info.referenced)),
-        ]);
-        rows.push(Value::object([
-            ("at", Value::from(addr.to_string())),
-            ("info", fields),
-        ]));
-        whys.insert(FactKey::Str(StringId(addr)), why.clone());
+        rows.push((*at, *info));
+        whys.insert(FactKey::Str(StringId(Address::ram(*at))), why.clone());
     }
     rows
 }
