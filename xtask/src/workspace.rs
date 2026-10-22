@@ -107,6 +107,8 @@ pub struct Dep {
     pub path: Option<PathBuf>,
     /// The registry or git source, when one exists.
     pub source: Option<String>,
+    /// The version requirement. Cargo gives `*` when the manifest has no version.
+    pub req: Option<String>,
 }
 
 /// One build target of a package.
@@ -205,6 +207,7 @@ fn parse_dep(value: &Value) -> Result<Dep, Error> {
         kind,
         path: text_of(value, "path").map(PathBuf::from),
         source: text_of(value, "source"),
+        req: text_of(value, "req"),
     })
 }
 
@@ -321,22 +324,71 @@ pub fn check_workspace_deps(meta: &Metadata) -> Vec<Finding> {
     found
 }
 
-/// AC-001e: every package sets `publish = false` and `license = "Apache-2.0"`.
+/// The root files that each production package holds a byte copy of (ADR-0030).
+pub const LEGAL_FILES: &[&str] = &["LICENSE", "NOTICE"];
+
+/// Tells if a package is a production package of the package table.
+fn is_prod(package: &Package) -> bool {
+    spec(&package.name).is_some_and(|s| s.kind == Kind::Prod)
+}
+
+/// AC-001e: each production package is publishable. Each other package is not.
+///
+/// Each normal path dependency of a production package gives a version. Every package sets
+/// `license = "Apache-2.0"`.
 #[must_use]
 pub fn check_publish_license(meta: &Metadata) -> Vec<Finding> {
     let mut found = Vec::new();
     for package in &meta.packages {
         let manifest = format!("{}/Cargo.toml", package.dir(&meta.root));
-        if !package.publish_false {
-            let detail = format!("package `{}` must set `publish = false`", package.name);
-            found.push(Finding::new("AC-001e", manifest.clone(), 0, detail));
+        let mut add = |detail: String| found.push(Finding::new("AC-001e", &manifest, 0, detail));
+        let name = &package.name;
+        if !is_prod(package) {
+            if !package.publish_false {
+                add(format!("dev package `{name}` must set `publish = false`"));
+            }
+        } else if package.publish_false {
+            add(format!("production package `{name}` must be publishable"));
+        } else {
+            let bare = package.deps.iter().filter(|d| {
+                d.kind != DepKind::Dev
+                    && d.path.is_some()
+                    && d.req.as_deref().is_none_or(|r| r == "*")
+            });
+            for dep in bare {
+                let dep = &dep.name;
+                add(format!(
+                    "dependency `{dep}` of `{name}` must give a version"
+                ));
+            }
         }
         if package.license.as_deref() != Some("Apache-2.0") {
-            let detail = format!(
-                "package `{}` must set `license = \"Apache-2.0\"`",
-                package.name
-            );
-            found.push(Finding::new("AC-001e", manifest, 0, detail));
+            add(format!(
+                "package `{name}` must set `license = \"Apache-2.0\"`"
+            ));
+        }
+    }
+    found
+}
+
+/// AC-001e: each production package holds byte copies of [`LEGAL_FILES`].
+///
+/// `cargo publish` packs only the files of the package directory, so the root copies do not
+/// go with it. `read` gives the text of a path relative to the workspace root.
+#[must_use]
+pub fn check_legal_copies(meta: &Metadata, read: impl Fn(&str) -> Option<String>) -> Vec<Finding> {
+    let mut found = Vec::new();
+    for package in meta.packages.iter().filter(|p| is_prod(p)) {
+        let dir = package.dir(&meta.root);
+        for file in LEGAL_FILES {
+            let copy = format!("{dir}/{file}");
+            let detail = match (read(file), read(&copy)) {
+                (Some(root), Some(text)) if root == text => continue,
+                (None, _) => format!("the root `{file}` does not read"),
+                (Some(_), None) => format!("copy the root `{file}` to `{copy}`"),
+                (Some(_), Some(_)) => format!("`{copy}` differs from the root `{file}`"),
+            };
+            found.push(Finding::new("AC-001e", copy, 0, detail));
         }
     }
     found

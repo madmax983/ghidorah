@@ -7,7 +7,28 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.97"
 license = "Apache-2.0"
+# The production packages set `publish = true` (ADR-0030). Dev packages keep this value.
 publish = false
+repository = "https://github.com/madmax983/ghidorah"
+readme = "README.md"
+keywords = ["reverse-engineering", "decompiler", "disassembler", "mcp", "x86-64"]
+categories = ["development-tools", "command-line-utilities"]
+
+# The production packages for `cargo publish --workspace`. Each entry gives the
+# workspace version, so a version bump edits this table only.
+[workspace.dependencies]
+ghidorah-spec = { path = "crates/spec", version = "0.1.0" }
+ghidorah-kernel = { path = "crates/kernel", version = "0.1.0" }
+ghidorah-base = { path = "crates/base", version = "0.1.0" }
+ghidorah-json = { path = "crates/json", version = "0.1.0" }
+ghidorah-loader = { path = "crates/loader", version = "0.1.0" }
+ghidorah-x86 = { path = "crates/x86", version = "0.1.0" }
+ghidorah-ir = { path = "crates/ir", version = "0.1.0" }
+ghidorah-types = { path = "crates/types", version = "0.1.0" }
+ghidorah-db = { path = "crates/db", version = "0.1.0" }
+ghidorah-analysis = { path = "crates/analysis", version = "0.1.0" }
+ghidorah-decomp = { path = "crates/decomp", version = "0.1.0" }
+ghidorah-tools = { path = "crates/tools", version = "0.1.0" }
 
 # The lint policy of ADR-0019. Each package sets `[lints] workspace = true`.
 [workspace.lints.rust]

@@ -5,7 +5,11 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-publish.workspace = true
+publish = true
+repository.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
 
 # The library holds the commands, so in-process tests can run them with a test backend.
 # Unit tests live in `tests.rs` files. Integration tests live in `tests/`.
@@ -18,9 +22,9 @@ name = "ghidorah"
 path = "src/main.rs"
 
 [dependencies]
-ghidorah-base = { path = "../base" }
-ghidorah-json = { path = "../json" }
-ghidorah-tools = { path = "../tools" }
+ghidorah-base.workspace = true
+ghidorah-json.workspace = true
+ghidorah-tools.workspace = true
 
 [dev-dependencies]
 ghidorah-testkit = { path = "../testkit" }

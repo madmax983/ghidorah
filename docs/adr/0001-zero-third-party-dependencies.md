@@ -1,6 +1,6 @@
 # ADR-0001: Zero third-party dependencies
 
-Status: Accepted (amended 2026-10-17)
+Status: Accepted (amended 2026-10-22)
 Date: 2026-10-16
 Verified by: AC-001a, AC-001b, AC-001c, AC-001d, AC-001e, AC-002, AC-005, AC-008
 
@@ -17,7 +17,7 @@ Verified by: AC-001a, AC-001b, AC-001c, AC-001d, AC-001e, AC-002, AC-005, AC-008
 - `cargo metadata --offline --locked` lists only the packages of design Section 2.1, each at `crates/<dir>/Cargo.toml` or `xtask/Cargo.toml`.
 - Every dependency of every package is a workspace package or the built-in `proc_macro` crate.
 - No `Cargo.toml` has `[patch]` or `[replace]`. `.cargo/config.toml` has no `[source]` or `[patch]` table.
-- Every package sets `publish = false` and `license = "Apache-2.0"`. No `[[package]]` in `Cargo.lock` has a `source` key.
+- Every package sets `license = "Apache-2.0"`. ADR-0030 sets the `publish` value of each package. No `[[package]]` in `Cargo.lock` has a `source` key.
 - First-party crates replace common libraries: `ghidorah-json` (JSON, JCS, pointer), `ghidorah-base` (SHA-256, FNV-1a, hex, glob, did-you-mean), `ghidorah-testkit` (PRNG, property tests, shrink, fuzz, golden files, bench, STE checker), `ghidorah` (CLI parsing, MCP).
 - `.cargo/config.toml` sets `[net] offline = true`, so a new registry dependency cannot resolve.
 - First-party proc-macro crates use only the built-in `proc_macro` crate (`ghidorah-spec`).
@@ -40,3 +40,8 @@ Verified by: AC-001a, AC-001b, AC-001c, AC-001d, AC-001e, AC-002, AC-005, AC-008
 ## Amendment 2026-10-17
 
 - AC-001 was a source-key check only. It is now five sub-ACs (AC-001a to AC-001e) that also catch path crates, patch tables and source replacement.
+
+## Amendment 2026-10-22
+
+- ADR-0030 makes the 13 production packages publishable. The dev packages keep `publish = false`.
+- A publish sends first-party code out. It adds no third-party code, so the zero-dependency rule stays the same.

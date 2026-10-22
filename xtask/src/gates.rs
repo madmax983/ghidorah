@@ -121,8 +121,14 @@ pub const GATES: &[Gate] = &[
     ),
     gate(
         "AC-001e",
-        "Every package sets `publish = false` and Apache-2.0.",
-        |r| Ok(workspace::check_publish_license(&r.meta)),
+        "Production packages can go to crates.io with LICENSE and NOTICE. Dev packages cannot.",
+        |r| {
+            let mut found = workspace::check_publish_license(&r.meta);
+            found.extend(workspace::check_legal_copies(&r.meta, |rel| {
+                r.read(rel).ok()
+            }));
+            Ok(found)
+        },
     ),
     gate(
         "AC-002",
