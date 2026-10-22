@@ -374,3 +374,40 @@ fn intervalmap_extend_sorted() {
             .contains("0x9")
     );
 }
+
+/// Bodies in address order go on the end of the map. Each call costs its own items, not a
+/// copy of the whole map, so 100,000 calls stay fast. A body that touches the last entry
+/// appends, and a body that overlaps it still fails.
+#[test]
+fn regress_extend_sorted_appends_in_address_order() {
+    let mut map = IntervalMap::new();
+    let started = std::time::Instant::now();
+    for i in 0..100_000_u64 {
+        let r = Range::new(i * 16, i * 16 + 5).unwrap();
+        map.extend_sorted(vec![(r, i)]).unwrap();
+    }
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(5),
+        "100,000 calls take {:?}",
+        started.elapsed()
+    );
+    assert_eq!(map.as_slice().len(), 100_000);
+    assert!(
+        map.as_slice()
+            .windows(2)
+            .all(|w| w[0].0.last < w[1].0.first)
+    );
+
+    let last = 99_999 * 16 + 5;
+    let touch = Range::new(last + 1, last + 4).unwrap();
+    map.extend_sorted(vec![(touch, 7)]).unwrap();
+    assert_eq!(map.as_slice().last(), Some(&(touch, 7)));
+    let clash = Range::new(last + 4, last + 9).unwrap();
+    assert_eq!(
+        map.extend_sorted(vec![(clash, 8)]),
+        Err(IntervalError::Overlap {
+            new: clash,
+            existing: touch,
+        })
+    );
+}
