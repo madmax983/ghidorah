@@ -28,9 +28,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use ghidorah_base::{Address, Limits, Range};
-use ghidorah_db::codec::edit_to_json;
-use ghidorah_db::{DataDef, Edit, FactKey, Origin, Program, Ref, RefKey, RefType};
-use ghidorah_json::Value;
+use ghidorah_db::{DataDef, Fact, FactKey, Origin, Program, Ref, RefKey, RefType};
 use ghidorah_kernel::RangeSet;
 use ghidorah_loader::pe::{REL_DIR64, REL_HIGHLOW};
 use ghidorah_loader::{Format, Kind, Perms, Reloc, RelocForm, SectionKind, Sym, SymTable};
@@ -500,14 +498,8 @@ fn ptr_type(program: &Program) -> TypeId {
 }
 
 /// Gives the data row of the definition `def` at `at`.
-fn data_row(at: u64, def: DataDef) -> Value {
-    let addr = Address::ram(at);
-    let edit = Edit::SetDataDef {
-        at: addr,
-        def: Some(Origin::analysis().fact(def)),
-    };
-    let fact = edit_to_json(&edit).get("def").cloned().unwrap_or_default();
-    Value::object([("at", Value::from(addr.to_string())), ("def", fact)])
+fn data_row(at: u64, def: DataDef) -> (u64, Fact<DataDef>) {
+    (at, Origin::analysis().fact(def))
 }
 
 /// Adds the data references of `work` to the facts of a publish step. An operand reference
@@ -519,7 +511,7 @@ pub(crate) fn collect(
     kept: &BTreeSet<u64>,
     refs: &mut Vec<Ref>,
     whys: &mut BTreeMap<FactKey, Why>,
-) -> Vec<Value> {
+) -> Vec<(u64, Fact<DataDef>)> {
     let is_kept = |at: u64| work.units.get(&at).is_some_and(|u| kept.contains(&u.owner));
     for (key, why) in &work.data.operands {
         if is_kept(key.from.off) {
@@ -536,7 +528,7 @@ pub(crate) fn collect(
     };
     let mut rows = BTreeMap::new();
     for (at, slot) in &work.data.slots {
-        rows.insert(*at, data_row(*at, slot_def));
+        rows.insert(*at, data_row(*at, slot_def).1);
         whys.insert(FactKey::Data(*at), slot.why.clone());
         let key = slot.key(*at);
         refs.push(Ref { key, primary: true });
@@ -553,7 +545,7 @@ pub(crate) fn collect(
         if !is_kept(entry.site) {
             continue;
         }
-        rows.insert(*at, data_row(*at, entry_def));
+        rows.insert(*at, data_row(*at, entry_def).1);
         let site = vec![FactKey::CodeUnit(entry.site)];
         whys.insert(FactKey::Data(*at), Why::new(Rule::AddrTable, site));
         let key = entry.key(*at);
@@ -563,5 +555,5 @@ pub(crate) fn collect(
             Why::new(Rule::AddrTable, vec![FactKey::Data(*at)]),
         );
     }
-    rows.into_values().collect()
+    rows.into_iter().collect()
 }

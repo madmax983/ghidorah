@@ -27,12 +27,12 @@ mod tests;
 use std::fmt;
 use std::path::Path;
 
-use ghidorah_base::{Rev, TxId, hex, sha256};
+use ghidorah_base::{Rev, Sha256, TxId, hex, sha256};
 use ghidorah_json::{Limits, Value, write_jcs};
 
 use crate::codec::{
     CodecError, Json, Obj, notes_from_json, notes_to_json, progress_from_json, progress_to_json,
-    tables_from_json, tables_to_json, types_from_json, types_to_json,
+    tables_from_json, tables_jcs_to, tables_to_json, types_from_json, types_to_json,
 };
 use crate::fs::{Fs, FsError, replace_file};
 use crate::migrate::ExtMap;
@@ -208,23 +208,40 @@ pub fn encode(
             .cloned()
             .unwrap_or(Value::Array(Vec::new()))
     };
-    let facts = Value::object([
-        ("analysis", tables_to_json(program.analysis())),
-        ("base", tables_to_json(program.base())),
-        ("binary", Value::from(hex::encode(&program.meta().sha256))),
-        ("notes", notes_to_json(program.notes())),
-        ("types", types_to_json(program.types())),
-    ]);
-    let all = Value::object([
-        ("analysis_inputs_hash", hash_json(inputs.as_ref())),
-        ("facts", facts),
-        ("format_version", Value::from(FORMAT_VERSION)),
-        ("journal_lines", Value::from(journal_lines)),
-        ("marks", part("marks")),
-        ("progress", part("funcs")),
-        ("rev", program.rev().enc()),
-    ]);
-    write_jcs(&all).map_err(|e| SnapshotError::Jcs(e.to_string()))
+    let jcs = |v: &Value| write_jcs(v).map_err(|e| SnapshotError::Jcs(e.to_string()));
+    // The members go in JCS order. The two layers go row by row, so no JSON value of a whole
+    // layer exists.
+    let mut out = String::new();
+    out.push_str("{\"analysis_inputs_hash\":");
+    out.push_str(&jcs(&hash_json(inputs.as_ref()))?);
+    out.push_str(",\"facts\":{\"analysis\":");
+    layer_jcs(&mut out, program.analysis())?;
+    out.push_str(",\"base\":");
+    layer_jcs(&mut out, program.base())?;
+    out.push_str(",\"binary\":");
+    out.push_str(&jcs(&Value::from(hex::encode(&program.meta().sha256)))?);
+    out.push_str(",\"notes\":");
+    out.push_str(&jcs(&notes_to_json(program.notes()))?);
+    out.push_str(",\"types\":");
+    out.push_str(&jcs(&types_to_json(program.types()))?);
+    out.push_str("},\"format_version\":");
+    out.push_str(&jcs(&Value::from(FORMAT_VERSION))?);
+    out.push_str(",\"journal_lines\":");
+    out.push_str(&jcs(&Value::from(journal_lines))?);
+    out.push_str(",\"marks\":");
+    out.push_str(&jcs(&part("marks"))?);
+    out.push_str(",\"progress\":");
+    out.push_str(&jcs(&part("funcs"))?);
+    out.push_str(",\"rev\":");
+    out.push_str(&jcs(&program.rev().enc())?);
+    out.push('}');
+    Ok(out)
+}
+
+/// Adds the JCS text of the tables of one layer to `out`, row by row.
+fn layer_jcs(out: &mut String, tables: &Tables) -> Result<(), SnapshotError> {
+    tables_jcs_to(tables, true, &mut |piece| out.push_str(piece))
+        .map_err(|e| SnapshotError::Jcs(e.to_string()))
 }
 
 /// Tells if `v` is a format version that a reader takes.
@@ -327,7 +344,11 @@ pub fn inputs_hash(program: &Program, engine: &Value, config: &Value) -> [u8; 32
 /// Gives the SHA-256 of the JCS text of the tables of an analysis layer.
 #[must_use]
 pub fn result_hash(set: &AnalysisSet) -> [u8; 32] {
-    hash_value(&tables_to_json(set))
+    let mut hasher = Sha256::default();
+    match tables_jcs_to(set, true, &mut |piece| hasher.update(piece.as_bytes())) {
+        Ok(()) => hasher.finalize(),
+        Err(_) => hash_value(&tables_to_json(set)),
+    }
 }
 
 /// Gives the SHA-256 of the JCS text of `value`, or of its compact text without a JCS form.

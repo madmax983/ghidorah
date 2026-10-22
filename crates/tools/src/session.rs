@@ -162,6 +162,8 @@ pub struct RunReport {
     pub state: AnalysisState,
     /// The fuel that the run used.
     pub steps_used: u64,
+    /// `true` when the analysis stopped at the cap of the code units.
+    pub capped: bool,
 }
 
 /// The analysis engine of a session. The analysis WP installs it with [`Session::set_engine`].

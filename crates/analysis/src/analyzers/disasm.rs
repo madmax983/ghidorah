@@ -36,6 +36,12 @@ use crate::why::{Rule, Why};
 /// The largest number of instructions in one function body.
 pub const MAX_INSNS: u64 = 100_000;
 
+/// The largest number of code units of the program.
+///
+/// A walk stops at the cap, so the memory of the analysis stays bounded for a large or
+/// hostile binary. One unit takes about 2.7 KB of peak memory, so the cap is about 11 GB.
+pub const MAX_UNITS: u64 = 4_194_304;
+
 /// The largest number of body changes of one function. Then its body stays.
 pub const MAX_CHANGES: u64 = 64;
 
@@ -52,6 +58,11 @@ pub const SPEC: AnalyzerSpec = AnalyzerSpec {
             name: "max_insns",
             value: MAX_INSNS,
             doc: "The largest number of instructions in one function body.",
+        },
+        Opt {
+            name: "max_units",
+            value: MAX_UNITS,
+            doc: "The largest number of code units of the program.",
         },
         Opt {
             name: "max_changes",
@@ -74,8 +85,12 @@ pub fn run(ctx: &mut AnalysisCtx<'_>, ranges: &RangeSet) -> Step {
             continue;
         }
         let walk = Walk::new(ctx, entry).run();
-        work = work.saturating_add(walk.insns);
-        let _ = ctx.set_body(entry, walk.body);
+        let (insns, body, capped) = (walk.insns, walk.body, walk.capped);
+        work = work.saturating_add(insns);
+        if capped {
+            ctx.work.capped = true;
+        }
+        let _ = ctx.set_body(entry, body);
     }
     Step { work }
 }
@@ -87,16 +102,26 @@ struct Walk<'c, 'a> {
     body: Body,
     todo: BTreeSet<u64>,
     insns: u64,
+    /// The code units that the walk can add: the cap less the units of other functions.
+    budget: u64,
+    /// `true` when the walk stopped at `budget`.
+    capped: bool,
 }
 
 impl<'c, 'a> Walk<'c, 'a> {
     fn new(ctx: &'c AnalysisCtx<'a>, entry: u64) -> Self {
+        let work = &ctx.work;
+        let own = work.funcs.get(&entry).map_or(0, |f| f.units.len());
+        let others = work.units.len().saturating_sub(own);
+        let cap = work.unit_cap.unwrap_or(MAX_UNITS);
         Self {
             ctx,
             entry,
             body: Body::default(),
             todo: BTreeSet::from([entry]),
             insns: 0,
+            budget: cap.saturating_sub(u64::try_from(others).unwrap_or(u64::MAX)),
+            capped: false,
         }
     }
 
@@ -302,6 +327,11 @@ impl<'c, 'a> Walk<'c, 'a> {
             }
             if self.insns >= MAX_INSNS {
                 self.body.summary.unknown = true;
+                break;
+            }
+            if self.insns >= self.budget {
+                self.body.summary.unknown = true;
+                self.capped = true;
                 break;
             }
             let decoded = decode_at(ctx.program(), at).and_then(|insn| {

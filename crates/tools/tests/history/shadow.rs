@@ -54,6 +54,7 @@ impl AnalysisEngine for TestEngine {
         Ok(RunReport {
             state: AnalysisState::Complete,
             steps_used: 10,
+            capped: false,
         })
     }
 
@@ -74,6 +75,7 @@ impl AnalysisEngine for TestEngine {
         Ok(RunReport {
             state: AnalysisState::Complete,
             steps_used: 5,
+            capped: false,
         })
     }
 }

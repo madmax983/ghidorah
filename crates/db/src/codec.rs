@@ -40,6 +40,8 @@ use crate::progress::Progress;
 use crate::typesglue::{TypeInput, Types};
 use crate::why::FactKey;
 
+pub use tables::SetRows;
+
 pub(crate) use values::Json;
 
 /// The reason of a [`CodecError`].
@@ -234,6 +236,22 @@ pub fn tables_to_json(tables: &Tables) -> Value {
     tables::encode(tables, true)
 }
 
+/// Writes the JCS text of [`tables_to_json`] to `sink` in pieces, one row at a time.
+///
+/// `counters` adds `why_next`. The pieces join to the same bytes as the JCS text of the JSON
+/// form, but no JSON value of the whole layer exists.
+///
+/// # Errors
+///
+/// Returns the [`ghidorah_json::JcsError`] of a row that has no JCS form.
+pub fn tables_jcs_to(
+    tables: &Tables,
+    counters: bool,
+    sink: &mut dyn FnMut(&str),
+) -> Result<(), ghidorah_json::JcsError> {
+    tables::write_jcs_to(tables, counters, sink)
+}
+
 /// Reads the tables of one layer.
 ///
 /// # Errors
@@ -241,6 +259,16 @@ pub fn tables_to_json(tables: &Tables) -> Value {
 /// Returns a [`CodecError`] for a bad shape, a bad text or a broken table rule.
 pub fn tables_from_json(value: &Value) -> Result<Tables, CodecError> {
     tables::decode(value)
+}
+
+/// Makes the tables of an analysis set from typed rows. Each row goes through the same write
+/// path as in [`tables_from_json`], with no JSON form between.
+///
+/// # Errors
+///
+/// Returns a [`CodecError`] for a broken table rule.
+pub fn tables_from_rows(rows: SetRows) -> Result<Tables, CodecError> {
+    tables::from_rows(rows)
 }
 
 /// Gives the JSON form of the note store, with the counter of new note IDs.

@@ -20,12 +20,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use ghidorah_base::{Address, Fuel, FuncId, JumpTableId, WarningCode};
-use ghidorah_db::codec::edit_to_json;
+use ghidorah_db::codec::SetRows;
 use ghidorah_db::{
-    Caveat, CommentKind, Edit, FactKey, FlowKind, Function, JumpTable, Origin, PartKind, Program,
-    SymKey, SymKind,
+    Caveat, CommentKind, Fact, FactKey, FlowKind, Function, JumpTable, Origin, PartKind, Program,
+    SymKey, SymKind, Symbol,
 };
-use ghidorah_json::Value;
 
 use crate::analyzers::iat::ThunkRec;
 use crate::ctx::AnalysisCtx;
@@ -183,14 +182,20 @@ pub(crate) fn work_ir_at(
 /// The rows of the IR facts for the analysis set.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub(crate) struct Rows {
-    jumptables: Vec<Value>,
-    symbols: Vec<Value>,
-    comments: Vec<Value>,
+    jumptables: Vec<(JumpTableId, Fact<JumpTable>)>,
+    symbols: Vec<Symbol>,
+    comments: Vec<(Address, CommentKind, Fact<String>)>,
 }
 
-/// Gives the member `name` of the JSON form of `edit`.
-fn member(edit: &Edit, name: &str) -> Value {
-    edit_to_json(edit).get(name).cloned().unwrap_or_default()
+/// Gives the primary `FUNCTION` symbol `name` at `addr`.
+fn function_symbol(addr: Address, name: Fact<String>) -> Symbol {
+    Symbol {
+        addr,
+        key: SymKey(0),
+        name,
+        kind: SymKind::Function,
+        primary: true,
+    }
 }
 
 /// Gives the rows of the IR facts of `work` whose owner is in `funcs`. Each row adds its
@@ -209,30 +214,15 @@ pub(crate) fn rows(
         if !owns(rec.owner, *site) {
             continue;
         }
-        let edit = Edit::SetJumpTable {
-            id: JumpTableId(Address::ram(*site)),
-            table: Some(o.fact(rec.table.clone())),
-        };
-        out.jumptables.push(Value::object([
-            ("at", member(&edit, "at")),
-            ("table", member(&edit, "table")),
-        ]));
+        out.jumptables
+            .push((JumpTableId(Address::ram(*site)), o.fact(rec.table.clone())));
         whys.insert(table_key(*site), rec.why.clone());
     }
     if let Some((entry, why)) = &work.ir.main {
         let addr = Address::ram(*entry);
         if kept.contains(entry) && program.base().symbols().primary(addr).is_none() {
-            let edit = Edit::SetName {
-                addr,
-                key: Some(SymKey(0)),
-                kind: SymKind::Function,
-                primary: true,
-                name: Some(o.fact(MAIN_NAME.to_owned())),
-                evidence: Vec::new(),
-            };
-            out.symbols.push(Value::object(
-                ["addr", "key", "kind", "primary", "name"].map(|m| (m, member(&edit, m))),
-            ));
+            out.symbols
+                .push(function_symbol(addr, o.fact(MAIN_NAME.to_owned())));
             whys.insert(main_key(*entry), why.clone());
         }
     }
@@ -241,30 +231,18 @@ pub(crate) fn rows(
         if !kept.contains(entry) || program.base().symbols().primary(addr).is_some() {
             continue;
         }
-        let edit = Edit::SetName {
-            addr,
-            key: Some(SymKey(0)),
-            kind: SymKind::Function,
-            primary: true,
-            name: Some(o.fact(rec.name.clone())),
-            evidence: Vec::new(),
-        };
-        out.symbols.push(Value::object(
-            ["addr", "key", "kind", "primary", "name"].map(|m| (m, member(&edit, m))),
-        ));
+        out.symbols
+            .push(function_symbol(addr, o.fact(rec.name.clone())));
         whys.insert(main_key(*entry), rec.why.clone());
     }
     for (site, rec) in &work.ir.syscalls {
         if !owns(rec.owner, *site) {
             continue;
         }
-        let edit = Edit::SetComment {
-            addr: Address::ram(*site),
-            kind: CommentKind::Eol,
-            text: Some(o.fact(rec.text.clone())),
-        };
-        out.comments.push(Value::object(
-            ["addr", "kind", "text"].map(|m| (m, member(&edit, m))),
+        out.comments.push((
+            Address::ram(*site),
+            CommentKind::Eol,
+            o.fact(rec.text.clone()),
         ));
         whys.insert(note_key(*site), rec.why.clone());
     }
@@ -272,20 +250,11 @@ pub(crate) fn rows(
 }
 
 impl Rows {
-    /// Adds the rows to the members of the JSON form of an analysis set.
-    pub(crate) fn merge(self, mut value: Value) -> Value {
-        if let Some(members) = value.as_object_mut() {
-            for (name, rows) in [
-                ("jumptables", self.jumptables),
-                ("symbols", self.symbols),
-                ("comments", self.comments),
-            ] {
-                if let Some(list) = members.get_mut(name).and_then(Value::as_array_mut) {
-                    list.extend(rows);
-                }
-            }
-        }
-        value
+    /// Adds the rows to the rows of an analysis set.
+    pub(crate) fn add_to(self, rows: &mut SetRows) {
+        rows.jumptables.extend(self.jumptables);
+        rows.symbols.extend(self.symbols);
+        rows.comments.extend(self.comments);
     }
 }
 

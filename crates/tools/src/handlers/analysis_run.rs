@@ -72,6 +72,8 @@ pub struct Sliced {
     /// `true` when the last slice did no work: no analyzer up to the bound of the run has
     /// work.
     pub idle: bool,
+    /// `true` when the analysis stopped at the cap of the code units.
+    pub capped: bool,
 }
 
 impl Sliced {
@@ -81,6 +83,7 @@ impl Sliced {
         RunReport {
             state: self.state,
             steps_used: self.steps_used,
+            capped: self.capped,
         }
     }
 }
@@ -103,6 +106,8 @@ pub struct Engine {
     order: Option<u64>,
     /// The change of the binary model before a first analysis, or `None`.
     edit: Option<fn(&mut Binary)>,
+    /// The cap of the code units of each program, or `None` for the shipped cap.
+    unit_cap: Option<u64>,
 }
 
 impl Engine {
@@ -130,6 +135,16 @@ impl Engine {
     pub fn with_model_edit(edit: fn(&mut Binary)) -> Self {
         Self {
             edit: Some(edit),
+            ..Self::default()
+        }
+    }
+
+    /// Makes an engine with the cap `cap` of the code units of each program, in place of
+    /// the shipped cap. A test uses a small cap to make the analysis stop at the cap.
+    #[must_use]
+    pub fn with_unit_cap(cap: u64) -> Self {
+        Self {
+            unit_cap: Some(cap),
             ..Self::default()
         }
     }
@@ -247,6 +262,7 @@ fn drive(
     Ok(RunReport {
         state: state_of(out.state),
         steps_used: out.steps_used,
+        capped: scheduler.capped(),
     })
 }
 
@@ -261,7 +277,7 @@ impl AnalysisEngine for Engine {
             Until::Triage => Band::Triage,
             Until::Full => Band::Full,
         };
-        let (order, edit) = (self.order, self.edit);
+        let (order, edit, cap) = (self.order, self.edit, self.unit_cap);
         let scheduler = match self.schedulers.entry(binary.id) {
             Entry::Occupied(found) => found.into_mut(),
             Entry::Vacant(slot) => match binary.analysis.map(|a| a.state) {
@@ -277,6 +293,7 @@ impl AnalysisEngine for Engine {
                     return Ok(RunReport {
                         state: AnalysisState::Complete,
                         steps_used: 0,
+                        capped: false,
                     });
                 }
                 // A project with a partial or stale set keeps it until a shadow completes.
@@ -285,6 +302,9 @@ impl AnalysisEngine for Engine {
                 }
             },
         };
+        if let Some(cap) = cap {
+            scheduler.set_unit_cap(cap);
+        }
         drive(scheduler, binary, band, fuel)
     }
 
@@ -301,11 +321,15 @@ impl AnalysisEngine for Engine {
         band: u16,
         fuel: &mut Fuel,
     ) -> Result<RunReport, ToolError> {
+        let cap = self.unit_cap;
         let scheduler = self
             .schedulers
             .entry(binary.id)
             .or_insert_with(Scheduler::shadow);
         scheduler.restart(band);
+        if let Some(cap) = cap {
+            scheduler.set_unit_cap(cap);
+        }
         drive(scheduler, binary, Band::Full, fuel)
     }
 
