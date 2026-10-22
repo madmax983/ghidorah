@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use ghidorah_base::{FuncId, NoteId, Range, Rev, Storage, VarId};
 use ghidorah_kernel::RangeSet;
 
@@ -73,7 +75,7 @@ fn table_epochs_follow_commits() {
     assert_eq!(p.epochs().table(Table::Symbols), Rev(1));
     let set = analysis_set(&p, 1);
     commit(&mut p, Source::Analysis, |_| {
-        Edit::ReplaceAnalysis(Box::new(set.clone()))
+        Edit::ReplaceAnalysis(Arc::new(set.clone()))
     });
     assert_eq!(p.epoch(Table::Analysis), Rev(3));
     assert_eq!(p.epoch(Table::Symbols), Rev(3));
@@ -150,7 +152,7 @@ fn func_epoch_reads_body_callees_and_record() {
     // A new analysis set changes every function.
     let set = analysis_set(&p, 1);
     commit(&mut p, Source::Analysis, |_| {
-        Edit::ReplaceAnalysis(Box::new(set.clone()))
+        Edit::ReplaceAnalysis(Arc::new(set.clone()))
     });
     assert_eq!([f0, f1, f2].map(|f| p.func_epoch(f)), [Rev(6); 3]);
     assert_eq!(p.func_epoch(FuncId(ram(0x9999))), Rev(6));

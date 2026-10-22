@@ -1,6 +1,8 @@
 //! Random forward edits for the model tests. Some edits break a rule on purpose, so the
 //! tests also see refused edits.
 
+use std::sync::Arc;
+
 use ghidorah_base::{Address, FuncId, JumpTableId, NoteId, Range, SetName, Storage, VarId};
 use ghidorah_kernel::RangeSet;
 use ghidorah_testkit::pbt::Gen;
@@ -294,5 +296,5 @@ fn ref_key(g: &mut Gen) -> RefKey {
 /// Draws a `ReplaceAnalysis` edit with one of `sets`.
 pub(crate) fn analysis_edit(g: &mut Gen, sets: &[AnalysisSet]) -> Edit {
     let set = g.pick(sets).cloned().unwrap_or_default();
-    Edit::ReplaceAnalysis(Box::new(set))
+    Edit::ReplaceAnalysis(Arc::new(set))
 }

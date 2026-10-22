@@ -26,6 +26,7 @@ ghidorah-x86 = { path = "../x86" }
 
 [dev-dependencies]
 ghidorah-testkit = { path = "../testkit" }
+ghidorah-oracle = { path = "../oracle" }
 
 [lints]
 workspace = true

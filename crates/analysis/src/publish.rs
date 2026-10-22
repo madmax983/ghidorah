@@ -15,6 +15,7 @@
 //!   `Strings` (WP-17a).
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 
 use ghidorah_base::{Address, FuncId, JumpTableId};
 use ghidorah_db::codec::{SetRows, tables_from_rows};
@@ -298,6 +299,6 @@ pub(crate) fn publish(program: &mut Program, work: &Work) -> Result<Commit, Anal
     let set = analysis_set(program, work)?;
     let label = SessionLabel::new(SessionLabel::ANALYSIS)?;
     let mut tx = program.begin("analysis", Source::Analysis, label)?;
-    let _ = tx.apply(Edit::ReplaceAnalysis(Box::new(set)))?;
+    let _ = tx.apply(Edit::ReplaceAnalysis(Arc::new(set)))?;
     Ok(tx.commit()?)
 }

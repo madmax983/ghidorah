@@ -408,23 +408,17 @@ fn many_fdes(n: u64) -> Program {
     program_of(&elf.build(), &LoadOpts::AUTO)
 }
 
-/// A pending set takes the event ranges of a step in place. A copy of the whole pending set
-/// for each event made the run quadratic in the number of functions: 40 s for 10000 FDEs.
+/// A run of 10,000 FDE functions completes and keeps every function. The cost of the run is
+/// in `tests/alloc_bounds.rs`.
 #[test]
-fn regress_pending_union_many_fdes() {
+fn many_fdes_complete() {
     const N: u64 = 10_000;
     let mut p = many_fdes(N);
-    let started = std::time::Instant::now();
     let (_, out) = analyze(&mut p);
-    let took = started.elapsed();
     assert_eq!(out.state, RunState::Complete);
     assert_eq!(
         p.analysis().funcs().len(),
         usize::try_from(N).expect("N fits")
-    );
-    assert!(
-        took < std::time::Duration::from_secs(10),
-        "the run of {N} FDE functions takes {took:?}"
     );
 }
 
@@ -460,4 +454,30 @@ fn regress_unit_cap_default() {
     assert_eq!(MAX_UNITS, 4_194_304);
     let shown = SPEC.options.iter().find(|o| o.name == "max_units");
     assert_eq!(shown.map(|o| o.value), Some(MAX_UNITS));
+}
+
+/// A hold keeps back the publish of a first analysis until a flush. The flushed set equals
+/// the set of a run that publishes each slice.
+#[test]
+fn hold_defers_the_publish_until_flush() {
+    let mut held = many_fdes(200);
+    let mut sched = Scheduler::new();
+    sched.set_hold(true);
+    let out = sched
+        .run(&mut held, Until::Full, &mut Fuel::new(500))
+        .expect("a slice");
+    assert_eq!(out.state, RunState::BudgetStopped);
+    assert!(out.commit.is_none(), "a held slice publishes nothing");
+    assert_eq!(held.rev().0, 0);
+    let commit = sched.flush(&mut held).expect("the flush");
+    assert!(commit.is_some());
+    assert_eq!(held.rev().0, 1);
+    assert!(sched.flush(&mut held).expect("a second flush").is_none());
+
+    let mut free = many_fdes(200);
+    let mut other = Scheduler::new();
+    let _ = other
+        .run(&mut free, Until::Full, &mut Fuel::new(500))
+        .expect("a slice");
+    assert_eq!(held.analysis(), free.analysis());
 }

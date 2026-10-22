@@ -8,10 +8,10 @@
 //! | [`Session::reload`] | the program loads again from the project or the checkpoint |
 //! | [`Session::close`] | a snapshot, and the lock goes |
 //!
-//! [`Session::analyze_sliced`] and [`Session::reanalyze_sliced`] run the engine in fuel
-//! slices with a progress report, a cancel check and a `max_ms` check per slice.
+//! [`Session::analyze_sliced`] and [`Session::reanalyze_sliced`] (in `slices.rs`) run the
+//! engine in fuel slices with one publish for the call.
 //!
-//! An analysis run that commits gives one marker line per new revision. A complete run also
+//! An analysis call that commits gives one marker line per new revision. A complete run also
 //! writes a snapshot, so a reopen needs no new run. A reopen compares the analysis inputs hash
 //! of the last run with the hash of the program. A difference makes the state `stale`, and a
 //! re-analysis from the start band 100 is due.
@@ -25,12 +25,9 @@ use ghidorah_db::{Line, Project, ProjectError, ProjectSummary, RunLine, RunState
 use ghidorah_json::{Limits as JsonLimits, Object, Value};
 
 use super::store::{project_error, project_reason};
-use super::{OpenBinary, RunReport, Session, Store, Until};
-use crate::api::Progress;
-use crate::dispatch::Ctx;
+use super::{OpenBinary, RunReport, Session, Store};
 use crate::envelope::{AnalysisInfo, AnalysisState, Warning};
 use crate::errors::ToolError;
-use crate::handlers::analysis_run::{SLICE_STEPS, SliceStop, Sliced};
 use crate::handlers::load::spec_differs;
 
 /// The start band of a full re-analysis (design Section 3.9).
@@ -363,128 +360,6 @@ impl Session {
         Ok(Some(report))
     }
 
-    /// Runs the analysis of the open binary `id` until `until` in the fuel slices of the call
-    /// `ctx` (design Section 2.4). Gives `None` when the session has no engine or no such
-    /// binary.
-    ///
-    /// A slice has [`SLICE_STEPS`] work units or a quarter of the units so far, whichever is
-    /// more. Each slice with work sends one progress report. After each slice the run can
-    /// stop. It stops when the analysis is complete, the slice does no work, the fuel is
-    /// empty, the client cancels, or the `max_ms` guard fires. A time stop adds
-    /// `W_TIME_STOP`. Eval mode turns the time guard off.
-    ///
-    /// # Errors
-    ///
-    /// Returns the error of the engine.
-    pub fn analyze_sliced(
-        &mut self,
-        id: BinaryId,
-        until: Until,
-        ctx: &mut Ctx,
-    ) -> Result<Option<Sliced>, ToolError> {
-        self.sliced(id, None, until, ctx)
-    }
-
-    /// Runs the re-analysis of the open binary `id` from the start band `band` with the
-    /// checkpoints of [`Session::analyze_sliced`]. With no engine, the analysis state becomes
-    /// `stale`.
-    ///
-    /// # Errors
-    ///
-    /// Returns the error of the engine.
-    pub fn reanalyze_sliced(
-        &mut self,
-        id: BinaryId,
-        band: u16,
-        ctx: &mut Ctx,
-    ) -> Result<Option<Sliced>, ToolError> {
-        self.sliced(id, Some(band), Until::Full, ctx)
-    }
-
-    /// Starts the re-analysis after an analysis-affecting commit like [`Session::after_edit`],
-    /// with the checkpoints of [`Session::analyze_sliced`].
-    ///
-    /// # Errors
-    ///
-    /// Returns the error of the engine.
-    pub fn after_edit_sliced(
-        &mut self,
-        id: BinaryId,
-        band: Option<u16>,
-        ctx: &mut Ctx,
-    ) -> Result<Option<RunReport>, ToolError> {
-        let Some(band) = band else {
-            return Ok(None);
-        };
-        if self.batch_band(id, band) {
-            return Ok(None);
-        }
-        Ok(self.reanalyze_sliced(id, band, ctx)?.map(|s| s.report()))
-    }
-
-    /// Tells if the `max_ms` guard of a call fires: the work started at the monotonic time
-    /// `began` of the session clock. Eval mode turns the guard off (design Section 10.11).
-    #[must_use]
-    pub fn past_max_ms(&self, began: u64, max_ms: Option<u64>) -> bool {
-        !self.config.run.eval_mode
-            && max_ms.is_some_and(|ms| self.clock.monotonic_ms().saturating_sub(began) > ms)
-    }
-
-    /// Runs the slices of [`Session::analyze_sliced`]. A start band makes the first slice a
-    /// re-analysis. The next slices resume the run of the engine.
-    fn sliced(
-        &mut self,
-        id: BinaryId,
-        band: Option<u16>,
-        until: Until,
-        ctx: &mut Ctx,
-    ) -> Result<Option<Sliced>, ToolError> {
-        let began = self.clock.monotonic_ms();
-        let mut out: Option<Sliced> = None;
-        loop {
-            let used = out.map_or(0, |s| s.steps_used);
-            let mut fuel = Fuel::new(SLICE_STEPS.max(used / 4).min(ctx.fuel.remaining()));
-            let report = match (out, band) {
-                (None, Some(band)) => self.reanalyze(id, band, &mut fuel)?,
-                _ => self.analyze(id, until, &mut fuel)?,
-            };
-            let Some(report) = report else {
-                return Ok(out);
-            };
-            let _ = ctx.fuel.take(report.steps_used.min(ctx.fuel.remaining()));
-            let total = used.saturating_add(report.steps_used);
-            let was_capped = out.is_some_and(|s| s.capped);
-            if report.capped && !was_capped {
-                ctx.warn(Warning::new(WarningCode::AnalysisLimit));
-            }
-            let mut run = Sliced {
-                state: report.state,
-                steps_used: total,
-                stop: None,
-                idle: report.steps_used == 0,
-                capped: report.capped || was_capped,
-            };
-            if !run.idle {
-                ctx.progress(Progress {
-                    progress: total,
-                    total: None,
-                    message: format!("The analysis used {total} work units."),
-                });
-            }
-            let done = run.state == AnalysisState::Complete || run.idle;
-            if !done && ctx.cancelled() {
-                run.stop = Some(SliceStop::Cancel);
-            } else if !done && self.past_max_ms(began, ctx.max_ms) {
-                run.stop = Some(SliceStop::Time);
-                ctx.warn(Warning::new(WarningCode::TimeStop));
-            }
-            out = Some(run);
-            if done || run.stop.is_some() || ctx.fuel.remaining() == 0 {
-                return Ok(out);
-            }
-        }
-    }
-
     /// Records the analysis commits of a run: one marker line per new revision, and a snapshot
     /// after a complete run. Sets the analysis state of the binary.
     ///
@@ -504,17 +379,24 @@ impl Session {
         };
         let program = &binary.program;
         let after = program.rev();
-        let config = store.project.as_ref().map_or_else(
-            || Value::Object(Object::new()),
-            |p| p.meta().analysis_config.clone(),
-        );
-        let inputs = inputs_hash(program, &tag, &config);
-        let result = result_hash(program.analysis());
         let state = match report.state {
             AnalysisState::Complete => RunState::Complete,
             AnalysisState::BudgetStopped | AnalysisState::Stale => RunState::BudgetStopped,
         };
         let last_tx = program.last_tx().0;
+        // The hashes cost a walk of the analysis set, so a run with no new revision skips them.
+        let (inputs, result) = if after > before {
+            let config = store.project.as_ref().map_or_else(
+                || Value::Object(Object::new()),
+                |p| p.meta().analysis_config.clone(),
+            );
+            (
+                inputs_hash(program, &tag, &config),
+                result_hash(program.analysis()),
+            )
+        } else {
+            ([0; 32], [0; 32])
+        };
         let mut rev = before.0;
         // Each pass writes the marker of one new revision.
         while rev < after.0 {

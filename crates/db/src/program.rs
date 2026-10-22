@@ -27,6 +27,7 @@ mod tests;
 
 use std::collections::BTreeMap;
 use std::fmt;
+use std::sync::Arc;
 
 use ghidorah_base::{Address, BinaryId, ExportId, ImportId, Limits, Rev};
 use ghidorah_loader::{Arch, Binary, Format, Kind, MemoryMap};
@@ -207,7 +208,7 @@ pub struct Program {
     exports: BTreeMap<ExportId, ExportRow>,
     types: Types,
     base: Tables,
-    analysis: Box<AnalysisSet>,
+    analysis: Arc<AnalysisSet>,
     notes: Notes,
     progress: Progress,
     rev: Rev,
@@ -289,7 +290,7 @@ impl Program {
     /// Gives the analysis layer: the `Analysis` facts.
     #[must_use]
     pub fn analysis(&self) -> &AnalysisSet {
-        &self.analysis
+        self.analysis.as_ref()
     }
 
     /// Gives the notes and the named sets.
@@ -318,13 +319,13 @@ impl Program {
     pub(crate) fn layer_mut(&mut self, source: Source) -> Result<&mut Tables, Invalid> {
         match source {
             Source::Default => Err(Invalid::DefaultSource),
-            Source::Analysis => Ok(&mut self.analysis),
+            Source::Analysis => Ok(Arc::make_mut(&mut self.analysis)),
             Source::Agent | Source::Imported | Source::User => Ok(&mut self.base),
         }
     }
 
     /// Puts `set` in place of the analysis layer and gives the old layer.
-    pub(crate) fn swap_analysis(&mut self, set: Box<AnalysisSet>) -> Box<AnalysisSet> {
+    pub(crate) fn swap_analysis(&mut self, set: Arc<AnalysisSet>) -> Arc<AnalysisSet> {
         std::mem::replace(&mut self.analysis, set)
     }
 

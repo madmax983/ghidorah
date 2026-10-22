@@ -1,4 +1,5 @@
 use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::sync::Arc;
 
 use ghidorah_base::{ErrorCode, FuncId, JumpTableId, NoteId, Range, Rev, Storage, TxId, VarId};
 use ghidorah_json::Value;
@@ -359,7 +360,7 @@ fn step(tx: &Tx<'_>, i: usize) -> Edit {
         },
         12 => Edit::WriteNote(Box::new(note(tx, 1, "check"))),
         13 => Edit::DeleteNote { id: NoteId(1) },
-        _ => Edit::ReplaceAnalysis(Box::new(analysis_set(p, 1))),
+        _ => Edit::ReplaceAnalysis(Arc::new(analysis_set(p, 1))),
     }
 }
 
@@ -404,24 +405,24 @@ fn replace_analysis_rollback() {
         let mut tx = p
             .begin("analysis_run", Source::Analysis, session("analysis"))
             .unwrap();
-        tx.apply(Edit::ReplaceAnalysis(Box::new(new.clone())))
+        tx.apply(Edit::ReplaceAnalysis(Arc::new(new.clone())))
             .unwrap();
         assert_eq!(tx.program().analysis(), &new);
     }
     assert_eq!(p.analysis(), &old);
     let mut tx = agent(&mut p);
     assert_eq!(
-        tx.apply(Edit::ReplaceAnalysis(Box::new(new.clone()))).err(),
+        tx.apply(Edit::ReplaceAnalysis(Arc::new(new.clone()))).err(),
         Some(EditError::WrongLayer(Source::Agent))
     );
     drop(tx);
     let mut tx = p
         .begin("analysis_run", Source::Analysis, session("analysis"))
         .unwrap();
-    tx.apply(Edit::ReplaceAnalysis(Box::new(new.clone())))
+    tx.apply(Edit::ReplaceAnalysis(Arc::new(new.clone())))
         .unwrap();
     let c = tx.commit().unwrap();
-    assert_eq!(c.edits[0].inverse, Edit::ReplaceAnalysis(Box::new(old)));
+    assert_eq!(c.edits[0].inverse, Edit::ReplaceAnalysis(Arc::new(old)));
     assert_eq!(p.analysis(), &new);
     assert_eq!(p.epoch(Table::Analysis), Rev(1));
     assert_eq!(p.epoch(Table::Functions), Rev(1));

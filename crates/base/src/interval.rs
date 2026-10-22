@@ -194,6 +194,16 @@ impl<V> IntervalMap<V> {
                 });
             }
         }
+        // Items after the last entry go on the end. A caller that adds bodies in address
+        // order then pays for its own items only, not for a copy of the whole map.
+        let after_last = match (self.entries.last(), items.first()) {
+            (Some((last, _)), Some((first, _))) => last.last < first.first,
+            _ => true,
+        };
+        if after_last {
+            self.entries.extend(items);
+            return Ok(());
+        }
         let old = std::mem::take(&mut self.entries);
         let mut merged = Vec::with_capacity(old.len().saturating_add(items.len()));
         let mut old = old.into_iter().peekable();

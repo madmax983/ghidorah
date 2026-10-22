@@ -185,7 +185,7 @@ fn key_cases() -> Vec<(Edit, Vec<FactKey>)> {
             Edit::DeleteNote { id: NoteId(3) },
             vec![FactKey::Note(NoteId(3))],
         ),
-        (Edit::ReplaceAnalysis(Box::default()), vec![]),
+        (Edit::ReplaceAnalysis(std::sync::Arc::default()), vec![]),
     ]
 }
 

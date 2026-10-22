@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use ghidorah_base::{
     Address, ExportId, FuncId, ImportId, JumpTableId, NoteId, Range, RegVar, Rev, SetName, Storage,
     StringId, TxId, VarId, WarningCode,
@@ -223,7 +225,7 @@ fn samples() -> Vec<Edit> {
     ];
     out.extend(flow_samples(&o));
     let p = seeded();
-    out.push(Edit::ReplaceAnalysis(Box::new(p.analysis().clone())));
+    out.push(Edit::ReplaceAnalysis(Arc::new(p.analysis().clone())));
     out
 }
 

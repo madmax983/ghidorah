@@ -12,6 +12,7 @@
 //! | 15 | the EXTERNAL address of each import |
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use ghidorah_base::id::MAX_NAME_LEN;
 use ghidorah_base::{Address, BinText, Caps, ExportId, ImportId, Limits, Rev};
@@ -270,7 +271,7 @@ pub(super) fn from_binary(
         exports,
         types,
         base,
-        analysis: Box::default(),
+        analysis: Arc::default(),
         notes: Notes::default(),
         progress: Progress::default(),
         rev: Rev(0),

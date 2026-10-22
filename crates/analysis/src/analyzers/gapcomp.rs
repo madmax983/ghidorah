@@ -168,7 +168,7 @@ fn solid(ctx: &AnalysisCtx<'_>) -> BTreeSet<u64> {
 /// Gives the gaps: the scope without the fixed area and without the bodies of `solid`.
 fn free(ctx: &AnalysisCtx<'_>, solid: &BTreeSet<u64>) -> RangeSet {
     let program = ctx.program();
-    let mut owned = gaps::fixed(program);
+    let mut owned: Vec<Range> = gaps::fixed(program).ranges().to_vec();
     let mut run: Option<Range> = None;
     let units = ctx
         .work
@@ -182,19 +182,15 @@ fn free(ctx: &AnalysisCtx<'_>, solid: &BTreeSet<u64>) -> RangeSet {
                 last: r.last,
             }),
             Some(cur) => {
-                owned.insert(cur);
+                owned.push(cur);
                 Some(r)
             }
             None => Some(r),
         };
     }
-    if let Some(cur) = run {
-        owned.insert(cur);
-    }
-    for entry in solid {
-        owned.insert(Range::single(*entry));
-    }
-    gaps::scope(program).subtract(&owned)
+    owned.extend(run);
+    owned.extend(solid.iter().map(|e| Range::single(*e)));
+    gaps::scope(program).subtract(&gaps::set_of(owned))
 }
 
 /// Makes the node of the instruction `insn` at `at`.
