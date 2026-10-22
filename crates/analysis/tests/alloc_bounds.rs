@@ -5,6 +5,8 @@
 //! a fixed input is the same on each run, so the tests use no clock. A linear path allocates
 //! about twice the bytes for twice the input. A path that copies its state on each step
 //! allocates about four times the bytes.
+//!
+//! The memory tests count the bytes that a result keeps, for each record or code unit.
 
 #![allow(clippy::expect_used, reason = "test helpers fail through expect")]
 
@@ -110,5 +112,38 @@ fn regress_replace_analysis_shares_the_set() {
         "the swap allocates {} bytes; a copy of the set is {} bytes",
         swap.allocated_bytes,
         copy.allocated_bytes
+    );
+}
+
+/// Runs a full analysis of `n` small functions. Gives the program, the bytes that the
+/// published set keeps and the bytes that the work state of the scheduler keeps.
+fn kept_bytes(n: u64) -> (Program, usize, usize) {
+    let run = |program: &mut Program| {
+        let mut sched = Scheduler::new();
+        let out = sched
+            .run(program, Until::Full, &mut Fuel::new(u64::MAX))
+            .expect("a run");
+        assert_eq!(out.state, RunState::Complete);
+        sched
+    };
+    let mut program = functions(n, false);
+    let (sched, both) = ALLOC.measure(|| run(&mut program));
+    drop(sched);
+    let mut again = functions(n, false);
+    let ((), set) = ALLOC.measure(|| drop(run(&mut again)));
+    let work = both.retained_bytes.saturating_sub(set.retained_bytes);
+    (program, set.retained_bytes, work)
+}
+
+/// The work state keeps the owner of each code unit, not its why-record. The record of a
+/// unit is always `R_DISASM_FLOW` with the owner function, so the publish step makes it.
+/// A copy in each unit kept 459 bytes of work state for each unit; now 344.
+#[test]
+fn regress_work_state_keeps_no_unit_why() {
+    let (program, _, work) = kept_bytes(5_000);
+    let units = program.analysis().listing().unit_count();
+    assert!(
+        work <= units * 400,
+        "the work state keeps {work} bytes for {units} code units"
     );
 }

@@ -26,7 +26,7 @@ use ghidorah_db::{
 };
 
 use crate::AnalysisError;
-use crate::why::Why;
+use crate::why::{Why, unit_why};
 use crate::work::Work;
 
 /// The change counts of `analysis_run` between two analysis sets.
@@ -176,7 +176,7 @@ fn collect(program: &Program, work: &Work) -> Facts {
                 flags: u.flags,
             },
         ));
-        out.whys.insert(FactKey::CodeUnit(*at), u.why.clone());
+        out.whys.insert(FactKey::CodeUnit(*at), unit_why(u.owner));
     }
     for (key, why) in &work.refs {
         let owner = work.units.get(&key.from.off).map(|u| u.owner);

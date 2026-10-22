@@ -66,10 +66,9 @@ pub(crate) struct WUnit {
     pub flow: FlowKind,
     /// The site flags.
     pub flags: u8,
-    /// The entry of the owner function.
+    /// The entry of the owner function. The why-record of the unit is
+    /// [`crate::why::unit_why`] of the owner.
     pub owner: u64,
-    /// The why-record.
-    pub why: Why,
 }
 
 impl WUnit {
@@ -298,12 +297,7 @@ impl Work {
                     evicted.push((owner, r));
                 }
             }
-            let UnitRec {
-                len,
-                flow,
-                flags,
-                why,
-            } = rec;
+            let UnitRec { len, flow, flags } = rec;
             self.units.insert(
                 at,
                 WUnit {
@@ -311,7 +305,6 @@ impl Work {
                     flow,
                     flags,
                     owner: entry,
-                    why,
                 },
             );
             kept.insert(at);
@@ -356,11 +349,7 @@ impl Work {
         }
         let units = body.units.iter().all(|(at, rec)| {
             self.units.get(at).is_some_and(|u| {
-                u.owner == entry
-                    && u.len == rec.len
-                    && u.flow == rec.flow
-                    && u.flags == rec.flags
-                    && u.why == rec.why
+                u.owner == entry && u.len == rec.len && u.flow == rec.flow && u.flags == rec.flags
             })
         });
         units

@@ -18,7 +18,7 @@
 
 use std::collections::BTreeSet;
 
-use ghidorah_base::{Address, FuncId, Range};
+use ghidorah_base::{Address, Range};
 use ghidorah_db::{FactKey, RefKey, RefType};
 use ghidorah_kernel::RangeSet;
 use ghidorah_x86::{Flow, Insn};
@@ -314,7 +314,6 @@ impl<'c, 'a> Walk<'c, 'a> {
     /// Runs the descent from the entry.
     fn run(mut self) -> Self {
         let ctx = self.ctx;
-        let id = FactKey::Func(FuncId(Address::ram(self.entry)));
         if ctx.owner(self.entry).is_some_and(|o| self.lower(o)) {
             // The exit at the entry runs the walk again when the lower function lets go.
             self.body.summary.exits.insert(self.entry);
@@ -353,14 +352,12 @@ impl<'c, 'a> Walk<'c, 'a> {
             };
             self.insns = self.insns.saturating_add(1);
             let flags = self.flow(at, next, &insn);
-            let why = Why::new(Rule::DisasmFlow, vec![id.clone()]);
             self.body.units.insert(
                 at,
                 UnitRec {
                     len: insn.len(),
                     flow,
                     flags,
-                    why,
                 },
             );
         }
