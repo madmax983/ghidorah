@@ -33,6 +33,7 @@
 //! | [`journal`] | Journal lines with checksums | Sections 3.7, 3.10 |
 //! | [`meta`] | Meta lines: progress rows and last-brief marks | Section 3.7 |
 //! | [`snapshot`] | Snapshots and the analysis inputs hash | Sections 3.9, 3.10 |
+//! | [`migrate`] | The `ext:` map of the project files of format version 1 | Section 3.10 |
 //! | [`lock`] | The single-writer lock | Section 3.10 |
 //! | [`project`] | [`Project`]: create, open, append, snapshot, crash records | Section 3.10, ADR-0022 |
 //! | [`replay`] | Replay of journal lines after a snapshot | Section 3.10 |
@@ -68,6 +69,7 @@ pub mod jumptables;
 pub mod listing;
 pub mod lock;
 pub mod meta;
+pub mod migrate;
 pub mod notes;
 pub mod overrides;
 pub mod program;

@@ -66,28 +66,62 @@ fn import_name(id: &ImportId) -> String {
     }
 }
 
-/// Gives the import rows. Each import gets `ext:` and its index plus 1.
+/// Gives `ext:` and `n` plus 1.
+fn ext_of(n: usize) -> Address {
+    Address::external(u64::try_from(n).map_or(u64::MAX, |k| k.saturating_add(1)))
+}
+
+/// Gives the import rows. Each import gets `ext:` and 1 plus the rank of its ID.
 ///
-/// The index is the place of the import in the list of the binary model. So that order sets
-/// the EXTERNAL addresses, and a project snapshot stores them. A slot and a stub find their
-/// import by its name, so their facts do not depend on that order.
+/// The rank is the place of the ID in ID order. So the order of the import list sets no
+/// address. Two imports with one ID give one row: the one with the lowest slot, stub and
+/// delay flag. `index` is the place of that import in the list of the binary model.
 fn import_rows(binary: &Binary) -> BTreeMap<ImportId, ImportRow> {
-    let mut rows = BTreeMap::new();
+    let key = |r: &ImportRow| (r.slot, r.stub, r.delay);
+    let mut rows: BTreeMap<ImportId, ImportRow> = BTreeMap::new();
     for (index, import) in binary.imports.iter().enumerate() {
         let Some(id) = import_id(import) else {
             continue;
         };
-        let ext = u64::try_from(index).map_or(u64::MAX, |k| k.saturating_add(1));
-        rows.entry(id.clone()).or_insert_with(|| ImportRow {
-            id,
+        let row = ImportRow {
+            id: id.clone(),
             index,
-            ext: Address::external(ext),
+            ext: Address::external(0),
             slot: import.slot.map(Address::ram),
             stub: import.stub.map(Address::ram),
             delay: import.delay,
-        });
+        };
+        match rows.get(&id) {
+            Some(old) if key(old) <= key(&row) => {}
+            _ => {
+                rows.insert(id, row);
+            }
+        }
+    }
+    for (rank, row) in rows.values_mut().enumerate() {
+        row.ext = ext_of(rank);
     }
     rows
+}
+
+/// Gives the `ext:` address of each import in format version 1, with its address now.
+///
+/// Version 1 gave the first import of each ID `ext:` and its index in the list of the binary
+/// model plus 1.
+pub(super) fn v1_ext_map(program: &Program) -> BTreeMap<Address, Address> {
+    let mut out = BTreeMap::new();
+    let mut seen = std::collections::BTreeSet::new();
+    for (index, import) in program.binary().imports.iter().enumerate() {
+        let Some(id) = import_id(import) else {
+            continue;
+        };
+        if let Some(row) = program.imports().get(&id)
+            && seen.insert(id)
+        {
+            out.insert(ext_of(index), row.ext);
+        }
+    }
+    out
 }
 
 /// Gives the export rows. An export name of the form `#<digits>` uses the ordinal.

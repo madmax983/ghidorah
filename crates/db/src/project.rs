@@ -99,7 +99,7 @@ impl LoadSpec {
 /// The content of `project.json`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProjectMeta {
-    /// The format version: [`FORMAT_VERSION`].
+    /// The format version: [`FORMAT_VERSION`], or an older version that a migration reads.
     pub format_version: u64,
     /// The binary ID.
     pub binary_id: BinaryId,
@@ -459,6 +459,9 @@ impl Project {
 
     /// Opens the project in `dir` (the open flow of design Section 3.10).
     ///
+    /// The open reads the project files of format version 1 too (the [`crate::migrate`]
+    /// module). After the load, a write open writes the project file at [`FORMAT_VERSION`].
+    ///
     /// # Errors
     ///
     /// Returns [`ProjectError::Locked`] for a held lock and [`ProjectError::BadMeta`] for a bad
@@ -495,6 +498,9 @@ impl Project {
             failed: None,
         };
         let loaded = project.load(&opts.limits)?;
+        if !project.read_only {
+            disk::upgrade_meta(&mut project)?;
+        }
         Ok(Opened {
             project,
             program: loaded.program,

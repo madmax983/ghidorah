@@ -16,6 +16,7 @@
 //! | [`Fs::sync_dir`] | makes the names of a directory durable |
 //! | [`Fs::remove`] | removes a file |
 //! | [`Fs::read`] | reads a file |
+//! | [`Fs::age`] | the time since the last change of a file |
 //!
 //! The other operations make directories, set the mode 0444, list a directory and test a
 //! path. A commit is [`Fs::append`] and then [`Fs::sync_file`].
@@ -26,6 +27,10 @@
 //! the project directory and its `bin` and `crash` directories with `remove_dead_temps`. It
 //! keeps the temporary files of live processes.
 //!
+//! The process test reads only the local `/proc`. A process on another host or in another PID
+//! namespace is not there. So the sweep also keeps each file that changed in the last
+//! [`TEMP_GRACE`], and each file with no age.
+//!
 //! [`RealFs`] never writes through a symbolic link. `create_new`, `append`, `write_all` and
 //! `truncate` give [`FsError::WrongKind`] for a path that is not a regular file.
 
@@ -35,6 +40,7 @@ mod tests;
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, SystemTime};
 
 /// The counter of the temporary file names of this process.
 static TMP_SEQ: AtomicU64 = AtomicU64::new(0);
@@ -44,6 +50,9 @@ const TMP_TRIES: usize = 64;
 
 /// The maximum number of directory entries that [`remove_dead_temps`] reads.
 const SWEEP_MAX: usize = 4_096;
+
+/// The time after its last change that a temporary file of a dead process stays.
+pub const TEMP_GRACE: Duration = Duration::from_hours(1);
 
 /// The maximum number of digits of a number in a temporary file name: the digits of
 /// `u64::MAX`.
@@ -234,6 +243,11 @@ pub trait Fs: Send {
     /// not follow a symbolic link.
     fn kind(&mut self, path: &Path) -> Option<EntryKind>;
 
+    /// Gives the time since the last change of the entry at the path. A change time in the
+    /// future gives zero. No entry, or a file system with no change time, gives `None`. The
+    /// query does not follow a symbolic link.
+    fn age(&mut self, path: &Path) -> Option<Duration>;
+
     /// Gives a second handle on the same file system.
     fn boxed(&self) -> Box<dyn Fs>;
 }
@@ -316,8 +330,12 @@ pub(crate) fn temp_pid(name: &str, base: &str) -> Option<u32> {
 
 /// Removes the temporary files of dead processes from the directory `dir`.
 ///
-/// An entry goes when it is a file, its name is `<base>.<pid>.<n>` with a `base` of `bases`,
-/// and `dead` gives `true` for `pid`. The temporary files of this process stay. The step reads
+/// An entry goes when these are true:
+///
+/// - It is a file, and its name is `<base>.<pid>.<n>` with a `base` of `bases`.
+/// - Its age is at least [`TEMP_GRACE`], and `dead` gives `true` for `pid`.
+///
+/// The temporary files of this process stay. The step reads
 /// at most [`SWEEP_MAX`] entries. A failed list or remove leaves the files. Gives the number
 /// of removed files.
 pub(crate) fn remove_dead_temps(
@@ -351,7 +369,8 @@ pub(crate) fn remove_dead_temps_by(
             continue;
         };
         let path = dir.join(name);
-        if pid == me || fs.kind(&path) != Some(EntryKind::File) || !dead(fs, pid) {
+        let old = fs.age(&path).is_some_and(|age| age >= TEMP_GRACE);
+        if pid == me || fs.kind(&path) != Some(EntryKind::File) || !old || !dead(fs, pid) {
             continue;
         }
         if fs.remove(&path).is_ok() {
@@ -476,6 +495,15 @@ impl Fs for RealFs {
         } else {
             EntryKind::Other
         })
+    }
+
+    fn age(&mut self, path: &Path) -> Option<Duration> {
+        let changed = std::fs::symlink_metadata(path).ok()?.modified().ok()?;
+        Some(
+            SystemTime::now()
+                .duration_since(changed)
+                .unwrap_or(Duration::ZERO),
+        )
     }
 
     fn boxed(&self) -> Box<dyn Fs> {

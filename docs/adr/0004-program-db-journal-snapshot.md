@@ -1,8 +1,8 @@
 # ADR-0004: In-memory program database with journal and snapshots; facts versus derived data
 
-Status: Accepted (amended 2026-10-17, revision 3)
+Status: Accepted (amended 2026-10-22)
 Date: 2026-10-16
-Verified by: AC-097, AC-117, AC-120a, AC-120b, AC-123, AC-203, AC-210
+Verified by: AC-097, AC-117, AC-120a, AC-120b, AC-120c, AC-123, AC-189a, AC-203, AC-210
 
 ## Context
 
@@ -44,3 +44,9 @@ Verified by: AC-097, AC-117, AC-120a, AC-120b, AC-123, AC-203, AC-210
 ## Amendment 2026-10-17 (revision 3)
 
 - SSA and pseudo-C are MVP derived data (ADR-0018). Similarity vectors (ADR-0028) are derived data with the key `(FuncId, func_epoch)` and never enter the journal.
+
+## Amendment 2026-10-22
+
+- The project format version is 2. Each import gets `ext:` and 1 plus the rank of its import ID. So the import order of the loader does not change `state_hash` (AC-189a).
+- A version 1 project still opens. The `db::migrate` module maps each old `ext:` address of the snapshot facts and the journal edits to its new address. A write open writes `project.json` at version 2.
+- The golden v1 project is frozen. A bless does not write it again (AC-120c).

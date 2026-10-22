@@ -578,7 +578,7 @@ Journal line (one per committed Tx):
 
 - `crc` is the first 16 hex digits of the SHA-256 of the line without the `crc` field.
 - A completed analysis writes a marker line `{"op":"AnalysisRun","inputs_hash":..,"fuel_used":..,"result_hash":..}` instead of thousands of facts.
-- Session metadata goes into `meta` lines: `{"v":1,"meta":"progress","func":..,"visited":true}` and `{"v":1,"meta":"brief","session":"mcp-1","rev":57}`. A `meta` line changes no `rev`. Replay folds them into `progress` and `marks`.
+- Session metadata goes into `meta` lines: `{"v":2,"meta":"progress","func":..,"visited":true}` and `{"v":2,"meta":"brief","session":"mcp-1","rev":57}`. A `meta` line changes no `rev`. Replay folds them into `progress` and `marks`.
 
 ### 3.8 Events, table epochs and history
 
@@ -638,9 +638,11 @@ Default projects root: `$XDG_DATA_HOME/ghidorah/projects` (fallback `$HOME/.loca
 - Temp files: the snapshot, the input copy, `project.json`, the journal, the lock and each crash record write their temp files with the per-process name `<base>.<pid>.<n>`.
 - `<base>` is the name of the target file, and `<n>` counts the temp files of the process. A crash record `crash/<id>.json` uses the base `<id>.tmp`.
 - So two processes never write to the same temp file. A write open removes the temp files of dead processes from the project directory, `bin/` and `crash/`.
+- The process test reads only the local `/proc`. A process on another host or in another PID namespace is not there. So the sweep removes only a file whose last change is at least one hour old (`Fs::age`). A file with no age stays.
 - `project.json` member `load` is `Auto` or `Raw { base, entry }`. A reopen loads the input copy the same way again.
 - `snapshot.json` member `journal_lines` is the count of journal lines that the snapshot covers. A valid snapshot has two properties. `journal_lines` is at most the line count of the journal. The rev of the last covered line equals the snapshot `rev`.
 - `format_version` starts at 1. Each later version ships a migration function and a golden v1 project fixture (AC-120c).
+- Version 2 gives each import the EXTERNAL address `ext:` and 1 plus the rank of its import ID. Version 1 used the place of the import in the import list of the binary model, so the import order changed the state hash. An open of a version 1 project changes each old `ext:` address of the snapshot facts and the journal edits to its new address (`db::migrate`). Journal lines carry `"v":2`. A write open writes `project.json` at version 2 after the load.
 - `crash_id` is the first 16 hex digits of `sha256(tool, JCS(args), rev)`. Output paths are relative to the project directory.
 - Lock: a write open creates `project.lock` and never writes over the lock of a live process. Its temp file follows the temp-file rule above. A lock whose process is alive (same `boot_id`, same start time in `/proc/<pid>/stat`) gives `PROJECT_LOCKED` with a read-only hint. The error names the owner of a stale lock. Only `--break-lock` replaces a stale lock.
 - `binary_load { binary_id }` reopens a project from `bin/<sha256>` with no path and no root check. `session_brief {}` with zero open binaries lists the projects under the root (Section 10.4).

@@ -14,9 +14,12 @@ use crate::fs::{EntryKind, Fs, FsError, replace_file};
 use crate::history::History;
 use crate::journal::{self, JOURNAL_FILE, JournalError, Line};
 use crate::lock::LockError;
+use crate::migrate::ExtMap;
 use crate::program::Program;
 use crate::replay;
-use crate::snapshot::{self, FORMAT_VERSION, SNAPSHOT_FILE, hash_from, inputs_hash};
+use crate::snapshot::{
+    self, FORMAT_VERSION, MIN_FORMAT_VERSION, SNAPSHOT_FILE, hash_from, inputs_hash,
+};
 
 /// The member names of the project file.
 const META_MEMBERS: [&str; 7] = [
@@ -92,9 +95,9 @@ fn read_load(v: &Value) -> Result<LoadSpec, CodecError> {
 pub(super) fn meta_from_json(value: &Value) -> Result<ProjectMeta, ProjectError> {
     let o = Obj::new(value, &META_MEMBERS).map_err(|e| bad(&e))?;
     let format_version: u64 = o.get("format_version").map_err(|e| bad(&e))?;
-    if format_version != FORMAT_VERSION {
+    if !(MIN_FORMAT_VERSION..=FORMAT_VERSION).contains(&format_version) {
         return Err(ProjectError::BadMeta(format!(
-            "the format version is {format_version}, not {FORMAT_VERSION}"
+            "the format version is {format_version}, not {MIN_FORMAT_VERSION} to {FORMAT_VERSION}"
         )));
     }
     let sha256 = o.with("sha256", hash_from).map_err(|e| bad(&e))?;
@@ -194,6 +197,33 @@ pub(super) fn write_new(project: &mut Project, bytes: &[u8]) -> Result<u64, Proj
     Ok(journal_len)
 }
 
+/// Writes the project file again at [`FORMAT_VERSION`] when it has an older version. The
+/// caller holds the lock. The steps are the steps of a project file write.
+///
+/// # Errors
+///
+/// Returns [`ProjectError::Fs`] for a failed file operation.
+pub(super) fn upgrade_meta(project: &mut Project) -> Result<(), ProjectError> {
+    if project.meta.format_version >= FORMAT_VERSION {
+        return Ok(());
+    }
+    let mut meta = project.meta.clone();
+    meta.format_version = FORMAT_VERSION;
+    let mut text = ghidorah_json::write_pretty(&meta.to_json());
+    text.push('\n');
+    let dir = project.dir.clone();
+    let fs = project.fs.as_mut();
+    replace_file(
+        fs,
+        &dir.join(PROJECT_FILE),
+        &dir.join(PROJECT_TMP),
+        text.as_bytes(),
+    )?;
+    fs.sync_dir(&dir)?;
+    project.meta = meta;
+    Ok(())
+}
+
 /// Gives the length of `bytes` as a file length.
 fn len_of(bytes: &[u8]) -> u64 {
     u64::try_from(bytes.len()).unwrap_or(u64::MAX)
@@ -214,12 +244,19 @@ fn last_rev(lines: &[Line]) -> Rev {
 }
 
 /// Puts the snapshot of the project into `program` when it is valid and agrees with the
-/// journal. Gives the number of journal lines that the snapshot covers, or 0.
-fn restore_snapshot(fs: &mut dyn Fs, dir: &Path, lines: &[Line], program: &mut Program) -> usize {
+/// journal. Gives the number of journal lines that the snapshot covers, or 0. A version 1
+/// snapshot gets the new `ext:` addresses of `v1`.
+fn restore_snapshot(
+    fs: &mut dyn Fs,
+    dir: &Path,
+    lines: &[Line],
+    program: &mut Program,
+    v1: &ExtMap,
+) -> usize {
     let Ok(bytes) = fs.read(&dir.join(SNAPSHOT_FILE)) else {
         return 0;
     };
-    let Ok(snap) = snapshot::decode(&bytes) else {
+    let Ok(snap) = snapshot::decode(&bytes, v1) else {
         return 0;
     };
     let Some(covered) = usize::try_from(snap.journal_lines)
@@ -253,10 +290,11 @@ pub(super) fn load(project: &mut Project, limits: &Limits) -> Result<Loaded, Pro
         .map_err(|e| ProjectError::Program(e.to_string()))?;
     let journal_path = dir.join(JOURNAL_FILE);
     let text = read_or_empty(fs, &journal_path)?;
-    let journal = journal::parse(&text).map_err(|e| match e {
+    let v1 = ExtMap::of(&program);
+    let journal = journal::parse(&text, &v1).map_err(|e| match e {
         JournalError::Corrupt { line, .. } => ProjectError::Corrupt { line },
     })?;
-    let skip = restore_snapshot(fs, &dir, &journal.lines, &mut program);
+    let skip = restore_snapshot(fs, &dir, &journal.lines, &mut program, &v1);
     let mut history = History::new();
     let replayed = replay::replay(&mut program, &journal.lines, skip, &mut history)
         .map_err(ProjectError::Replay)?;
@@ -300,7 +338,8 @@ fn summary(fs: &mut dyn Fs, dir: &Path) -> Option<ProjectSummary> {
     let value = ghidorah_json::parse(text, &ghidorah_json::Limits::DEFAULT).ok()?;
     let meta = meta_from_json(&value).ok()?;
     let journal = read_or_empty(fs, &dir.join(JOURNAL_FILE)).ok()?;
-    let lines = journal::parse(&journal)
+    // The summary reads only the revisions and the sessions, so it needs no `ext:` map.
+    let lines = journal::parse(&journal, &ExtMap::default())
         .map(|j| j.lines)
         .unwrap_or_default();
     let last_session = lines.iter().rev().find_map(|l| match l {

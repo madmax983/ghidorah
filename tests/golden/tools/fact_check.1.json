@@ -55,7 +55,7 @@
         },
         "verdict": "supported",
         "evidence": [
-          "ref:0x1014>ext:0x5:unconditional_call"
+          "ref:0x1014>ext:0x4:unconditional_call"
         ],
         "basis": {
           "complete": true,
