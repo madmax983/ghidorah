@@ -14,6 +14,7 @@ use std::path::PathBuf;
 use ghidorah_base::{Address, Limits};
 use ghidorah_db::journal::{self, Line, TxLine};
 use ghidorah_db::meta::MetaLine;
+use ghidorah_db::migrate::ExtMap;
 use ghidorah_db::{Edit, FuncProgress, History, Program, SessionLabel, Source, SymKind, replay};
 use ghidorah_loader::{LoadOpts, load};
 use ghidorah_testkit::fuzz::{self, Config, Outcome};
@@ -91,8 +92,8 @@ fn corpus(start: &Program) -> Vec<Vec<u8>> {
 }
 
 fn target(start: &Program, input: &[u8]) -> Outcome {
-    let _ = journal::parse(input);
-    let Ok(parsed) = journal::parse(&recrc(input)) else {
+    let _ = journal::parse(input, &ExtMap::default());
+    let Ok(parsed) = journal::parse(&recrc(input), &ExtMap::default()) else {
         return Outcome::reached(0);
     };
     let mut p = start.clone();
@@ -113,7 +114,8 @@ fn target(start: &Program, input: &[u8]) -> Outcome {
 fn fuzz_journal_replay() {
     let start = program();
     let corpus = corpus(&start);
-    let seed = journal::parse(corpus.first().expect("a corpus input")).expect("the seed parses");
+    let seed = journal::parse(corpus.first().expect("a corpus input"), &ExtMap::default())
+        .expect("the seed parses");
     assert_eq!(seed.lines.len(), 4, "the seed journal has four lines");
     let again = corpus.first().map(|c| recrc(c));
     assert_eq!(

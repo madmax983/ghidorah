@@ -1,8 +1,12 @@
 //! Tests of the real file system and the file replace.
 
 use std::path::Path;
+use std::time::Duration;
 
-use super::{EntryKind, Fs, FsError, RealFs, SWEEP_MAX, remove_dead_temps, replace_file, temp_pid};
+use super::{
+    EntryKind, Fs, FsError, RealFs, SWEEP_MAX, TEMP_GRACE, remove_dead_temps, replace_file,
+    temp_pid,
+};
 use crate::project::tests::fs_sim::SimFs;
 
 #[cfg(unix)]
@@ -195,6 +199,7 @@ fn dead_temps_sweep_is_bounded_and_keeps_live_files() {
     handle
         .create_dir_all(&dir.join("a.json.tmp.4194305.99999"))
         .unwrap();
+    fs.advance(TEMP_GRACE);
     let first = remove_dead_temps(handle.as_mut(), dir, &["a.json.tmp"], dead);
     assert!(
         first <= SWEEP_MAX,
@@ -219,4 +224,58 @@ fn dead_temps_sweep_is_bounded_and_keeps_live_files() {
         0,
         "a directory that does not exist gives no remove"
     );
+}
+
+/// The sweep took the temporary file of a process that the local `/proc` does not show at
+/// once. On a disk that two hosts or two PID namespaces share, that process can be alive and
+/// still write the file. Now a file stays until [`TEMP_GRACE`] after its last change.
+#[test]
+fn regress_sweep_keeps_young_temps() {
+    let fs = SimFs::new();
+    let dir = Path::new("/p/0011223344556677");
+    let mut handle = fs.boxed();
+    let dead = |_: &mut dyn Fs, pid: u32| pid == 4_194_305;
+    let sweep = |h: &mut Box<dyn Fs>| remove_dead_temps(h.as_mut(), dir, &["a.json.tmp"], dead);
+    let (old, young) = (
+        dir.join("a.json.tmp.4194305.0"),
+        dir.join("a.json.tmp.4194305.1"),
+    );
+    fs.seed(&old, b"x");
+    assert_eq!(sweep(&mut handle), 0, "a new file stays");
+    fs.advance(TEMP_GRACE.saturating_sub(Duration::from_secs(1)));
+    fs.seed(&young, b"x");
+    assert_eq!(
+        sweep(&mut handle),
+        0,
+        "a file younger than the grace time stays"
+    );
+    fs.advance(Duration::from_secs(1));
+    assert_eq!(sweep(&mut handle), 1, "the old file goes");
+    assert!(!handle.exists(&old) && handle.exists(&young));
+    // A write makes the file young again.
+    fs.advance(TEMP_GRACE.saturating_sub(Duration::from_secs(1)));
+    handle.append(&young, b"y").unwrap();
+    fs.advance(Duration::from_secs(1));
+    assert_eq!(sweep(&mut handle), 0, "a written file stays");
+    // A file system that does not tell the age keeps the file.
+    fs.advance(TEMP_GRACE);
+    fs.set_age_known(false);
+    assert_eq!(handle.age(&young), None);
+    assert_eq!(sweep(&mut handle), 0, "a file with no age stays");
+    fs.set_age_known(true);
+    assert_eq!(sweep(&mut handle), 1, "an old file goes");
+}
+
+#[test]
+fn real_fs_age() {
+    let dir = std::env::temp_dir().join(format!("ghidorah-fs-age-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let mut fs = RealFs;
+    fs.create_dir_all(&dir).unwrap();
+    let file = dir.join("a.txt");
+    fs.create_new(&file).unwrap();
+    let age = fs.age(&file).expect("the age of a new file");
+    assert!(age < Duration::from_mins(10), "{age:?}");
+    assert_eq!(fs.age(&dir.join("none")), None, "no file gives no age");
+    let _ = std::fs::remove_dir_all(&dir);
 }

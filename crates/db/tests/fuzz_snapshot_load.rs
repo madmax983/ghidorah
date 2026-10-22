@@ -14,6 +14,7 @@
 use std::path::PathBuf;
 
 use ghidorah_base::Limits;
+use ghidorah_db::migrate::ExtMap;
 use ghidorah_db::{Program, snapshot};
 use ghidorah_json::Value;
 use ghidorah_loader::{LoadOpts, load};
@@ -122,9 +123,9 @@ fn changed(seed: &Value, input: &[u8]) -> Value {
 }
 
 fn target(start: &Program, seed: &Value, input: &[u8]) -> Outcome {
-    let _ = snapshot::decode(input);
+    let _ = snapshot::decode(input, &ExtMap::default());
     let text = ghidorah_json::write(&changed(seed, input));
-    let Ok(snap) = snapshot::decode(text.as_bytes()) else {
+    let Ok(snap) = snapshot::decode(text.as_bytes(), &ExtMap::default()) else {
         return Outcome::reached(0);
     };
     let mut p = start.clone();
@@ -141,7 +142,7 @@ fn fuzz_snapshot_load() {
     let text = snapshot::encode(&start, 0, None).expect("the snapshot");
     let seed = ghidorah_json::parse(&text, &snapshot::SNAPSHOT_LIMITS).expect("the snapshot JSON");
     assert!(
-        snapshot::decode(text.as_bytes()).is_ok(),
+        snapshot::decode(text.as_bytes(), &ExtMap::default()).is_ok(),
         "the seed decodes"
     );
     let corpus = vec![vec![0, 0, 0], text.into_bytes()];

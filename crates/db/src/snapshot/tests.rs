@@ -8,6 +8,7 @@ use ghidorah_json::Value;
 use super::{SnapshotError, decode, encode, inputs_hash, result_hash, write};
 use crate::fs::Fs;
 use crate::meta::{MetaLine, apply};
+use crate::migrate::ExtMap;
 use crate::progress::FuncProgress;
 use crate::project::tests::fs_sim::SimFs;
 use crate::project::tests::{input, sim};
@@ -77,7 +78,7 @@ fn snapshot_roundtrip_restores_the_state() {
         text,
         "JCS text"
     );
-    let snap = decode(text.as_bytes()).unwrap();
+    let snap = decode(text.as_bytes(), &ExtMap::default()).unwrap();
     assert_eq!(snap.journal_lines, 3);
     assert_eq!(snap.analysis_inputs_hash, Some([5; 32]));
     let (_, fresh) = input("hello.gcc-O2");
@@ -101,14 +102,29 @@ fn snapshot_roundtrip_restores_the_state() {
 
 #[test]
 fn decode_refuses_bad_snapshots() {
-    assert!(matches!(decode(b"[1"), Err(SnapshotError::Json(_))));
-    assert!(matches!(decode(b"{}"), Err(SnapshotError::Shape(_))));
+    assert!(matches!(
+        decode(b"[1", &ExtMap::default()),
+        Err(SnapshotError::Json(_))
+    ));
+    assert!(matches!(
+        decode(b"{}", &ExtMap::default()),
+        Err(SnapshotError::Shape(_))
+    ));
     let p = seeded();
     let text = encode(&p, 0, None).unwrap();
-    let other = text.replacen("\"format_version\":1", "\"format_version\":2", 1);
-    assert_eq!(decode(other.as_bytes()), Err(SnapshotError::Version(2)));
+    for v in [0u64, 3] {
+        let other = text.replacen(
+            "\"format_version\":2",
+            &format!("\"format_version\":{v}"),
+            1,
+        );
+        assert_eq!(
+            decode(other.as_bytes(), &ExtMap::default()),
+            Err(SnapshotError::Version(v))
+        );
+    }
     let (_, mut fresh) = input("crackme.gcc-O2");
-    let snap = decode(text.as_bytes()).unwrap();
+    let snap = decode(text.as_bytes(), &ExtMap::default()).unwrap();
     assert_eq!(snap.restore(&mut fresh), Err(SnapshotError::Binary));
 }
 

@@ -184,9 +184,10 @@ fn from_binary_gives_imported_symbols_and_imports() {
         .unwrap();
     assert_eq!(puts.slot, Some(ram(0x3fc8)));
     assert_eq!(puts.stub, Some(ram(0x1060)));
+    let rank = p.imports().keys().position(|id| *id == puts.id).unwrap();
     assert_eq!(
         puts.ext,
-        Address::external(u64::try_from(puts.index).unwrap() + 1)
+        Address::external(u64::try_from(rank).unwrap() + 1)
     );
     assert_eq!(p.addrs_named("puts@plt"), [ram(0x1060)]);
     assert_eq!(p.addrs_named("puts@got"), [ram(0x3fc8)]);
@@ -579,4 +580,57 @@ fn load_names_escape_bad_utf8_and_drop_long_names() {
     assert_eq!(super::load::text(&BinText::new(Vec::new())), None);
     let long = vec![b'x'; ghidorah_base::id::MAX_NAME_LEN + 1];
     assert_eq!(super::load::text(&BinText::new(long)), None);
+}
+
+/// Loads the fixture `name` and gives its program and the program of its binary model with
+/// the import list in reverse order.
+fn program_and_reversed(name: &str) -> (Program, Program) {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../fixtures/bin")
+        .join(name);
+    let bytes = std::fs::read(&path).unwrap();
+    let (binary, mem) = load(&bytes, &LoadOpts::AUTO, &Limits::DEFAULT).unwrap();
+    let mut reversed = binary.clone();
+    reversed.imports.reverse();
+    let p = Program::from_binary(binary, mem.clone(), &Limits::DEFAULT).unwrap();
+    let q = Program::from_binary(reversed, mem, &Limits::DEFAULT).unwrap();
+    (p, q)
+}
+
+/// The place of an import in the list of the binary model gave its `ext:` address. So a
+/// loader with another import order gave other addresses and another state hash. Now the
+/// address is 1 plus the rank of the import ID, with no gap. The version 1 map gives the old
+/// address of each import.
+#[test]
+fn regress_ext_follows_import_ids() {
+    for name in ["hello.gcc-O2", "crackme.gcc-O2", "pe/pe_main.exe"] {
+        let (p, q) = program_and_reversed(name);
+        let ext = |p: &Program| -> Vec<(String, Address)> {
+            p.imports()
+                .values()
+                .map(|r| (r.id.to_string(), r.ext))
+                .collect()
+        };
+        assert!(p.imports().len() >= 2, "{name}");
+        assert_eq!(ext(&p), ext(&q), "{name}: the import order sets no address");
+        for (k, row) in p.imports().values().enumerate() {
+            let want = Address::external(u64::try_from(k).unwrap() + 1);
+            assert_eq!(row.ext, want, "{name}: {}", row.id);
+        }
+        assert_eq!(p.state_hash(), q.state_hash(), "{name}");
+        let old = p.v1_ext_map();
+        assert_eq!(old.len(), p.imports().len(), "{name}");
+        // An ELF import name is unique, so its first place gives its version 1 address.
+        let elf = !name.starts_with("pe/");
+        for row in p.imports().values().filter(|_| elf) {
+            let first = p
+                .binary()
+                .imports
+                .iter()
+                .position(|i| i.name.as_ref().and_then(|n| n.as_str()) == row.id.name())
+                .unwrap();
+            let v1 = Address::external(u64::try_from(first).unwrap() + 1);
+            assert_eq!(old.get(&v1), Some(&row.ext), "{name}: {}", row.id);
+        }
+    }
 }

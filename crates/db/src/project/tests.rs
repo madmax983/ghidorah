@@ -1,6 +1,9 @@
 //! Tests of the project directory: replay (AC-117), the torn tail (AC-119a), a corrupt line
 //! (AC-119b), crash consistency (AC-120b), the golden v1 project (AC-120c), the lock (AC-124),
-//! project safety (AC-125), forward undo (AC-128b) and the snapshot cadence.
+//! project safety (AC-125), forward undo (AC-128b) and the snapshot cadence. The `migrate`
+//! module tests a version 1 project.
+
+mod migrate;
 
 #[path = "../../tests/common/fs_sim.rs"]
 pub(crate) mod fs_sim;
@@ -25,6 +28,7 @@ use crate::history::{History, Scope};
 use crate::journal::{JOURNAL_FILE, Line, TxLine};
 use crate::lock::{BOOT_ID_FILE, LOCK_FILE, LockInfo};
 use crate::meta::MetaLine;
+use crate::migrate::ExtMap;
 use crate::program::Program;
 use crate::progress::FuncProgress;
 use crate::snapshot::SNAPSHOT_FILE;
@@ -360,113 +364,10 @@ fn golden_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/golden/projects/v1")
 }
 
-/// Writes the golden v1 project again: the demo binary (`crackme.gcc-O2`) with a rename, a
-/// note, a snapshot, a comment, the undo of the comment and two meta lines.
-fn bless_golden() {
-    let root = golden_dir();
-    let _ = std::fs::remove_dir_all(&root);
-    let (bytes, mut p) = input("crackme.gcc-O2");
-    let meta = ProjectMeta::new(&p, "demo.elf", LoadSpec::Auto);
-    let mut real = crate::fs::RealFs;
-    let mut options = write(1);
-    options.me = crate::lock::current(&mut real).unwrap_or_else(|| me(1));
-    let mut project = Project::create(
-        Box::new(crate::fs::RealFs),
-        &root,
-        meta,
-        &bytes,
-        &p,
-        &options,
-    )
-    .unwrap();
-    let mut h = History::new();
-    let mut tx = p
-        .begin("symbol_rename", Source::Agent, session("mcp-1"))
-        .unwrap();
-    let fact = tx.fact("read_input".to_string());
-    tx.apply(Edit::SetName {
-        addr: Address::ram(0x1090),
-        key: None,
-        kind: SymKind::Label,
-        primary: true,
-        name: Some(fact),
-        evidence: vec!["fn:0x1080".to_string()],
-    })
-    .unwrap();
-    let commit = tx.commit().unwrap();
-    journal(&mut project, &mut h, &p, &commit);
-    let mut tx = p
-        .begin("note_write", Source::Agent, session("mcp-1"))
-        .unwrap();
-    let note = crate::notes::Note {
-        id: tx.program().notes().next_id(),
-        kind: crate::notes::NoteKind::Finding,
-        text: "The check XORs each input byte with a key.".to_string(),
-        at: Some(Address::ram(0x11e0)),
-        func: Some(ghidorah_base::FuncId(Address::ram(0x11e0))),
-        status: crate::notes::NoteStatus::Open,
-        tags: vec!["crypto".to_string()],
-        evidence: vec!["fn:0x11e0".to_string()],
-        lift_ver: None,
-        claims: Vec::new(),
-        set: None,
-        src: Source::Agent,
-        session: session("mcp-1"),
-        rev: tx.pending_rev(),
-    };
-    tx.apply(Edit::WriteNote(Box::new(note))).unwrap();
-    let commit = tx.commit().unwrap();
-    journal(&mut project, &mut h, &p, &commit);
-    project.snapshot(&p).unwrap();
-    let mut tx = p
-        .begin("comment_set", Source::Agent, session("mcp-1"))
-        .unwrap();
-    let text = tx.fact("loop over the input".to_string());
-    tx.apply(Edit::SetComment {
-        addr: Address::ram(0x11e4),
-        kind: crate::comments::CommentKind::Eol,
-        text: Some(text),
-    })
-    .unwrap();
-    let commit = tx.commit().unwrap();
-    journal(&mut project, &mut h, &p, &commit);
-    let req = UndoRequest {
-        scope: Scope::Session(session("mcp-1")),
-        tx: None,
-        count: 1,
-        redo: false,
-        force: false,
-        dry_run: false,
-        source: Source::Agent,
-        session: session("mcp-1"),
-    };
-    let line = run(&mut p, &h, &req).unwrap().line.unwrap();
-    project
-        .append(&Line::Tx(Box::new(line.clone())), &p)
-        .unwrap();
-    h.record(&line);
-    let visited = MetaLine::Progress {
-        func: ghidorah_base::FuncId(Address::ram(0x11e0)),
-        row: FuncProgress {
-            visited: true,
-            ..FuncProgress::default()
-        },
-    };
-    let brief = MetaLine::Brief {
-        session: session("mcp-1"),
-        rev: p.rev(),
-    };
-    for meta in [visited, brief] {
-        crate::meta::apply(&mut p, &meta);
-        project.append(&Line::Meta(meta), &p).unwrap();
-    }
-}
-
+/// The golden v1 project loads (AC-120c). A bless does not write it again: version 1 is
+/// frozen. The `ext:` facts of its snapshot move to the address of their import ID.
 #[test]
 fn ac_120c_golden_v1() {
-    if std::env::var_os(ghidorah_testkit::golden::BLESS_ENV).is_some_and(|v| v == "1") {
-        bless_golden();
-    }
     let dir = golden_dir().join("467a43b75d95c826");
     let mut fs = crate::fs::RealFs;
     let opened = Project::open(fs.boxed(), &dir, &opts(Access::ReadOnly, 1)).unwrap();
@@ -494,6 +395,20 @@ fn ac_120c_golden_v1() {
         Some(Rev(4))
     );
     assert_eq!(opened.history.mcp_labels(), 1);
+    // The v1 snapshot holds the import labels in import order: `__libc_start_main` at
+    // `ext:0x1`. Each one moves to the address of its import ID.
+    assert!(
+        !ExtMap::of(p).is_empty(),
+        "the import order is not the ID order"
+    );
+    for row in p.imports().values() {
+        let label = p
+            .base()
+            .symbols()
+            .primary(row.ext)
+            .map(|s| s.name.value.clone());
+        assert_eq!(label.as_deref(), row.id.name(), "{}", row.id);
+    }
     assert!(Project::exists(&mut fs, &dir));
     assert!(
         !dir.join(LOCK_FILE).exists(),
@@ -669,7 +584,7 @@ fn regress_concurrent_create_has_one_writer() {
         assert_eq!(writers, 1, "round {round}: {results:?}");
         let dir = Project::dir_of(&root, id);
         let text = std::fs::read(dir.join(JOURNAL_FILE)).unwrap();
-        let revs: Vec<Rev> = crate::journal::parse(&text)
+        let revs: Vec<Rev> = crate::journal::parse(&text, &crate::migrate::ExtMap::default())
             .unwrap()
             .lines
             .iter()
@@ -701,7 +616,7 @@ fn regress_failed_append_leaves_no_partial_line() {
     let mut h = History::new();
     rename(&mut p, &mut project, &mut h, 0x1084, "alpha");
     let text = fs.get(&path).unwrap();
-    let journal = crate::journal::parse(&text).unwrap();
+    let journal = crate::journal::parse(&text, &crate::migrate::ExtMap::default()).unwrap();
     assert_eq!(journal.lines.len(), 1, "only the good commit");
     assert!(!journal.torn);
     drop(project);
@@ -739,7 +654,8 @@ fn failed_cut_stops_the_project_until_a_reload() {
     assert!(loaded.tail_discarded);
     assert_eq!(fs.get(&path).unwrap(), good);
     project.append(&brief, &p).unwrap();
-    let journal = crate::journal::parse(&fs.get(&path).unwrap()).unwrap();
+    let journal =
+        crate::journal::parse(&fs.get(&path).unwrap(), &crate::migrate::ExtMap::default()).unwrap();
     assert_eq!(journal.lines.len(), 2);
     assert!(!journal.torn);
     // A failed sync and a failed cut also stop the project.
@@ -814,7 +730,7 @@ fn snapshot_every_256_lines() {
     }
     assert_eq!(snapshots, vec![SNAPSHOT_EVERY]);
     let text = fs.get(&dir.join(SNAPSHOT_FILE)).unwrap();
-    let snap = crate::snapshot::decode(&text).unwrap();
+    let snap = crate::snapshot::decode(&text, &crate::migrate::ExtMap::default()).unwrap();
     assert_eq!(snap.rev, Rev(SNAPSHOT_EVERY));
     assert_eq!(snap.journal_lines, SNAPSHOT_EVERY);
     drop(project);
@@ -983,6 +899,8 @@ fn regress_stale_temp_removed_on_open() {
     }
     let live_bin = format!("{sha}.tmp.{live}.1");
     fs.seed(&bin.join(&live_bin), b"x");
+    // The files of the dead writer are older than the grace time.
+    fs.advance(crate::fs::TEMP_GRACE);
     let opened = reopen(&fs, &dir, &opts(Access::Write { break_lock: true }, next)).unwrap();
     let mut left = temps_of(&fs, &dir, dead);
     left.extend(temps_of(&fs, &bin, dead));
@@ -1058,6 +976,9 @@ impl Fs for LinkFs {
         }
         self.sim.kind(path)
     }
+    fn age(&mut self, path: &Path) -> Option<std::time::Duration> {
+        self.sim.age(path)
+    }
     fn boxed(&self) -> Box<dyn Fs> {
         Box::new(self.clone())
     }
@@ -1121,6 +1042,7 @@ fn regress_sweep_removes_dead_crash_temps() {
         sim: fs.clone(),
         links: vec![link.clone()],
     };
+    fs.advance(crate::fs::TEMP_GRACE);
     let options = opts(Access::Write { break_lock: true }, next);
     let opened = Project::open(linked.boxed(), &dir, &options).unwrap();
     let names = fs.boxed().list(&crash).unwrap();

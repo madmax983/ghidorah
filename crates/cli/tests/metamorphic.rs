@@ -38,7 +38,7 @@ struct Run {
     /// The analyzer rows in list order.
     rows: Vec<&'static str>,
     /// The seed lists of the program in insertion order: symbols, FDEs, entry points,
-    /// exports and `.pdata` entries.
+    /// exports, `.pdata` entries and imports.
     seeds: Vec<Vec<String>>,
 }
 
@@ -72,6 +72,7 @@ fn analyzed(path: &str, engine: Engine) -> Run {
         b.entry_points.iter().map(|e| format!("{e:?}")).collect(),
         b.exports.iter().map(|e| format!("{e:?}")).collect(),
         b.pdata.iter().map(|r| format!("{r:?}")).collect(),
+        b.imports.iter().map(|i| format!("{i:?}")).collect(),
     ];
     Run { hash, rows, seeds }
 }
@@ -280,7 +281,7 @@ const IMPORT_FIXTURES: [&str; 4] = [
 ///
 /// Each import gives the `func_get` read of its PLT stub and of each function that reads its
 /// slot. The read has the name, the flags with `varargs` and `noreturn`, and the parameters.
-/// Each EXTERNAL address shows as its import ID, because the import order sets the address.
+/// The EXTERNAL addresses stay as they are: the import order does not set them.
 fn import_reads(path: &str, engine: Engine) -> BTreeMap<String, Value> {
     let roots = Roots::new(&root(), &[PathBuf::from(".")]).expect("the root");
     let mut session = Session::new(SessionConfig::new(roots), Box::new(FixedClock::new(0)));
@@ -296,13 +297,6 @@ fn import_reads(path: &str, engine: Engine) -> BTreeMap<String, Value> {
         .next()
         .expect("the binary is open")
         .program;
-    let mut ext: Vec<(String, String)> = program
-        .imports()
-        .values()
-        .map(|r| (r.ext.to_string(), format!("ext:{}", r.id)))
-        .collect();
-    // A longer address goes first, so `ext:0x1` does not cut `ext:0x10`.
-    ext.sort_by_key(|(from, _)| std::cmp::Reverse(from.len()));
     let mut targets = Vec::new();
     for row in program.imports().values() {
         if let Some(stub) = row.stub {
@@ -323,12 +317,7 @@ fn import_reads(path: &str, engine: Engine) -> BTreeMap<String, Value> {
                 r#"{{"target":"{target}","include":["summary","decomp","vars"],"max_chars":60000}}"#
             )),
         );
-        let read = dispatch_with(&registry, &mut session, &get).to_json();
-        let read = map_strings(&read, &|t| {
-            ext.iter()
-                .fold(t.to_owned(), |acc, (from, to)| acc.replace(from, to))
-        });
-        out.insert(key, read);
+        out.insert(key, dispatch_with(&registry, &mut session, &get).to_json());
     }
     out
 }

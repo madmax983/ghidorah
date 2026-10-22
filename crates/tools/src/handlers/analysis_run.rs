@@ -110,10 +110,9 @@ impl Engine {
     /// shuffles the seed insertion order of the first analysis of each binary with `seed`.
     ///
     /// Before that analysis, the engine makes the program again from a copy of its binary
-    /// model. The copy has the symbols, FDEs, entry points, exports and `.pdata` entries in
-    /// shuffled order. The symbols at one address keep their order. The import order stays,
-    /// because it sets the EXTERNAL addresses. The rebuild uses the default limits. The
-    /// analyzer order of the scheduler also changes.
+    /// model. The copy has the symbols, FDEs, entry points, exports, `.pdata` entries and
+    /// imports in shuffled order. The symbols at one address keep their order. The rebuild
+    /// uses the default limits. The analyzer order of the scheduler also changes.
     #[must_use]
     pub fn with_seed_order(seed: u64) -> Self {
         Self {
@@ -177,6 +176,7 @@ fn seeds_shuffled(binary: &Binary, seed: u64) -> Binary {
     out.entry_points = shuffled(&binary.entry_points, seed.rotate_left(16));
     out.exports = shuffled(&binary.exports, seed.rotate_left(24));
     out.pdata = shuffled(&binary.pdata, seed.rotate_left(32));
+    out.imports = shuffled(&binary.imports, seed.rotate_left(40));
     out
 }
 
