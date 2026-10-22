@@ -634,3 +634,36 @@ fn regress_ext_follows_import_ids() {
         }
     }
 }
+
+/// Version 1 gave a list index to an import with no valid ID and to a later import of one
+/// ID. An agent fact can sit at such an address. The new addresses of the import IDs used
+/// it again. Now the version 1 map is a permutation of `ext:0x1` to the list length: such
+/// an address moves above the import IDs.
+#[test]
+fn regress_v1_ext_map_is_a_permutation() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/bin/hello.gcc-O2");
+    let bytes = std::fs::read(&path).unwrap();
+    let (mut binary, mem) = load(&bytes, &LoadOpts::AUTO, &Limits::DEFAULT).unwrap();
+    // A second import of the first ID, then an import with no name.
+    let first = binary.imports[0].clone();
+    binary.imports.insert(1, first.clone());
+    binary.imports.insert(
+        0,
+        ghidorah_loader::Import {
+            name: None,
+            ..first
+        },
+    );
+    let p = Program::from_binary(binary, mem, &Limits::DEFAULT).unwrap();
+    let len = u64::try_from(p.binary().imports.len()).unwrap();
+    assert_eq!(p.imports().len() + 2, p.binary().imports.len());
+    let map = p.v1_ext_map();
+    let all: Vec<Address> = (1..=len).map(Address::external).collect();
+    assert_eq!(map.keys().copied().collect::<Vec<_>>(), all);
+    let mut new: Vec<Address> = map.values().copied().collect();
+    new.sort();
+    assert_eq!(new, all, "the map is a permutation");
+    for row in p.imports().values() {
+        assert!(map.values().any(|a| *a == row.ext), "{}", row.id);
+    }
+}

@@ -13,7 +13,8 @@
 //! with the durable view only.
 //!
 //! Each file has a change time on a clock that only [`SimFs::advance`] moves. A new file and
-//! a write take the time of the clock. [`SimFs::set_age_known`] makes [`Fs::age`] give `None`.
+//! a write take the time of the clock. [`SimFs::set_times_known`] makes [`Fs::modified`] give
+//! `None`.
 //!
 //! All handles of [`Fs::boxed`] share one state.
 
@@ -23,7 +24,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use ghidorah_db::fs::{EntryKind, Fs, FsError};
 
@@ -50,8 +51,8 @@ struct State {
     crash_on: Option<String>,
     /// The simulated clock.
     clock: Duration,
-    /// [`Fs::age`] gives `None`.
-    no_age: bool,
+    /// [`Fs::modified`] gives `None`.
+    no_times: bool,
 }
 
 impl State {
@@ -151,9 +152,15 @@ impl SimFs {
         s.clock = s.clock.saturating_add(by);
     }
 
-    /// Sets if [`Fs::age`] gives the age of a file. With `false` it gives `None`.
-    pub fn set_age_known(&self, known: bool) {
-        self.state().no_age = !known;
+    /// Sets if [`Fs::modified`] gives the change time of a file. With `false` it gives `None`.
+    pub fn set_times_known(&self, known: bool) {
+        self.state().no_times = !known;
+    }
+
+    /// Gives the time of the clock: the Unix epoch plus the advances.
+    #[must_use]
+    pub fn now(&self) -> SystemTime {
+        SystemTime::UNIX_EPOCH + self.state().clock
     }
 
     /// Gives the live bytes of a file, or `None`.
@@ -410,14 +417,13 @@ impl Fs for SimFs {
         }
     }
 
-    fn age(&mut self, path: &Path) -> Option<Duration> {
+    fn modified(&mut self, path: &Path) -> Option<SystemTime> {
         let mut s = self.state();
-        if s.no_age {
+        if s.no_times {
             return None;
         }
-        let clock = s.clock;
         let node = s.node(path).ok()?;
-        Some(clock.saturating_sub(node.changed))
+        Some(SystemTime::UNIX_EPOCH + node.changed)
     }
 
     fn boxed(&self) -> Box<dyn Fs> {

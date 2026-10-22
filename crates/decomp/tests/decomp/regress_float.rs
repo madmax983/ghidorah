@@ -773,3 +773,29 @@ fn regress_varargs_order_follows_format() {
         );
     }
 }
+
+/// The program environment gives the `printf` format index of a Tier-0 callee from its
+/// `fmt(printf, n)` attribute. A `scanf` format and a callee with no format give none.
+#[test]
+fn printf_format_of_program_callees() {
+    let cases: [(&str, &str, Option<usize>); 5] = [
+        ("hello.gcc-O0", "printf", Some(0)),
+        ("hello.gcc-O0", "puts", None),
+        ("hello.gcc-O2", "__printf_chk", Some(1)),
+        ("cold_split.gcc-O0", "fprintf", Some(1)),
+        ("cold_split.gcc-O2", "__fprintf_chk", Some(2)),
+    ];
+    for (fixture, name, want) in cases {
+        let p = program(fixture);
+        let stub = p
+            .imports()
+            .values()
+            .find(|r| r.id.name() == Some(name))
+            .and_then(|r| r.stub)
+            .unwrap_or_else(|| panic!("{fixture}: the stub of {name}"));
+        let env = ghidorah_decomp::ProgramEnv(p);
+        assert_eq!(env.printf_format(stub.off), want, "{fixture} {name}");
+    }
+    let scanf = Types::prototype("scanf").expect("the Tier-0 prototype scanf");
+    assert!(scanf.attrs.fmt.is_some(), "scanf has a format");
+}

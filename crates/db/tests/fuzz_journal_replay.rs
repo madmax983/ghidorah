@@ -92,7 +92,7 @@ fn corpus(start: &Program) -> Vec<Vec<u8>> {
 }
 
 fn target(start: &Program, input: &[u8]) -> Outcome {
-    let _ = journal::parse(input, &ExtMap::default());
+    let _ = journal::parse(input, &swap());
     let Ok(parsed) = journal::parse(&recrc(input), &ExtMap::default()) else {
         return Outcome::reached(0);
     };
@@ -144,4 +144,10 @@ fn fuzz_journal_replay() {
     );
     assert_eq!(fuzz::panic_count(), 0, "no case panics");
     assert!(report.reached[2] > 0, "replay share: {:?}", report.reached);
+}
+
+/// Gives a map that swaps `ext:0x1` and `ext:0x2`, so a version 1 input takes the remap path.
+fn swap() -> ExtMap {
+    let ext = ghidorah_base::Address::external;
+    ExtMap::from_pairs([(ext(1), ext(2)), (ext(2), ext(1))])
 }

@@ -5,7 +5,8 @@ const F: Class = Class::Float;
 
 #[test]
 fn format_classes() {
-    let cases: [(&[u8], &[Class]); 14] = [
+    let cases: [(&[u8], &[Class]); 15] = [
+        (b"%lf %hhd %lld %qd %jx", &[F, I, I, I, I]),
         (b"", &[]),
         (b"plain text\n", &[]),
         (b"%d %f\n", &[I, F]),
@@ -31,10 +32,16 @@ fn format_classes() {
 fn format_forms_with_no_order() {
     let long = vec![b'a'; MAX_FORMAT + 1];
     let many = "%d".repeat(MAX_CONVERSIONS + 1);
-    let cases: [&[u8]; 8] = [
+    let cases: [&[u8]; 14] = [
         b"%1$d %2$f",
         b"%*2$d",
         b"%Lf",
+        b"%llf",
+        b"%qe",
+        b"%lLf",
+        b"%hhhd",
+        b"%lll",
+        b"%zjd",
         b"%k",
         b"%",
         b"%5",

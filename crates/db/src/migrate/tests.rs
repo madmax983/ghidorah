@@ -29,3 +29,19 @@ fn remap_changes_only_exact_old_addresses() {
     assert!(same.is_empty());
     assert_eq!(same, ExtMap::default());
 }
+
+/// A `ref:` ID holds two addresses. The migration changed only a string that is one address,
+/// so the evidence of a v1 note kept the old address of its import.
+#[test]
+fn regress_remap_changes_ref_ids() {
+    let map = ExtMap::from_pairs([(ext(5), ext(4)), (ext(4), ext(5))]);
+    let value = json(
+        r#"["ref:0x1014>ext:0x5:unconditional_call","ref:ext:0x4>0x10:read",
+        "ref:0x1014>0x2000:read","ref:0x1014>ext:0x5","ref:0x1014>EXT:0x5:read"]"#,
+    );
+    let want = json(
+        r#"["ref:0x1014>ext:0x4:unconditional_call","ref:ext:0x5>0x10:read",
+        "ref:0x1014>0x2000:read","ref:0x1014>ext:0x5","ref:0x1014>EXT:0x5:read"]"#,
+    );
+    assert_eq!(write(&map.remap(value)), write(&want));
+}

@@ -976,8 +976,8 @@ impl Fs for LinkFs {
         }
         self.sim.kind(path)
     }
-    fn age(&mut self, path: &Path) -> Option<std::time::Duration> {
-        self.sim.age(path)
+    fn modified(&mut self, path: &Path) -> Option<std::time::SystemTime> {
+        self.sim.modified(path)
     }
     fn boxed(&self) -> Box<dyn Fs> {
         Box::new(self.clone())

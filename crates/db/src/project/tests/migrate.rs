@@ -126,7 +126,10 @@ fn rename_import(
             func: None,
             status: NoteStatus::Open,
             tags: Vec::new(),
-            evidence: vec![at.to_string()],
+            evidence: vec![
+                at.to_string(),
+                format!("ref:0x1080>{at}:unconditional_call"),
+            ],
             lift_ver: None,
             claims: Vec::new(),
             set: None,
@@ -173,6 +176,21 @@ fn regress_v1_project_migrates() {
     drop(project);
     let mut raw = fs.boxed();
     downgrade(raw.as_mut(), &dir, &back);
+    // The v1 files hold the old address of `puts` in the note and its evidence.
+    let puts = p
+        .imports()
+        .values()
+        .find(|r| r.id.name() == Some("puts"))
+        .map(|r| r.ext)
+        .unwrap();
+    let old = p
+        .v1_ext_map()
+        .into_iter()
+        .find_map(|(old, new)| (new == puts).then_some(old))
+        .unwrap();
+    assert_ne!(old, puts);
+    let snap = String::from_utf8(raw.read(&dir.join(SNAPSHOT_FILE)).unwrap()).unwrap();
+    assert!(snap.contains(&format!("\"ref:0x1080>{old}:unconditional_call\"")));
     // A read-only open migrates in memory and writes nothing.
     let read = reopen(&fs, &dir, &opts(Access::ReadOnly, 200)).unwrap();
     assert_eq!(read.project.meta().format_version, 1);
@@ -188,7 +206,15 @@ fn regress_v1_project_migrates() {
             .map(|r| r.ext);
         let note = q.notes().iter().next().unwrap();
         assert_eq!(note.at, puts, "the note moves too");
-        assert_eq!(note.evidence, [puts.unwrap().to_string()]);
+        let puts = puts.unwrap();
+        assert_eq!(
+            note.evidence,
+            [
+                puts.to_string(),
+                format!("ref:0x1080>{puts}:unconditional_call")
+            ],
+            "the evidence moves too"
+        );
         for row in q.imports().values() {
             let name = row.id.name().unwrap();
             if !["puts", "strlen"].contains(&name) {

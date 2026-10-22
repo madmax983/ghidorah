@@ -123,7 +123,7 @@ fn changed(seed: &Value, input: &[u8]) -> Value {
 }
 
 fn target(start: &Program, seed: &Value, input: &[u8]) -> Outcome {
-    let _ = snapshot::decode(input, &ExtMap::default());
+    let _ = snapshot::decode(input, &swap());
     let text = ghidorah_json::write(&changed(seed, input));
     let Ok(snap) = snapshot::decode(text.as_bytes(), &ExtMap::default()) else {
         return Outcome::reached(0);
@@ -167,4 +167,10 @@ fn fuzz_snapshot_load() {
     );
     assert_eq!(fuzz::panic_count(), 0, "no case panics");
     assert!(report.reached[1] > 0, "decode share: {:?}", report.reached);
+}
+
+/// Gives a map that swaps `ext:0x1` and `ext:0x2`, so a version 1 input takes the remap path.
+fn swap() -> ExtMap {
+    let ext = ghidorah_base::Address::external;
+    ExtMap::from_pairs([(ext(1), ext(2)), (ext(2), ext(1))])
 }
