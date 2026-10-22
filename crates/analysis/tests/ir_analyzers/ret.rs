@@ -387,3 +387,124 @@ fn regress_ret_value_of_tail_caller() {
         Some(RetValue::Void)
     );
 }
+
+/// Gives the blob of `entry` at `BASE`, which calls each function of `funcs` and returns, and
+/// the functions of `funcs` at `BASE + 0x10`, `BASE + 0x20` and so on. Each function is at
+/// most 16 bytes, and its `rel32` fields are relative to its own start.
+fn funcs_blob(funcs: &[&[u8]]) -> Program {
+    let mut bytes = Vec::new();
+    for k in 0..funcs.len() {
+        let at = i32::try_from(bytes.len() + 5).expect("a small offset");
+        let to = i32::try_from(0x10 * (k + 1)).expect("a small offset");
+        bytes.push(0xe8);
+        bytes.extend_from_slice(&(to - at).to_le_bytes());
+    }
+    bytes.push(RET);
+    assert!(bytes.len() <= 0x10, "the entry fits in 16 bytes");
+    for f in funcs {
+        bytes.resize(bytes.len().next_multiple_of(0x10), 0xcc);
+        bytes.extend_from_slice(f);
+    }
+    blob(&bytes)
+}
+
+/// Gives `jmp rel32` from offset 0 of a function at `from` to `to`.
+fn jmp(from: u64, to: u64) -> Vec<u8> {
+    let rel =
+        i32::try_from(i64::try_from(to).expect("small") - i64::try_from(from + 5).expect("small"))
+            .expect("a near jump");
+    let mut out = vec![0xe9];
+    out.extend_from_slice(&rel.to_le_bytes());
+    out
+}
+
+/// Gives `call rel32; ret` from offset 0 of a function at `from` to `to`.
+fn call_ret(from: u64, to: u64) -> Vec<u8> {
+    let mut out = jmp(from, to);
+    out[0] = 0xe8;
+    out.push(RET);
+    out
+}
+
+/// `cvtsi2sd xmm0, edi; ret`.
+const TO_DOUBLE: [u8; 5] = [0xf2, 0x0f, 0x2a, 0xc7, RET];
+
+/// A tail jump passes the floating return of its target on. `f` tail jumps to `g`, `g` tail
+/// jumps to `h`, and `h` returns a `double`. So all three return a `double`.
+#[test]
+fn regress_float_return_follows_tail_chain() {
+    let (f, g) = (0x10, 0x20);
+    let p = funcs_blob(&[&jmp(f, g), &jmp(g, 0x30), &TO_DOUBLE]);
+    for at in [BASE + f, BASE + g, BASE + 0x30] {
+        let l0 = fir_of(&p, at);
+        assert_eq!(
+            ret::float_ret(&p, fid(at), &l0),
+            Some(FloatRet::Double),
+            "{at:#x}"
+        );
+        assert_eq!(
+            ret::ret_value(&p, fid(at), &l0),
+            RetValue::Float(FloatRet::Double),
+            "{at:#x}"
+        );
+        let mut memo = Memo::default();
+        let mut fuel = Fuel::new(1_000_000);
+        assert_eq!(
+            ret::ret_value_in(&p, at, &mut memo, &mut fuel),
+            Some(RetValue::Float(FloatRet::Double)),
+            "{at:#x}"
+        );
+    }
+    // A chain of calls gives the same kind.
+    let p = funcs_blob(&[&call_ret(f, g), &call_ret(g, 0x30), &TO_DOUBLE]);
+    assert_eq!(
+        ret::float_ret(&p, fid(BASE + f), &fir_of(&p, BASE + f)),
+        Some(FloatRet::Double)
+    );
+}
+
+/// Two functions that call each other, or tail jump to each other, give a result. The walk
+/// does not recurse without end.
+#[test]
+fn regress_mutual_calls_end() {
+    let (f, g) = (0x10, 0x20);
+    for funcs in [[call_ret(f, g), call_ret(g, f)], [jmp(f, g), jmp(g, f)]] {
+        let p = funcs_blob(&[&funcs[0], &funcs[1]]);
+        for at in [BASE + f, BASE + g] {
+            let l0 = fir_of(&p, at);
+            assert_eq!(ret::float_ret(&p, fid(at), &l0), None, "{at:#x}");
+            let value = ret::ret_value(&p, fid(at), &l0);
+            assert_ne!(value, RetValue::Float(FloatRet::Double), "{at:#x}");
+            let mut memo = Memo::default();
+            let mut fuel = Fuel::new(1_000_000);
+            assert!(
+                ret::ret_value_in(&p, at, &mut memo, &mut fuel).is_some(),
+                "{at:#x}"
+            );
+        }
+    }
+}
+
+/// A long chain of `call next; ret` functions gives a result with a bounded walk depth.
+#[test]
+fn regress_long_call_chain_is_bounded() {
+    const N: u64 = 4_000;
+    let mut bytes = vec![0xe8, 0x0b, 0, 0, 0, RET];
+    for k in 0..N {
+        bytes.resize(usize::try_from(0x10 * (k + 1)).expect("small"), 0xcc);
+        let at = 0x10 * (k + 1);
+        bytes.extend_from_slice(&call_ret(at, at + 0x10));
+    }
+    bytes.resize(usize::try_from(0x10 * (N + 1)).expect("small"), 0xcc);
+    bytes.extend_from_slice(&TO_DOUBLE);
+    let p = blob(&bytes);
+    let at = BASE + 0x10;
+    let mut memo = Memo::default();
+    let mut fuel = Fuel::new(1_000_000);
+    let value = ret::ret_value_in(&p, at, &mut memo, &mut fuel);
+    assert!(
+        matches!(value, Some(RetValue::Int | RetValue::Float(_))),
+        "{value:?}"
+    );
+    let _ = ret::float_ret(&p, fid(at), &fir_of(&p, at));
+}
