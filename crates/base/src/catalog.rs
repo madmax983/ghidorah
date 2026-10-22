@@ -260,6 +260,8 @@ pub enum WarningCode {
     AnalysisStale = 19,
     /// `W_TIME_STOP`: a `max_ms` guard stopped the work.
     TimeStop = 20,
+    /// `W_ANALYSIS_LIMIT`: the analysis stopped at the cap of the code units.
+    AnalysisLimit = 21,
 }
 
 /// The code of a loader or C parser diagnostic. The numbers are frozen.
@@ -363,7 +365,7 @@ impl ErrorCode {
 
 impl WarningCode {
     /// All codes in number order.
-    pub const ALL: [Self; 18] = [
+    pub const ALL: [Self; 19] = [
         Self::Coerced,
         Self::ArchUnsupported,
         Self::NotDemangled,
@@ -382,6 +384,7 @@ impl WarningCode {
         Self::StructureSelfcheck,
         Self::AnalysisStale,
         Self::TimeStop,
+        Self::AnalysisLimit,
     ];
 
     /// The reserved numbers of the catalog.

@@ -1743,6 +1743,7 @@ Warnings use the frozen enum `base::WarningCode` (`#[repr(u16)]`). `docs/errors.
 | 18 | `W_STRUCTURE_SELFCHECK` | The decompiler self-check failed. | - |
 | 19 | `W_ANALYSIS_STALE` | A read used the committed set while a shadow runs. | `analysis_run` |
 | 20 | `W_TIME_STOP` | A `max_ms` guard stopped the work. | the same call again |
+| 21 | `W_ANALYSIS_LIMIT` | The analysis stopped at the cap of the code units (`Disasm` option `max_units`). | - |
 
 ### 10.9 Pagination and budgets
 

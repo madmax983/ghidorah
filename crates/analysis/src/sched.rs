@@ -316,6 +316,19 @@ impl Scheduler {
         self.mode
     }
 
+    /// Sets the cap of the code units of the program. The default is
+    /// [`crate::analyzers::disasm::MAX_UNITS`].
+    pub const fn set_unit_cap(&mut self, cap: u64) {
+        self.work.unit_cap = Some(cap);
+    }
+
+    /// Tells if a body stopped at the cap of the code units. Then the analysis set holds only
+    /// a part of the code of the program.
+    #[must_use]
+    pub const fn capped(&self) -> bool {
+        self.work.capped
+    }
+
     /// Gives the work units of all runs.
     #[must_use]
     pub const fn steps_used(&self) -> u64 {

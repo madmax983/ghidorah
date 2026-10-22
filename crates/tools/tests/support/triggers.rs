@@ -349,6 +349,13 @@ fn copy_project(name: &str, dir: &std::path::Path) {
 /// The sessions that a setup keeps alive, for example the first writer of `locked`.
 pub type Keep = Vec<Session>;
 
+/// Makes a session whose engine stops at 64 code units (`W_ANALYSIS_LIMIT`).
+fn capped_session() -> Session {
+    let mut s = crate::support::session();
+    s.set_engine(Box::new(handlers::analysis_run::Engine::with_unit_cap(64)));
+    s
+}
+
 /// Makes the session of `setup`.
 pub fn setup(setup: &str, keep: &mut Keep) -> Session {
     let (kind, arg) = setup.split_once(':').unwrap_or((setup, ""));
@@ -392,6 +399,7 @@ pub fn setup(setup: &str, keep: &mut Keep) -> Session {
             open_demo(&mut s, false);
             s
         }
+        "capped" => capped_session(),
         "panic" => {
             let mut s =
                 Session::with_registry(panic_registry(), config(), Box::new(FixedClock::new(0)));

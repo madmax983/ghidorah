@@ -2,7 +2,7 @@
 //! (AC-092, AC-093).
 
 use ghidorah_analysis::registry::{ANALYZERS, by_name, index};
-use ghidorah_analysis::sched::{pick, unit};
+use ghidorah_analysis::sched::{self, pick, unit};
 use ghidorah_analysis::{
     AnalyzerId, AnalyzerSpec, BAND_FULL, BAND_SIGNATURES, BAND_TRIAGE, Grain, Mode, RunState,
     Scheduler, Trigger, Until,
@@ -426,4 +426,28 @@ fn regress_pending_union_many_fdes() {
         took < std::time::Duration::from_secs(10),
         "the run of {N} FDE functions takes {took:?}"
     );
+}
+
+/// The cap of the code units bounds the work state. The run still reaches a fixpoint, and
+/// the scheduler reports the cap.
+#[test]
+fn regress_unit_cap_bounds_the_code_units() {
+    let mut free = many_fdes(200);
+    let (sched, out) = analyze(&mut free);
+    assert_eq!(out.state, RunState::Complete);
+    assert!(!sched.capped());
+    let all = free.analysis().listing().units_in(sched::ALL).count();
+    assert!(all > 400, "the free run decodes every function: {all}");
+
+    let mut capped = many_fdes(200);
+    let mut sched = Scheduler::new();
+    sched.set_unit_cap(100);
+    let out = sched
+        .run(&mut capped, Until::Full, &mut Fuel::new(u64::MAX))
+        .expect("the run");
+    assert_eq!(out.state, RunState::Complete);
+    assert!(sched.capped());
+    let kept = capped.analysis().listing().units_in(sched::ALL).count();
+    assert!(kept <= 100, "the cap holds: {kept}");
+    assert!(kept > 0, "the walk decodes up to the cap");
 }

@@ -57,3 +57,4 @@
 {"code":"W_ANALYSIS_STALE","tool":"func_edit","args":{"action":"create","target":"0x11d0","max_steps":20}}
 {"code":"W_TIME_STOP","setup":"slow","tool":"batch_run","args":{"steps":[{"id":"a","tool":"calc","args":{"expr":"0x1"}},{"id":"b","tool":"calc","args":{"expr":"0x2"}},{"id":"c","tool":"calc","args":{"expr":"0x3"}}],"max_ms":1500}}
 {"code":"OUTPUT_BUDGET_EXCEEDED","tool":"mem_read","args":{"target":"0x1080","as":"insn","count":120}}
+{"code":"W_ANALYSIS_LIMIT","setup":"capped","tool":"binary_load","args":{"builtin":"demo"}}

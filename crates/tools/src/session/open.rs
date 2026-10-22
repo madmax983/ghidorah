@@ -453,11 +453,16 @@ impl Session {
             };
             let _ = ctx.fuel.take(report.steps_used.min(ctx.fuel.remaining()));
             let total = used.saturating_add(report.steps_used);
+            let was_capped = out.is_some_and(|s| s.capped);
+            if report.capped && !was_capped {
+                ctx.warn(Warning::new(WarningCode::AnalysisLimit));
+            }
             let mut run = Sliced {
                 state: report.state,
                 steps_used: total,
                 stop: None,
                 idle: report.steps_used == 0,
+                capped: report.capped || was_capped,
             };
             if !run.idle {
                 ctx.progress(Progress {

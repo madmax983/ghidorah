@@ -91,6 +91,7 @@ A result warning has one of these codes. A remedy is a complete call.
 | 18 | `W_STRUCTURE_SELFCHECK` | N | no | The decompiler self-check failed. The structured text can differ from the control flow. | Read the disassembly to check the control flow. |
 | 19 | `W_ANALYSIS_STALE` | R | no | The read used the committed analysis set. A shadow analysis runs, so the result can change. | Call analysis_run to complete the analysis. |
 | 20 | `W_TIME_STOP` | R | yes | A max_ms guard stopped the work. The result depends on the time, so it is not deterministic. | Send the same call again. |
+| 21 | `W_ANALYSIS_LIMIT` | N | no | The analysis stopped at the cap of the code units. Some functions have no body or a part of their body. | Read the functions with care. The caveats and the coverage show the gaps. |
 
 ## Diagnostic codes
 
