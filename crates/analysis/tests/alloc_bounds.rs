@@ -148,9 +148,9 @@ fn regress_work_state_keeps_no_unit_why() {
     );
 }
 
-/// The why store builds its tree in one pass from rows in key order, and the records of one
-/// rule share the text of its code. One insert at a time left each node about half full, and
-/// each record kept its own copy of the code: 279 bytes for each record; now 162.
+/// The why store builds its tree in one pass from rows in key order. The records of one rule
+/// share the text of its code. One insert at a time left each node about half full. Each
+/// record also kept its own copy of the code. The store kept 279 bytes for each record; now 162.
 #[test]
 fn regress_why_store_packs_its_records() {
     use ghidorah_db::codec::{SetRows, tables_from_rows};
@@ -193,5 +193,24 @@ fn regress_published_set_keeps_exact_premise_lists() {
     assert!(
         set <= records * 350,
         "the published set keeps {set} bytes for {records} records"
+    );
+}
+
+/// The project writes a snapshot to its file one piece at a time. Before, the text of the
+/// whole snapshot was one string, and its growth held up to two copies of the text. The
+/// encoder peaks far below the length of the text.
+#[test]
+fn regress_snapshot_streams_its_text() {
+    let (program, _, _) = kept_bytes(5_000);
+    let (len, stats) = ALLOC.measure(|| {
+        let mut len = 0usize;
+        ghidorah_db::snapshot::encode_to(&program, 0, None, &mut |piece| len += piece.len())
+            .expect("a JCS text");
+        len
+    });
+    assert!(
+        stats.peak_bytes * 10 < len,
+        "the encoder peaks at {} bytes for a text of {len} bytes",
+        stats.peak_bytes
     );
 }

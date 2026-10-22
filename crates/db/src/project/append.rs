@@ -81,9 +81,7 @@ impl Project {
     pub fn snapshot(&mut self, program: &Program) -> Result<(), ProjectError> {
         self.writable()?;
         let inputs = self.last_run.map(|run| run.inputs_hash);
-        let text = snapshot::encode(program, self.lines, inputs)
-            .map_err(|e| ProjectError::Program(e.to_string()))?;
-        snapshot::write(self.fs.as_mut(), &self.dir, &text)?;
+        snapshot::write_program(self.fs.as_mut(), &self.dir, program, self.lines, inputs)?;
         self.since_snapshot = 0;
         Ok(())
     }

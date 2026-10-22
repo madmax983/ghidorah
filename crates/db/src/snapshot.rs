@@ -35,7 +35,7 @@ use crate::codec::{
     CodecError, Json, Obj, notes_from_json, notes_to_json, progress_from_json, progress_to_json,
     tables_from_json, tables_jcs_to, tables_to_json, types_from_json, types_to_json,
 };
-use crate::fs::{Fs, FsError, replace_file};
+use crate::fs::{Fs, FsError, replace_file, replace_file_from};
 use crate::migrate::ExtMap;
 use crate::notes::Notes;
 use crate::program::{AnalysisSet, Program, Tables};
@@ -202,6 +202,26 @@ pub fn encode(
     journal_lines: u64,
     inputs: Option<[u8; 32]>,
 ) -> Result<String, SnapshotError> {
+    let mut out = String::new();
+    encode_to(program, journal_lines, inputs, &mut |piece| {
+        out.push_str(piece);
+    })?;
+    Ok(out)
+}
+
+/// Gives the JCS text of [`encode`] to `sink` in pieces. No text of the whole snapshot
+/// exists, and no JSON value of a whole layer exists.
+///
+/// # Errors
+///
+/// Returns [`SnapshotError::Jcs`] as [`encode`] does. The sink can then hold a part of the
+/// text.
+pub fn encode_to(
+    program: &Program,
+    journal_lines: u64,
+    inputs: Option<[u8; 32]>,
+    sink: &mut dyn FnMut(&str),
+) -> Result<(), SnapshotError> {
     let progress = progress_to_json(program.progress());
     let part = |name: &str| {
         progress
@@ -210,39 +230,36 @@ pub fn encode(
             .unwrap_or(Value::Array(Vec::new()))
     };
     let jcs = |v: &Value| write_jcs(v).map_err(|e| SnapshotError::Jcs(e.to_string()));
-    // The members go in JCS order. The two layers go row by row, so no JSON value of a whole
-    // layer exists.
-    let mut out = String::new();
-    out.push_str("{\"analysis_inputs_hash\":");
-    out.push_str(&jcs(&hash_json(inputs.as_ref()))?);
-    out.push_str(",\"facts\":{\"analysis\":");
-    layer_jcs(&mut out, program.analysis())?;
-    out.push_str(",\"base\":");
-    layer_jcs(&mut out, program.base())?;
-    out.push_str(",\"binary\":");
-    out.push_str(&jcs(&Value::from(hex::encode(&program.meta().sha256)))?);
-    out.push_str(",\"notes\":");
-    out.push_str(&jcs(&notes_to_json(program.notes()))?);
-    out.push_str(",\"types\":");
-    out.push_str(&jcs(&types_to_json(program.types()))?);
-    out.push_str("},\"format_version\":");
-    out.push_str(&jcs(&Value::from(FORMAT_VERSION))?);
-    out.push_str(",\"journal_lines\":");
-    out.push_str(&jcs(&Value::from(journal_lines))?);
-    out.push_str(",\"marks\":");
-    out.push_str(&jcs(&part("marks"))?);
-    out.push_str(",\"progress\":");
-    out.push_str(&jcs(&part("funcs"))?);
-    out.push_str(",\"rev\":");
-    out.push_str(&jcs(&program.rev().enc())?);
-    out.push('}');
-    Ok(out)
+    // The members go in JCS order. The two layers go row by row.
+    sink("{\"analysis_inputs_hash\":");
+    sink(&jcs(&hash_json(inputs.as_ref()))?);
+    sink(",\"facts\":{\"analysis\":");
+    layer_jcs(sink, program.analysis())?;
+    sink(",\"base\":");
+    layer_jcs(sink, program.base())?;
+    sink(",\"binary\":");
+    sink(&jcs(&Value::from(hex::encode(&program.meta().sha256)))?);
+    sink(",\"notes\":");
+    sink(&jcs(&notes_to_json(program.notes()))?);
+    sink(",\"types\":");
+    sink(&jcs(&types_to_json(program.types()))?);
+    sink("},\"format_version\":");
+    sink(&jcs(&Value::from(FORMAT_VERSION))?);
+    sink(",\"journal_lines\":");
+    sink(&jcs(&Value::from(journal_lines))?);
+    sink(",\"marks\":");
+    sink(&jcs(&part("marks"))?);
+    sink(",\"progress\":");
+    sink(&jcs(&part("funcs"))?);
+    sink(",\"rev\":");
+    sink(&jcs(&program.rev().enc())?);
+    sink("}");
+    Ok(())
 }
 
-/// Adds the JCS text of the tables of one layer to `out`, row by row.
-fn layer_jcs(out: &mut String, tables: &Tables) -> Result<(), SnapshotError> {
-    tables_jcs_to(tables, true, &mut |piece| out.push_str(piece))
-        .map_err(|e| SnapshotError::Jcs(e.to_string()))
+/// Gives the JCS text of the tables of one layer to `sink`, row by row.
+fn layer_jcs(sink: &mut dyn FnMut(&str), tables: &Tables) -> Result<(), SnapshotError> {
+    tables_jcs_to(tables, true, sink).map_err(|e| SnapshotError::Jcs(e.to_string()))
 }
 
 /// Tells if `v` is a format version that a reader takes.
@@ -313,6 +330,31 @@ pub fn decode(bytes: &[u8], v1: &ExtMap) -> Result<Snapshot, SnapshotError> {
 pub fn write(fs: &mut dyn Fs, dir: &Path, text: &str) -> Result<(), FsError> {
     let tmp = dir.join(SNAPSHOT_TMP);
     replace_file(fs, &dir.join(SNAPSHOT_FILE), &tmp, text.as_bytes())?;
+    fs.sync_dir(dir)
+}
+
+/// Writes the snapshot of `program` in `dir`, as [`write()`] does with the text of [`encode`].
+/// The text goes to the file one piece at a time, so no text of the whole snapshot exists.
+///
+/// # Errors
+///
+/// Returns the [`FsError`] of the first failed operation. A [`SnapshotError::Jcs`] gives
+/// [`FsError::Io`] of `write_all`, and the snapshot file does not change.
+pub fn write_program(
+    fs: &mut dyn Fs,
+    dir: &Path,
+    program: &Program,
+    journal_lines: u64,
+    inputs: Option<[u8; 32]>,
+) -> Result<(), FsError> {
+    let tmp = dir.join(SNAPSHOT_TMP);
+    let mut fill = |put: &mut dyn FnMut(&[u8])| {
+        encode_to(program, journal_lines, inputs, &mut |piece| {
+            put(piece.as_bytes());
+        })
+        .map_err(|e| e.to_string())
+    };
+    replace_file_from(fs, &dir.join(SNAPSHOT_FILE), &tmp, &mut fill)?;
     fs.sync_dir(dir)
 }
 

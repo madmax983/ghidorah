@@ -5,7 +5,7 @@ use std::time::{Duration, SystemTime};
 
 use super::{
     EntryKind, Fs, FsError, RealFs, SWEEP_MAX, TEMP_GRACE, remove_dead_temps, replace_file,
-    temp_pid,
+    replace_file_from, temp_pid,
 };
 use crate::project::tests::fs_sim::SimFs;
 
@@ -301,4 +301,72 @@ fn real_fs_modified() {
         "no file gives no time"
     );
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn real_fs_writes_from_pieces() {
+    let dir = std::env::temp_dir().join(format!("ghidorah-fs-pieces-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let mut fs = RealFs;
+    fs.create_dir_all(&dir).unwrap();
+    let path = dir.join("a.json");
+    std::fs::write(&path, b"an old and longer content").unwrap();
+    let mut fill = |put: &mut dyn FnMut(&[u8])| {
+        for piece in [&b"{\"a\""[..], b":", b"1}"] {
+            put(piece);
+        }
+        Ok(())
+    };
+    fs.write_from(&path, &mut fill).unwrap();
+    assert_eq!(std::fs::read(&path).unwrap(), b"{\"a\":1}");
+    // A failed source gives an error of `write_all`.
+    let mut broken = |put: &mut dyn FnMut(&[u8])| {
+        put(b"{");
+        Err("no JCS form".to_owned())
+    };
+    match fs.write_from(&path, &mut broken) {
+        Err(FsError::Io { op, message, .. }) => {
+            assert_eq!((op, message.as_str()), ("write_all", "no JCS form"));
+        }
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(
+        fs.write_from(&dir.join("none"), &mut fill),
+        Err(FsError::NotFound(dir.join("none")))
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn replace_file_from_drops_the_temp_of_a_failed_source() {
+    let fs = SimFs::new();
+    let dir = Path::new("/p/0011223344556677");
+    let path = dir.join("a.json");
+    let tmp = dir.join("a.json.tmp");
+    fs.seed(&path, b"old");
+    let mut handle = fs.boxed();
+    let _ = fs.take_log();
+    let mut fill = |put: &mut dyn FnMut(&[u8])| {
+        put(b"ne");
+        put(b"w");
+        Ok(())
+    };
+    replace_file_from(handle.as_mut(), &path, &tmp, &mut fill).unwrap();
+    assert_eq!(fs.get(&path), Some(b"new".to_vec()));
+    let ops: Vec<String> = fs.take_log();
+    let names: Vec<&str> = ops.iter().filter_map(|l| l.split(' ').next()).collect();
+    assert_eq!(names, ["create_new", "write_all", "sync_file", "rename"]);
+    let mut broken = |_: &mut dyn FnMut(&[u8])| Err("no JCS form".to_owned());
+    let failed = replace_file_from(handle.as_mut(), &path, &tmp, &mut broken);
+    assert!(matches!(
+        failed,
+        Err(FsError::Io {
+            op: "write_all",
+            ..
+        })
+    ));
+    assert_eq!(fs.get(&path), Some(b"new".to_vec()), "no rename follows");
+    let ops: Vec<String> = fs.take_log();
+    let names: Vec<&str> = ops.iter().filter_map(|l| l.split(' ').next()).collect();
+    assert_eq!(names, ["create_new", "remove"], "the temporary file goes");
 }

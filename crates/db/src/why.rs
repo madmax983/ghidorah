@@ -209,8 +209,8 @@ impl WhyStore {
     /// Sets the records of `rows`, each with its creation order, as [`Self::insert_at`] does
     /// one at a time.
     ///
-    /// Rows in strict key order go into an empty store in one bulk build, so the tree has full
-    /// nodes. One insert at a time in key order leaves each node about half full.
+    /// When the store is empty and each key is above the key before it, one bulk build
+    /// makes the tree with full nodes. One insert at a time in key order leaves each node about half full.
     ///
     /// # Errors
     ///

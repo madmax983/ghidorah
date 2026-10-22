@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime};
 
-use super::{EntryKind, Fs, FsError};
+use super::{EntryKind, Fill, Fs, FsError};
 
 /// The counter of the temporary file names of this process.
 static TMP_SEQ: AtomicU64 = AtomicU64::new(0);
@@ -64,9 +64,34 @@ pub(crate) fn replace_file(
     tmp: &Path,
     bytes: &[u8],
 ) -> Result<(), FsError> {
+    replace_by(fs, path, tmp, &mut |fs, own| fs.write_all(own, bytes))
+}
+
+/// Puts the content that `fill` gives at `path`, as [`replace_file`] does. The content goes
+/// to the temporary file with [`Fs::write_from`], one piece at a time.
+///
+/// # Errors
+///
+/// Returns the [`FsError`] of the first failed operation. A failed `fill` gives the error of
+/// [`Fs::write_from`], and no rename follows.
+pub(crate) fn replace_file_from(
+    fs: &mut dyn Fs,
+    path: &Path,
+    tmp: &Path,
+    fill: &mut Fill<'_>,
+) -> Result<(), FsError> {
+    replace_by(fs, path, tmp, &mut |fs, own| fs.write_from(own, fill))
+}
+
+/// Puts a temporary file at `path`. `write` puts the content in the temporary file.
+fn replace_by(
+    fs: &mut dyn Fs,
+    path: &Path,
+    tmp: &Path,
+    write: &mut dyn FnMut(&mut dyn Fs, &Path) -> Result<(), FsError>,
+) -> Result<(), FsError> {
     let own = create_temp(fs, tmp)?;
-    let done = fs
-        .write_all(&own, bytes)
+    let done = write(fs, &own)
         .and_then(|()| fs.sync_file(&own))
         .and_then(|()| fs.rename(&own, path));
     if done.is_err() {

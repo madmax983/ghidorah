@@ -9,6 +9,7 @@
 //! | [`Fs::create_new`] | a new empty file. It fails when the path exists. |
 //! | [`Fs::append`] | one journal line |
 //! | [`Fs::write_all`] | the content of a file that exists |
+//! | [`Fs::write_from`] | the content of a file that exists, one piece at a time: a snapshot |
 //! | [`Fs::truncate`] | cuts a journal back after a failed append |
 //! | [`Fs::sync_file`] | makes the data of a file durable |
 //! | [`Fs::rename`] | puts a temporary file in place |
@@ -48,8 +49,15 @@ use std::time::SystemTime;
 pub(crate) use temp::SWEEP_MAX;
 pub use temp::TEMP_GRACE;
 pub(crate) use temp::{
-    create_temp, remove_dead_temps, remove_dead_temps_by, replace_file, temp_pid,
+    create_temp, remove_dead_temps, remove_dead_temps_by, replace_file, replace_file_from, temp_pid,
 };
+
+/// The content source of [`Fs::write_from`]. It gives each piece of the content to its
+/// argument, in order. An error text stops the write.
+pub type Fill<'a> = dyn FnMut(&mut dyn FnMut(&[u8])) -> Result<(), String> + 'a;
+
+/// The size of the write buffer of [`RealFs::write_from`].
+const WRITE_BUF: usize = 1 << 20;
 
 /// The error of a file-system operation.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -90,6 +98,15 @@ impl FsError {
     #[must_use]
     pub const fn is_not_found(&self) -> bool {
         matches!(self, Self::NotFound(_))
+    }
+
+    /// Makes the error of a failed content source of [`Fs::write_from`].
+    fn fill(path: &Path, message: String) -> Self {
+        Self::Io {
+            op: "write_all",
+            path: path.to_path_buf(),
+            message,
+        }
     }
 
     /// Makes the error of a failed `std::io` operation.
@@ -163,6 +180,22 @@ pub trait Fs: Send {
     ///
     /// Returns [`FsError::NotFound`] when the file does not exist.
     fn write_all(&mut self, path: &Path, bytes: &[u8]) -> Result<(), FsError>;
+
+    /// Puts the bytes that `fill` gives, one piece at a time, in place of the content of a
+    /// file that exists. So no copy of the whole content is necessary.
+    ///
+    /// The default collects the pieces and calls [`Fs::write_all`] one time. So the
+    /// operation log of a simulated file system holds one `write_all`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`FsError::NotFound`] when the file does not exist. A failed `fill` gives
+    /// [`FsError::Io`] with the operation `write_all` and the text of `fill`.
+    fn write_from(&mut self, path: &Path, fill: &mut Fill<'_>) -> Result<(), FsError> {
+        let mut bytes = Vec::new();
+        fill(&mut |piece| bytes.extend_from_slice(piece)).map_err(|m| FsError::fill(path, m))?;
+        self.write_all(path, &bytes)
+    }
 
     /// Cuts a file that exists to `len` bytes and makes the result durable.
     ///
@@ -283,6 +316,29 @@ impl Fs for RealFs {
         file.set_len(0)
             .and_then(|()| file.write_all(bytes))
             .map_err(|e| FsError::io("write_all", path, &e))
+    }
+
+    fn write_from(&mut self, path: &Path, fill: &mut Fill<'_>) -> Result<(), FsError> {
+        use std::io::Write;
+        let fail = |e: &std::io::Error| FsError::io("write_all", path, e);
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true);
+        let target = open_regular("write_all", path, &options)?;
+        target.set_len(0).map_err(|e| fail(&e))?;
+        let mut out = std::io::BufWriter::with_capacity(WRITE_BUF, target);
+        let mut failed: Option<std::io::Error> = None;
+        let filled = fill(&mut |piece| {
+            if failed.is_none()
+                && let Err(e) = out.write_all(piece)
+            {
+                failed = Some(e);
+            }
+        });
+        if let Some(e) = failed {
+            return Err(fail(&e));
+        }
+        filled.map_err(|m| FsError::fill(path, m))?;
+        out.flush().map_err(|e| fail(&e))
     }
 
     fn truncate(&mut self, path: &Path, len: u64) -> Result<(), FsError> {
