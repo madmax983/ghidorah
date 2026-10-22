@@ -149,14 +149,14 @@ fn split(program: &Program, r: Range, out: &mut Vec<Gap>) {
 /// Gives the addresses that the facts of the binary own. These are the PLT area up to the
 /// next 16-byte boundary, the FDE ranges and the extents of the function symbols.
 pub(crate) fn fixed(program: &Program) -> RangeSet {
-    let mut owned = RangeSet::new();
+    let mut owned = Vec::new();
     for r in plt_area(program).ranges() {
         let end = r.last.checked_add(PLT_ENTRY).map(|e| e & !(PLT_ENTRY - 1));
         let last = end
             .and_then(|e| e.checked_sub(1))
             .unwrap_or(r.last)
             .max(r.last);
-        owned.insert(Range {
+        owned.push(Range {
             first: r.first,
             last,
         });
@@ -167,10 +167,15 @@ pub(crate) fn fixed(program: &Program) -> RangeSet {
         .iter()
         .filter(|s| s.kind == SymKind::Func)
         .filter_map(|s| Range::with_len(s.addr, s.size));
-    for r in b.fdes.iter().map(|f| f.range).chain(symbols) {
-        owned.insert(r);
-    }
-    owned
+    owned.extend(b.fdes.iter().map(|f| f.range).chain(symbols));
+    set_of(owned)
+}
+
+/// Gives the set of `ranges`. The ranges go in by start, so each insert lands at the end of
+/// the set and the cost stays near linear.
+pub(crate) fn set_of(mut ranges: Vec<Range>) -> RangeSet {
+    ranges.sort_unstable_by_key(|r| r.first);
+    RangeSet::from_ranges(&ranges)
 }
 
 /// Gives the gap items of `program` in address order.
