@@ -132,6 +132,16 @@ const fn ternary(opc: Opc) -> bool {
     matches!(opc, Opc::Ite | Opc::Insert | Opc::Flags | Opc::FlagsSel)
 }
 
+/// Gives the expression of the constant `value` with the width `w`. A 64-bit value at the
+/// start of a string literal is that string.
+pub(crate) fn konst(env: &dyn Env, value: u64, w: u8) -> Expr {
+    if w == 64 && value != 0 && env.is_string(value) {
+        Expr::Str { addr: value }
+    } else {
+        Expr::Const { value, w }
+    }
+}
+
 impl Ex<'_> {
     /// Gives the width of a value, or 64 bits.
     fn width(&self, v: Val) -> u8 {
@@ -141,14 +151,7 @@ impl Ex<'_> {
     /// Gives the expression of an argument with the width `w` for a constant.
     pub(crate) fn arg(&self, a: Arg, w: u8) -> Expr {
         match a {
-            Arg::K(imm) => {
-                let value = imm.get();
-                if w == 64 && value != 0 && self.env.is_string(value) {
-                    Expr::Str { addr: value }
-                } else {
-                    Expr::Const { value, w }
-                }
-            }
+            Arg::K(imm) => konst(self.env, imm.get(), w),
             Arg::V(v) => self.value(v),
             Arg::Nil | Arg::L(_) => Expr::Const { value: 0, w },
         }

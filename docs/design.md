@@ -1585,6 +1585,7 @@ A string resolves by the first rule that matches, in this order:
 
 - A string of digits only is never guessed. It gives `ADDRESS_BASE_AMBIGUOUS`. The candidates list both readings (decimal and hex) with their mapped state.
 - A JSON integer of 2^53 or more gives `ADDRESS_INVALID`. `next[0]` repeats the call with the hex string.
+- A JSON integer is a decimal address. When its target gives `NOT_IN_FUNCTION` or `ADDRESS_UNMAPPED`, `details` holds `resolved_from` and the hex `addr` of that reading. When a function holds the hex reading of the same digits, the first candidate is that reading.
 - A name with several matches gives `AMBIGUOUS_NAME`. Candidates are `{ value, label, id, addr, kind }` in address order, at most 5, plus `candidates_total`.
 - Each `value` resolves to that candidate. It is the `name@0x..` form of a symbol or the `sec:` ID of a section, else the address.
 - An unknown name gives `NOT_FOUND` with did-you-mean candidates (Damerau-Levenshtein, top 5, under fuel).
@@ -1684,7 +1685,7 @@ Repair classes: **R** (repair): `next[0]` is the complete corrected call, so a c
 | 10 | `NOT_FOUND` | C | no | ID, name, type, note or set does not exist. | `details.kind`. Candidates: did-you-mean. |
 | 11 | `UNKNOWN_BINARY` | R* | no | `binary_id` is not open. | Candidates: open binaries and projects. `next[0]`: `binary_load { binary_id }` when the project exists. |
 | 12 | `BINARY_REQUIRED` | R | no | More than one binary is open and the call names none. | Candidates. `next[0]`: the call with the most recently used `binary_id`. |
-| 13 | `PATH_OUTSIDE_ROOT` | N | no | Path resolves outside the configured roots. | `details.roots` (relative names). For a relative path, also `details.relative_to`: the root names in the order of the tries. |
+| 13 | `PATH_OUTSIDE_ROOT` | N | no | Path resolves outside the configured roots. | `details.roots` (relative names). For a relative path, also `details.relative_to`: the root names in the order of the tries. Candidates: `<root name>/<file name>` for each root that holds a regular file with the file name of the path. |
 | 14 | `FILE_UNREADABLE` | N | no | The file does not exist, or the process cannot read it. | For a relative path: `details.roots` and `details.relative_to`. |
 | 15 | `UNSUPPORTED_FORMAT` | N | no | The probe detects a format that the MVP does not support. | `details: { detected, supported }` |
 | 16 | `UNSUPPORTED_ARCH` | N | no | Code feature on a non-x86-64 binary. | - |

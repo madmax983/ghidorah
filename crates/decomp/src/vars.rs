@@ -21,8 +21,8 @@ use ghidorah_types::CallConv;
 
 use crate::expr::{Expr, Stmt, VarIdx};
 use crate::view::facts::{Facts, Kind};
-use crate::view::stmts::{Raw, Term};
-use crate::view::{Var, VarKind};
+use crate::view::stmts::{self, Raw, Term};
+use crate::view::{Env, Var, VarKind};
 
 /// The source of an edge with copies: a block, or the function entry.
 pub(crate) type From = Option<Node>;
@@ -45,6 +45,8 @@ pub(crate) struct Ctx<'a> {
     pub(crate) l0: &'a Arena,
     pub(crate) conv: Option<&'a CallConv>,
     pub(crate) entry: u64,
+    /// The facts of the program: an edge copy of a string address is that string.
+    pub(crate) env: &'a dyn Env,
     /// The count of the parameter slots of the function, when the facts know it. It is at
     /// least the count of the slots that the L1 body reads. An entry value of a later slot is
     /// not a parameter.
@@ -488,7 +490,7 @@ fn edge_copies(
                         },
                         None => continue,
                     },
-                    Some(Arg::K(k)) => Expr::Const { value: k.get(), w },
+                    Some(Arg::K(k)) => stmts::konst(cx.env, k.get(), w),
                     _ => continue,
                 };
                 list.push((dst, src, at));

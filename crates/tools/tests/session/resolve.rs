@@ -541,3 +541,37 @@ fn target_table() {
     let (a, _) = address(p, &Value::from("main"), &Site::default()).expect("an address");
     assert_eq!(a, main.0);
 }
+
+/// A JSON integer is a decimal address. `1080` is `0x438`, outside each function. The error
+/// gave no sign of that reading, so an agent that meant hex got `NOT_IN_FUNCTION` with no
+/// clue. Now `details` shows the reading, and a candidate gives the hex reading of the digits.
+#[test]
+fn regress_integer_target_error_shows_reading() {
+    let mut s = demo();
+    add_function(&mut s, DEMO_ID, DEMO_MAIN, 0x53);
+    let p = program(&s, DEMO_ID);
+    let error = function(p, &json("1080"), &Site::default()).expect_err("0x438 is no function");
+    assert!(
+        matches!(
+            error.code,
+            ErrorCode::NotInFunction | ErrorCode::AddressUnmapped
+        ),
+        "{error}"
+    );
+    let details = error.details.clone().map(Value::Object).expect("details");
+    assert_eq!(text_at(&details, "/resolved_from/rule"), "integer");
+    assert_eq!(text_at(&details, "/resolved_from/matched"), "1080");
+    assert_eq!(text_at(&details, "/addr"), "0x438");
+    let hex = error
+        .candidates
+        .iter()
+        .find(|c| c.value.as_str() == Some("0x1080"))
+        .unwrap_or_else(|| panic!("the hex reading: {:?}", error.candidates));
+    assert!(hex.label.contains("hex reading"), "{}", hex.label);
+    assert_eq!(hex.id.as_deref(), Some("fn:0x1080"));
+
+    let (f, _) = function(p, &json("4224"), &Site::default()).expect("main");
+    assert_eq!(f, FuncId(Address::ram(DEMO_MAIN)));
+    let error = function(p, &Value::from("0x438"), &Site::default()).expect_err("hex text");
+    assert!(error.details.is_none(), "{error}");
+}

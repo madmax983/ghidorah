@@ -154,3 +154,65 @@ fn regress_relative_path_under_second_root() {
     assert_eq!(detail(&outside, "roots"), Some(&texts(&["a", "b"])));
     assert_eq!(detail(&outside, "relative_to"), None);
 }
+
+/// The roots of `PATH_OUTSIDE_ROOT` show relative names only, so an agent with a host path
+/// got no valid path. Now a candidate gives the root name and the file name when a
+/// root holds a regular file of that name. The hint tells that a path is relative to a root.
+#[test]
+fn regress_outside_path_gives_root_candidates() {
+    let dir = TempDir::new("outside_candidates");
+    write(&dir.0.join("a/x.bin"), b"in a");
+    write(&dir.0.join("b/y.bin"), b"in b");
+    write(&dir.0.join("elsewhere/y.bin"), b"outside");
+    std::fs::create_dir_all(dir.0.join("b/sub")).expect("the sub dir");
+    let roots = Roots::new(&dir.0, &[PathBuf::from("a"), PathBuf::from("b")]).expect("two roots");
+    let values = |error: &ToolError| -> Vec<String> {
+        error
+            .candidates
+            .iter()
+            .map(|c| c.value.as_str().unwrap_or_default().to_owned())
+            .collect()
+    };
+    let path = dir.0.join("elsewhere/y.bin").display().to_string();
+    let outside = roots.check(&path).expect_err("the path leaves the roots");
+    assert_eq!(outside.code, ErrorCode::PathOutsideRoot);
+    assert_eq!(values(&outside), ["b/y.bin"]);
+    assert!(
+        outside.hint(false).contains("relative to a root"),
+        "{}",
+        outside.hint(false)
+    );
+    let candidate = values(&outside).remove(0);
+    assert_eq!(
+        roots.read(&candidate, 64).expect("the candidate").bytes,
+        b"in b"
+    );
+    let relative = roots
+        .check("../elsewhere/y.bin")
+        .expect_err("the path leaves the roots");
+    assert_eq!(values(&relative), ["b/y.bin"]);
+    // No root holds the name, or the name is a directory: no candidate, and the plain hint.
+    let none = roots
+        .check(&dir.0.join("elsewhere/z.bin").display().to_string())
+        .expect_err("the path leaves the roots");
+    assert!(none.candidates.is_empty());
+    assert!(
+        none.hint(false).contains("relative to a root"),
+        "{}",
+        none.hint(false)
+    );
+    let sub = roots
+        .check(&dir.0.join("elsewhere/sub").display().to_string())
+        .expect_err("the path leaves the roots");
+    assert!(sub.candidates.is_empty());
+    // The candidate of the root `.` starts with `./`, so it selects that root before the others.
+    write(&dir.0.join("y.bin"), b"in dot");
+    let here = Roots::new(&dir.0, &[PathBuf::from("b"), PathBuf::from(".")]).expect("the roots");
+    let path = dir.0.join("elsewhere/../../y.bin").display().to_string();
+    let error = here.check(&path).expect_err("outside");
+    assert_eq!(values(&error), ["b/y.bin", "./y.bin"]);
+    assert_eq!(
+        here.read("./y.bin", 64).expect("the dot root").bytes,
+        b"in dot"
+    );
+}

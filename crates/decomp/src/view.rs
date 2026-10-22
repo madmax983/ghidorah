@@ -359,6 +359,7 @@ pub fn build(
         l0: input.l0,
         conv: input.conv,
         entry,
+        env,
         params: match &layout {
             Some(l) => Some(u16::try_from(l.len()).unwrap_or(u16::MAX)),
             None => info.map(|i| {

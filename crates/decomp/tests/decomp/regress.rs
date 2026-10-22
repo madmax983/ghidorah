@@ -678,3 +678,16 @@ fn regress_slot_kind_matches_facts() {
         }
     }
 }
+
+/// `main` of the clang build sets `rdi` to the usage text on one path and selects a reply on
+/// the other. The `puts` argument is a phi. The copy of the constant edge input gave
+/// `v10 = 0x2004;`, but the disassembly names the string at that address.
+#[test]
+fn regress_phi_copy_string_is_literal() {
+    let main = output_of("crackme.clang-O2", "main");
+    let text = main.text();
+    assert!(text.contains("\"usage: crackme <password>\""), "{text}");
+    assert!(!text.contains("0x2004"), "{text}");
+    let strings: Vec<u64> = main.lines.iter().flat_map(|l| l.strings.clone()).collect();
+    assert!(strings.contains(&0x2004), "{strings:x?}");
+}

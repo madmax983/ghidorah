@@ -11,9 +11,11 @@
 //!    the open and again on the open file. The open never waits for the writer of a FIFO.
 //!
 //! A path whose candidates all leave the roots gives `PATH_OUTSIDE_ROOT` with `details.roots`.
-//! The error never shows an absolute path: each root shows its relative name. A file that does
-//! not exist or does not read gives `FILE_UNREADABLE`. For a relative path, the two errors
-//! also give `details.roots` and `details.relative_to`: the root names in the order of the tries.
+//! The error never shows an absolute path: each root shows its relative name. When a root
+//! holds a regular file with the file name of the path, a candidate gives the root name and
+//! the file name. A file that does not exist or does not read gives `FILE_UNREADABLE`. For a
+//! relative path, the two errors also give `details.roots` and `details.relative_to`: the root
+//! names in the order of the tries.
 
 use std::fmt;
 use std::io::Read;
@@ -22,7 +24,7 @@ use std::path::{Component, Path, PathBuf};
 use ghidorah_base::ErrorCode;
 use ghidorah_json::Value;
 
-use crate::errors::ToolError;
+use crate::errors::{Candidate, ToolError};
 
 /// The largest number of roots.
 pub const MAX_ROOTS: usize = 64;
@@ -148,9 +150,28 @@ impl Roots {
         self.roots.iter().any(|r| path.starts_with(&r.path))
     }
 
-    /// Gives the `PATH_OUTSIDE_ROOT` error with the root names.
-    fn outside(&self) -> ToolError {
-        ToolError::new(ErrorCode::PathOutsideRoot).detail("roots", self.names())
+    /// Gives the `PATH_OUTSIDE_ROOT` error of `raw` with the root names and the candidates.
+    fn outside(&self, raw: &Path) -> ToolError {
+        ToolError::new(ErrorCode::PathOutsideRoot)
+            .detail("roots", self.names())
+            .candidates(self.name_candidates(raw))
+    }
+
+    /// Gives one candidate for each root that holds a regular file with the file name of
+    /// `raw`. The value is the root name, a slash and the file name. It shows no absolute
+    /// path.
+    fn name_candidates(&self, raw: &Path) -> Vec<Candidate> {
+        let Some(name) = raw.file_name().and_then(|n| n.to_str()) else {
+            return Vec::new();
+        };
+        self.roots
+            .iter()
+            .filter(|r| match self.try_path(&r.path.join(name)) {
+                Try::Found(canonical) => canonical.is_file(),
+                Try::Missing | Try::Outside => false,
+            })
+            .map(|r| Candidate::text(&format!("{}/{name}", r.name), "the file name under a root"))
+            .collect()
     }
 
     /// Gives the error `code` of a relative path with the roots in the order of the tries.
@@ -207,7 +228,7 @@ impl Roots {
             return match self.try_path(raw) {
                 Try::Found(canonical) => Ok(canonical),
                 Try::Missing => Err(ToolError::new(ErrorCode::FileUnreadable)),
-                Try::Outside => Err(self.outside()),
+                Try::Outside => Err(self.outside(raw)),
             };
         }
         let mut tried: Vec<usize> = Vec::new();
@@ -222,12 +243,11 @@ impl Roots {
                 Try::Outside => {}
             }
         }
-        let code = if missing {
-            ErrorCode::FileUnreadable
-        } else {
-            ErrorCode::PathOutsideRoot
-        };
-        Err(self.relative_error(code, &tried))
+        if missing {
+            return Err(self.relative_error(ErrorCode::FileUnreadable, &tried));
+        }
+        let error = self.relative_error(ErrorCode::PathOutsideRoot, &tried);
+        Err(error.candidates(self.name_candidates(raw)))
     }
 
     /// Reads the file at `path` with the checks of the module docs.
