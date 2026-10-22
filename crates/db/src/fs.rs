@@ -16,7 +16,7 @@
 //! | [`Fs::sync_dir`] | makes the names of a directory durable |
 //! | [`Fs::remove`] | removes a file |
 //! | [`Fs::read`] | reads a file |
-//! | [`Fs::age`] | the time since the last change of a file |
+//! | [`Fs::modified`] | the time of the last change of a file |
 //!
 //! The other operations make directories, set the mode 0444, list a directory and test a
 //! path. A commit is [`Fs::append`] and then [`Fs::sync_file`].
@@ -29,7 +29,8 @@
 //!
 //! The process test reads only the local `/proc`. A process on another host or in another PID
 //! namespace is not there. So the sweep also keeps each file that changed in the last
-//! [`TEMP_GRACE`], and each file with no age.
+//! [`TEMP_GRACE`], and each file with no change time. The caller gives the time now in the
+//! clock of the file system.
 //!
 //! [`RealFs`] never writes through a symbolic link. `create_new`, `append`, `write_all` and
 //! `truncate` give [`FsError::WrongKind`] for a path that is not a regular file.
@@ -51,7 +52,7 @@ const TMP_TRIES: usize = 64;
 /// The maximum number of directory entries that [`remove_dead_temps`] reads.
 const SWEEP_MAX: usize = 4_096;
 
-/// The time after its last change that a temporary file of a dead process stays.
+/// A temporary file of a dead process stays for this time after its last change.
 pub const TEMP_GRACE: Duration = Duration::from_hours(1);
 
 /// The maximum number of digits of a number in a temporary file name: the digits of
@@ -243,10 +244,10 @@ pub trait Fs: Send {
     /// not follow a symbolic link.
     fn kind(&mut self, path: &Path) -> Option<EntryKind>;
 
-    /// Gives the time since the last change of the entry at the path. A change time in the
-    /// future gives zero. No entry, or a file system with no change time, gives `None`. The
-    /// query does not follow a symbolic link.
-    fn age(&mut self, path: &Path) -> Option<Duration>;
+    /// Gives the time of the last change of the entry at the path, in the clock of the file
+    /// system. No entry, or a file system with no change time, gives `None`. The query does not
+    /// follow a symbolic link.
+    fn modified(&mut self, path: &Path) -> Option<SystemTime>;
 
     /// Gives a second handle on the same file system.
     fn boxed(&self) -> Box<dyn Fs>;
@@ -333,19 +334,19 @@ pub(crate) fn temp_pid(name: &str, base: &str) -> Option<u32> {
 /// An entry goes when these are true:
 ///
 /// - It is a file, and its name is `<base>.<pid>.<n>` with a `base` of `bases`.
-/// - Its age is at least [`TEMP_GRACE`], and `dead` gives `true` for `pid`.
+/// - It changed at least [`TEMP_GRACE`] before `now`, and `dead` gives `true` for `pid`.
 ///
-/// The temporary files of this process stay. The step reads
-/// at most [`SWEEP_MAX`] entries. A failed list or remove leaves the files. Gives the number
-/// of removed files.
+/// The temporary files of this process stay. The step reads at most [`SWEEP_MAX`] entries.
+/// A failed list or remove leaves the files. Gives the number of removed files.
 pub(crate) fn remove_dead_temps(
     fs: &mut dyn Fs,
     dir: &Path,
     bases: &[&str],
     dead: fn(&mut dyn Fs, u32) -> bool,
+    now: SystemTime,
 ) -> usize {
     let pid_of = |name: &str| bases.iter().find_map(|base| temp_pid(name, base));
-    remove_dead_temps_by(fs, dir, &pid_of, dead)
+    remove_dead_temps_by(fs, dir, &pid_of, dead, now)
 }
 
 /// Removes the temporary files of dead processes from the directory `dir`, with the names
@@ -358,6 +359,7 @@ pub(crate) fn remove_dead_temps_by(
     dir: &Path,
     pid_of: &dyn Fn(&str) -> Option<u32>,
     dead: fn(&mut dyn Fs, u32) -> bool,
+    now: SystemTime,
 ) -> usize {
     let Ok(names) = fs.list(dir) else {
         return 0;
@@ -369,7 +371,10 @@ pub(crate) fn remove_dead_temps_by(
             continue;
         };
         let path = dir.join(name);
-        let old = fs.age(&path).is_some_and(|age| age >= TEMP_GRACE);
+        let old = fs
+            .modified(&path)
+            .and_then(|changed| now.duration_since(changed).ok())
+            .is_some_and(|age| age >= TEMP_GRACE);
         if pid == me || fs.kind(&path) != Some(EntryKind::File) || !old || !dead(fs, pid) {
             continue;
         }
@@ -497,13 +502,8 @@ impl Fs for RealFs {
         })
     }
 
-    fn age(&mut self, path: &Path) -> Option<Duration> {
-        let changed = std::fs::symlink_metadata(path).ok()?.modified().ok()?;
-        Some(
-            SystemTime::now()
-                .duration_since(changed)
-                .unwrap_or(Duration::ZERO),
-        )
+    fn modified(&mut self, path: &Path) -> Option<SystemTime> {
+        std::fs::symlink_metadata(path).ok()?.modified().ok()
     }
 
     fn boxed(&self) -> Box<dyn Fs> {

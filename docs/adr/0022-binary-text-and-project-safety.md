@@ -52,5 +52,6 @@ Verified by: AC-125, AC-146a to AC-146d, AC-147
 
 ## Amendment 2026-10-22
 
-- The temporary file sweep removes only a file whose last change is at least one hour old (`Fs::age`). A file with no age stays.
+- The open writes the lock file first. The temporary file sweep removes only a file whose last change is at least one hour before the change of that lock file (`Fs::modified`). Both times come from the clock of the file system, so a clock skew between hosts has no effect. A file with no change time stays.
+- A process that crashes again and again leaves its temporary files for one hour.
 - Reason: the process test reads only the local `/proc`. A process on another host or in another PID namespace is not there, but it can still write its temporary file.

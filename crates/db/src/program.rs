@@ -261,8 +261,8 @@ impl Program {
         &self.imports
     }
 
-    /// Gives the `ext:` address of each import in format version 1, with its address now
-    /// (the `migrate` module).
+    /// Maps the version 1 `ext:` address of each import to its version 2 address (the
+    /// `migrate` module).
     #[must_use]
     pub fn v1_ext_map(&self) -> BTreeMap<Address, Address> {
         load::v1_ext_map(self)

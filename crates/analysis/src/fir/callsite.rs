@@ -21,9 +21,15 @@
 //! A callee has a count when its signature, its Tier-0 prototype or the recovery gives one
 //! ([`callee_arity_in`]). The call then keeps only that count of integer and floating argument
 //! registers.
-//! A callee with no count reads all of them. An unknown target has no count. So has an import
-//! with no Tier-0 prototype. So has a function whose tail jump at stack height 0 passes its
-//! registers on to such an import, as a thunk does.
+//!
+//! A callee with no count reads all the argument registers. An unknown target has no count.
+//! So has an import with no Tier-0 prototype. So has a function whose tail jump at stack
+//! height 0 passes its registers on to such an import, as a thunk does.
+//!
+//! A recovered callee has a floating count only when it is closed. Then no call or tail jump of
+//! it, or of a function that it calls, goes to a target with unknown reads. No such target has
+//! a variable argument list. A signature with a record or an array parameter has no floating
+//! count. A callee with no floating count keeps every floating argument register.
 //!
 //! [`solve`] recovers the parameters of a function with the reads of its calls and tail
 //! calls (the `solve` module).
@@ -46,7 +52,7 @@ use crate::cc::{ParamSource, Params, conv_of, loc_of};
 mod slots;
 mod solve;
 
-pub(crate) use slots::{declared, fixed, proto_params};
+pub(crate) use slots::{declared, fixed, has_aggregate, proto_params};
 pub use slots::{fixed_slots, sig_slots};
 pub use solve::{MAX_SOLVE, Memo, Solved, solve, solve_in};
 
@@ -183,16 +189,25 @@ pub fn callee_arity_in(
     fuel: &mut Fuel,
 ) -> Result<Option<Arity>, OutOfFuel> {
     let at = Address::ram(addr);
+    let float_regs = u8::try_from(conv.float_args.len()).unwrap_or(u8::MAX);
     if let Some(row) = program
         .imports()
         .values()
         .find(|r| r.stub == Some(at) || r.slot == Some(at))
     {
+        let tier0 = ghidorah_types::proto::builtin().ok();
         return Ok(row.id.name().and_then(Types::prototype).map(|proto| {
             let p = proto_params(program, conv, &proto.sig);
+            let aggregate = tier0.is_some_and(|t| has_aggregate(t.store(), &proto.sig));
             Arity {
                 int: p.int,
-                float: if conv.positional { p.int } else { p.float },
+                float: if aggregate {
+                    float_regs
+                } else if conv.positional {
+                    p.int
+                } else {
+                    p.float
+                },
                 varargs: p.varargs,
             }
         }));
@@ -200,14 +215,21 @@ pub fn callee_arity_in(
     let mut part = Fuel::new(fuel.remaining().min(CALLEE_FUEL));
     let found = param_facts(program, FuncId(at), memo, &mut part);
     fuel.take(part.used())?;
-    let p = match found {
+    let (p, source) = match found {
         Ok(f) if f.open => return Ok(None),
-        Ok(f) => f.params,
+        Ok(f) => (f.params, f.source),
         Err(FirError::Fuel(e)) if fuel.is_empty() => return Err(e),
         Err(_) => return Ok(None),
     };
+    let known_floats = if source == ParamSource::Recovered {
+        let mut part = Fuel::new(fuel.remaining().min(CALLEE_FUEL));
+        let closed = solve::is_closed(program, conv, addr, memo, &mut part);
+        fuel.take(part.used())?;
+        matches!(closed, Ok(true))
+    } else {
+        declared(program, FuncId(at)).is_some_and(|(sig, store, _)| !has_aggregate(store, sig))
+    };
     let regs = u8::try_from(conv.int_args.len()).unwrap_or(u8::MAX);
-    let float_regs = u8::try_from(conv.float_args.len()).unwrap_or(u8::MAX);
     let (int, float) = if p.stack > 0 {
         (regs, float_regs)
     } else if conv.positional {
@@ -218,7 +240,7 @@ pub fn callee_arity_in(
     };
     Ok(Some(Arity {
         int,
-        float,
+        float: if known_floats { float } else { float_regs },
         varargs: p.varargs,
     }))
 }

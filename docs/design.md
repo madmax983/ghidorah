@@ -632,13 +632,13 @@ Default projects root: `$XDG_DATA_HOME/ghidorah/projects` (fallback `$HOME/.loca
   crash/<id>.json    crash repro: tool, args, rev, panic text
 ```
 
-- All file access goes through the `Fs` trait at the `db` edge: `create_new`, `append`, `write_all`, `sync_file`, `rename`, `sync_dir`, `remove`, `read`, `age`. Production uses `RealFs`. Tests use `SimFs`: an operation log, a crash point that drops every write with no sync, and a clock.
+- All file access goes through the `Fs` trait at the `db` edge: `create_new`, `append`, `write_all`, `sync_file`, `rename`, `sync_dir`, `remove`, `read`, `modified`. Production uses `RealFs`. Tests use `SimFs`: an operation log, a crash point that drops every write with no sync, and a clock.
 - A commit is `append` of one journal line, then `sync_file`.
 - A snapshot is `create_new` of its temp file in the same directory, `write_all`, `sync_file`, `rename` and `sync_dir` (AC-120a). The session writes a snapshot after each completed analysis run, every 256 journal lines and at clean shutdown.
 - Temp files: the snapshot, the input copy, `project.json`, the journal, the lock and each crash record write their temp files with the per-process name `<base>.<pid>.<n>`.
 - `<base>` is the name of the target file, and `<n>` counts the temp files of the process. A crash record `crash/<id>.json` uses the base `<id>.tmp`.
 - So two processes never write to the same temp file. A write open removes the temp files of dead processes from the project directory, `bin/` and `crash/`.
-- The process test reads only the local `/proc`. A process on another host or in another PID namespace is not there. So the sweep removes only a file whose last change is at least one hour old (`Fs::age`). A file with no age stays.
+- The process test reads only the local `/proc`. A process on another host or in another PID namespace is not there. The open writes the lock file first. So the sweep removes only a file whose last change is at least one hour before the change of that lock file (`Fs::modified`). Both times come from the clock of the file system. A file with no change time stays.
 - `project.json` member `load` is `Auto` or `Raw { base, entry }`. A reopen loads the input copy the same way again.
 - `snapshot.json` member `journal_lines` is the count of journal lines that the snapshot covers. A valid snapshot has two properties. `journal_lines` is at most the line count of the journal. The rev of the last covered line equals the snapshot `rev`.
 - `format_version` starts at 1. Each later version ships a migration function and a golden v1 project fixture (AC-120c).

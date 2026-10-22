@@ -198,19 +198,27 @@ fn rax_dead_after(program: &Program, site: u64) -> bool {
 /// An import, through its stub or its slot, gives the return type of its Tier-0 prototype. A
 /// function gives [`ret_value`]. The recovery reads the L0 IR of the solve of the function,
 /// with fuel from `fuel`. An import with no prototype, a function whose IR does not build and
-/// another address give `None`. So does a function on the walk of `memo`, or a walk of
-/// [`RET_DEPTH`] functions (see the module doc of [`super`]).
+/// another address give `None`. So does a function on the walk of `memo`, any address when
+/// the walk holds [`RET_DEPTH`] functions, and an empty `fuel` (see the module doc of
+/// [`super`]).
+///
+/// `memo` keeps the result of each callee, so a walk visits each callee once. A callee on a
+/// cycle keeps the result of its first visit.
 pub fn ret_value_in(
     program: &Program,
     addr: u64,
     memo: &mut Memo,
     fuel: &mut Fuel,
 ) -> Option<RetValue> {
-    if !memo.enter(addr, RET_DEPTH) {
+    if memo.has_ret(addr) {
+        return memo.ret_of(addr);
+    }
+    if fuel.tick().is_err() || !memo.enter(addr, RET_DEPTH) {
         return None;
     }
     let out = value_in(program, addr, memo, fuel);
     memo.leave();
+    memo.keep_ret(addr, out);
     out
 }
 

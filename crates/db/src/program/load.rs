@@ -104,22 +104,28 @@ fn import_rows(binary: &Binary) -> BTreeMap<ImportId, ImportRow> {
     rows
 }
 
-/// Gives the `ext:` address of each import in format version 1, with its address now.
+/// Maps the version 1 `ext:` address of each import list index to its version 2 address.
 ///
 /// Version 1 gave the first import of each ID `ext:` and its index in the list of the binary
-/// model plus 1.
+/// model plus 1. That index maps to the address of the ID. Some indexes have no ID: an import
+/// with no valid ID, and a later import of one ID. Each maps to the next free address above
+/// the import IDs. So the map is a permutation of `ext:0x1` to the list length.
 pub(super) fn v1_ext_map(program: &Program) -> BTreeMap<Address, Address> {
     let mut out = BTreeMap::new();
     let mut seen = std::collections::BTreeSet::new();
+    let mut free = program.imports().len();
     for (index, import) in program.binary().imports.iter().enumerate() {
-        let Some(id) = import_id(import) else {
-            continue;
+        let row = import_id(import)
+            .filter(|id| seen.insert(id.clone()))
+            .and_then(|id| program.imports().get(&id));
+        let new = if let Some(row) = row {
+            row.ext
+        } else {
+            let at = ext_of(free);
+            free = free.saturating_add(1);
+            at
         };
-        if let Some(row) = program.imports().get(&id)
-            && seen.insert(id)
-        {
-            out.insert(ext_of(index), row.ext);
-        }
+        out.insert(ext_of(index), new);
     }
     out
 }

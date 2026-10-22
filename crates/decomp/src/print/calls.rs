@@ -277,10 +277,11 @@ impl Printer<'_> {
     /// Gives the argument registers of the variadic call `c` of `t` in the order of its
     /// `printf` format string.
     ///
-    /// `ints` holds the integer argument registers and the named count. The order is the
-    /// named registers, then one register for each argument class of the format. These cases
-    /// give `None`:
+    /// The pair `ints` holds the integer argument registers and the count of named parameters.
+    /// The order is the named registers, then one register for each argument class of the
+    /// format. These cases give `None`:
     ///
+    /// - The call has no floating arguments.
     /// - The callee has no `printf` format, or the format argument is no string literal.
     /// - The call has stack arguments.
     /// - The classes do not fill the registers exactly.

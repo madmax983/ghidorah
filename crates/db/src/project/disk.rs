@@ -187,9 +187,7 @@ pub(super) fn write_new(project: &mut Project, bytes: &[u8]) -> Result<u64, Proj
         fs.sync_file(&journal)?;
         0
     };
-    let mut text = ghidorah_json::write_pretty(&project.meta.to_json());
-    text.push('\n');
-    replace_file(fs, &file, &dir.join(PROJECT_TMP), text.as_bytes())?;
+    write_meta(fs, &dir, &project.meta)?;
     fs.sync_dir(&dir)?;
     if let Some(root) = dir.parent() {
         fs.sync_dir(root)?;
@@ -198,7 +196,7 @@ pub(super) fn write_new(project: &mut Project, bytes: &[u8]) -> Result<u64, Proj
 }
 
 /// Writes the project file again at [`FORMAT_VERSION`] when it has an older version. The
-/// caller holds the lock. The steps are the steps of a project file write.
+/// caller holds the lock. It uses the steps of a project file write.
 ///
 /// # Errors
 ///
@@ -209,19 +207,28 @@ pub(super) fn upgrade_meta(project: &mut Project) -> Result<(), ProjectError> {
     }
     let mut meta = project.meta.clone();
     meta.format_version = FORMAT_VERSION;
+    let fs = project.fs.as_mut();
+    write_meta(fs, &project.dir, &meta)?;
+    fs.sync_dir(&project.dir)?;
+    project.meta = meta;
+    Ok(())
+}
+
+/// Writes the project file of `meta` in `dir` through a temporary file and a rename. The
+/// caller syncs the directory.
+///
+/// # Errors
+///
+/// Returns the [`FsError`] of the first failed operation.
+fn write_meta(fs: &mut dyn Fs, dir: &Path, meta: &ProjectMeta) -> Result<(), FsError> {
     let mut text = ghidorah_json::write_pretty(&meta.to_json());
     text.push('\n');
-    let dir = project.dir.clone();
-    let fs = project.fs.as_mut();
     replace_file(
         fs,
         &dir.join(PROJECT_FILE),
         &dir.join(PROJECT_TMP),
         text.as_bytes(),
-    )?;
-    fs.sync_dir(&dir)?;
-    project.meta = meta;
-    Ok(())
+    )
 }
 
 /// Gives the length of `bytes` as a file length.
