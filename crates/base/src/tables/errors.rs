@@ -151,9 +151,10 @@ pub(crate) const fn info(code: ErrorCode) -> CodeInfo {
             "PATH_OUTSIDE_ROOT",
             N,
             false,
-            "The path is outside the roots of the server. The server reads files only under its roots. Use a path under a root of details.roots.",
-            "Start the server with a root option for the directory.",
-        ),
+            "The path is outside the roots of the server. The server reads files only under its roots. Send a path relative to a root of details.roots.",
+            "Send the value of a candidate. A path is relative to a root, and it can start with a name of details.roots.",
+        )
+        .with_plain("A path is relative to a root, and it can start with a name of details.roots. Else start the server with a root option for the directory."),
         E::FileUnreadable => row(
             code,
             "FILE_UNREADABLE",

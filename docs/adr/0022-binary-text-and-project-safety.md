@@ -47,4 +47,5 @@ Verified by: AC-125, AC-146a to AC-146d, AC-147
 - Reason: a run of tag characters can spell an instruction that a model reads but a human reviewer cannot see.
 - A relative `binary_load` path whose first parts are a root name starts at that root. Then the path starts at each root in order. The first file under a root wins.
 - For a relative path, `PATH_OUTSIDE_ROOT` and `FILE_UNREADABLE` give `details.roots` and `details.relative_to`, the root names in the order of the tries.
+- `PATH_OUTSIDE_ROOT` gives a candidate `<root name>/<file name>` for each root that holds a regular file with the file name of the path. The candidate shows no absolute path.
 - `binary_load` checks the file type before the open and again on the open file. The open does not wait for a FIFO writer. A special file gives `FILE_UNREADABLE`.

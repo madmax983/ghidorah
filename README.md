@@ -46,6 +46,7 @@ Put this `.mcp.json` file in the root of a Claude Code project:
 - `--root DIR` names a directory that `binary_load` can read. Send it one time for each directory. The default root is the current directory.
 - `--project-root DIR` names the directory of the projects. The default is `$XDG_DATA_HOME/ghidorah/projects`, else `$HOME/.local/share/ghidorah/projects`.
 - `--profile readonly` gives the read-only tools. `--profile mini` gives 10 tools for small contexts.
+- The `tools/list` result of `full` has at most 24,000 characters (AC-131a). The `mini` result has at most 6,000 characters (AC-131b).
 - The server sends its instructions in the handshake. Their workflow line names only the tools of the active profile.
 - In the `full` and `mini` profiles, an agent starts with `binary_load`, then `binary_survey`.
 - The `readonly` profile has no `binary_load`. Send `--open BIN_ID` to open a project in read-only mode. Then an agent starts with `binary_survey`.
