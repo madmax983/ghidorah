@@ -303,6 +303,8 @@ pub struct Memo {
     bases: BTreeMap<u64, Option<Base>>,
     /// The result of each solve, by the entry of its function.
     solved: BTreeMap<u64, Solved>,
+    /// The functions on the walk of the callee return values, in walk order.
+    walk: Vec<u64>,
 }
 
 impl Memo {
@@ -310,6 +312,21 @@ impl Memo {
     #[must_use]
     pub fn ir(&self, entry: u64) -> Option<&FuncIr> {
         self.bases.get(&entry)?.as_ref().map(|b| &b.ir)
+    }
+
+    /// Puts the function `entry` on the walk of the callee return values. Gives `false`, and
+    /// changes nothing, when `entry` is on the walk or the walk holds `max` functions.
+    pub(crate) fn enter(&mut self, entry: u64, max: usize) -> bool {
+        if self.walk.len() >= max || self.walk.contains(&entry) {
+            return false;
+        }
+        self.walk.push(entry);
+        true
+    }
+
+    /// Removes the last function from the walk of the callee return values.
+    pub(crate) fn leave(&mut self) {
+        self.walk.pop();
     }
 }
 

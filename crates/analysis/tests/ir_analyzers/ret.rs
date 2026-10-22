@@ -8,11 +8,13 @@ use ghidorah_analysis::fir::ret::{self, FloatRet, RetValue};
 use ghidorah_base::{Address, Fuel};
 use ghidorah_db::{Edit, Program, SessionLabel, Source, SymKind};
 use ghidorah_ir::Loc;
+use ghidorah_loader::LoadOpts;
+use ghidorah_testkit::elf::{ElfBuilder, FixupKind, ImportKind, Loc as ElfLoc, Section, Symbol};
 use ghidorah_types::Prim;
 use ghidorah_types::cc::{MS_X64, SYSV_X86_64};
 
 use crate::blob::{BASE, load};
-use crate::support::{analyze, cached, fid, fir_of, named};
+use crate::support::{analyze, cached, fid, fir_of, named, program_of};
 
 /// Gives the analyzed program of the blob `bytes` with the entry at its start.
 fn blob(bytes: &[u8]) -> Program {
@@ -507,4 +509,37 @@ fn regress_long_call_chain_is_bounded() {
         "{value:?}"
     );
     let _ = ret::float_ret(&p, fid(at), &fir_of(&p, at));
+}
+
+/// A call or a tail jump through the GOT slot of an import is a call of the import. `f` calls
+/// `atof` through its slot and returns. `g` tail jumps through the slot. The Tier-0 prototype
+/// of `atof` returns a `double`, so both functions return a `double`.
+#[test]
+fn regress_float_return_through_import_slot() {
+    // f: call [rip + atof@got]; ret. g at 0x10: jmp [rip + atof@got].
+    let mut text = vec![0xff, 0x15, 0, 0, 0, 0, RET];
+    text.resize(0x10, 0xcc);
+    text.extend_from_slice(&[0xff, 0x25, 0, 0, 0, 0]);
+    let got = || ElfLoc::Got("atof".to_owned());
+    let (bytes, layout) = ElfBuilder::exec()
+        .import("atof", ImportKind::Got)
+        .section(
+            Section::code(".text", &text)
+                .fixup(2, FixupKind::Rel32, got())
+                .fixup(0x12, FixupKind::Rel32, got()),
+        )
+        .symbol(Symbol::func("f", ElfLoc::section(".text", 0), 7))
+        .symbol(Symbol::func("g", ElfLoc::section(".text", 0x10), 6))
+        .build_with_layout();
+    let mut p = program_of(&bytes, &LoadOpts::AUTO);
+    let _ = analyze(&mut p);
+    let base = layout.section(".text").expect("the code section").addr;
+    for at in [base, base + 0x10] {
+        let l0 = fir_of(&p, at);
+        assert_eq!(
+            ret::float_ret(&p, fid(at), &l0),
+            Some(FloatRet::Double),
+            "{at:#x}"
+        );
+    }
 }

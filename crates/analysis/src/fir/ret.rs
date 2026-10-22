@@ -25,27 +25,36 @@
 //! A call writes both registers, so the value after a call is no evidence for [`recover`]. A
 //! write of `xmm0` by another op, for example an integer vector op, is no evidence too.
 //!
-//! [`float_ret`] also reads the callees: a direct call whose callee returns a floating value
-//! ([`ret_value_in`]) is a floating write of its kind. The callee value comes from the facts
-//! and the L0 body of the callee only, so the rule looks one call deep.
+//! A block that ends in a tail jump is also a return site. The jump is a call event of its
+//! target. An indirect call or jump that loads its target from an import slot is a call of
+//! the slot ([`super::callsite::call_targets`]).
+//!
+//! [`float_ret`] also reads the callees. A call or a tail jump to a callee with a floating
+//! value ([`ret_value_in`]) is a floating write of its kind. The callee value comes
+//! from its facts and its L0 body, with the same rules. So the rule follows a chain of calls
+//! and tail jumps. The walk stops at a function that is already on the walk and after
+//! [`RET_DEPTH`] functions. Such a callee gives no value.
 //!
 //! [`ret_value`] gives the return value of a function: no value, an integer value or a
 //! floating value (the `value` module).
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use ghidorah_base::{Fuel, FuncId};
 use ghidorah_db::Program;
-use ghidorah_ir::{Arena, Arg, IntrinsicId, Loc, Node, Op, Opc};
+use ghidorah_ir::{Arena, Arg, IntrinsicId, Loc, Node, Op, OpId, Opc};
 use ghidorah_types::{DataModel, Prim, Type, TypeId, TypeStore};
 use ghidorah_x86::Mnem;
 
 use super::FuncIr;
-use super::callsite::{CALLEE_FUEL, Memo};
+use super::callsite::{CALLEE_FUEL, Memo, call_targets};
 
 mod value;
 
 pub use value::{RetValue, recover_value, ret_value, ret_value_in};
+
+/// The largest number of functions on one walk of the callee return values.
+pub const RET_DEPTH: usize = 16;
 
 /// The kind of a floating return value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -171,7 +180,7 @@ enum Event {
     Read,
     /// An op writes the register. A floating write has its kind.
     Write(Option<FloatRet>),
-    /// A call writes the register. A direct call has its target.
+    /// A call or a tail jump writes the register. A call with a known target has it.
     Call(Option<u64>),
     /// The path reaches the function entry.
     Entry,
@@ -237,17 +246,14 @@ pub fn recover(l0: &FuncIr) -> Option<FloatRet> {
 /// of `xmm0` before a `ret` gives the kind `callee(target)`.
 fn recover_with(l0: &FuncIr, callee: &mut dyn FnMut(u64) -> Option<FloatRet>) -> Option<FloatRet> {
     let xmm0 = Loc::xmm(0)?;
-    let preds = l0.body.cfg.preds();
-    let rets: Vec<usize> = (0..l0.body.blocks.len())
-        .filter(|&n| ends_in_ret(l0, n))
-        .collect();
-    let int = events(l0, &preds, &rets, Loc::RAX, true)
+    let exits = Exits::of(l0);
+    let int = events(l0, &exits, Loc::RAX, true)
         .iter()
         .any(|e| matches!(e, Event::Write(_)));
     if int {
         return None;
     }
-    events(l0, &preds, &rets, xmm0, true)
+    events(l0, &exits, xmm0, true)
         .into_iter()
         .filter_map(|e| match e {
             Event::Write(k) => k,
@@ -273,29 +279,53 @@ fn block_ops(l0: &FuncIr, n: usize) -> Vec<&Op> {
         .collect()
 }
 
-/// Tells if block `n` of `l0` ends in a `ret`.
-fn ends_in_ret(l0: &FuncIr, n: usize) -> bool {
-    block_ops(l0, n).last().is_some_and(|op| op.opc == Opc::Ret)
+/// The return sites of a function.
+struct Exits {
+    /// The blocks that end in a `ret` or in a tail jump.
+    blocks: Vec<usize>,
+    /// The target of each call and tail jump by op.
+    targets: BTreeMap<OpId, u64>,
+    /// The predecessors of each block.
+    preds: Vec<Vec<Node>>,
 }
 
-/// Gives the last event of `loc` on each path from the end of a block of `starts` back to the
-/// entry. With `reads` off, a read is no event. `preds` holds the predecessors of each block.
-/// The paths share one walk, so the walk reads each block once, also for a function with many
-/// `ret` blocks.
-fn events(l0: &FuncIr, preds: &[Vec<Node>], starts: &[usize], loc: Loc, reads: bool) -> Vec<Event> {
+impl Exits {
+    /// Gives the return sites of `l0`.
+    fn of(l0: &FuncIr) -> Self {
+        let targets = call_targets(l0);
+        let blocks = (0..l0.body.blocks.len())
+            .filter(|&n| {
+                block_ops(l0, n).last().is_some_and(|op| match op.opc {
+                    Opc::Ret => true,
+                    Opc::Jump | Opc::JumpInd => targets.contains_key(&op.id),
+                    _ => false,
+                })
+            })
+            .collect();
+        Self {
+            blocks,
+            targets,
+            preds: l0.body.cfg.preds(),
+        }
+    }
+}
+
+/// Gives the last event of `loc` on each path from the end of a return site of `exits` back
+/// to the entry. With `reads` off, a read is no event. The paths share one walk, so the walk
+/// reads each block once, also for a function with many return sites.
+fn events(l0: &FuncIr, exits: &Exits, loc: Loc, reads: bool) -> Vec<Event> {
     let entry = l0.body.cfg.entry().index();
     let mut out = Vec::new();
     let mut seen: BTreeSet<usize> = BTreeSet::new();
-    let mut work = starts.to_vec();
+    let mut work = exits.blocks.clone();
     while let Some(n) = work.pop() {
         if !seen.insert(n) {
             continue;
         }
         let ops = block_ops(l0, n);
-        let found = ops
-            .iter()
-            .rev()
-            .find_map(|op| event(&l0.arena, op, loc).filter(|e| reads || *e != Event::Read));
+        let found = ops.iter().rev().find_map(|op| {
+            event(&l0.arena, &exits.targets, op, loc).filter(|e| reads || *e != Event::Read)
+        });
         if let Some(e) = found {
             out.push(e);
             continue;
@@ -304,7 +334,8 @@ fn events(l0: &FuncIr, preds: &[Vec<Node>], starts: &[usize], loc: Loc, reads: b
             out.push(Event::Entry);
         }
         work.extend(
-            preds
+            exits
+                .preds
                 .get(n)
                 .into_iter()
                 .flatten()
@@ -315,11 +346,12 @@ fn events(l0: &FuncIr, preds: &[Vec<Node>], starts: &[usize], loc: Loc, reads: b
     out
 }
 
-/// Gives the event of the op `op` for `loc`, or `None` when the op does not touch it.
-fn event(arena: &Arena, op: &Op, loc: Loc) -> Option<Event> {
+/// Gives the event of the op `op` of `arena` for `loc`, or `None` when the op does not touch it.
+/// A call has the target that `targets` gives. A jump with a target is a tail call.
+fn event(arena: &Arena, targets: &BTreeMap<OpId, u64>, op: &Op, loc: Loc) -> Option<Event> {
     match op.opc {
-        Opc::Call => Some(Event::Call(op.a[0].as_k())),
-        Opc::CallInd => Some(Event::Call(None)),
+        Opc::Call | Opc::CallInd => Some(Event::Call(targets.get(&op.id).copied())),
+        Opc::Jump | Opc::JumpInd => targets.get(&op.id).map(|t| Event::Call(Some(*t))),
         Opc::Get if op.a[0].as_loc() == Some(loc) => Some(Event::Read),
         Opc::Put if op.a[0].as_loc() == Some(loc) => {
             Some(Event::Write(Some(move_kind(arena, op.a[1]))))
