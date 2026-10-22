@@ -143,15 +143,64 @@ fn ac_001d_no_patch_tables() {
 #[test]
 fn ac_001e_publish_and_license() {
     assert_clean("AC-001e");
-    let good = metadata(&[package("ghidorah-json", "crates/json", "")]);
+    let public = |name: &str, dir: &str, deps: &str| {
+        package(name, dir, deps).replace("\"publish\":[]", "\"publish\":null")
+    };
+    let versioned = path_dep("ghidorah-kernel", "crates/kernel", "null")
+        .replace("\"path\"", "\"req\":\"^0.1.0\",\"path\"");
+    let tests_only = path_dep("ghidorah-testkit", "crates/testkit", "\"dev\"");
+    let good = metadata(&[
+        public(
+            "ghidorah-base",
+            "crates/base",
+            &format!("{versioned},{tests_only}"),
+        ),
+        package("xtask", "xtask", ""),
+    ]);
     assert!(workspace::check_publish_license(&good).is_empty());
-    let text = package("ghidorah-json", "crates/json", "")
-        .replace("\"publish\":[]", "\"publish\":null")
-        .replace("Apache-2.0", "MIT");
-    assert_eq!(
-        workspace::check_publish_license(&metadata(&[text])).len(),
-        2
-    );
+    // A private production package, a public dev package and an MIT license.
+    let bad = metadata(&[
+        package("ghidorah-json", "crates/json", ""),
+        public("xtask", "xtask", "").replace("Apache-2.0", "MIT"),
+    ]);
+    assert_eq!(workspace::check_publish_license(&bad).len(), 3);
+    // A normal path dependency without a version cannot go to crates.io.
+    let bare = path_dep("ghidorah-kernel", "crates/kernel", "null");
+    let any = bare.replace("\"path\"", "\"req\":\"*\",\"path\"");
+    for dep in [bare, any] {
+        let meta = metadata(&[public("ghidorah-base", "crates/base", &dep)]);
+        assert_eq!(workspace::check_publish_license(&meta).len(), 1, "{dep}");
+    }
+}
+
+#[test]
+fn ac_001e_legal_copies() {
+    assert_clean("AC-001e");
+    let meta = metadata(&[
+        package("ghidorah-json", "crates/json", "").replace("\"publish\":[]", "\"publish\":null"),
+        package("xtask", "xtask", ""),
+    ]);
+    let files = |extra: &'static [(&'static str, &'static str)]| {
+        move |rel: &str| {
+            [("LICENSE", "license text"), ("NOTICE", "notice text")]
+                .iter()
+                .chain(extra)
+                .find(|(path, _)| *path == rel)
+                .map(|(_, text)| (*text).to_owned())
+        }
+    };
+    let exact = files(&[
+        ("crates/json/LICENSE", "license text"),
+        ("crates/json/NOTICE", "notice text"),
+    ]);
+    assert!(workspace::check_legal_copies(&meta, exact).is_empty());
+    let stale = files(&[
+        ("crates/json/LICENSE", "license text"),
+        ("crates/json/NOTICE", "old notice"),
+    ]);
+    assert_eq!(workspace::check_legal_copies(&meta, stale).len(), 1);
+    // The dev package `xtask` needs no copies. The production package needs both.
+    assert_eq!(workspace::check_legal_copies(&meta, files(&[])).len(), 2);
 }
 
 #[test]
