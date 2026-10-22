@@ -39,8 +39,9 @@ pub const MAX_INSNS: u64 = 100_000;
 /// The largest number of code units of the program.
 ///
 /// A walk stops at the cap, so the memory of the analysis stays bounded for a large or
-/// hostile binary. One unit takes about 2.7 KB of peak memory, so the cap is about 11 GB.
-pub const MAX_UNITS: u64 = 4_194_304;
+/// hostile binary. One unit takes about 0.8 KB of peak memory, so the cap is about 6.7 GB.
+/// The memory budget of a run is 11 GB.
+pub const MAX_UNITS: u64 = 8_388_608;
 
 /// The largest number of body changes of one function. Then its body stays.
 pub const MAX_CHANGES: u64 = 64;
