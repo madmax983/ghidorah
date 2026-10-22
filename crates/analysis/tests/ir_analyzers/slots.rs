@@ -162,3 +162,33 @@ fn regress_call_uses_keep_callee_xmm_count() {
         "{list:?}"
     );
 }
+
+/// A recovered callee that passes its registers on to a target with no facts reads no XMM
+/// register by the solve. The narrow use list then dropped the XMM arguments of its calls.
+/// Now such a callee keeps every XMM argument register. So does a signature with a record
+/// parameter, because a record can travel in XMM registers.
+#[test]
+fn regress_open_callee_keeps_xmm_uses() {
+    // 0x00: call w; call v; ret. 0x10 w: jmp [rip + 0x0a] (the qword at 0x20). 0x30 v:
+    // call rax; ret.
+    let mut bytes = vec![0xe8, 0x0b, 0, 0, 0, 0xe8, 0x26, 0, 0, 0, 0xc3];
+    bytes.resize(0x10, 0xcc);
+    bytes.extend_from_slice(&[0xff, 0x25, 0x0a, 0, 0, 0]);
+    bytes.resize(0x20, 0xcc);
+    bytes.extend_from_slice(&(BASE + 0x40).to_le_bytes());
+    bytes.resize(0x30, 0xcc);
+    bytes.extend_from_slice(&[0xff, 0xd0, 0xc3]);
+    bytes.resize(0x40, 0xcc);
+    bytes.push(0xc3);
+    let mut p = load(&bytes, 0);
+    let _ = analyze(&mut p);
+    let conv = cc::conv_of(&p);
+    for at in [BASE + 0x10, BASE + 0x30] {
+        assert!(p.func(fid(at)).is_some(), "{at:#x} is a function");
+        let arity = callsite::callee_arity(&p, at, conv).expect("an arity");
+        assert_eq!(arity.float, 8, "{at:#x}: {arity:?}");
+    }
+    let rec = with_sig("double f(struct timespec t)");
+    let arity = callsite::callee_arity(&rec, BASE, cc::conv_of(&rec)).expect("an arity");
+    assert_eq!(arity.float, 8, "a record parameter: {arity:?}");
+}

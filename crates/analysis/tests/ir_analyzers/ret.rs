@@ -475,40 +475,78 @@ fn regress_mutual_calls_end() {
         for at in [BASE + f, BASE + g] {
             let l0 = fir_of(&p, at);
             assert_eq!(ret::float_ret(&p, fid(at), &l0), None, "{at:#x}");
-            let value = ret::ret_value(&p, fid(at), &l0);
-            assert_ne!(value, RetValue::Float(FloatRet::Double), "{at:#x}");
+            assert_eq!(ret::ret_value(&p, fid(at), &l0), RetValue::Int, "{at:#x}");
             let mut memo = Memo::default();
             let mut fuel = Fuel::new(1_000_000);
-            assert!(
-                ret::ret_value_in(&p, at, &mut memo, &mut fuel).is_some(),
+            assert_eq!(
+                ret::ret_value_in(&p, at, &mut memo, &mut fuel),
+                Some(RetValue::Int),
                 "{at:#x}"
             );
         }
     }
 }
 
-/// A long chain of `call next; ret` functions gives a result with a bounded walk depth.
-#[test]
-fn regress_long_call_chain_is_bounded() {
-    const N: u64 = 4_000;
-    let mut bytes = vec![0xe8, 0x0b, 0, 0, 0, RET];
-    for k in 0..N {
-        bytes.resize(usize::try_from(0x10 * (k + 1)).expect("small"), 0xcc);
-        let at = 0x10 * (k + 1);
-        bytes.extend_from_slice(&call_ret(at, at + 0x10));
+/// Gives the blob of a chain: the entry calls each function, function `k` at `0x80 * k` tail
+/// jumps to function `k + 1` from each of `fan` exits, and the last function returns a
+/// `double`. The chain has `depth` functions before the last one.
+fn chain_blob(depth: u64, fan: u8) -> Program {
+    let at = |k: u64| 0x80 * k;
+    let mut bytes = Vec::new();
+    for k in 1..=depth + 1 {
+        let next =
+            i32::try_from(at(k)).expect("small") - i32::try_from(bytes.len() + 5).expect("small");
+        bytes.push(0xe8);
+        bytes.extend_from_slice(&next.to_le_bytes());
     }
-    bytes.resize(usize::try_from(0x10 * (N + 1)).expect("small"), 0xcc);
+    bytes.push(RET);
+    for k in 1..=depth {
+        bytes.resize(usize::try_from(at(k)).expect("small"), 0xcc);
+        // `fan - 1` times `cmp edi, j; jne +5; jmp next`, then `jmp next`.
+        for j in 1..fan {
+            bytes.extend_from_slice(&[0x83, 0xff, j, 0x75, 0x05]);
+            let from = u64::try_from(bytes.len()).expect("small");
+            bytes.extend_from_slice(&jmp(from, at(k + 1)));
+        }
+        let from = u64::try_from(bytes.len()).expect("small");
+        bytes.extend_from_slice(&jmp(from, at(k + 1)));
+    }
+    bytes.resize(usize::try_from(at(depth + 1)).expect("small"), 0xcc);
     bytes.extend_from_slice(&TO_DOUBLE);
-    let p = blob(&bytes);
-    let at = BASE + 0x10;
+    blob(&bytes)
+}
+
+/// The walk of the callee return values stops after `RET_DEPTH` functions. A chain that fits
+/// gives the floating return of its last function. A longer chain gives none.
+#[test]
+fn regress_ret_walk_depth_is_bounded() {
+    for (depth, want) in [
+        (ret::RET_DEPTH as u64, Some(FloatRet::Double)),
+        (ret::RET_DEPTH as u64 + 1, None),
+    ] {
+        let p = chain_blob(depth, 1);
+        let at = BASE + 0x80;
+        assert_eq!(
+            ret::float_ret(&p, fid(at), &fir_of(&p, at)),
+            want,
+            "{depth}"
+        );
+    }
+}
+
+/// The walk did not keep the result of a callee. A chain with 4 tail jumps from each function
+/// to the next took 4^d visits: 21 s at a depth of 12. Now each callee takes one visit.
+#[test]
+fn regress_ret_walk_fan_out_is_linear() {
+    let p = chain_blob(12, 4);
+    let at = BASE + 0x80;
+    let start = Instant::now();
     let mut memo = Memo::default();
     let mut fuel = Fuel::new(1_000_000);
-    let value = ret::ret_value_in(&p, at, &mut memo, &mut fuel);
-    assert!(
-        matches!(value, Some(RetValue::Int | RetValue::Float(_))),
-        "{value:?}"
-    );
-    let _ = ret::float_ret(&p, fid(at), &fir_of(&p, at));
+    let got = ret::ret_value_in(&p, at, &mut memo, &mut fuel);
+    let took = start.elapsed();
+    assert_eq!(got, Some(RetValue::Float(FloatRet::Double)));
+    assert!(took < Duration::from_secs(2), "the walk took {took:?}");
 }
 
 /// A call or a tail jump through the GOT slot of an import is a call of the import. `f` calls
