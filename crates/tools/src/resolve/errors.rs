@@ -13,7 +13,7 @@
 
 use std::collections::BTreeSet;
 
-use ghidorah_base::addr_expr::{AddrExprError, Readings};
+use ghidorah_base::addr_expr::{self, AddrExpr, AddrExprError, Readings};
 use ghidorah_base::bintext::escapes;
 use ghidorah_base::{
     Address, ErrorCode, Fuel, FuncId, IdError, IdKind, SectionId, SymId, did_you_mean, hex,
@@ -21,8 +21,8 @@ use ghidorah_base::{
 use ghidorah_db::Program;
 use ghidorah_json::Value;
 
-use super::Site;
 use super::table::{Family, accepted};
+use super::{Named, Resolved, Rule, Site};
 use crate::errors::{Candidate, MAX_TEXT_CHARS, ToolError};
 use crate::handlers::func_sections::safe;
 use crate::hints::{Call, WHY_HEX};
@@ -419,4 +419,44 @@ pub(super) fn invalid(expected: &str, site: &Site<'_>) -> ToolError {
 /// Gives `NOT_IN_FUNCTION`.
 pub(super) fn not_in_function(site: &Site<'_>) -> ToolError {
     at(site, ToolError::new(ErrorCode::NotInFunction))
+}
+
+/// Adds the reading of a JSON integer input to an error of the target step.
+///
+/// A JSON integer is a decimal address, so an agent that means hex gets an address that it
+/// does not expect. For `NOT_IN_FUNCTION` and `ADDRESS_UNMAPPED`, `details` gets
+/// `resolved_from` and `addr`. When a function holds the hex reading of the same digits, the
+/// first candidate is that reading. Other errors and other rules stay the same.
+pub(super) fn integer_reading(
+    program: &Program,
+    resolved: &Resolved,
+    error: ToolError,
+) -> ToolError {
+    let reads_addr = matches!(
+        error.code,
+        ErrorCode::NotInFunction | ErrorCode::AddressUnmapped
+    );
+    let Named::Addr(addr) = resolved.named else {
+        return error;
+    };
+    if resolved.rule != Rule::Integer || !reads_addr {
+        return error;
+    }
+    let mut error = error
+        .detail("resolved_from", resolved.resolved_from())
+        .detail("addr", Value::from(hex::u64_text(addr.off)));
+    let hex = match addr_expr::parse(&resolved.matched) {
+        Ok(AddrExpr::Digits(readings)) => readings.hex,
+        _ => None,
+    };
+    let owner = hex.and_then(|value| Some((value, program.owner_of(Address::ram(value))?)));
+    if let Some((value, func)) = owner {
+        let text = hex::u64_text(value);
+        let mut candidate = Candidate::text(&text, "hex reading of the digits, in a function");
+        candidate.id = Some(func.to_string());
+        candidate.addr = Some(text);
+        candidate.kind = Some("function".to_owned());
+        error.candidates.insert(0, candidate);
+    }
+    error
 }

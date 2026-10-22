@@ -19,6 +19,9 @@
 //! "Invalid" gives `INVALID_ARGUMENT` with `details.accepted`. The address family needs a
 //! mapped RAM address or an EXTERNAL address: else `ADDRESS_UNMAPPED` with the nearest mapped
 //! addresses.
+//!
+//! A JSON integer is a decimal address. When its target step fails, `details` shows that
+//! reading. A candidate gives the hex reading of the digits when a function holds it.
 
 use ghidorah_base::{Address, FuncId, ImportId, JumpTableId, SyscallId};
 use ghidorah_db::{ImportRow, Program};
@@ -102,6 +105,17 @@ fn owner(program: &Program, addr: Address, site: &Site<'_>) -> Result<FuncId, To
 
 /// Gives the target of `resolved` for `family`, with the field path of `site` in errors.
 fn target_at(
+    program: &Program,
+    resolved: &Resolved,
+    family: Family,
+    site: &Site<'_>,
+) -> Result<Target, ToolError> {
+    target_of(program, resolved, family, site)
+        .map_err(|e| errors::integer_reading(program, resolved, e))
+}
+
+/// Gives the target of `resolved` for `family`, before the note of an integer reading.
+fn target_of(
     program: &Program,
     resolved: &Resolved,
     family: Family,

@@ -1585,6 +1585,7 @@ A string resolves by the first rule that matches, in this order:
 
 - A string of digits only is never guessed. It gives `ADDRESS_BASE_AMBIGUOUS`. The candidates list both readings (decimal and hex) with their mapped state.
 - A JSON integer of 2^53 or more gives `ADDRESS_INVALID`. `next[0]` repeats the call with the hex string.
+- A JSON integer is a decimal address. When its target gives `NOT_IN_FUNCTION` or `ADDRESS_UNMAPPED`, `details` holds `resolved_from` and the hex `addr` of that reading. When a function holds the hex reading of the same digits, the first candidate is that reading.
 - A name with several matches gives `AMBIGUOUS_NAME`. Candidates are `{ value, label, id, addr, kind }` in address order, at most 5, plus `candidates_total`.
 - Each `value` resolves to that candidate. It is the `name@0x..` form of a symbol or the `sec:` ID of a section, else the address.
 - An unknown name gives `NOT_FOUND` with did-you-mean candidates (Damerau-Levenshtein, top 5, under fuel).
