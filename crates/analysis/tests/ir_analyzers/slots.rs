@@ -96,3 +96,69 @@ fn signature_params_count_floats_apart() {
     let _ = analyze(&mut bare);
     assert_eq!(callsite::fixed_slots(&bare, fid(BASE)), None);
 }
+
+/// Gives the use list of the first call op of the function at `BASE` of `p` in `conv`, with
+/// the callee arity `arity`.
+fn first_call_uses(
+    p: &Program,
+    conv: &ghidorah_types::CallConv,
+    arity: &dyn Fn(u64) -> Option<callsite::Arity>,
+) -> Vec<Loc> {
+    let l0 = crate::support::fir_of(p, BASE);
+    let uses = callsite::uses(&l0, &l0.arena, conv, arity);
+    uses.into_values().next().expect("a call op")
+}
+
+/// A call kept every XMM argument register as a use, also for a callee that reads fewer. So
+/// unread XMM values stayed alive and took `vN` names. Now a callee with a known count keeps
+/// only its XMM argument registers. In a positional convention the count is the slot count.
+#[test]
+fn regress_call_uses_keep_callee_xmm_count() {
+    // 0x00: call g; ret. 0x10 g: addsd xmm0, xmm1; ret.
+    let mut bytes = vec![0xe8, 0x0b, 0, 0, 0, 0xc3];
+    bytes.resize(0x10, 0xcc);
+    bytes.extend_from_slice(&[0xf2, 0x0f, 0x58, 0xc1, 0xc3]);
+    let mut p = load(&bytes, 0);
+    let _ = analyze(&mut p);
+    let conv = cc::conv_of(&p);
+    let arity = callsite::callee_arity(&p, BASE + 0x10, conv).expect("an arity");
+    assert_eq!((arity.int, arity.float, arity.varargs), (0, 2, false));
+    let list = first_call_uses(&p, conv, &|t| callsite::callee_arity(&p, t, conv));
+    for n in 0..8 {
+        assert_eq!(list.contains(&xmm(n)), n < 2, "xmm{n}: {list:?}");
+    }
+    let sysv = |int, float| {
+        move |_: u64| {
+            Some(callsite::Arity {
+                int,
+                float,
+                varargs: false,
+            })
+        }
+    };
+    let list = first_call_uses(&p, &SYSV_X86_64, &sysv(1, 0));
+    assert!(list.contains(&gpr(7)), "{list:?}");
+    assert!(
+        !list.iter().any(|l| (0..16).any(|n| *l == xmm(n))),
+        "{list:?}"
+    );
+    // A variadic callee keeps all of them and `al`.
+    let list = first_call_uses(&p, &SYSV_X86_64, &|_| {
+        Some(callsite::Arity {
+            int: 1,
+            float: 0,
+            varargs: true,
+        })
+    });
+    assert!((0..8).all(|n| list.contains(&xmm(n))), "{list:?}");
+    // MS x64: two slots keep rcx, rdx, xmm0 and xmm1.
+    let list = first_call_uses(&p, &MS_X64, &sysv(2, 2));
+    for n in 0..4 {
+        assert_eq!(list.contains(&xmm(n)), n < 2, "MS x64 xmm{n}: {list:?}");
+    }
+    assert!(list.contains(&gpr(1)) && list.contains(&gpr(2)), "{list:?}");
+    assert!(
+        !list.contains(&gpr(8)) && !list.contains(&gpr(9)),
+        "{list:?}"
+    );
+}
