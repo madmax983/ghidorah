@@ -222,8 +222,8 @@ pub(super) fn decode(value: &Value) -> Result<Tables, CodecError> {
     Ok(out)
 }
 
-/// The typed rows of an analysis set: the rows of [`decode`] with no JSON form. A layer of
-/// the analysis has no flow overrides and no variables.
+/// The typed rows of an analysis set: the rows of [`crate::codec::tables_from_json`] with no
+/// JSON form. A layer of the analysis has no flow overrides and no variables.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SetRows {
     /// The comments: address, kind and text.
