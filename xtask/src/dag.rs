@@ -63,6 +63,8 @@ pub const ALLOWED: &[(&str, &str)] = &[
 /// The allowed dev edges beyond [`ALLOWED`] and [`DEV_ANY`].
 pub const DEV_ALLOWED: &[(&str, &str)] = &[
     ("ghidorah-loader", "ghidorah-oracle"),
+    ("ghidorah-base", "ghidorah-oracle"),
+    ("ghidorah-analysis", "ghidorah-oracle"),
     ("ghidorah-decomp", "ghidorah-json"),
     ("ghidorah-decomp", "ghidorah-loader"),
 ];

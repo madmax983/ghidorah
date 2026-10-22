@@ -19,6 +19,7 @@ ghidorah-kernel = { path = "../kernel" }
 
 [dev-dependencies]
 ghidorah-testkit = { path = "../testkit" }
+ghidorah-oracle = { path = "../oracle" }
 
 [lints]
 workspace = true

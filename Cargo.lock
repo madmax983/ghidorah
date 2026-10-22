@@ -22,6 +22,7 @@ dependencies = [
  "ghidorah-json",
  "ghidorah-kernel",
  "ghidorah-loader",
+ "ghidorah-oracle",
  "ghidorah-testkit",
  "ghidorah-types",
  "ghidorah-x86",
@@ -32,6 +33,7 @@ name = "ghidorah-base"
 version = "0.1.0"
 dependencies = [
  "ghidorah-kernel",
+ "ghidorah-oracle",
  "ghidorah-testkit",
 ]
 

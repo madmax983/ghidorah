@@ -298,7 +298,7 @@ graph TD
 
 Rules:
 
-- Every production crate can take `ghidorah-testkit` as a dev-dependency. Only the `loader` tests take `ghidorah-oracle` as a dev-dependency (counting allocator, AC-055).
+- Every production crate can take `ghidorah-testkit` as a dev-dependency. Only the `loader`, `base` and `analysis` tests take `ghidorah-oracle` as a dev-dependency. They use its counting allocator: AC-055 in `loader`, and the allocation bounds of the scaling tests in `base` and `analysis`. A count of allocated bytes is deterministic, so these tests use no clock.
 - The `decomp` tests take `ghidorah-loader` and `ghidorah-json` as dev-dependencies. They load the fixtures and read the truth files and the leaf vectors (AC-101).
 - `json` and `testkit` are leaves. They have no workspace dependencies.
 - `analysis` names `Address`, `FuncId` and `Fuel` of `base` and the `RangeSet` of `kernel`. It writes its analysis set through the typed rows of the `db` codec (`tables_from_rows`). Its inputs hash and metrics use JSON values, so it also takes `json` (WP-15).

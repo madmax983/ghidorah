@@ -78,7 +78,8 @@ CI (`.github/workflows/ci.yml`) runs three jobs: `tier1`, `tier2` and `verus`.
 - Add no `allow` entry outside the reviewed allowlist of ADR-0019. `cargo xtask gates AC-010` checks it.
 - A new crate edge needs a design change first. Then add one line to `ALLOWED` in `xtask/src/dag.rs`.
 - Run `cargo xtask deps` after each edit of `ALLOWED`. It writes `docs/architecture/crates.mmd` again.
-- Every package can take `ghidorah-testkit` as a dev-dependency. Only `ghidorah-loader` can take `ghidorah-oracle`.
+- Every package can take `ghidorah-testkit` as a dev-dependency. Only `ghidorah-loader`, `ghidorah-base` and `ghidorah-analysis` can take `ghidorah-oracle` (counting allocator).
+- A scaling test bounds a count, such as the allocated bytes of the counting allocator, not a time.
 
 ## TDD process
 
