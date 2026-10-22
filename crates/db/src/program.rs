@@ -159,7 +159,7 @@ pub struct ImportRow {
     pub id: ImportId,
     /// The index in [`Binary::imports`].
     pub index: usize,
-    /// The EXTERNAL address: `ext:` and the index plus 1.
+    /// The EXTERNAL address: `ext:` and 1 plus the rank of the ID in ID order.
     pub ext: Address,
     /// The import slot: the GOT or IAT entry.
     pub slot: Option<Address>,
@@ -259,6 +259,13 @@ impl Program {
     #[must_use]
     pub const fn imports(&self) -> &BTreeMap<ImportId, ImportRow> {
         &self.imports
+    }
+
+    /// Maps the version 1 `ext:` address of each import to its version 2 address (the
+    /// `migrate` module).
+    #[must_use]
+    pub fn v1_ext_map(&self) -> BTreeMap<Address, Address> {
+        load::v1_ext_map(self)
     }
 
     /// Gives the exports in ID order.

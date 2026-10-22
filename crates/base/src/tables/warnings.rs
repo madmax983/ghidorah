@@ -173,5 +173,13 @@ pub(crate) const fn info(code: WarningCode) -> CodeInfo {
             "A max_ms guard stopped the work. The result depends on the time, so it is not deterministic.",
             "Send the same call again.",
         ),
+        W::AnalysisLimit => row(
+            code,
+            "W_ANALYSIS_LIMIT",
+            N,
+            false,
+            "The analysis stopped at the cap of the code units. Some functions have no body or a part of their body.",
+            "Read the functions with care. The caveats and the coverage show the gaps.",
+        ),
     }
 }

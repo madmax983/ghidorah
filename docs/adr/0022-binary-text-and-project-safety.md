@@ -1,6 +1,6 @@
 # ADR-0022: Binary-derived text as a type, and project safety
 
-Status: Accepted (amended 2026-10-20)
+Status: Accepted (amended 2026-10-22)
 Date: 2026-10-16
 Verified by: AC-125, AC-146a to AC-146d, AC-147
 
@@ -49,3 +49,9 @@ Verified by: AC-125, AC-146a to AC-146d, AC-147
 - For a relative path, `PATH_OUTSIDE_ROOT` and `FILE_UNREADABLE` give `details.roots` and `details.relative_to`, the root names in the order of the tries.
 - `PATH_OUTSIDE_ROOT` gives a candidate `<root name>/<file name>` for each root that holds a regular file with the file name of the path. The candidate shows no absolute path.
 - `binary_load` checks the file type before the open and again on the open file. The open does not wait for a FIFO writer. A special file gives `FILE_UNREADABLE`.
+
+## Amendment 2026-10-22
+
+- The open writes the lock file first. The temporary file sweep removes only a file whose last change is at least one hour before the change of that lock file (`Fs::modified`). Both times come from the clock of the file system, so a clock skew between hosts has no effect. A file with no change time stays.
+- A process that crashes again and again leaves its temporary files for one hour.
+- Reason: the process test reads only the local `/proc`. A process on another host or in another PID namespace is not there, but it can still write its temporary file.

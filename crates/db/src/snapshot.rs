@@ -4,8 +4,11 @@
 //!
 //! ```text
 //! {"analysis_inputs_hash": hex or null, "facts": {analysis, base, binary, notes, types},
-//!  "format_version": 1, "journal_lines": n, "marks": [..], "progress": [..], "rev": r}
+//!  "format_version": 2, "journal_lines": n, "marks": [..], "progress": [..], "rev": r}
 //! ```
+//!
+//! [`decode`] also reads format version 1. It maps the old `ext:` addresses of the `analysis`,
+//! `base` and `notes` facts to their new addresses (the [`crate::migrate`] module).
 //!
 //! - `facts` holds the tables of both layers with their counters, the note store, the SHA-256
 //!   of the input and the types. The types are a number of types, or the number and the C
@@ -24,14 +27,15 @@ mod tests;
 use std::fmt;
 use std::path::Path;
 
-use ghidorah_base::{Rev, TxId, hex, sha256};
+use ghidorah_base::{Rev, Sha256, TxId, hex, sha256};
 use ghidorah_json::{Limits, Value, write_jcs};
 
 use crate::codec::{
     CodecError, Json, Obj, notes_from_json, notes_to_json, progress_from_json, progress_to_json,
-    tables_from_json, tables_to_json, types_from_json, types_to_json,
+    tables_from_json, tables_jcs_to, tables_to_json, types_from_json, types_to_json,
 };
 use crate::fs::{Fs, FsError, replace_file};
+use crate::migrate::ExtMap;
 use crate::notes::Notes;
 use crate::program::{AnalysisSet, Program, Tables};
 use crate::progress::Progress;
@@ -39,7 +43,10 @@ use crate::source::Source;
 use crate::typesglue::{TypeInput, Types};
 
 /// The format version of the project files.
-pub const FORMAT_VERSION: u64 = 1;
+pub const FORMAT_VERSION: u64 = 2;
+
+/// The oldest format version that a migration reads.
+pub const MIN_FORMAT_VERSION: u64 = 1;
 
 /// The file name of the snapshot.
 pub const SNAPSHOT_FILE: &str = "snapshot.json";
@@ -74,7 +81,7 @@ pub enum SnapshotError {
     Json(String),
     /// The JSON has the wrong shape.
     Shape(CodecError),
-    /// The format version is not [`FORMAT_VERSION`].
+    /// The format version is not in [`MIN_FORMAT_VERSION`] to [`FORMAT_VERSION`].
     Version(u64),
     /// The snapshot belongs to another input file.
     Binary,
@@ -201,43 +208,76 @@ pub fn encode(
             .cloned()
             .unwrap_or(Value::Array(Vec::new()))
     };
-    let facts = Value::object([
-        ("analysis", tables_to_json(program.analysis())),
-        ("base", tables_to_json(program.base())),
-        ("binary", Value::from(hex::encode(&program.meta().sha256))),
-        ("notes", notes_to_json(program.notes())),
-        ("types", types_to_json(program.types())),
-    ]);
-    let all = Value::object([
-        ("analysis_inputs_hash", hash_json(inputs.as_ref())),
-        ("facts", facts),
-        ("format_version", Value::from(FORMAT_VERSION)),
-        ("journal_lines", Value::from(journal_lines)),
-        ("marks", part("marks")),
-        ("progress", part("funcs")),
-        ("rev", program.rev().enc()),
-    ]);
-    write_jcs(&all).map_err(|e| SnapshotError::Jcs(e.to_string()))
+    let jcs = |v: &Value| write_jcs(v).map_err(|e| SnapshotError::Jcs(e.to_string()));
+    // The members go in JCS order. The two layers go row by row, so no JSON value of a whole
+    // layer exists.
+    let mut out = String::new();
+    out.push_str("{\"analysis_inputs_hash\":");
+    out.push_str(&jcs(&hash_json(inputs.as_ref()))?);
+    out.push_str(",\"facts\":{\"analysis\":");
+    layer_jcs(&mut out, program.analysis())?;
+    out.push_str(",\"base\":");
+    layer_jcs(&mut out, program.base())?;
+    out.push_str(",\"binary\":");
+    out.push_str(&jcs(&Value::from(hex::encode(&program.meta().sha256)))?);
+    out.push_str(",\"notes\":");
+    out.push_str(&jcs(&notes_to_json(program.notes()))?);
+    out.push_str(",\"types\":");
+    out.push_str(&jcs(&types_to_json(program.types()))?);
+    out.push_str("},\"format_version\":");
+    out.push_str(&jcs(&Value::from(FORMAT_VERSION))?);
+    out.push_str(",\"journal_lines\":");
+    out.push_str(&jcs(&Value::from(journal_lines))?);
+    out.push_str(",\"marks\":");
+    out.push_str(&jcs(&part("marks"))?);
+    out.push_str(",\"progress\":");
+    out.push_str(&jcs(&part("funcs"))?);
+    out.push_str(",\"rev\":");
+    out.push_str(&jcs(&program.rev().enc())?);
+    out.push('}');
+    Ok(out)
 }
 
-/// Reads a snapshot.
+/// Adds the JCS text of the tables of one layer to `out`, row by row.
+fn layer_jcs(out: &mut String, tables: &Tables) -> Result<(), SnapshotError> {
+    tables_jcs_to(tables, true, &mut |piece| out.push_str(piece))
+        .map_err(|e| SnapshotError::Jcs(e.to_string()))
+}
+
+/// Tells if `v` is a format version that a reader takes.
+const fn known(v: u64) -> bool {
+    MIN_FORMAT_VERSION <= v && v <= FORMAT_VERSION
+}
+
+/// Reads a snapshot. A version 1 snapshot gets the new `ext:` addresses of `v1`.
 ///
 /// # Errors
 ///
 /// Returns a [`SnapshotError`] for text that is not JSON, a bad shape or another version.
-pub fn decode(bytes: &[u8]) -> Result<Snapshot, SnapshotError> {
+pub fn decode(bytes: &[u8], v1: &ExtMap) -> Result<Snapshot, SnapshotError> {
     let text =
         std::str::from_utf8(bytes).map_err(|_| SnapshotError::Json("not UTF-8".to_owned()))?;
-    let value = ghidorah_json::parse(text, &SNAPSHOT_LIMITS)
+    let mut value = ghidorah_json::parse(text, &SNAPSHOT_LIMITS)
         .map_err(|e| SnapshotError::Json(e.to_string()))?;
-    if let Some(v) = value.get("format_version").and_then(Value::as_u64)
-        && v != FORMAT_VERSION
+    let version = value.get("format_version").and_then(Value::as_u64);
+    if let Some(v) = version
+        && !known(v)
     {
         return Err(SnapshotError::Version(v));
     }
+    if version == Some(1)
+        && let Value::Object(top) = &mut value
+        && let Some(Value::Object(facts)) = top.get_mut("facts")
+    {
+        for key in ["analysis", "base", "notes"] {
+            if let Some(part) = facts.get_mut(key) {
+                *part = v1.remap(std::mem::take(part));
+            }
+        }
+    }
     let o = Obj::new(&value, &SNAPSHOT_MEMBERS)?;
     let format: u64 = o.get("format_version")?;
-    if format != FORMAT_VERSION {
+    if !known(format) {
         return Err(SnapshotError::Version(format));
     }
     let f = Obj::new(o.member("facts")?, &FACT_MEMBERS).map_err(|e| e.at("facts"))?;
@@ -304,7 +344,11 @@ pub fn inputs_hash(program: &Program, engine: &Value, config: &Value) -> [u8; 32
 /// Gives the SHA-256 of the JCS text of the tables of an analysis layer.
 #[must_use]
 pub fn result_hash(set: &AnalysisSet) -> [u8; 32] {
-    hash_value(&tables_to_json(set))
+    let mut hasher = Sha256::default();
+    match tables_jcs_to(set, true, &mut |piece| hasher.update(piece.as_bytes())) {
+        Ok(()) => hasher.finalize(),
+        Err(_) => hash_value(&tables_to_json(set)),
+    }
 }
 
 /// Gives the SHA-256 of the JCS text of `value`, or of its compact text without a JCS form.

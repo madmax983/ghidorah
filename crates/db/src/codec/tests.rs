@@ -7,25 +7,26 @@ use ghidorah_kernel::RangeSet;
 use ghidorah_types::TypeId;
 
 use super::{
-    CodecError, Reason, edit_from_json, edit_to_json, facts, key_from_json, key_to_json,
+    CodecError, Reason, SetRows, edit_from_json, edit_to_json, facts, key_from_json, key_to_json,
     notes_from_json, notes_to_json, progress_from_json, progress_to_json, tables_from_json,
-    tables_to_json,
+    tables_from_rows, tables_jcs_to, tables_to_json,
 };
 use crate::comments::CommentKind;
 use crate::edit::{Edit, EditKind, FuncRecord, VarField};
 use crate::fact::{Fact, Origin};
 use crate::funcs::{Caveat, Function, Part, PartKind, StartReason};
 use crate::jumptables::{JtMethod, JumpTable};
-use crate::listing::DataDef;
+use crate::listing::{CodeUnit, DataDef, FlowKind};
 use crate::notes::{Claim, Note, NoteKind, NoteSet, NoteStatus, SetMembers};
 use crate::overrides::FlowOverride;
 use crate::progress::{FuncProgress, Mark};
 use crate::refs::{Ref, RefKey, RefType};
 use crate::source::Source;
-use crate::symbols::{SymKey, SymKind};
+use crate::strings::{Encoding, StrInfo};
+use crate::symbols::{SymKey, SymKind, Symbol};
 use crate::tests::{origin, ram, seeded, session};
 use crate::vars::VarFact;
-use crate::why::FactKey;
+use crate::why::{FactKey, RuleCode, Why};
 
 fn agent() -> Origin {
     let mut o = origin(Source::Agent, 42, "mcp-1");
@@ -487,4 +488,140 @@ fn decoders_refuse_bad_input() {
         Some(f.value.as_str())
     );
     let _ = TxId(0);
+}
+
+/// Gives typed rows with one row in each table of an analysis set.
+fn set_rows() -> SetRows {
+    let o = Origin::analysis();
+    let key = RefKey {
+        from: ram(0x1084),
+        op_index: -1,
+        to: ram(0x1150),
+        kind: RefType::UnconditionalJump,
+    };
+    let mut func = Function::new(ram(0x1080), StartReason::Entry, 90, Source::Analysis);
+    func.body = {
+        let mut b = RangeSet::new();
+        b.insert(Range::new(0x1080, 0x1087).unwrap());
+        b
+    };
+    SetRows {
+        comments: vec![(
+            ram(0x1084),
+            CommentKind::Eol,
+            o.fact("sys:write".to_string()),
+        )],
+        data: vec![(
+            0x4000,
+            o.fact(DataDef {
+                ty: TypeId::from_index(9),
+                len: 8,
+            }),
+        )],
+        funcs: vec![func],
+        jumptables: vec![(
+            JumpTableId(ram(0x1084)),
+            o.fact(JumpTable {
+                base: Some(ram(0x2000)),
+                entry_size: 4,
+                count: 1,
+                targets: vec![ram(0x1150)],
+                method: JtMethod::A,
+                resolved: true,
+            }),
+        )],
+        refs: vec![o.fact(Ref { key, primary: true })],
+        strings: vec![(
+            0x2004,
+            StrInfo {
+                encoding: Encoding::Ascii,
+                len: 5,
+                referenced: true,
+            },
+        )],
+        symbols: vec![Symbol {
+            addr: ram(0x1080),
+            key: SymKey(0),
+            name: o.fact("main".to_string()),
+            kind: SymKind::Function,
+            primary: true,
+        }],
+        units: vec![
+            (0x1080, unit(4, FlowKind::Seq)),
+            (0x1084, unit(4, FlowKind::Jmp)),
+        ],
+        why: vec![(
+            FactKey::Func(FuncId(ram(0x1080))),
+            0,
+            Why {
+                rule: RuleCode::new("R_ENTRY").unwrap(),
+                premises: Vec::new(),
+            },
+        )],
+        why_next: 1,
+    }
+}
+
+/// Gives an instruction unit.
+const fn unit(len: u8, flow: FlowKind) -> CodeUnit {
+    CodeUnit::Insn {
+        len,
+        flow,
+        flags: 0,
+    }
+}
+
+/// The typed rows give the same tables as their JSON form, through the same write rules.
+#[test]
+fn rows_build_the_tables_of_the_json_form() {
+    let typed = tables_from_rows(set_rows()).unwrap();
+    assert_eq!(typed.funcs().iter().count(), 1);
+    assert_eq!(
+        typed
+            .listing()
+            .units_in(Range::new(0, u64::MAX).unwrap())
+            .count(),
+        2
+    );
+    let json = tables_to_json(&typed);
+    assert_eq!(tables_from_json(&reparse(&json)).unwrap(), typed);
+
+    // A broken row fails on both paths: two code units overlap.
+    let mut bad = set_rows();
+    bad.units.push((0x1082, unit(4, FlowKind::Seq)));
+    assert!(tables_from_rows(bad.clone()).is_err());
+    let mut form = tables_to_json(&typed);
+    let units = form
+        .as_object_mut()
+        .and_then(|o| o.get_mut("units"))
+        .and_then(Value::as_array_mut)
+        .unwrap();
+    units.push(
+        parse(
+            r#"{"at":"0x1082","len":4,"flow":"seq","flags":0}"#,
+            &Limits::DEFAULT,
+        )
+        .unwrap(),
+    );
+    assert!(tables_from_json(&form).is_err());
+}
+
+/// The row by row JCS text of a layer has the bytes of the JCS text of its JSON form.
+#[test]
+fn layer_jcs_streams_the_same_bytes() {
+    let typed = tables_from_rows(set_rows()).unwrap();
+    let mut p = seeded();
+    p.layer_mut(Source::Agent)
+        .unwrap()
+        .funcs
+        .insert(record().func)
+        .unwrap();
+    for tables in [&typed, p.base(), p.analysis()] {
+        for counters in [true, false] {
+            let mut text = String::new();
+            tables_jcs_to(tables, counters, &mut |piece| text.push_str(piece)).unwrap();
+            let want = write_jcs(&super::tables::encode(tables, counters)).unwrap();
+            assert_eq!(text, want);
+        }
+    }
 }

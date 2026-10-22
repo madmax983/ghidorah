@@ -158,8 +158,56 @@ impl AnalysisEngine for TestEngine {
         Ok(RunReport {
             state: self.0,
             steps_used: steps,
+            capped: false,
         })
     }
+}
+
+/// A test engine whose run stops at the cap of the code units. Each run does work, so a load
+/// in fuel slices runs several slices.
+struct CappedEngine(u64);
+
+impl AnalysisEngine for CappedEngine {
+    fn run(
+        &mut self,
+        _binary: &mut OpenBinary,
+        _until: Until,
+        fuel: &mut Fuel,
+    ) -> Result<RunReport, ToolError> {
+        self.0 += 1;
+        let steps = fuel.remaining().min(10);
+        fuel.take(steps)
+            .map_err(|_| ToolError::new(ErrorCode::BudgetExceeded))?;
+        let state = if self.0 < 3 {
+            AnalysisState::BudgetStopped
+        } else {
+            AnalysisState::Complete
+        };
+        Ok(RunReport {
+            state,
+            steps_used: steps,
+            capped: true,
+        })
+    }
+}
+
+/// A load whose analysis stops at the cap of the code units gives `W_ANALYSIS_LIMIT` one
+/// time, also over several slices.
+#[test]
+fn capped_analysis_warns_once() {
+    let mut s = session();
+    s.set_engine(Box::new(CappedEngine(0)));
+    let envelope = call(&mut s, "binary_load", r#"{"builtin":"demo"}"#);
+    assert_eq!(text_at(data(&envelope), "/analysis/state"), "complete");
+    let codes: Vec<String> = envelope
+        .get("warnings")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .map(|w| text_at(w, "/code"))
+        .collect();
+    let limits = codes.iter().filter(|c| **c == "W_ANALYSIS_LIMIT").count();
+    assert_eq!(limits, 1, "{envelope}");
 }
 
 #[test]

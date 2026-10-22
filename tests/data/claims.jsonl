@@ -14,7 +14,7 @@
 {"fixture":"demo","claim":{"rel":"uses_import","args":["main","imp:strlen"]},"verdict":"refuted"}
 {"fixture":"demo","claim":{"rel":"uses_import","args":["fn:0x1000","imp:puts"]},"verdict":"refuted","gaps":[]}
 {"fixture":"demo","claim":{"rel":"uses_import","args":["fn:0x1000","imp:__gmon_start__"]},"verdict":"supported"}
-{"fixture":"demo","claim":{"rel":"calls","args":["fn:0x1000","imp:__gmon_start__"]},"verdict":"supported","evidence":["ref:0x1014>ext:0x5:unconditional_call"]}
+{"fixture":"demo","claim":{"rel":"calls","args":["fn:0x1000","imp:__gmon_start__"]},"verdict":"supported","evidence":["ref:0x1014>ext:0x4:unconditional_call"]}
 {"fixture":"demo","claim":{"rel":"refs_string","args":["main","Access*"]},"verdict":"supported","evidence":["ref:0x109a>0x202d:data","ref:0x10b0>0x201e:data"]}
 {"fixture":"demo","claim":{"rel":"refs_string","args":["main","*<password>"]},"verdict":"supported","evidence":["ref:0x10c0>0x2004:data"]}
 {"fixture":"demo","claim":{"rel":"refs_string","args":["main","nothing*"]},"verdict":"refuted"}

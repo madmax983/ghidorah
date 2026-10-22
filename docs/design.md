@@ -301,7 +301,7 @@ Rules:
 - Every production crate can take `ghidorah-testkit` as a dev-dependency. Only the `loader` tests take `ghidorah-oracle` as a dev-dependency (counting allocator, AC-055).
 - The `decomp` tests take `ghidorah-loader` and `ghidorah-json` as dev-dependencies. They load the fixtures and read the truth files and the leaf vectors (AC-101).
 - `json` and `testkit` are leaves. They have no workspace dependencies.
-- `analysis` names `Address`, `FuncId` and `Fuel` of `base` and the `RangeSet` of `kernel`. It writes its analysis set through the JSON codec of `db`, so it also takes `json` (WP-15).
+- `analysis` names `Address`, `FuncId` and `Fuel` of `base` and the `RangeSet` of `kernel`. It writes its analysis set through the typed rows of the `db` codec (`tables_from_rows`). Its inputs hash and metrics use JSON values, so it also takes `json` (WP-15).
 - `decomp` names `Fuel`, `FuncId`, `VarId` and `WarningCode` of `base` (WP-21).
 - Pure core crates (`kernel`, `base`, `json`, `loader`, `x86`, `ir`, `types`, `analysis`, `decomp`) do not use `std::fs`, `std::net`, `std::process`, `std::env` or `std::time::SystemTime` (AC-017). `db`, `tools` and `cli` get file access and a clock from the edge.
 - No crate calls `std::env::set_var` or `std::env::remove_var` (AC-223). The `cli` crate reads every `GHIDORAH_*` variable once into `RunConfig` (Section 10.11).
@@ -571,14 +571,14 @@ Undo is a forward commit (ADR-0017). The model is one linear stack per session:
 Journal line (one per committed Tx):
 
 ```json
-{"v":1,"rev":58,"tx":42,"label":"symbol_rename","source":"agent","session":"mcp-1","force":false,
+{"v":2,"rev":58,"tx":42,"label":"symbol_rename","source":"agent","session":"mcp-1","force":false,
  "edits":[{"op":"SetName","addr":"0x401130","old":null,"new":"parse_cfg"}],
  "undo_of":null,"redo_of":null,"crc":"9c41d07a2f3e11b0"}
 ```
 
 - `crc` is the first 16 hex digits of the SHA-256 of the line without the `crc` field.
 - A completed analysis writes a marker line `{"op":"AnalysisRun","inputs_hash":..,"fuel_used":..,"result_hash":..}` instead of thousands of facts.
-- Session metadata goes into `meta` lines: `{"v":1,"meta":"progress","func":..,"visited":true}` and `{"v":1,"meta":"brief","session":"mcp-1","rev":57}`. A `meta` line changes no `rev`. Replay folds them into `progress` and `marks`.
+- Session metadata goes into `meta` lines: `{"v":2,"meta":"progress","func":..,"visited":true}` and `{"v":2,"meta":"brief","session":"mcp-1","rev":57}`. A `meta` line changes no `rev`. Replay folds them into `progress` and `marks`.
 
 ### 3.8 Events, table epochs and history
 
@@ -632,15 +632,17 @@ Default projects root: `$XDG_DATA_HOME/ghidorah/projects` (fallback `$HOME/.loca
   crash/<id>.json    crash repro: tool, args, rev, panic text
 ```
 
-- All file access goes through the `Fs` trait at the `db` edge: `create_new`, `append`, `write_all`, `sync_file`, `rename`, `sync_dir`, `remove`, `read`. Production uses `RealFs`. Tests use `RecordingFs` (an operation log) and `CrashFs` (stops after operation k and drops every write that has no sync).
+- All file access goes through the `Fs` trait at the `db` edge: `create_new`, `append`, `write_all`, `sync_file`, `rename`, `sync_dir`, `remove`, `read`, `modified`. Production uses `RealFs`. Tests use `SimFs`: an operation log, a crash point that drops every write with no sync, and a clock.
 - A commit is `append` of one journal line, then `sync_file`.
 - A snapshot is `create_new` of its temp file in the same directory, `write_all`, `sync_file`, `rename` and `sync_dir` (AC-120a). The session writes a snapshot after each completed analysis run, every 256 journal lines and at clean shutdown.
 - Temp files: the snapshot, the input copy, `project.json`, the journal, the lock and each crash record write their temp files with the per-process name `<base>.<pid>.<n>`.
 - `<base>` is the name of the target file, and `<n>` counts the temp files of the process. A crash record `crash/<id>.json` uses the base `<id>.tmp`.
 - So two processes never write to the same temp file. A write open removes the temp files of dead processes from the project directory, `bin/` and `crash/`.
+- The process test reads only the local `/proc`. A process on another host or in another PID namespace is not there. The open writes the lock file first. So the sweep removes only a file whose last change is at least one hour before the change of that lock file (`Fs::modified`). Both times come from the clock of the file system. A file with no change time stays.
 - `project.json` member `load` is `Auto` or `Raw { base, entry }`. A reopen loads the input copy the same way again.
 - `snapshot.json` member `journal_lines` is the count of journal lines that the snapshot covers. A valid snapshot has two properties. `journal_lines` is at most the line count of the journal. The rev of the last covered line equals the snapshot `rev`.
 - `format_version` starts at 1. Each later version ships a migration function and a golden v1 project fixture (AC-120c).
+- Version 2 gives each import the EXTERNAL address `ext:` and 1 plus the rank of its import ID. Version 1 used the place of the import in the import list of the binary model, so the import order changed the state hash. An open of a version 1 project changes each old `ext:` address of the snapshot facts and the journal edits to its new address (`db::migrate`). Journal lines carry `"v":2`. A write open writes `project.json` at version 2 after the load.
 - `crash_id` is the first 16 hex digits of `sha256(tool, JCS(args), rev)`. Output paths are relative to the project directory.
 - Lock: a write open creates `project.lock` and never writes over the lock of a live process. Its temp file follows the temp-file rule above. A lock whose process is alive (same `boot_id`, same start time in `/proc/<pid>/stat`) gives `PROJECT_LOCKED` with a read-only hint. The error names the owner of a stale lock. Only `--break-lock` replaces a stale lock.
 - `binary_load { binary_id }` reopens a project from `bin/<sha256>` with no path and no root check. `session_brief {}` with zero open binaries lists the projects under the root (Section 10.4).
@@ -1172,7 +1174,7 @@ Seeds in confidence order. Each start keeps `start_reason`, a `Why` and a confid
 - Parameters = live-in registers that are argument registers, minus callee-saved push and pop pairs and alignment pushes, filled up to the highest used register.
 - A register that a call or a tail jump passes to a callee that reads it counts as read. A callee is a direct target or a tail jump out of the body. It is also the import slot of an indirect call or jump at stack height 0.
 - A syscall reads only the argument registers that its number takes: the parameter count of the Tier-0 prototype of its name. A syscall reads all six registers when block-local evaluation does not give its number, or when its name has no Tier-0 prototype.
-- A callee with a parameter count keeps only those argument registers at its calls. A count comes from a signature, a Tier-0 prototype or the recovery.
+- A callee with a parameter count keeps only those integer and floating argument registers at its calls. A count comes from a signature, a Tier-0 prototype or the recovery.
 - An import with no Tier-0 prototype has no parameter count. A function whose tail jump at stack height 0 goes to a callee with no count also has no count, for example a thunk.
 - A call to a callee with no count keeps every argument register. Its text shows the arguments that the caller sets. The facts of `cc::params` do not change.
 - `cc::params` solves the callees first, depth first, up to 32 functions. It runs again in that fixed order until no count changes.
@@ -1191,7 +1193,7 @@ Floating return and return value (`analysis::fir::ret`):
 - The recovery walks back from each `ret` to the last event of `xmm0` and of `rax` on each path. An event is a read, a write, a call or the function entry. All the paths share one walk, so each block gets one visit.
 - A write of `xmm0` that no op reads before the `ret` is a floating return value. A scalar op on `float` values or a 32-bit move gives `float`. Another floating write gives `double`.
 - A write of `rax` that no op reads before the `ret` is an integer return value. It rules out a floating return.
-- A direct call that is the last event of `xmm0` gives the floating return of its callee. The callee value comes from its facts and its L0 body only, so the rule looks one call deep. An indirect call is no evidence.
+- A direct call that is the last event of `xmm0` gives the floating return of its callee. A block that ends in a tail jump is a return site, and the jump is a call of its target. The callee value comes from its facts and its L0 body with the same rules, so the rule follows chains of calls and tail jumps. The walk stops at a function that is already on the walk and after 16 functions. An indirect call or jump through an import slot is a call of the slot. Another indirect call is no evidence.
 - With a floating return, each L1 `Ret` reads `xmm0` in place of `rax` (Section 7.12).
 - The return value of a function (`RetValue`) is no value, an integer value or a floating value. A `void` return type gives no value. With no signature, a function with no floating return gives no value when a `ret` returns the entry value of `rax`. A C function returns a value on each path or on none, so one such `ret` is enough.
 - Caller evidence: the value of a function can pass on from calls. Then the last event of `rax` before each `ret` is a call, or the function has no `ret`. A floating return of a callee gives a floating value. Else the callers decide.
@@ -1315,7 +1317,7 @@ decomp {
 - Call arguments: a known count (signature, prototype, recovery) gives the registers, then the stack arguments. Without a count, the arguments are the registers that the caller sets: a new value, or a write in the block of the call. The register of an indirect target is not an argument. A variadic call with all argument registers set also shows its stack arguments.
 - Staging register: a register that an op reads after its last `Put` in the block of the call is not an argument. An example is `rdx` in `mov rdx,[rbp-0x18]; mov rsi,rdx` of `-O0` code.
 - A `SysV` call that is not variadic takes its arguments from the slots of the callee (Section 7.10). A signature gives the register of the class of each parameter. The recovery gives the integer registers, then the floating registers, then the stack arguments. So the text keeps the slot order of the head of the callee.
-- A `SysV` variadic call passes its floating arguments in `xmm0` to `xmm7`, and `al` holds their count. A constant `al`, or the low byte of a `mov al, k`, gives the count. Else the count is the XMM argument registers that the caller sets. The XMM arguments follow the integer arguments. The `al` value is no argument and no read.
+- A `SysV` variadic call passes its floating arguments in `xmm0` to `xmm7`, and `al` holds their count. A constant `al`, or the low byte of a `mov al, k`, gives the count. Else the count is the XMM argument registers that the caller sets. A `printf` format string of a Tier-0 callee gives the order of the integer and the XMM arguments. Else the XMM arguments follow the integer arguments. The `al` value is no argument and no read.
 - An MS x64 slot prints its floating register when the caller sets only that register of the slot.
 - Call result: a signature with a floating return type gives `xmm0`, another type gives `rax`, and `void` gives no result. With no signature, a recovered floating return of the callee gives `xmm0`, and a recovered return with no value gives no result. Else `xmm0` is the result when the caller reads the `xmm0` def and reads the `rax` def only as a return value. Else the result is `rax`.
 - The `rax` def of a call with no `rax` result is a value that the call leaves behind. A return of it prints `return;`, and the head gets no return type from it.
@@ -1743,6 +1745,7 @@ Warnings use the frozen enum `base::WarningCode` (`#[repr(u16)]`). `docs/errors.
 | 18 | `W_STRUCTURE_SELFCHECK` | The decompiler self-check failed. | - |
 | 19 | `W_ANALYSIS_STALE` | A read used the committed set while a shadow runs. | `analysis_run` |
 | 20 | `W_TIME_STOP` | A `max_ms` guard stopped the work. | the same call again |
+| 21 | `W_ANALYSIS_LIMIT` | The analysis stopped at the cap of the code units (`Disasm` option `max_units`). | - |
 
 ### 10.9 Pagination and budgets
 
@@ -2291,7 +2294,7 @@ Metamorphic relations (AC-189):
 - Parser targets, each owned by its parser WP: `elf_load` (WP-07), `x86_decode` (WP-08), `eh_frame` (WP-09), `cparse` (WP-10), `json_parse` (WP-04), `addr_expr` (WP-05), `calc` and `cursor_decode` (WP-13b), `mcp_line` (WP-14), `batch_parse` (WP-25), `pe_load` (WP-30).
 - Pipeline targets: `x86_lift_interp` (WP-16: random bytes, decode, lift, run the L0 interpreter with fuel), `journal_replay`, `snapshot_load` and `project_json` (WP-20), `pipeline_raw` (WP-27: random bytes as a raw blob with an entry, `analysis_run` full with a fuel cap, then `func_get` with every section for every function) and `pipeline_elf` (WP-27: havoc on T1 fixtures, then the same steps).
 - Each target is one test binary `crates/<crate>/tests/fuzz_<target>.rs` with one test function. So the global panic hook has no race (research 3.10 pitfall). `xtask ci` runs these binaries with `--test-threads=1`. A panic hook counter (`AtomicU64`) counts every panic.
-- Tier 1 runs 2,000 fixed-seed cases per target (10,000 for `pe_load`, AC-251) (AFL-style havoc: bit flip, random byte, interesting values, add 1..35, delete block, insert byte) in a thread with a 256 KiB stack. ELF targets take their seed corpus from the T1 fixtures and the `ElfBuilder` variants. `pe_load` takes its seeds from the PE fixtures and the `PeBuilder` variants, and its stages are headers, sections, imports, exports, relocs, tls and pdata. Each case reports the deepest stage that it reached (header, phdr, dynamic, symbols, relocs, eh_frame). The test asserts that at least 10% of cases reach each stage (AC-190d).
+- Tier 1 runs 2,000 fixed-seed cases per target (10,000 for `pe_load`, AC-251) (AFL-style havoc: bit flip, random byte, interesting values, add 1..35, delete block, insert byte) in at most 4 case threads with a 256 KiB stack each. One generator makes the inputs in case order, so the inputs and the report do not depend on the threads. ELF targets take their seed corpus from the T1 fixtures and the `ElfBuilder` variants. `pe_load` takes its seeds from the PE fixtures and the `PeBuilder` variants, and its stages are headers, sections, imports, exports, relocs, tls and pdata. Each case reports the deepest stage that it reached (header, phdr, dynamic, symbols, relocs, eh_frame). The test asserts that at least 10% of cases reach each stage (AC-190d).
 - In an `xtask fuzz` run, the harness writes `tests/regress/<target>/pending.bin` before each case and deletes it after the case. An abort, a stack overflow or a hang leaves the file.
 - A tier-1 fuzz test writes its pending input into a directory of its own process under the system temporary directory (`ghidorah-fuzz-<pid>-<run>/<target>`). So two test runs at the same time do not share a file, and the tree gets no `pending.bin`. Each run removes its directory at the end.
 - Tier 2: `xtask fuzz <target> --iters N --seed S` runs batches in child processes with a test-only wall-clock watchdog. It shrinks a crashing or pending input and writes `tests/regress/<target>/<sha8>.bin`. CI runs 100,000 cases per target. Every test run replays the regression files.

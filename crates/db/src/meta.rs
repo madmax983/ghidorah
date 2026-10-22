@@ -4,8 +4,8 @@
 //!
 //! | Line | JSON |
 //! |---|---|
-//! | progress | `{"v":1,"meta":"progress","func":"0x401130","visited":true,"named":false,"typed":false,"commented":false}` |
-//! | brief | `{"v":1,"meta":"brief","session":"mcp-1","rev":57}` |
+//! | progress | `{"v":2,"meta":"progress","func":"0x401130","visited":true,"named":false,"typed":false,"commented":false}` |
+//! | brief | `{"v":2,"meta":"brief","session":"mcp-1","rev":57}` |
 //!
 //! A progress line sets the whole row of the function. A brief line keeps the higher of the
 //! old and the new rev, so a second fold of a line changes nothing.

@@ -19,7 +19,7 @@
         "extra": {
           "slot": "0x3ff8",
           "stub": "0x1050",
-          "ext": "ext:0x7",
+          "ext": "ext:0x3",
           "delay": false
         }
       },
@@ -31,7 +31,7 @@
         "extra": {
           "slot": "0x3fc8",
           "stub": "0x1060",
-          "ext": "ext:0x3",
+          "ext": "ext:0x6",
           "delay": false
         }
       },
@@ -43,7 +43,7 @@
         "extra": {
           "slot": "0x3fd0",
           "stub": "0x1070",
-          "ext": "ext:0x4",
+          "ext": "ext:0x7",
           "delay": false
         }
       },
@@ -54,7 +54,7 @@
         "text": "__libc_start_main",
         "extra": {
           "slot": "0x3fd8",
-          "ext": "ext:0x1",
+          "ext": "ext:0x5",
           "delay": false
         }
       },
@@ -65,7 +65,7 @@
         "text": "_ITM_deregisterTMCloneTable",
         "extra": {
           "slot": "0x3fe0",
-          "ext": "ext:0x2",
+          "ext": "ext:0x1",
           "delay": false
         }
       },
@@ -76,7 +76,7 @@
         "text": "__gmon_start__",
         "extra": {
           "slot": "0x3fe8",
-          "ext": "ext:0x5",
+          "ext": "ext:0x4",
           "delay": false
         }
       },
@@ -87,7 +87,7 @@
         "text": "_ITM_registerTMCloneTable",
         "extra": {
           "slot": "0x3ff0",
-          "ext": "ext:0x6",
+          "ext": "ext:0x2",
           "delay": false
         }
       }

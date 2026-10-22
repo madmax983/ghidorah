@@ -8,11 +8,13 @@ use ghidorah_analysis::fir::ret::{self, FloatRet, RetValue};
 use ghidorah_base::{Address, Fuel};
 use ghidorah_db::{Edit, Program, SessionLabel, Source, SymKind};
 use ghidorah_ir::Loc;
+use ghidorah_loader::LoadOpts;
+use ghidorah_testkit::elf::{ElfBuilder, FixupKind, ImportKind, Loc as ElfLoc, Section, Symbol};
 use ghidorah_types::Prim;
 use ghidorah_types::cc::{MS_X64, SYSV_X86_64};
 
 use crate::blob::{BASE, load};
-use crate::support::{analyze, cached, fid, fir_of, named};
+use crate::support::{analyze, cached, fid, fir_of, named, program_of};
 
 /// Gives the analyzed program of the blob `bytes` with the entry at its start.
 fn blob(bytes: &[u8]) -> Program {
@@ -386,4 +388,196 @@ fn regress_ret_value_of_tail_caller() {
         ret::ret_value_in(p, at, &mut memo, &mut fuel),
         Some(RetValue::Void)
     );
+}
+
+/// Gives the blob of `entry` at `BASE`, which calls each function of `funcs` and returns, and
+/// the functions of `funcs` at `BASE + 0x10`, `BASE + 0x20` and so on. Each function is at
+/// most 16 bytes, and its `rel32` fields are relative to its own start.
+fn funcs_blob(funcs: &[&[u8]]) -> Program {
+    let mut bytes = Vec::new();
+    for k in 0..funcs.len() {
+        let at = i32::try_from(bytes.len() + 5).expect("a small offset");
+        let to = i32::try_from(0x10 * (k + 1)).expect("a small offset");
+        bytes.push(0xe8);
+        bytes.extend_from_slice(&(to - at).to_le_bytes());
+    }
+    bytes.push(RET);
+    assert!(bytes.len() <= 0x10, "the entry fits in 16 bytes");
+    for f in funcs {
+        bytes.resize(bytes.len().next_multiple_of(0x10), 0xcc);
+        bytes.extend_from_slice(f);
+    }
+    blob(&bytes)
+}
+
+/// Gives `jmp rel32` from offset 0 of a function at `from` to `to`.
+fn jmp(from: u64, to: u64) -> Vec<u8> {
+    let rel =
+        i32::try_from(i64::try_from(to).expect("small") - i64::try_from(from + 5).expect("small"))
+            .expect("a near jump");
+    let mut out = vec![0xe9];
+    out.extend_from_slice(&rel.to_le_bytes());
+    out
+}
+
+/// Gives `call rel32; ret` from offset 0 of a function at `from` to `to`.
+fn call_ret(from: u64, to: u64) -> Vec<u8> {
+    let mut out = jmp(from, to);
+    out[0] = 0xe8;
+    out.push(RET);
+    out
+}
+
+/// `cvtsi2sd xmm0, edi; ret`.
+const TO_DOUBLE: [u8; 5] = [0xf2, 0x0f, 0x2a, 0xc7, RET];
+
+/// A tail jump passes the floating return of its target on. `f` tail jumps to `g`, `g` tail
+/// jumps to `h`, and `h` returns a `double`. So all three return a `double`.
+#[test]
+fn regress_float_return_follows_tail_chain() {
+    let (f, g) = (0x10, 0x20);
+    let p = funcs_blob(&[&jmp(f, g), &jmp(g, 0x30), &TO_DOUBLE]);
+    for at in [BASE + f, BASE + g, BASE + 0x30] {
+        let l0 = fir_of(&p, at);
+        assert_eq!(
+            ret::float_ret(&p, fid(at), &l0),
+            Some(FloatRet::Double),
+            "{at:#x}"
+        );
+        assert_eq!(
+            ret::ret_value(&p, fid(at), &l0),
+            RetValue::Float(FloatRet::Double),
+            "{at:#x}"
+        );
+        let mut memo = Memo::default();
+        let mut fuel = Fuel::new(1_000_000);
+        assert_eq!(
+            ret::ret_value_in(&p, at, &mut memo, &mut fuel),
+            Some(RetValue::Float(FloatRet::Double)),
+            "{at:#x}"
+        );
+    }
+    // A chain of calls gives the same kind.
+    let p = funcs_blob(&[&call_ret(f, g), &call_ret(g, 0x30), &TO_DOUBLE]);
+    assert_eq!(
+        ret::float_ret(&p, fid(BASE + f), &fir_of(&p, BASE + f)),
+        Some(FloatRet::Double)
+    );
+}
+
+/// Two functions that call each other, or tail jump to each other, give a result. The walk
+/// does not recurse without end.
+#[test]
+fn regress_mutual_calls_end() {
+    let (f, g) = (0x10, 0x20);
+    for funcs in [[call_ret(f, g), call_ret(g, f)], [jmp(f, g), jmp(g, f)]] {
+        let p = funcs_blob(&[&funcs[0], &funcs[1]]);
+        for at in [BASE + f, BASE + g] {
+            let l0 = fir_of(&p, at);
+            assert_eq!(ret::float_ret(&p, fid(at), &l0), None, "{at:#x}");
+            assert_eq!(ret::ret_value(&p, fid(at), &l0), RetValue::Int, "{at:#x}");
+            let mut memo = Memo::default();
+            let mut fuel = Fuel::new(1_000_000);
+            assert_eq!(
+                ret::ret_value_in(&p, at, &mut memo, &mut fuel),
+                Some(RetValue::Int),
+                "{at:#x}"
+            );
+        }
+    }
+}
+
+/// Gives the blob of a chain: the entry calls each function, function `k` at `0x80 * k` tail
+/// jumps to function `k + 1` from each of `fan` exits, and the last function returns a
+/// `double`. The chain has `depth` functions before the last one.
+fn chain_blob(depth: u64, fan: u8) -> Program {
+    let at = |k: u64| 0x80 * k;
+    let mut bytes = Vec::new();
+    for k in 1..=depth + 1 {
+        let next =
+            i32::try_from(at(k)).expect("small") - i32::try_from(bytes.len() + 5).expect("small");
+        bytes.push(0xe8);
+        bytes.extend_from_slice(&next.to_le_bytes());
+    }
+    bytes.push(RET);
+    for k in 1..=depth {
+        bytes.resize(usize::try_from(at(k)).expect("small"), 0xcc);
+        // `fan - 1` times `cmp edi, j; jne +5; jmp next`, then `jmp next`.
+        for j in 1..fan {
+            bytes.extend_from_slice(&[0x83, 0xff, j, 0x75, 0x05]);
+            let from = u64::try_from(bytes.len()).expect("small");
+            bytes.extend_from_slice(&jmp(from, at(k + 1)));
+        }
+        let from = u64::try_from(bytes.len()).expect("small");
+        bytes.extend_from_slice(&jmp(from, at(k + 1)));
+    }
+    bytes.resize(usize::try_from(at(depth + 1)).expect("small"), 0xcc);
+    bytes.extend_from_slice(&TO_DOUBLE);
+    blob(&bytes)
+}
+
+/// The walk of the callee return values stops after `RET_DEPTH` functions. A chain that fits
+/// gives the floating return of its last function. A longer chain gives none.
+#[test]
+fn regress_ret_walk_depth_is_bounded() {
+    for (depth, want) in [
+        (ret::RET_DEPTH as u64, Some(FloatRet::Double)),
+        (ret::RET_DEPTH as u64 + 1, None),
+    ] {
+        let p = chain_blob(depth, 1);
+        let at = BASE + 0x80;
+        assert_eq!(
+            ret::float_ret(&p, fid(at), &fir_of(&p, at)),
+            want,
+            "{depth}"
+        );
+    }
+}
+
+/// The walk did not keep the result of a callee. A chain with 4 tail jumps from each function
+/// to the next took 4^d visits: 21 s at a depth of 12. Now each callee takes one visit.
+#[test]
+fn regress_ret_walk_fan_out_is_linear() {
+    let p = chain_blob(12, 4);
+    let at = BASE + 0x80;
+    let start = Instant::now();
+    let mut memo = Memo::default();
+    let mut fuel = Fuel::new(1_000_000);
+    let got = ret::ret_value_in(&p, at, &mut memo, &mut fuel);
+    let took = start.elapsed();
+    assert_eq!(got, Some(RetValue::Float(FloatRet::Double)));
+    assert!(took < Duration::from_secs(2), "the walk took {took:?}");
+}
+
+/// A call or a tail jump through the GOT slot of an import is a call of the import. `f` calls
+/// `atof` through its slot and returns. `g` tail jumps through the slot. The Tier-0 prototype
+/// of `atof` returns a `double`, so both functions return a `double`.
+#[test]
+fn regress_float_return_through_import_slot() {
+    // f: call [rip + atof@got]; ret. g at 0x10: jmp [rip + atof@got].
+    let mut text = vec![0xff, 0x15, 0, 0, 0, 0, RET];
+    text.resize(0x10, 0xcc);
+    text.extend_from_slice(&[0xff, 0x25, 0, 0, 0, 0]);
+    let got = || ElfLoc::Got("atof".to_owned());
+    let (bytes, layout) = ElfBuilder::exec()
+        .import("atof", ImportKind::Got)
+        .section(
+            Section::code(".text", &text)
+                .fixup(2, FixupKind::Rel32, got())
+                .fixup(0x12, FixupKind::Rel32, got()),
+        )
+        .symbol(Symbol::func("f", ElfLoc::section(".text", 0), 7))
+        .symbol(Symbol::func("g", ElfLoc::section(".text", 0x10), 6))
+        .build_with_layout();
+    let mut p = program_of(&bytes, &LoadOpts::AUTO);
+    let _ = analyze(&mut p);
+    let base = layout.section(".text").expect("the code section").addr;
+    for at in [base, base + 0x10] {
+        let l0 = fir_of(&p, at);
+        assert_eq!(
+            ret::float_ret(&p, fid(at), &l0),
+            Some(FloatRet::Double),
+            "{at:#x}"
+        );
+    }
 }

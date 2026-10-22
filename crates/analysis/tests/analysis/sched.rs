@@ -2,7 +2,7 @@
 //! (AC-092, AC-093).
 
 use ghidorah_analysis::registry::{ANALYZERS, by_name, index};
-use ghidorah_analysis::sched::{pick, unit};
+use ghidorah_analysis::sched::{self, pick, unit};
 use ghidorah_analysis::{
     AnalyzerId, AnalyzerSpec, BAND_FULL, BAND_SIGNATURES, BAND_TRIAGE, Grain, Mode, RunState,
     Scheduler, Trigger, Until,
@@ -13,7 +13,10 @@ use ghidorah_kernel::RangeSet;
 use ghidorah_testkit::rng::{SplitMix64, below};
 
 use crate::blobs::Blob;
-use crate::support::{analyze, named, program};
+use ghidorah_loader::LoadOpts;
+use ghidorah_testkit::elf::{ElfBuilder, Fde, Loc, Section};
+
+use crate::support::{analyze, named, program, program_of};
 
 fn spec(name: &'static str, priority: u16, grain: Grain) -> AnalyzerSpec {
     AnalyzerSpec {
@@ -386,4 +389,75 @@ fn registry_follows_section_7_1() {
         ]
     );
     assert_eq!(RunState::Stale.name(), "stale");
+}
+
+/// Builds an ELF with `n` small frame-pointer functions. Each function has an FDE, so
+/// `FdeSeeds` gives every function to `Disasm` in one event.
+fn many_fdes(n: u64) -> Program {
+    const BODY: [u8; 16] = [
+        0x55, 0x48, 0x89, 0xe5, 0x5d, 0xc3, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc,
+        0xcc,
+    ];
+    let text: Vec<u8> = (0..n).flat_map(|_| BODY).collect();
+    let mut elf = ElfBuilder::exec()
+        .section(Section::code(".text", &text))
+        .entry(Loc::section(".text", 0));
+    for i in 0..n {
+        elf = elf.fde(Fde::frame_pointer(Loc::section(".text", i * 16), 6));
+    }
+    program_of(&elf.build(), &LoadOpts::AUTO)
+}
+
+/// A pending set takes the event ranges of a step in place. A copy of the whole pending set
+/// for each event made the run quadratic in the number of functions: 40 s for 10000 FDEs.
+#[test]
+fn regress_pending_union_many_fdes() {
+    const N: u64 = 10_000;
+    let mut p = many_fdes(N);
+    let started = std::time::Instant::now();
+    let (_, out) = analyze(&mut p);
+    let took = started.elapsed();
+    assert_eq!(out.state, RunState::Complete);
+    assert_eq!(
+        p.analysis().funcs().len(),
+        usize::try_from(N).expect("N fits")
+    );
+    assert!(
+        took < std::time::Duration::from_secs(10),
+        "the run of {N} FDE functions takes {took:?}"
+    );
+}
+
+/// The cap of the code units bounds the work state. The run still reaches a fixpoint, and
+/// the scheduler reports the cap.
+#[test]
+fn regress_unit_cap_bounds_the_code_units() {
+    let mut free = many_fdes(200);
+    let (sched, out) = analyze(&mut free);
+    assert_eq!(out.state, RunState::Complete);
+    assert!(!sched.capped());
+    let all = free.analysis().listing().units_in(sched::ALL).count();
+    assert!(all > 400, "the free run decodes every function: {all}");
+
+    let mut capped = many_fdes(200);
+    let mut sched = Scheduler::new();
+    sched.set_unit_cap(100);
+    let out = sched
+        .run(&mut capped, Until::Full, &mut Fuel::new(u64::MAX))
+        .expect("the run");
+    assert_eq!(out.state, RunState::Complete);
+    assert!(sched.capped());
+    let kept = capped.analysis().listing().units_in(sched::ALL).count();
+    assert!(kept <= 100, "the cap holds: {kept}");
+    assert!(kept > 0, "the walk decodes up to the cap");
+}
+
+/// The shipped cap of the code units is 4,194,304, about 11 GB at 2.7 KB of peak memory for
+/// each unit. The `Disasm` option `max_units` shows the same value.
+#[test]
+fn regress_unit_cap_default() {
+    use ghidorah_analysis::analyzers::disasm::{MAX_UNITS, SPEC};
+    assert_eq!(MAX_UNITS, 4_194_304);
+    let shown = SPEC.options.iter().find(|o| o.name == "max_units");
+    assert_eq!(shown.map(|o| o.value), Some(MAX_UNITS));
 }

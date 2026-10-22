@@ -58,7 +58,7 @@ const ERRORS: [(u16, &str, &str, bool); 41] = [
 ];
 
 /// The frozen warning list: number, name, class and retry flag.
-const WARNINGS: [(u16, &str, &str, bool); 20] = [
+const WARNINGS: [(u16, &str, &str, bool); 21] = [
     (1, "W_COERCED", "N", false),
     (2, "W_ARCH_UNSUPPORTED", "N", false),
     (3, "W_NOT_DEMANGLED", "N", false),
@@ -79,6 +79,7 @@ const WARNINGS: [(u16, &str, &str, bool); 20] = [
     (18, "W_STRUCTURE_SELFCHECK", "N", false),
     (19, "W_ANALYSIS_STALE", "R", false),
     (20, "W_TIME_STOP", "R", true),
+    (21, "W_ANALYSIS_LIMIT", "N", false),
 ];
 
 /// The frozen diagnostic list: number and name.
@@ -179,7 +180,7 @@ fn check_warning_codes_frozen() {
         assert_eq!(WarningCode::from_num(reserved.num), None);
         assert_eq!(WarningCode::from_name(reserved.name), None);
     }
-    assert_eq!(WarningCode::from_num(21), None);
+    assert_eq!(WarningCode::from_num(22), None);
 }
 
 #[test]

@@ -130,6 +130,11 @@ pub(crate) struct Work {
     pub codeptrs: CodePtrs,
     /// The state of the gap components.
     pub gapcomp: GapState,
+    /// The cap of the code units of the program, or `None` for
+    /// [`crate::analyzers::disasm::MAX_UNITS`].
+    pub unit_cap: Option<u64>,
+    /// `true` when a body stopped at the cap of the code units.
+    pub capped: bool,
 }
 
 /// Gives the import of each import slot of `program`: the ELF slot map, then the slots of
