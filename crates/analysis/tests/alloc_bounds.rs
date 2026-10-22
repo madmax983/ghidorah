@@ -183,3 +183,15 @@ fn regress_why_store_packs_its_records() {
         stats.retained_bytes
     );
 }
+
+/// The publish step keeps the premises of each record in the list of the record. A filtered
+/// copy of each list reserved room for four keys: 446 bytes of set for each record; now 278.
+#[test]
+fn regress_published_set_keeps_exact_premise_lists() {
+    let (program, set, _) = kept_bytes(5_000);
+    let records = program.analysis().why().len();
+    assert!(
+        set <= records * 350,
+        "the published set keeps {set} bytes for {records} records"
+    );
+}
