@@ -22,11 +22,11 @@ use ghidorah_db::codec::{SetRows, tables_from_rows};
 use ghidorah_db::listing::CodeUnit;
 use ghidorah_db::{
     AnalysisSet, Commit, Edit, Fact, FactKey, Function, JumpTable, Origin, Part, PartKind, Program,
-    Ref, RefKey, SessionLabel, Source, StartReason, StrInfo,
+    Ref, RefKey, RuleCode, SessionLabel, Source, StartReason, StrInfo,
 };
 
 use crate::AnalysisError;
-use crate::why::{Why, unit_why};
+use crate::why::{Rule, Why, unit_why};
 use crate::work::Work;
 
 /// The change counts of `analysis_run` between two analysis sets.
@@ -266,14 +266,19 @@ pub(crate) fn analysis_set(program: &Program, work: &Work) -> Result<AnalysisSet
     let ordered = order(program, &facts.whys);
     let why_next = u64::try_from(ordered.len()).unwrap_or(u64::MAX);
     let mut why = Vec::with_capacity(ordered.len());
+    let mut codes: BTreeMap<Rule, RuleCode> = BTreeMap::new();
     for (key, (n, premises)) in ordered {
         let Some(found) = facts.whys.remove(&key) else {
             continue;
         };
-        let record = ghidorah_db::why::Why {
-            rule: found.rule.rule_code()?,
-            premises,
+        let rule = if let Some(code) = codes.get(&found.rule) {
+            code.clone()
+        } else {
+            let code = found.rule.rule_code()?;
+            codes.insert(found.rule, code.clone());
+            code
         };
+        let record = ghidorah_db::why::Why { rule, premises };
         why.push((key, n, record));
     }
     let mut rows = SetRows {

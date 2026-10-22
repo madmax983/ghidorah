@@ -12,6 +12,7 @@ mod tests;
 
 use std::collections::BTreeMap;
 use std::fmt;
+use std::sync::Arc;
 
 use ghidorah_base::{Address, ExportId, FuncId, ImportId, JumpTableId, NoteId, StringId, VarId};
 
@@ -27,8 +28,10 @@ pub const MAX_RULE: usize = 64;
 pub const MAX_PREMISES: usize = 64;
 
 /// A rule code, for example `R_FDE_START`.
+///
+/// A clone shares the text. Many records of one rule hold one copy of its code.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct RuleCode(String);
+pub struct RuleCode(Arc<str>);
 
 impl RuleCode {
     /// Makes a rule code.
@@ -49,7 +52,7 @@ impl RuleCode {
                 max: MAX_RULE,
             });
         }
-        Ok(Self(text.to_string()))
+        Ok(Self(Arc::from(text)))
     }
 
     /// Gives the code text.
@@ -201,6 +204,36 @@ impl WhyStore {
         }
         self.next = self.next.max(order.saturating_add(1));
         Ok(self.map.insert(key, (order, why)).map(|(_, w)| w))
+    }
+
+    /// Sets the records of `rows`, each with its creation order, as [`Self::insert_at`] does
+    /// one at a time.
+    ///
+    /// Rows in strict key order go into an empty store in one bulk build, so the tree has full
+    /// nodes. One insert at a time in key order leaves each node about half full.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Invalid::TooMany`] above [`MAX_PREMISES`] premises.
+    pub(crate) fn extend_at(&mut self, rows: Vec<(FactKey, u64, Why)>) -> Result<(), Invalid> {
+        let sorted = rows.windows(2).all(|w| matches!(w, [a, b] if a.0 < b.0));
+        if !self.map.is_empty() || !sorted {
+            for (key, order, why) in rows {
+                self.insert_at(key, order, why)?;
+            }
+            return Ok(());
+        }
+        if let Some((_, _, why)) = rows.iter().find(|r| r.2.premises.len() > MAX_PREMISES) {
+            return Err(Invalid::TooMany {
+                count: why.premises.len(),
+                max: MAX_PREMISES,
+            });
+        }
+        if let Some(top) = rows.iter().map(|r| r.1).max() {
+            self.next = self.next.max(top.saturating_add(1));
+        }
+        self.map = rows.into_iter().map(|(k, o, w)| (k, (o, w))).collect();
+        Ok(())
     }
 
     /// Sets the creation order of the next new record. The order never goes below a stored order.

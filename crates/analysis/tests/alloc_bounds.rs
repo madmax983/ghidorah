@@ -147,3 +147,39 @@ fn regress_work_state_keeps_no_unit_why() {
         "the work state keeps {work} bytes for {units} code units"
     );
 }
+
+/// The why store builds its tree in one pass from rows in key order, and the records of one
+/// rule share the text of its code. One insert at a time left each node about half full, and
+/// each record kept its own copy of the code: 279 bytes for each record; now 162.
+#[test]
+fn regress_why_store_packs_its_records() {
+    use ghidorah_db::codec::{SetRows, tables_from_rows};
+    use ghidorah_db::{FactKey, RuleCode, Why};
+
+    let n = 20_000u64;
+    let rule = RuleCode::new("R_DISASM_FLOW").expect("a rule code");
+    let (tables, stats) = ALLOC.measure(|| {
+        let why = (0..n)
+            .map(|i| {
+                let record = Why {
+                    rule: rule.clone(),
+                    premises: vec![FactKey::Entry(0)],
+                };
+                (FactKey::CodeUnit(i * 4), i, record)
+            })
+            .collect();
+        let rows = SetRows {
+            why,
+            why_next: n,
+            ..SetRows::default()
+        };
+        tables_from_rows(rows).expect("the rows")
+    });
+    let records = tables.why().len();
+    assert_eq!(records, 20_000);
+    assert!(
+        stats.retained_bytes <= records * 200,
+        "the store keeps {} bytes for {records} records",
+        stats.retained_bytes
+    );
+}

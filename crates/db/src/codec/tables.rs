@@ -15,6 +15,8 @@
 //! | `why` | `{"key","order","rule","premises"}` |
 //! | `why_next` | the creation order of the next why-record. The fact dump leaves it out. |
 
+use std::collections::BTreeSet;
+
 use ghidorah_base::{Address, JumpTableId, Range, Rev};
 use ghidorah_json::{JcsError, Value, write_jcs};
 
@@ -32,7 +34,7 @@ use crate::progress::{FuncProgress, Mark, Progress};
 use crate::refs::Ref;
 use crate::strings::StrInfo;
 use crate::symbols::Symbol;
-use crate::why::{FactKey, Why};
+use crate::why::{FactKey, RuleCode, Why};
 
 /// The member names of the tables of a layer.
 const NAMES: [&str; 12] = [
@@ -276,9 +278,7 @@ pub(super) fn from_rows(rows: SetRows) -> Result<Tables, CodecError> {
     for (at, unit) in rows.units {
         out.listing.insert_unit(at, unit)?;
     }
-    for (key, order, why) in rows.why {
-        out.why.insert_at(key, order, why)?;
-    }
+    out.why.extend_at(rows.why)?;
     out.why.set_next(rows.why_next);
     Ok(out)
 }
@@ -369,17 +369,25 @@ fn records(form: Obj<'_>, out: &mut Tables) -> Result<(), CodecError> {
         }
         Ok(())
     })?;
+    let mut whys = Vec::new();
+    let mut codes: BTreeSet<RuleCode> = BTreeSet::new();
     form.each("why", |row| {
         let cells = Obj::new(row, &["key", "order", "rule", "premises"])?;
+        let rule: RuleCode = cells.get("rule")?;
+        let rule = if let Some(shared) = codes.get(&rule) {
+            shared.clone()
+        } else {
+            codes.insert(rule.clone());
+            rule
+        };
         let why = Why {
-            rule: cells.get("rule")?,
+            rule,
             premises: cells.get("premises")?,
         };
-        Ok(out
-            .why
-            .insert_at(cells.get("key")?, cells.get("order")?, why)
-            .map(drop)?)
+        whys.push((cells.get("key")?, cells.get("order")?, why));
+        Ok(())
     })?;
+    out.why.extend_at(whys)?;
     out.why.set_next(form.get("why_next")?);
     Ok(())
 }

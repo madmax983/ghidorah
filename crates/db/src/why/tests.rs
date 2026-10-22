@@ -77,3 +77,60 @@ fn records_get_increasing_creation_orders() {
     assert!(store.get(&entry).is_none());
     assert!(store.order(&entry).is_none());
 }
+
+#[test]
+fn a_bulk_build_matches_one_insert_at_a_time() {
+    let rows = |keys: &[u64]| -> Vec<(FactKey, u64, Why)> {
+        keys.iter()
+            .map(|k| {
+                (
+                    FactKey::CodeUnit(*k),
+                    k * 2,
+                    why("R_X", vec![FactKey::Entry(*k)]),
+                )
+            })
+            .collect()
+    };
+    let one_by_one = |rows: Vec<(FactKey, u64, Why)>| {
+        let mut store = WhyStore::default();
+        for (k, o, w) in rows {
+            store.insert_at(k, o, w).unwrap();
+        }
+        store
+    };
+    // Rows in key order, rows out of order, a key twice and a store that is not empty.
+    for keys in [&[1, 2, 5, 9][..], &[9, 1, 5], &[1, 5, 5, 2], &[]] {
+        let mut bulk = WhyStore::default();
+        bulk.extend_at(rows(keys)).unwrap();
+        assert_eq!(bulk, one_by_one(rows(keys)), "{keys:?}");
+    }
+    let mut store = one_by_one(rows(&[3]));
+    store.extend_at(rows(&[1, 4])).unwrap();
+    assert_eq!(store, one_by_one(rows(&[3, 1, 4])));
+    assert_eq!(store.next_order(), 9);
+}
+
+#[test]
+fn a_bulk_build_refuses_too_many_premises() {
+    let many = vec![FactKey::Entry(0); MAX_PREMISES + 1];
+    let mut store = WhyStore::default();
+    let rows = vec![
+        (FactKey::CodeUnit(1), 0, why("R_X", Vec::new())),
+        (FactKey::CodeUnit(2), 1, why("R_X", many)),
+    ];
+    assert_eq!(
+        store.extend_at(rows),
+        Err(Invalid::TooMany {
+            count: MAX_PREMISES + 1,
+            max: MAX_PREMISES
+        })
+    );
+    assert!(store.is_empty());
+}
+
+#[test]
+fn clones_of_a_rule_code_share_its_text() {
+    let code = RuleCode::new("R_DISASM_FLOW").unwrap();
+    let copy = code.clone();
+    assert!(std::ptr::eq(code.as_str(), copy.as_str()));
+}
