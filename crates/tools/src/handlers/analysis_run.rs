@@ -24,8 +24,8 @@
 //! | `complete`, from a project | none: the analysis is current, so the run does no work |
 //! | `budget_stopped` or `stale`, from a project | [`Scheduler::shadow`]: one publish at completion |
 
-use std::collections::BTreeMap;
 use std::collections::btree_map::Entry;
+use std::collections::{BTreeMap, BTreeSet};
 
 use ghidorah_analysis::{ANALYZERS, AnalyzerRow, Changed, RunState, Scheduler, Until as Band};
 use ghidorah_base::{BinaryId, ErrorCode, Fuel, Limits};
@@ -108,6 +108,8 @@ pub struct Engine {
     edit: Option<fn(&mut Binary)>,
     /// The cap of the code units of each program, or `None` for the shipped cap.
     unit_cap: Option<u64>,
+    /// The binaries whose first analysis holds its publish until a flush.
+    held: BTreeSet<BinaryId>,
 }
 
 impl Engine {
@@ -278,6 +280,7 @@ impl AnalysisEngine for Engine {
             Until::Full => Band::Full,
         };
         let (order, edit, cap) = (self.order, self.edit, self.unit_cap);
+        let held = self.held.contains(&binary.id);
         let scheduler = match self.schedulers.entry(binary.id) {
             Entry::Occupied(found) => found.into_mut(),
             Entry::Vacant(slot) => match binary.analysis.map(|a| a.state) {
@@ -305,7 +308,28 @@ impl AnalysisEngine for Engine {
         if let Some(cap) = cap {
             scheduler.set_unit_cap(cap);
         }
+        scheduler.set_hold(held);
         drive(scheduler, binary, band, fuel)
+    }
+
+    fn hold(&mut self, id: BinaryId, on: bool) {
+        if on {
+            self.held.insert(id);
+        } else {
+            self.held.remove(&id);
+        }
+        if let Some(scheduler) = self.schedulers.get_mut(&id) {
+            scheduler.set_hold(on);
+        }
+    }
+
+    fn flush(&mut self, binary: &mut OpenBinary) -> Result<(), ToolError> {
+        let Some(scheduler) = self.schedulers.get_mut(&binary.id) else {
+            return Ok(());
+        };
+        scheduler.flush(&mut binary.program).map(drop).map_err(|e| {
+            ToolError::new(ErrorCode::InternalError).detail("reason", Value::from(e.to_string()))
+        })
     }
 
     /// Gives `{ analyzers: [[name, version], ..] }` in registry order.
@@ -322,6 +346,7 @@ impl AnalysisEngine for Engine {
         fuel: &mut Fuel,
     ) -> Result<RunReport, ToolError> {
         let cap = self.unit_cap;
+        let held = self.held.contains(&binary.id);
         let scheduler = self
             .schedulers
             .entry(binary.id)
@@ -330,6 +355,7 @@ impl AnalysisEngine for Engine {
         if let Some(cap) = cap {
             scheduler.set_unit_cap(cap);
         }
+        scheduler.set_hold(held);
         drive(scheduler, binary, Band::Full, fuel)
     }
 

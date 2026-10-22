@@ -594,7 +594,7 @@ ADR-0004 and ADR-0016 fix these rules:
 - ANALYSIS facts are a pure function of their inputs. The inputs are the input bytes, the analyzer versions, the analysis config and the higher-rank facts that affect analysis. These facts are agent functions, noreturn flags, jump-table targets, flow overrides, indirect call targets, agent refs, data definitions and signatures.
 - `analysis_inputs_hash` is the SHA-256 of the canonical JSON of these inputs.
 - Each program has `analysis = { committed: AnalysisSet, shadow: Option<(Scheduler, AnalysisSet)> }`. Reads always use `committed`.
-- The first analysis after a load publishes into `committed` after each fuel slice. Its state is `partial` until it completes.
+- The first analysis after a load publishes into `committed` once at the end of each call. The end is the completion, a stop (fuel, cancel, `max_ms`) or an error. The fuel slices of one call do not publish. Its state is `partial` until it completes.
 - An analysis-affecting edit commits the agent fact first. Then the session builds `shadow` from a copy of the committed facts below the start band of the edit (table below). The edit call runs shadow slices within its `max_steps` (default 2,000,000). At completion, one `ReplaceAnalysis` commit swaps `shadow` into `committed`.
 - While a shadow exists, reads return `committed` with `partial: true` and `analysis.state: "stale"` (AC-211). `analysis_run` resumes the shadow.
 - A new analysis-affecting edit during a shadow drops it. The new shadow starts at the lower of the two start bands.

@@ -461,3 +461,29 @@ fn regress_unit_cap_default() {
     let shown = SPEC.options.iter().find(|o| o.name == "max_units");
     assert_eq!(shown.map(|o| o.value), Some(MAX_UNITS));
 }
+
+/// A hold keeps back the publish of a first analysis until a flush. The flushed set equals
+/// the set of a run that publishes each slice.
+#[test]
+fn hold_defers_the_publish_until_flush() {
+    let mut held = many_fdes(200);
+    let mut sched = Scheduler::new();
+    sched.set_hold(true);
+    let out = sched
+        .run(&mut held, Until::Full, &mut Fuel::new(500))
+        .expect("a slice");
+    assert_eq!(out.state, RunState::BudgetStopped);
+    assert!(out.commit.is_none(), "a held slice publishes nothing");
+    assert_eq!(held.rev().0, 0);
+    let commit = sched.flush(&mut held).expect("the flush");
+    assert!(commit.is_some());
+    assert_eq!(held.rev().0, 1);
+    assert!(sched.flush(&mut held).expect("a second flush").is_none());
+
+    let mut free = many_fdes(200);
+    let mut other = Scheduler::new();
+    let _ = other
+        .run(&mut free, Until::Full, &mut Fuel::new(500))
+        .expect("a slice");
+    assert_eq!(held.analysis(), free.analysis());
+}

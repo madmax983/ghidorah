@@ -308,6 +308,36 @@ fn regress_binary_load_stops_on_cancel() {
     );
 }
 
+/// A load publishes its analysis once (ADR-0016, amendment 2026-10-22): many slices give
+/// many progress reports but one revision. A cancel still leaves a readable partial set.
+#[test]
+fn regress_one_publish_per_call() {
+    let mut s = engine_session(false, Box::new(ghidorah_base::FixedClock::new(0)));
+    let (sender, reports) = mpsc::channel();
+    let args = format!(r#"{{"path":"{LARGE}"}}"#);
+    let envelope = load_with(&mut s, &args, |r| r.progress = Some(sender));
+    assert_eq!(text_at(data(&envelope), "/analysis/state"), "complete");
+    let slices = reports.try_iter().count();
+    assert!(slices > 2, "the load runs many slices: {slices}");
+    assert_eq!(envelope.get("rev"), Some(&Value::from(1_u64)), "{envelope}");
+
+    let mut s = engine_session(false, Box::new(ghidorah_base::FixedClock::new(0)));
+    let envelope = load_with(&mut s, &args, |r| {
+        r.cancel = Some(Arc::new(AtomicBool::new(true)));
+    });
+    assert_eq!(
+        text_at(data(&envelope), "/analysis/state"),
+        "budget_stopped"
+    );
+    assert_eq!(envelope.get("rev"), Some(&Value::from(1_u64)), "{envelope}");
+    let list = call(&mut s, "func_list", r#"{"limit":5}"#);
+    let items = data(&list).get("items").and_then(Value::as_array);
+    assert!(
+        items.is_some_and(|i| !i.is_empty()),
+        "the partial set reads: {list}"
+    );
+}
+
 #[test]
 fn regress_binary_load_sends_progress() {
     for (path, many) in [("crates/tools/data/demo.elf", false), (LARGE, true)] {

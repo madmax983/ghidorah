@@ -136,6 +136,9 @@ pub struct Scheduler {
     steps: u64,
     mode: Mode,
     dirty: bool,
+    /// `true` while a caller holds the publish of a first analysis: a run publishes only at
+    /// completion, and [`Scheduler::flush`] publishes the rest.
+    hold: bool,
 }
 
 impl Default for Scheduler {
@@ -258,6 +261,7 @@ impl Scheduler {
             steps: 0,
             mode: Mode::First,
             dirty: false,
+            hold: false,
         }
     }
 
@@ -466,7 +470,7 @@ impl Scheduler {
         }
         self.drain_all();
         let done = self.is_done(Until::Full);
-        let publish = self.dirty && (self.mode == Mode::First || done);
+        let publish = self.dirty && (done || (self.mode == Mode::First && !self.hold));
         let commit = if publish {
             let commit = crate::publish::publish(program, &self.work)?;
             self.dirty = false;
@@ -485,6 +489,28 @@ impl Scheduler {
             resume: !done,
             commit,
         })
+    }
+
+    /// Holds or releases the publish of a first analysis. While the hold is on, a run of a
+    /// first analysis publishes only at completion. A caller that runs many slices in one
+    /// call holds the publish and calls [`Scheduler::flush`] once at the end.
+    pub const fn set_hold(&mut self, hold: bool) {
+        self.hold = hold;
+    }
+
+    /// Publishes the work of a first analysis that a hold kept back. A shadow publishes only
+    /// at completion, so a flush of a shadow does nothing.
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`AnalysisError`] when the publish step fails. The work state stays.
+    pub fn flush(&mut self, program: &mut Program) -> Result<Option<Commit>, AnalysisError> {
+        if !(self.dirty && self.mode == Mode::First) {
+            return Ok(None);
+        }
+        let commit = crate::publish::publish(program, &self.work)?;
+        self.dirty = false;
+        Ok(Some(commit))
     }
 
     /// Gives the analysis set of the work state without a commit.
