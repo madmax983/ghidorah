@@ -11,6 +11,7 @@
 //! | `syscalls` | `Syscalls` | an `EOL` comment `sys:<name>` at the site |
 //! | `conflicts` | `JumpTables` | `W_AGENT_OVERRIDE_CONFLICT` with the analysis value |
 //! | `thunks` | `IatThunks` | the `thunk` flag and a `FUNCTION` symbol with the import name |
+//! | `slot_sites` | `JumpTables` | no row: `Disasm` gives the site a reference to the import ([`crate::slotsite`]) |
 //!
 //! A record whose owner is not in the set does not go into the set. The agent noreturn flag
 //! of the base layer also gives `W_AGENT_OVERRIDE_CONFLICT` when the flow disagrees. A call
@@ -29,6 +30,7 @@ use ghidorah_json::Value;
 use crate::analyzers::iat::ThunkRec;
 use crate::ctx::AnalysisCtx;
 use crate::fir::{self, FirError, FuncIr, Input, Opts, Unit};
+use crate::slotsite::SiteTarget;
 use crate::why::Why;
 use crate::work::Work;
 
@@ -60,6 +62,15 @@ pub(crate) struct SysRec {
     pub why: Why,
 }
 
+/// One indirect jump or call through a register that holds an import slot or 0.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct SlotSite {
+    /// The entry of the function of the site.
+    pub owner: u64,
+    /// The target.
+    pub target: SiteTarget,
+}
+
 /// One disagreement of the analysis with an agent fact.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct Conflict {
@@ -88,6 +99,8 @@ pub(crate) struct IrFacts {
     pub conflicts: BTreeMap<u64, BTreeSet<Conflict>>,
     /// The IAT thunks by function entry.
     pub thunks: BTreeMap<u64, ThunkRec>,
+    /// The indirect sites through a register that holds an import slot or 0, by site.
+    pub slot_sites: BTreeMap<u64, SlotSite>,
 }
 
 impl AnalysisCtx<'_> {

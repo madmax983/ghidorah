@@ -7,7 +7,8 @@
 //! | `stack:<k>` | `local_p<k>` in hex |
 //! | a register value | `v<N>`, numbered in view order |
 //!
-//! A name fact of the variable wins over its default name.
+//! A name fact of the variable wins over its default name. Each variable that the text names,
+//! other than a parameter, gets a declaration line after the `{` of the function.
 
 use std::collections::BTreeSet;
 
@@ -181,6 +182,29 @@ impl Printer<'_> {
             texts.join(", ")
         };
         format!("{ret} {name}({list})")
+    }
+
+    /// Gives the declaration lines of the variables that the text names, other than the
+    /// parameters, in view order. A lattice type gives its C declarator, else the type of
+    /// the width. An example is `uint64_t v9;`.
+    pub(super) fn decls(&self) -> Vec<String> {
+        self.view()
+            .vars
+            .iter()
+            .enumerate()
+            .filter_map(|(i, v)| {
+                let idx = VarIdx(u32::try_from(i).ok()?);
+                if !self.used.contains(&idx) || matches!(v.id.storage, Storage::Param(_)) {
+                    return None;
+                }
+                let name = self.vnames.get(i)?.0.clone();
+                let lattice = self.types.get(i).copied().flatten();
+                let decl = lattice
+                    .and_then(|t| self.stores.decl(t, &name))
+                    .unwrap_or_else(|| format!("{} {name}", width_type(v.w)));
+                Some(format!("{decl};"))
+            })
+            .collect()
     }
 
     /// Gives the rows of the variables that the text names, in view order.

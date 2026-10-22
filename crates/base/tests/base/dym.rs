@@ -1,6 +1,6 @@
 //! Tests of `did_you_mean` (design Section 10.5, AC-047).
 
-use ghidorah_base::dym::{MAX_QUERY_CHARS, MAX_SUGGESTIONS, distance, max_distance};
+use ghidorah_base::dym::{MAX_QUERY_CHARS, MAX_SUGGESTIONS, distance, max_distance, word_matches};
 use ghidorah_base::{Fuel, Suggestion, did_you_mean};
 
 fn names(found: &[Suggestion]) -> Vec<&str> {
@@ -81,4 +81,48 @@ fn dym_distance_table() {
     }
     let limits: Vec<usize> = [0, 1, 2, 3, 5, 6, 9, 12, 100].map(max_distance).to_vec();
     assert_eq!(limits, [1, 1, 1, 1, 1, 2, 3, 4, 4]);
+}
+
+#[test]
+fn regress_dym_word_matches() {
+    let tools = [
+        "binary_load",
+        "history_list",
+        "history_undo",
+        "func_get",
+        "func_list",
+        "xref_list",
+    ];
+    let mut fuel = Fuel::unlimited();
+    assert_eq!(word_matches("undo", tools, &mut fuel), ["history_undo"]);
+    let mut fuel = Fuel::unlimited();
+    assert_eq!(
+        word_matches("LIST", tools, &mut fuel),
+        ["history_list", "func_list", "xref_list"],
+        "the case is ignored and the input order stays"
+    );
+    let mut fuel = Fuel::unlimited();
+    assert_eq!(
+        word_matches("undo-history", tools, &mut fuel),
+        ["history_list", "history_undo"],
+        "a hyphen or a space also splits the words"
+    );
+    let mut fuel = Fuel::unlimited();
+    assert!(
+        word_matches("und", tools, &mut fuel).is_empty(),
+        "a part of a word is no match"
+    );
+    let mut fuel = Fuel::unlimited();
+    assert!(word_matches("", tools, &mut fuel).is_empty());
+    let many: Vec<String> = (0..20).map(|i| format!("x_{i:02}_list")).collect();
+    let mut fuel = Fuel::unlimited();
+    assert_eq!(
+        word_matches("list", many.iter().map(String::as_str), &mut fuel).len(),
+        MAX_SUGGESTIONS
+    );
+    let mut fuel = Fuel::new(0);
+    assert!(word_matches("undo", tools, &mut fuel).is_empty());
+    let long = "q".repeat(MAX_QUERY_CHARS + 1);
+    let mut fuel = Fuel::unlimited();
+    assert!(word_matches(&long, [long.as_str()], &mut fuel).is_empty());
 }

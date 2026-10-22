@@ -2,7 +2,8 @@
 //!
 //! The model reads the listing lines of readelf, not the bytes. It knows the CFA lines of
 //! the fixtures: `def_cfa`, `def_cfa_offset`, `def_cfa_register`, `advance_loc*`,
-//! `remember_state` and `restore_state`. A `def_cfa_expression` line clears the rows.
+//! `remember_state` and `restore_state`. The PLT expression of GNU ld gives one row at each
+//! change of its rule. Another `def_cfa_expression` line clears the rows.
 
 use std::collections::BTreeMap;
 
@@ -24,7 +25,7 @@ pub struct GoldenFde {
     pub pc_end: u64,
     /// The rows of the model.
     pub rows: Vec<Row>,
-    /// A `def_cfa_expression` inside the range stops the rows.
+    /// A `def_cfa_expression` other than the PLT rule inside the range stops the rows.
     pub stopped: bool,
 }
 
@@ -67,6 +68,32 @@ struct Walk {
     end: u64,
     rows: Vec<Row>,
     dead: bool,
+    plt: bool,
+}
+
+/// Parses the PLT expression of GNU ld into the base offset and the entry offset `k` of the
+/// second rule: `breg7 (rsp): <base>; breg16 (rip): 0; lit15; and; lit<k>; ge; lit3; shl; plus`.
+fn plt_rule(line: &str) -> Option<(i64, u64)> {
+    let inner = line.split_once('(')?.1.strip_suffix(')')?;
+    let ops: Vec<&str> = inner.split("; ").collect();
+    let [
+        breg7,
+        breg16,
+        "DW_OP_lit15",
+        "DW_OP_and",
+        lit,
+        "DW_OP_ge",
+        "DW_OP_lit3",
+        "DW_OP_shl",
+        "DW_OP_plus",
+    ] = ops.as_slice()
+    else {
+        return None;
+    };
+    let base = breg7.strip_prefix("DW_OP_breg7 (rsp): ")?.parse().ok()?;
+    (*breg16 == "DW_OP_breg16 (rip): 0").then_some(())?;
+    let k = lit.strip_prefix("DW_OP_lit")?.parse().ok()?;
+    Some((base, k))
 }
 
 impl Walk {
@@ -96,7 +123,16 @@ impl Walk {
             self.state = self.stack.pop().expect("a remembered state");
         } else if line.starts_with("DW_CFA_def_cfa_expression") {
             self.dead = true;
-            self.rows.clear();
+            match plt_rule(line) {
+                Some((base, k)) => {
+                    for pc in self.loc..self.end {
+                        let off = if pc % 16 >= k { base + 8 } else { base };
+                        emit(&mut self.rows, pc, Some((7, off)), self.end);
+                    }
+                    self.plt = true;
+                }
+                None => self.rows.clear(),
+            }
             return;
         } else {
             return;
@@ -140,6 +176,7 @@ pub fn parse(text: &str) -> Vec<GoldenFde> {
             end: pc_end,
             rows: Vec::new(),
             dead: false,
+            plt: false,
         };
         emit(&mut walk.rows, pc_begin, state, pc_end);
         while let Some(next) = lines.peek() {
@@ -158,7 +195,7 @@ pub fn parse(text: &str) -> Vec<GoldenFde> {
                 pc_begin,
                 pc_end,
                 rows: walk.rows,
-                stopped: walk.dead,
+                stopped: walk.dead && !walk.plt,
             });
         }
     }

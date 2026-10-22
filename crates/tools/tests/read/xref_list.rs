@@ -12,7 +12,7 @@ use ghidorah_testkit::elf::{
     ElfBuilder, FixupKind, ImportKind, Loc, Reloc, RelocTable, Section, Symbol,
 };
 use ghidorah_tools::Session;
-use ghidorah_x86::Flow;
+use ghidorah_x86::{Flow, Insn, Operand};
 
 use crate::support::{
     addr_of, all_items, call, call_value, data, fixture, items, json, load_bytes, pe_fixtures,
@@ -216,29 +216,56 @@ fn cfg_calls(program: &Program, func: FuncId) -> BTreeSet<String> {
     let Some(graph) = cfg::build(program, func) else {
         return out;
     };
-    for block in &graph.blocks {
-        for (at, _) in &block.insns {
-            let Some(insn) = decode_at(program, *at) else {
-                continue;
-            };
-            match (insn.flow(), insn.target(), slot_of(&insn)) {
-                (Flow::Call, Some(t), _) => {
-                    out.insert(target_id(program, Address::ram(t)));
-                }
-                (Flow::ICall, None, Some(slot)) => {
-                    let row = program
-                        .imports()
-                        .values()
-                        .find(|r| r.slot == Some(Address::ram(slot)));
-                    if let Some(row) = row {
-                        out.insert(row.id.to_string());
-                    }
-                }
-                _ => {}
+    let insns: Vec<u64> = graph
+        .blocks
+        .iter()
+        .flat_map(|b| b.insns.iter().map(|(at, _)| *at))
+        .collect();
+    for (i, at) in insns.iter().enumerate() {
+        let Some(insn) = decode_at(program, *at) else {
+            continue;
+        };
+        let slot = match (insn.flow(), insn.target(), slot_of(&insn)) {
+            (Flow::Call, Some(t), _) => {
+                out.insert(target_id(program, Address::ram(t)));
+                None
             }
+            (Flow::ICall, None, Some(slot)) => Some(slot),
+            (Flow::ICall, None, None) => reg_slot(program, &insn, &insns[..i]),
+            _ => None,
+        };
+        let row = slot.and_then(|slot| {
+            program
+                .imports()
+                .values()
+                .find(|r| r.slot == Some(Address::ram(slot)))
+        });
+        if let Some(row) = row {
+            out.insert(row.id.to_string());
         }
     }
     out
+}
+
+/// Gives the slot that the register of the indirect call `call` holds. The last write of the
+/// register in the 4 instructions before the call must be a `mov reg, [slot]` of 8 bytes.
+/// `before` holds the earlier instructions of the function in address order. The C runtime
+/// loads a weak import slot this way.
+fn reg_slot(program: &Program, call: &Insn, before: &[u64]) -> Option<u64> {
+    let Some(Operand::Reg { reg, .. }) = call.op(0) else {
+        return None;
+    };
+    for at in before.iter().rev().take(4) {
+        let insn = decode_at(program, *at)?;
+        if !insn.regs_written().contains(reg) {
+            continue;
+        }
+        let mem = insn
+            .mem()
+            .filter(|m| m.width_bytes == 8 && m.index.is_none())?;
+        return mem.abs_target;
+    }
+    None
 }
 
 /// The counts of a cross-view run: fixtures, functions and functions with calls.

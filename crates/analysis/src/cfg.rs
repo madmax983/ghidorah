@@ -12,7 +12,8 @@
 //! | `jmp` | `branch` in the body, else `tailcall` |
 //! | `jcc` | `cond_true` to the target, `cond_false` to the next instruction |
 //! | `call` | `call_return`, except after a noreturn callee (AC-080a) |
-//! | indirect `jmp` | `switch_case(i)` for a resolved jump table, `tailcall` through an import slot, else `indirect_unresolved` |
+//! | indirect `jmp` | `switch_case(i)` for a resolved jump table, `tailcall` through an import slot or a jump reference to an import, else `indirect_unresolved` |
+//! | indirect `jmp` to the constant 0 ([`crate::ctx::UNIT_NULL_TARGET`]) | none |
 //! | `ret`, trap | none |
 //!
 //! A `fallthrough` or `cond_false` edge out of the body is a `tailcall` edge.
@@ -25,11 +26,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use ghidorah_base::{Address, FuncId, JumpTableId};
-use ghidorah_db::{CodeUnit, FlowKind, Program};
+use ghidorah_db::{CodeUnit, FlowKind, Program, RefType};
 use ghidorah_kernel::RangeSet;
 
 use crate::code::{decode_at, slot_of};
-use crate::ctx::UNIT_NORETURN_CALL;
+use crate::ctx::{UNIT_NORETURN_CALL, UNIT_NULL_TARGET};
 use crate::work::{SlotImport, import_slots};
 
 /// The kind of a CFG edge.
@@ -224,7 +225,18 @@ impl Edges<'_> {
         }
         let slot = decode_at(program, at).as_ref().and_then(slot_of);
         let slots = self.slots.get_or_insert_with(|| import_slots(program));
-        let ext = slot.and_then(|s| slots.get(&s)).map(|(_, ext)| *ext);
+        // A register that holds an import slot has the jump reference of `Disasm` instead.
+        let ext = slot
+            .and_then(|s| slots.get(&s))
+            .map(|(_, ext)| *ext)
+            .or_else(|| {
+                program
+                    .refs_from(Address::ram(at))
+                    .iter()
+                    .map(|r| r.value.key)
+                    .find(|k| !k.to.is_ram() && k.kind == RefType::UnconditionalJump)
+                    .map(|k| k.to)
+            });
         self.out.push(Edge {
             from,
             to: ext,
@@ -265,6 +277,7 @@ impl Edges<'_> {
                     self.to(from, next, EdgeKind::CallReturn);
                 }
             }
+            FlowKind::IJmp if flags & UNIT_NULL_TARGET != 0 => {}
             FlowKind::IJmp => self.indirect(from, at),
             FlowKind::Ret | FlowKind::Trap => {}
         }

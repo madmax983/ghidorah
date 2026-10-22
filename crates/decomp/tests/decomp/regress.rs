@@ -341,7 +341,9 @@ const PARAM_FIXTURES: [&str; 14] = [
 /// argument registers after the named parameters. They are register values, not parameters.
 fn save_area_only(text: &str, name: &str) -> bool {
     let store = format!(" = {name};");
+    let decl = format!(" {name};");
     text.lines()
+        .filter(|l| !l.ends_with(&decl) || l.contains(" = "))
         .filter(|l| var_tokens(l).iter().any(|(t, _)| t == name))
         .all(|l| l.trim_start().starts_with("*(") && l.ends_with(&store))
 }

@@ -7,9 +7,9 @@ use crate::support::{
     call, claim, data, open, open_sites, program, text_at, texts, verdict_of, verdicts,
 };
 
-/// The fixtures of the soundness check.
-const FIXTURES: [&str; 4] = [
-    "demo",
+/// The fixtures of the soundness check. The demo binary has no unresolved site: the analysis
+/// resolves the weak import slots of its C runtime.
+const FIXTURES: [&str; 3] = [
     "fixtures/bin/func_ptrs.gcc-O0",
     "fixtures/bin/func_ptrs.gcc-O2",
     "fixtures/bin/func_ptrs.clang-O2",
@@ -82,10 +82,7 @@ fn ac_159b_soundness_unresolved_indirect() {
 }
 
 /// The indirect sites of `func_ptrs.gcc-O0` and the targets that resolve each one.
-const RESOLVE: [(&str, &str); 5] = [
-    ("0x1014", r#"["imp:__gmon_start__"]"#),
-    ("0x110f", r#"["imp:_ITM_deregisterTMCloneTable"]"#),
-    ("0x1150", r#"["imp:_ITM_registerTMCloneTable"]"#),
+const RESOLVE: [(&str, &str); 2] = [
     ("0x1292", r#"["op_add","op_sub","op_mul","op_div"]"#),
     ("0x1302", r#"["log_event"]"#),
 ];

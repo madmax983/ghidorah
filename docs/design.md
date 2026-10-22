@@ -752,6 +752,7 @@ Binary {
 - The loader finds `.eh_frame` through its section or, without section headers, through `PT_GNU_EH_FRAME` and the `eh_frame_ptr` field of `.eh_frame_hdr`. The MVP does not read the sorted table of `.eh_frame_hdr`.
 - Output: FDE PC ranges (function seeds) and a CFA summary per FDE (CFA register and offset at each row start). Stack tracking uses the CFA rows as a cross-check (AC-091).
 - The CFA row interpreter supports `DW_CFA_advance_loc*`, `def_cfa*`, `offset*`, `restore*`, `remember_state`, `restore_state` and `nop`. Other opcodes stop the FDE with a diagnostic.
+- The PLT FDE of GNU ld ends in a `def_cfa_expression`: `rsp + 8`, plus 8 from offset `k` of each 16-byte entry. The interpreter knows this one expression. It gives one row at each change of the rule, and each row counts against the instruction cap. Other expressions stop the FDE.
 
 ### 4.5 Import slots and stub naming
 
@@ -1149,6 +1150,7 @@ Seeds in confidence order. Each start keeps `start_reason`, a `Why` and a confid
 ### 7.8 Jump tables
 
 - Method A (slice): a backward slice from `JumpInd` over at most 50 L0 ops or 4 blocks, stopped at calls. It matches `base + idx * scale` with an optional add and the guard `cmp idx, N; ja default` (one add or sub normalization allowed). The interpreter then runs `idx = 0..=N` with image-backed loads. Method A accepts only executable targets inside the function's region. Cap: 1,024 entries. Forms: 4-byte PIC relative (`movsxd; add`) and 8-byte absolute (`jmp [T + idx*8]`).
+- Register slot sites (`analysis::slotsite`): before method A, the block-local walk (Section 6.6) evaluates the target of each indirect jump and call. In the walk, the bytes of an import slot read as the slot address. A target that is the slot address with one 8-byte load of that slot goes through the slot, as in the C runtime: `mov rax, [rip+slot]; test rax, rax; je ..; jmp rax`. `Disasm` then treats the site like `jmp [rip+slot]`: a reference to the import, and no table. A target of constant 0 (a weak symbol that the static linker sets to 0) gets the site flag `null_target` and no CFG edge. An agent fact at the site wins.
 - When method A fails, the record stays unresolved with `W_JUMPTABLE_UNRESOLVED`. The warning names the remedy `func_edit { action: "set_jumptable" }`. `func_get include jumptables` and `search { ids: ["jt:.."] }` return the record.
 - Method B (data shape) and `W_JUMPTABLE_DISAGREE` are stretch S9.
 - Gate: at least 95% of tables resolved against `.rela.rodata` truth with zero wrong targets (AC-081).
@@ -1192,6 +1194,8 @@ Floating return and return value (`analysis::fir::ret`):
 - A direct call that is the last event of `xmm0` gives the floating return of its callee. The callee value comes from its facts and its L0 body only, so the rule looks one call deep. An indirect call is no evidence.
 - With a floating return, each L1 `Ret` reads `xmm0` in place of `rax` (Section 7.12).
 - The return value of a function (`RetValue`) is no value, an integer value or a floating value. A `void` return type gives no value. With no signature, a function with no floating return gives no value when a `ret` returns the entry value of `rax`. A C function returns a value on each path or on none, so one such `ret` is enough.
+- Caller evidence: the value of a function can pass on from calls. Then the last event of `rax` before each `ret` is a call, or the function has no `ret`. A floating return of a callee gives a floating value. Else the callers decide.
+- The callers ignore the value when three conditions are true. Each reference to the function is a direct call. No export names it. After each call site, the caller writes `rax` and `xmm0` before any read, branch or return. A call writes both, and the scan reads at most 8 instructions.
 
 ### 7.11 Other analyzers
 
@@ -1281,7 +1285,7 @@ All passes are pure, named and switchable (`passes: { fold, sailr, canary, tailc
 1. Expression view: `Expr { Var, Const, Load, Un, Bin, Ite, Call, Str }` and `Stmt { Assign, Store, Call, If, Loop, Switch, Return, Goto, Label, Break, Continue }` with an `OpId` on each node. The decompiler builds the view again on demand. Passes never edit L1.
 2. Safe folding (angr rule): a def folds into its use only when four conditions are true. It has exactly 1 def and 1 use. The use is not a phi. No store, call or `Intrinsic` with a memory effect lies between def and use. The def does not leave a loop body. Other values become named variables (Ghidra `max_implied_ref = 2` for explicit versus implied).
 3. Out-of-SSA: SSA values merge into one variable when their live ranges do not intersect (interference coloring). Variable identity is storage-based (`VarId`), so agent renames and retypes survive (AC-105a).
-4. SAILR-lite passes: stack-canary removal (the `fs:0x28` load and the `__stack_chk_fail` branch), per-call-site noreturn, and tail calls printed as `return f(..);`. A tail call of a callee with no return value prints `f(..);`, then `return;`. A tail call of a callee that does not return prints `f(..);` only. Return duplication, loop-inversion cleanup and guard-clause flattening are stretch S31.
+4. SAILR-lite passes: stack-canary removal (the `fs:0x28` load and the `__stack_chk_fail` branch), per-call-site noreturn, and tail calls printed as `return f(..);`. A tail call of a callee with no return value, or in a function with no return value (Section 7.10), prints `f(..);`, then `return;`. A tail call of a callee that does not return prints `f(..);` only. Return duplication, loop-inversion cleanup and guard-clause flattening are stretch S31.
 5. Type lattice (Section 8.4).
 6. Structuring (Section 8.1).
 7. Self-check (always on): the CFG walker and an AST interpreter run with 8 branch oracles seeded from the function body hash. Their block traces must be equal. A mismatch switches the output to FLAT and adds `W_STRUCTURE_SELFCHECK`. The result carries `validation: { structure: ok | repaired }`.
@@ -1307,6 +1311,7 @@ decomp {
 - Comments: the printer puts PLATE comments before the function, PRE comments before the first line of their address, POST comments after the last line of their address and EOL comments at the end of the line. Each comment line has a `line_map` row with `comment` set (AC-237).
 - Printer: precedence climbing with Ghidra's numbers. Conditions negate by a flip of the compare operator. `for` only when init, condition and step on one variable are adjacent. A cast only where widths or lattice types differ. String literals inline. Call names come from symbols, PLT names, IAT names and `sys:` IDs. Labels use addresses (`L_401234`).
 - Default names: `param_N`, `local_<hex>` (stack offset) and `v<N>` for register temporaries. Names from agent facts win.
+- Declarations: each variable that the text names, other than a parameter, gets one line after the `{` of the function, in view order. An example is `uint64_t v9;`. The lattice type gives the declarator, else the width type. A declaration line has no ops, and the metrics do not count it as a statement.
 - Call arguments: a known count (signature, prototype, recovery) gives the registers, then the stack arguments. Without a count, the arguments are the registers that the caller sets: a new value, or a write in the block of the call. The register of an indirect target is not an argument. A variadic call with all argument registers set also shows its stack arguments.
 - Staging register: a register that an op reads after its last `Put` in the block of the call is not an argument. An example is `rdx` in `mov rdx,[rbp-0x18]; mov rsi,rdx` of `-O0` code.
 - A `SysV` call that is not variadic takes its arguments from the slots of the callee (Section 7.10). A signature gives the register of the class of each parameter. The recovery gives the integer registers, then the floating registers, then the stack arguments. So the text keeps the slot order of the head of the callee.
@@ -1670,7 +1675,7 @@ Repair classes: **R** (repair): `next[0]` is the complete corrected call, so a c
 | 1 | `INVALID_ARGUMENT` | N | no | Value has the wrong type or range. | `field_path`, `details.expected`. For `details.reason: "load_spec_differs"`: `details.stored` and `next[0]` `binary_load { binary_id }` (Section 10.4). |
 | 2 | `UNKNOWN_ARGUMENT` | R | no | Key is not in the schema. | Candidates: closest fields. `next[0]`: the key renamed or removed. When that call fails its argument check: `tool_search { name, level: "full" }`. |
 | 3 | `MISSING_ARGUMENT` | H | no | A required key is absent. | `details: { action?, example }`. `next[0]`: `tool_search { name, level: "full" }`. |
-| 4 | `UNKNOWN_TOOL` | H | no | Tool name is unknown (batch step). | Candidates. `next[0]`: `tool_search { query }`. |
+| 4 | `UNKNOWN_TOOL` | H | no | Tool name is unknown (batch step). | Candidates: did-you-mean, else the tools with a full name word of the query (`undo` gives `history_undo`). `next[0]`: `tool_search { query }`. |
 | 5 | `TOOL_NOT_IN_PROFILE` | H | no | Tool is outside the active profile, or a batch step is destructive. | `details.reason`: `not_in_profile` or `destructive_in_batch`. For `not_in_profile`: candidates (the active tools with close names) and `next[0]` `tool_search { query: <tool> }` when `tool_search` is active. For a destructive step: `next[0]` is the direct call. |
 | 6 | `ADDRESS_INVALID` | R* | no | Address text does not parse, or a JSON integer is 2^53 or more. | `next[0]` for a large integer (hex string) or hex text with letters and no `0x` (prefix added). |
 | 7 | `ADDRESS_UNMAPPED` | C | no | Address is not in a mapped region. | Candidates: nearest mapped VAs. |

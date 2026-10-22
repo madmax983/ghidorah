@@ -11,7 +11,7 @@
   "partial": false,
   "data": {
     "state": "complete",
-    "steps_used": 1104,
+    "steps_used": 1202,
     "resume": false,
     "analyzers": [
       {
@@ -54,7 +54,7 @@
         "name": "Disasm",
         "priority": 300,
         "pending": 0,
-        "runs": 21
+        "runs": 22
       },
       {
         "name": "NoReturnKnown",
@@ -66,25 +66,25 @@
         "name": "NoReturnDiscovered",
         "priority": 302,
         "pending": 0,
-        "runs": 4
+        "runs": 5
       },
       {
         "name": "CallTargets",
         "priority": 400,
         "pending": 0,
-        "runs": 3
+        "runs": 4
       },
       {
         "name": "IatThunks",
         "priority": 405,
         "pending": 0,
-        "runs": 3
+        "runs": 4
       },
       {
         "name": "JumpTables",
         "priority": 410,
         "pending": 0,
-        "runs": 2
+        "runs": 3
       },
       {
         "name": "TailCallsAndParts",
@@ -155,9 +155,9 @@
     ],
     "changed": {
       "functions": 12,
-      "refs": 54,
+      "refs": 57,
       "strings": 4,
-      "jumptables": 2
+      "jumptables": 0
     }
   },
   "noop": false

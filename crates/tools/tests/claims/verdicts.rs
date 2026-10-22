@@ -235,11 +235,11 @@ fn stale_analysis_weakens_refuted() {
 
 #[test]
 fn unknown_verdict_hints_at_the_gap() {
-    let (mut s, _) = open("demo");
+    let (mut s, _) = open("fixtures/bin/func_ptrs.gcc-O0");
     let envelope = call(
         &mut s,
         "fact_check",
-        r#"{"claims":[{"rel":"calls","args":["fn:0x1000","main"]}]}"#,
+        r#"{"claims":[{"rel":"calls","args":["fire","log_event"]}]}"#,
     );
     assert_eq!(text_at(&envelope, "/data/verdicts/0/verdict"), "unknown");
     let next = envelope
@@ -250,7 +250,7 @@ fn unknown_verdict_hints_at_the_gap() {
         .iter()
         .find(|n| text_at(n, "/tool") == "addr_info")
         .expect("an addr_info hint");
-    assert_eq!(text_at(hint, "/args/target"), "0x1014", "{envelope}");
+    assert_eq!(text_at(hint, "/args/target"), "0x1302", "{envelope}");
 }
 
 #[test]
@@ -258,9 +258,9 @@ fn claim_inputs_take_each_form() {
     let (mut s, _) = open("demo");
     let cases: [(&str, &str, &str); 14] = [
         ("calls", r#"["main",4224]"#, "refuted"),
-        ("const_arg", r#"["imp:puts",0,-1]"#, "unknown"),
-        ("const_arg", r#"["imp:puts",0,"-1"]"#, "unknown"),
-        ("const_arg", r#"["imp:puts",0,"check_password"]"#, "unknown"),
+        ("const_arg", r#"["imp:puts",0,-1]"#, "refuted"),
+        ("const_arg", r#"["imp:puts",0,"-1"]"#, "refuted"),
+        ("const_arg", r#"["imp:puts",0,"check_password"]"#, "refuted"),
         ("reaches", r#"["main","sys:write"]"#, "INVALID_ARGUMENT"),
         (
             "xref",

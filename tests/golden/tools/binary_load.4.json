@@ -20,13 +20,8 @@
       "steps_used": 0
     },
     "diagnostics": {
-      "total": 1,
-      "by_code": [
-        {
-          "code": "E_CFA_OPCODE",
-          "count": 1
-        }
-      ]
+      "total": 0,
+      "by_code": []
     }
   },
   "noop": true,

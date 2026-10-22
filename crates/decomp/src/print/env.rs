@@ -6,7 +6,7 @@
 //! | `comments` | the PLATE, PRE, POST and EOL comments at the instructions of the body |
 //! | `signature` | the signature fact of the function, then the Tier-0 prototype of its name |
 //! | `string_bytes` | the bytes of the string fact |
-//! | `call_targets` | the targets of the call references from the site |
+//! | `call_targets` | the targets of the call references from the site; an import gives its stub, else its slot |
 //! | `syscall_name` | the x86-64 syscall table |
 //! | `ret_value` | the return value of a callee: its Tier-0 prototype, else the recovery ([`ret_value_in`]) |
 //!
@@ -197,12 +197,21 @@ impl PrintEnv for ProgramEnv<'_> {
     }
 
     fn call_targets(&self, site: u64) -> Vec<u64> {
+        let imports = self.0.imports();
+        // An EXTERNAL target is an import: its stub, else its slot.
+        let ram = |to: Address| {
+            if to.is_ram() {
+                return Some(to.off);
+            }
+            let row = imports.values().find(|r| r.ext == to)?;
+            row.stub.or(row.slot).filter(Address::is_ram).map(|a| a.off)
+        };
         let mut out: Vec<u64> = self
             .0
             .refs_from(Address::ram(site))
             .iter()
             .filter(|r| r.value.key.kind.is_call())
-            .map(|r| r.value.key.to.off)
+            .filter_map(|r| ram(r.value.key.to))
             .collect();
         out.sort_unstable();
         out.dedup();

@@ -283,31 +283,16 @@ fn ac_205_call_targets_xref() {
     let xrefs = r#"{"targets":["fn:0x11c0"]}"#;
     let before = call(&mut s, "xref_list", xrefs);
     assert_eq!(computed_calls(&before), 0, "{before}");
+    // The analysis resolves the `call rax` of `_init` through the slot of `__gmon_start__`.
     assert_eq!(
         data(&before).pointer("/basis/complete"),
-        Some(&Value::Bool(false)),
-        "the indirect call at 0x1014 is open: {before}"
+        Some(&Value::Bool(true)),
+        "no indirect site is open: {before}"
     );
-    // The `jmp rax` tail jumps of the tm_clones helpers are gaps too. Give them targets first.
-    let open = data(&before)
-        .pointer("/basis/unresolved")
-        .and_then(Value::as_array)
-        .expect("basis.unresolved")
-        .to_vec();
-    assert!(open.contains(&Value::from("0x1014")), "{before}");
-    for site in open
-        .iter()
-        .filter_map(Value::as_str)
-        .filter(|s| *s != "0x1014")
-    {
-        let set =
-            format!(r#"{{"action":"set_call_targets","at":"{site}","targets":["fn:0x11c0"]}}"#);
-        data(&call(&mut s, "func_edit", &set));
-    }
     let set = r#"{"action":"set_call_targets","at":"0x1014","targets":["fn:0x11c0"]}"#;
     data(&call(&mut s, "func_edit", set));
     let after = call(&mut s, "xref_list", xrefs);
-    assert_eq!(computed_calls(&after), 1, "{after}");
+    assert_eq!(computed_calls(&after), 1, "the agent targets win: {after}");
     assert_eq!(
         data(&after).pointer("/basis/complete"),
         Some(&Value::Bool(true)),

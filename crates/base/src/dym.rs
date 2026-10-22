@@ -4,6 +4,9 @@
 //! over characters. An adjacent transposition costs 1. The comparison ignores ASCII
 //! letter case. The result holds at most [`MAX_SUGGESTIONS`] names, sorted by distance,
 //! then by name.
+//!
+//! [`word_matches`] is the fallback when no name is near. It gives the names that share a
+//! full word with the query, for example `history_undo` for `undo`.
 
 use std::collections::BTreeSet;
 
@@ -113,4 +116,44 @@ where
         }
     }
     best.into_iter().collect()
+}
+
+/// Gives the words of `text` in lower case. An underscore, a hyphen or white space splits
+/// the words.
+fn words(text: &str) -> impl Iterator<Item = String> + '_ {
+    text.split(|c: char| c == '_' || c == '-' || c.is_whitespace())
+        .filter(|w| !w.is_empty())
+        .map(str::to_ascii_lowercase)
+}
+
+/// Gives the names that share a full word with `query`, in the order of `names`.
+///
+/// The words of a name or of the query are the parts between underscores, hyphens and white
+/// space. The comparison ignores ASCII letter case. The result holds at most
+/// [`MAX_SUGGESTIONS`] names. Duplicate names count once. Each name takes fuel by its length. When the
+/// fuel runs out, the scan stops and the function gives the names so far.
+pub fn word_matches<'a, I>(query: &str, names: I, fuel: &mut Fuel) -> Vec<&'a str>
+where
+    I: IntoIterator<Item = &'a str>,
+{
+    if query.chars().count() > MAX_QUERY_CHARS {
+        return Vec::new();
+    }
+    let wanted: BTreeSet<String> = words(query).collect();
+    let mut out: Vec<&'a str> = Vec::new();
+    if wanted.is_empty() {
+        return out;
+    }
+    for name in names {
+        let cost = u64::try_from(name.len())
+            .unwrap_or(u64::MAX)
+            .saturating_add(1);
+        if out.len() == MAX_SUGGESTIONS || fuel.take(cost).is_err() {
+            break;
+        }
+        if !out.contains(&name) && words(name).any(|w| wanted.contains(&w)) {
+            out.push(name);
+        }
+    }
+    out
 }

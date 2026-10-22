@@ -164,6 +164,43 @@ pub fn analyzed() -> &'static Analyzed {
     })
 }
 
+/// Gives the binary ID and the analysis of the fixture file `path`. Each test binary loads it
+/// once.
+pub fn analyzed_file(path: &'static str) -> &'static (BinaryId, Analyzed) {
+    cached(path, || {
+        let mut session = session();
+        let args = Value::object([("path", Value::from(path))]);
+        let envelope = call_value(&mut session, "binary_load", args);
+        let id = BinaryId::parse(&text_at(&envelope, "/data/binary_id"))
+            .unwrap_or_else(|_| panic!("{path} loads: {envelope}"));
+        let binary = session.binary(id).expect("the fixture is open");
+        let found = Analyzed {
+            program: binary.program.clone(),
+            file_name: binary.file_name.clone(),
+            analysis: binary.analysis,
+        };
+        (id, found)
+    })
+}
+
+/// Makes a session in the profile `profile` with the analyzed fixture file `path` open.
+pub fn fixture_in(profile: Profile, path: &'static str) -> Session {
+    let (id, found) = analyzed_file(path);
+    let mut config = config();
+    config.profile = ProfileSet::new(profile, None);
+    let mut session = session_with(config);
+    let label = session.new_label();
+    session.open(OpenBinary {
+        id: *id,
+        program: found.program.clone(),
+        file_name: found.file_name.clone(),
+        read_only: false,
+        label,
+        analysis: found.analysis,
+    });
+    session
+}
+
 /// Makes a session of `config` with the analyzed demo binary open.
 pub fn demo_with(config: SessionConfig) -> Session {
     let found = analyzed();

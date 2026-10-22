@@ -3,11 +3,13 @@
 //! The demo binary is `crackme.gcc-O2`. `hidden_gate` at `0x11d0` is code that no function
 //! owns. `register_tm_clones` at `0x1140` has an unresolved indirect jump at `0x1170`.
 
-use ghidorah_base::{Address, FuncId, JumpTableId};
+use ghidorah_base::{Address, BinaryId, FuncId, JumpTableId};
 use ghidorah_db::{FlowOverride, Source};
 use ghidorah_json::Value;
 
-use crate::support::{call, caveats, code, data, demo, program, text_at, warnings};
+use crate::support::{
+    call, caveats, code, config, data, demo, program, session_with, text_at, warnings,
+};
 
 #[test]
 fn create_makes_an_agent_function() {
@@ -152,32 +154,39 @@ fn set_noreturn_needs_a_function() {
     assert!(!fact.value);
 }
 
+/// The `jmp [rdx + rax*8]` of `run_op` in `func_ptrs.gcc-O2` goes through a table of
+/// function pointers in writable data, so method A leaves it unresolved.
 #[test]
 fn set_jumptable_resolves_the_caveat() {
-    let mut s = demo();
-    let before = caveats(&mut s, "fn:0x1140");
-    assert!(
-        before
-            .iter()
-            .any(|c| text_at(c, "/code") == "W_JUMPTABLE_UNRESOLVED"),
-        "{before:?}"
+    let mut s = session_with(config());
+    let load = call(
+        &mut s,
+        "binary_load",
+        r#"{"path":"fixtures/bin/func_ptrs.gcc-O2"}"#,
     );
-    let args = r#"{"action":"set_jumptable","at":"0x1170","targets":["0x1178"]}"#;
+    let id = BinaryId::parse(&text_at(&load, "/data/binary_id")).expect("a binary ID");
+    let unresolved = |list: &[Value]| {
+        list.iter().any(|c| {
+            text_at(c, "/code") == "W_JUMPTABLE_UNRESOLVED" && text_at(c, "/at") == "0x1366"
+        })
+    };
+    let before = caveats(&mut s, "run_op");
+    assert!(unresolved(&before), "{before:?}");
+    let args = r#"{"action":"set_jumptable","at":"0x1366","targets":["0x12a0","0x12b0"]}"#;
     let envelope = call(&mut s, "func_edit", args);
-    assert_eq!(text_at(data(&envelope), "/target"), "0x1170");
-    let after = caveats(&mut s, "fn:0x1140");
-    assert!(
-        !after
-            .iter()
-            .any(|c| text_at(c, "/code") == "W_JUMPTABLE_UNRESOLVED"),
-        "{after:?}"
-    );
-    let table = program(&s)
+    assert_eq!(text_at(data(&envelope), "/target"), "0x1366");
+    let after = caveats(&mut s, "run_op");
+    assert!(!unresolved(&after), "{after:?}");
+    let program = &s.binary(id).expect("the binary is open").program;
+    let table = program
         .base()
         .jumptables()
-        .get(JumpTableId(Address::ram(0x1170)))
+        .get(JumpTableId(Address::ram(0x1366)))
         .expect("the agent table");
-    assert_eq!(table.value.targets, vec![Address::ram(0x1178)]);
+    assert_eq!(
+        table.value.targets,
+        vec![Address::ram(0x12a0), Address::ram(0x12b0)]
+    );
 }
 
 #[test]

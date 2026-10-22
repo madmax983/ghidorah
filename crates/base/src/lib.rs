@@ -17,7 +17,7 @@
 //! | [`fnv`] | FNV-1a with 64 bits | Section 7.13 |
 //! | [`hex`] | Hex text | ADR-0007 |
 //! | [`bintext`] | [`BinText`], the one carrier of binary text | Section 10.16, ADR-0022 |
-//! | [`dym`] | [`did_you_mean`] | Section 10.5 |
+//! | [`dym`] | [`did_you_mean`], [`word_matches`] | Section 10.5 |
 //! | [`glob`] | [`Glob`] with linear work | Section 10.4 |
 //! | [`clock`] | The [`Clock`] seam and [`FixedClock`] | Section 10.11, ADR-0012 |
 
@@ -44,7 +44,7 @@ pub use bintext::{BinText, Caps, Rendered};
 pub use catalog::{CodeInfo, DiagCode, ErrorCode, RepairClass, Reserved, WarningCode};
 pub use clock::{Clock, FixedClock, ManualClock};
 pub use default_name::{DefaultKind, DefaultName};
-pub use dym::{Suggestion, did_you_mean};
+pub use dym::{Suggestion, did_you_mean, word_matches};
 pub use fnv::{Fnv1a64, fnv1a64};
 pub use fuel::{Fuel, OutOfFuel};
 pub use ghidorah_kernel::Range;

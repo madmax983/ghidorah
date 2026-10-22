@@ -11,8 +11,8 @@
   "partial": true,
   "data": {
     "state": "budget_stopped",
-    "steps_used": 969,
-    "resume": false,
+    "steps_used": 1067,
+    "resume": true,
     "analyzers": [
       {
         "name": "Entry",
@@ -54,7 +54,7 @@
         "name": "Disasm",
         "priority": 300,
         "pending": 0,
-        "runs": 21
+        "runs": 22
       },
       {
         "name": "NoReturnKnown",
@@ -66,25 +66,25 @@
         "name": "NoReturnDiscovered",
         "priority": 302,
         "pending": 0,
-        "runs": 4
+        "runs": 5
       },
       {
         "name": "CallTargets",
         "priority": 400,
         "pending": 0,
-        "runs": 3
+        "runs": 4
       },
       {
         "name": "IatThunks",
         "priority": 405,
         "pending": 0,
-        "runs": 3
+        "runs": 4
       },
       {
         "name": "JumpTables",
         "priority": 410,
         "pending": 0,
-        "runs": 2
+        "runs": 3
       },
       {
         "name": "TailCallsAndParts",
@@ -155,9 +155,9 @@
     ],
     "changed": {
       "functions": 12,
-      "refs": 54,
+      "refs": 57,
       "strings": 4,
-      "jumptables": 2
+      "jumptables": 0
     }
   },
   "next": [
@@ -165,9 +165,9 @@
       "tool": "analysis_run",
       "args": {
         "binary_id": "467a43b75d95c826",
-        "until": "full"
+        "until": "triage"
       },
-      "why": "The triage bands have no more work. Call analysis_run with until full to run the other bands."
+      "why": "The analysis has more work. Call analysis_run again to resume it."
     }
   ],
   "noop": false

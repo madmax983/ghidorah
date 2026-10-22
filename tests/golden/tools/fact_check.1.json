@@ -50,16 +50,16 @@
           "rel": "calls",
           "args": [
             "fn:0x1000",
-            "main"
+            "imp:__gmon_start__"
           ]
         },
-        "verdict": "unknown",
-        "evidence": [],
+        "verdict": "supported",
+        "evidence": [
+          "ref:0x1014>ext:0x5:unconditional_call"
+        ],
         "basis": {
-          "complete": false,
-          "gaps": [
-            "0x1014"
-          ]
+          "complete": true,
+          "gaps": []
         }
       },
       {
@@ -204,17 +204,17 @@
         "claim": {
           "rel": "in_func",
           "args": [
-            "0x10a1",
+            "0x11d0",
             "main"
           ]
         },
-        "verdict": "supported",
-        "evidence": [
-          "fn:0x1080"
-        ],
+        "verdict": "unknown",
+        "evidence": [],
         "basis": {
-          "complete": true,
-          "gaps": []
+          "complete": false,
+          "gaps": [
+            "0x11d0"
+          ]
         }
       }
     ],
@@ -225,7 +225,7 @@
     {
       "tool": "addr_info",
       "args": {
-        "target": "0x1014"
+        "target": "0x11d0"
       },
       "why": "Read the site that blocks a refuted verdict."
     }

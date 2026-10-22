@@ -332,3 +332,58 @@ fn float_return_follows_float_callee() {
     ]);
     assert_eq!(ret::float_ret(&ind, fid(BASE), &fir_of(&ind, BASE)), None);
 }
+
+/// Gives the blob of `f` at `BASE`, `g` at `BASE + 0x10` and `h` at `BASE + 0x20`. `f` calls
+/// `g` and then runs `after`. `g` calls `h` and returns its `rax`. `h` returns 7.
+fn caller_blob(after: &[u8]) -> Program {
+    let mut bytes = vec![0xe8, 0x0b, 0, 0, 0];
+    bytes.extend_from_slice(after);
+    bytes.resize(0x10, 0x90);
+    bytes.extend_from_slice(&[0xe8, 0x0b, 0, 0, 0, 0xc3]);
+    bytes.resize(0x20, 0x90);
+    bytes.extend_from_slice(&[0xb8, 0x07, 0, 0, 0, 0xc3]);
+    blob(&bytes)
+}
+
+/// A function whose value comes only from a call has no value when no caller reads `rax`.
+/// A read, a return or a branch after a call site keeps the integer value.
+#[test]
+fn regress_ret_value_from_callers() {
+    let value = |p: &Program, at: u64| ret::ret_value(p, fid(at), &fir_of(p, at));
+    // call h; ret: the second call writes rax and xmm0 before any read.
+    let p = caller_blob(&[0xe8, 0x16, 0, 0, 0, 0xc3]);
+    assert_eq!(value(&p, BASE + 0x10), RetValue::Void);
+    assert_eq!(value(&p, BASE + 0x20), RetValue::Int, "h writes rax");
+    // mov eax, 1; ret: xmm0 can still pass on to the return.
+    let p = caller_blob(&[0xb8, 0x01, 0, 0, 0, 0xc3]);
+    assert_eq!(value(&p, BASE + 0x10), RetValue::Int);
+    // add rax, 1; ret: the caller reads rax.
+    let p = caller_blob(&[0x48, 0x83, 0xc0, 0x01, 0xc3]);
+    assert_eq!(value(&p, BASE + 0x10), RetValue::Int);
+    // ret: the caller passes rax on.
+    let p = caller_blob(&[0xc3]);
+    assert_eq!(value(&p, BASE + 0x10), RetValue::Int);
+    // The body rule alone gives no caller evidence.
+    let p = caller_blob(&[0xe8, 0x16, 0, 0, 0, 0xc3]);
+    assert_eq!(ret::recover_value(&fir_of(&p, BASE + 0x10)), RetValue::Int);
+}
+
+/// `run_command` of `switch` only tail calls `puts`, and `main` ignores its value.
+#[test]
+fn regress_ret_value_of_tail_caller() {
+    let p = cached("fixtures/bin/switch.gcc-O2");
+    let value = |name: &str| {
+        let at = named(p, name);
+        ret::ret_value(p, fid(at), &fir_of(p, at))
+    };
+    assert_eq!(value("run_command"), RetValue::Void);
+    assert_eq!(value("sparse_code"), RetValue::Int);
+    assert_eq!(value("apply_op"), RetValue::Int);
+    let mut memo = Memo::default();
+    let mut fuel = Fuel::new(1_000_000);
+    let at = named(p, "run_command");
+    assert_eq!(
+        ret::ret_value_in(p, at, &mut memo, &mut fuel),
+        Some(RetValue::Void)
+    );
+}

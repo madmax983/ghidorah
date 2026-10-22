@@ -22,14 +22,14 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
 
-use ghidorah_base::{ErrorCode, Fnv1a64, Fuel, did_you_mean, hex};
+use ghidorah_base::{ErrorCode, Fnv1a64, Fuel, hex};
 use ghidorah_json::{Object, Value};
 
 use crate::api::{Host, Progress, Request};
 use crate::args::{self, Args, Format, Globals};
 use crate::budget::Budget;
 use crate::envelope::{Body, Envelope, Frame, Mutation, Warning};
-use crate::errors::{Candidate, Inactive, ToolError, not_in_profile};
+use crate::errors::{Inactive, ToolError, not_in_profile, tool_candidates};
 use crate::hints::{Call, WHY_ANALYSIS, WHY_FIRST_PAGE, check, keep_valid};
 use crate::registry::Registry;
 use crate::spec::{ArgKind, ToolSpec};
@@ -355,12 +355,7 @@ fn open<S: Host>(
         ..Frame::default()
     };
     let Some((index, tool)) = registry.get(&request.tool) else {
-        let mut fuel = Fuel::new(1_000_000);
-        let names = registry.names();
-        let candidates = did_you_mean(&request.tool, names.iter().copied(), &mut fuel)
-            .into_iter()
-            .map(|s| Candidate::text(&s.name, "tool"))
-            .collect();
+        let candidates = tool_candidates(&request.tool, &registry.names());
         let error = ToolError::new(ErrorCode::UnknownTool)
             .var("tool", &request.tool)
             .candidates(candidates);

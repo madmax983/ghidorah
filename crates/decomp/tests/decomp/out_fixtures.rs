@@ -804,3 +804,73 @@ fn lattice_field_access_through_a_typed_pointer() {
         .expect("the variable row");
     assert_eq!(row.ty, "struct sockaddr_in *");
 }
+
+/// Tells if `text` holds `word` with no identifier character on either side.
+fn has_word(text: &str, word: &str) -> bool {
+    let ident = |c: char| c.is_ascii_alphanumeric() || c == '_';
+    text.match_indices(word).any(|(i, _)| {
+        let before = text[..i].chars().next_back().is_none_or(|c| !ident(c));
+        let after = text[i + word.len()..]
+            .chars()
+            .next()
+            .is_none_or(|c| !ident(c));
+        before && after
+    })
+}
+
+/// The text named variables such as `v9` and `local_18` with no declaration, so it was not C.
+/// Now each variable that the text names, other than a parameter, has one declaration line
+/// after the `{` of the function. No other variable has a declaration line.
+#[test]
+fn regress_locals_are_declared() {
+    let mut bad = Vec::new();
+    let mut decls = 0usize;
+    for item in corpus() {
+        let lines = &item.out.lines;
+        let open = lines
+            .iter()
+            .position(|l| l.kind == print::LineKind::Open)
+            .unwrap_or(0);
+        let block: Vec<&str> = lines
+            .iter()
+            .filter(|l| l.kind == print::LineKind::Decl)
+            .map(|l| l.text.as_str())
+            .collect();
+        let first = lines.iter().position(|l| l.kind == print::LineKind::Decl);
+        if first.is_some_and(|f| f != open + 1) {
+            bad.push(format!(
+                "{} {:#x}: the declarations do not follow {{",
+                item.fixture, item.entry
+            ));
+        }
+        let locals: Vec<&str> = item
+            .out
+            .vars
+            .iter()
+            .filter(|v| !matches!(v.id.storage, ghidorah_base::Storage::Param(_)))
+            .map(|v| v.name.as_str())
+            .collect();
+        decls += block.len();
+        if block.len() != locals.len() {
+            bad.push(format!(
+                "{} {:#x}: {block:?} for {locals:?}",
+                item.fixture, item.entry
+            ));
+        }
+        for name in locals {
+            if !block.iter().any(|d| has_word(d, name) && d.ends_with(';')) {
+                bad.push(format!(
+                    "{} {:#x}: no declaration of {name}",
+                    item.fixture, item.entry
+                ));
+            }
+        }
+    }
+    assert!(decls > 1_000, "only {decls} declarations");
+    assert!(
+        bad.is_empty(),
+        "{} problems: {:?}",
+        bad.len(),
+        &bad[..bad.len().min(10)]
+    );
+}

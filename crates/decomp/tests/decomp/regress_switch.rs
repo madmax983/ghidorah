@@ -241,7 +241,7 @@ fn regress_switch_on_index_with_default() {
     let run = text("switch.gcc-O2", "run_command");
     assert!(run.contains("switch ((uint32_t)param_1) {"), "{run}");
     assert!(
-        run.contains("default:\n        return puts(\"unknown command\");"),
+        run.contains("default:\n        puts(\"unknown command\");\n        return;"),
         "{run}"
     );
     let o0 = text("switch.gcc-O0", "apply_op");

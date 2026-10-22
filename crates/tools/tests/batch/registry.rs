@@ -18,7 +18,9 @@ use ghidorah_tools::{
     ArgKind, ArgSpec, Fit, Host, Profile, ProfileSet, Registry, Session, ToolSpec, handlers,
 };
 
-use crate::support::{call, call_value, chars, demo, demo_in, full_registry, json, root, text_at};
+use crate::support::{
+    call, call_value, chars, demo, demo_in, fixture_in, full_registry, json, root, text_at,
+};
 
 /// The characters that the catalog keeps free for a tool of a later WP: `func_similar` when
 /// it is not in the registry yet.
@@ -287,12 +289,20 @@ fn ac_132a_137_143_full_registry_examples() {
     for profile in Profile::ALL {
         let nested = profile_examples(profile);
         // The walk reaches the hints inside the data, not only the top-level next.
-        for path in [
-            "/data/coverage/worklist/items/*/remedy",
-            "/data/sections/omitted/next",
-        ] {
-            assert!(nested.contains(path), "{}: {nested:?}", profile.as_str());
-        }
+        assert!(
+            nested.contains("/data/sections/omitted/next"),
+            "{}: {nested:?}",
+            profile.as_str()
+        );
+        // The one worklist item of the demo is a gap. The mini profile has no tool for its
+        // remedy, so the item has none there.
+        let remedy = "/data/coverage/worklist/items/*/remedy";
+        assert_eq!(
+            nested.contains(remedy),
+            profile != Profile::Mini,
+            "{}: {nested:?}",
+            profile.as_str()
+        );
     }
 }
 
@@ -369,48 +379,68 @@ fn profile_examples(profile: Profile) -> BTreeSet<String> {
     nested
 }
 
+/// The fixtures of the worklist remedy check. The demo binary has a gap. The `func_ptrs`
+/// builds have indirect jumps and calls through function pointers.
+const REMEDY_FIXTURES: [Option<&str>; 3] = [
+    None,
+    Some("fixtures/bin/func_ptrs.gcc-O0"),
+    Some("fixtures/bin/func_ptrs.gcc-O2"),
+];
+
 /// Each worklist remedy of `binary_survey` is a complete call with a `why`. It names a tool
 /// of the active profile and passes the strict parser (found by the round 4 review).
 #[test]
 fn regress_survey_worklist_remedies_parse() {
     let registry = full_registry();
+    let open = |profile: Profile, fixture: Option<&'static str>| match fixture {
+        None => demo_in(profile),
+        Some(path) => fixture_in(profile, path),
+    };
+    let mut kinds = std::collections::BTreeSet::new();
     for profile in Profile::ALL {
-        let mut s = demo_in(profile);
-        let envelope = call(&mut s, "binary_survey", r#"{"include":["coverage"]}"#);
-        let items = envelope
-            .pointer("/data/coverage/worklist/items")
-            .and_then(Value::as_array)
-            .unwrap_or_default();
-        assert!(items.len() >= 3, "{envelope}");
         let mut remedies = 0;
-        for item in items {
-            let Some(remedy) = item.get("remedy") else {
-                continue;
-            };
-            remedies += 1;
-            let why = text_at(remedy, "/why");
-            assert!(!why.is_empty(), "{} {remedy}", profile.as_str());
-            // A worklist holds up to 5 remedies, so each why is short.
-            assert!(why.chars().count() <= 32, "{} {remedy}", profile.as_str());
-            let found = ghidorah_tools::Call::new(
-                &text_at(remedy, "/tool"),
-                remedy.get("args").cloned().unwrap_or_default(),
-                &why,
-            );
-            check(&registry, &|name| s.in_profile(name), &found)
-                .unwrap_or_else(|e| panic!("{} {remedy}: {e}", profile.as_str()));
-            // The agent can send the remedy as it is.
-            let mut fresh = demo_in(profile);
-            let sent = call_value(&mut fresh, &found.tool, found.args.clone());
-            assert_eq!(
-                sent.get("ok"),
-                Some(&Value::Bool(true)),
-                "{} {remedy}: {sent}",
-                profile.as_str()
-            );
+        for fixture in REMEDY_FIXTURES {
+            let mut s = open(profile, fixture);
+            let envelope = call(&mut s, "binary_survey", r#"{"include":["coverage"]}"#);
+            let items = envelope
+                .pointer("/data/coverage/worklist/items")
+                .and_then(Value::as_array)
+                .unwrap_or_default();
+            assert!(!items.is_empty(), "{envelope}");
+            for item in items {
+                kinds.insert(text_at(item, "/kind"));
+                let Some(remedy) = item.get("remedy") else {
+                    continue;
+                };
+                remedies += 1;
+                let why = text_at(remedy, "/why");
+                assert!(!why.is_empty(), "{} {remedy}", profile.as_str());
+                // A worklist holds up to 5 remedies, so each why is short.
+                assert!(why.chars().count() <= 32, "{} {remedy}", profile.as_str());
+                let found = ghidorah_tools::Call::new(
+                    &text_at(remedy, "/tool"),
+                    remedy.get("args").cloned().unwrap_or_default(),
+                    &why,
+                );
+                check(&registry, &|name| s.in_profile(name), &found)
+                    .unwrap_or_else(|e| panic!("{} {remedy}: {e}", profile.as_str()));
+                // The agent can send the remedy as it is.
+                let mut fresh = open(profile, fixture);
+                let sent = call_value(&mut fresh, &found.tool, found.args.clone());
+                assert_eq!(
+                    sent.get("ok"),
+                    Some(&Value::Bool(true)),
+                    "{} {remedy}: {sent}",
+                    profile.as_str()
+                );
+            }
         }
-        // Each indirect site keeps a remedy: an edit with its targets, or a read call.
-        assert!(remedies >= 3, "{} {envelope}", profile.as_str());
+        // Each indirect site keeps a remedy: an edit, or a read call. The mini profile has no
+        // remedy for a gap.
+        assert!(remedies >= 4, "{} {remedies}", profile.as_str());
+    }
+    for kind in ["gap", "unresolved_call", "unresolved_jump"] {
+        assert!(kinds.contains(kind), "{kinds:?}");
     }
 }
 

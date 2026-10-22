@@ -215,6 +215,7 @@ pub fn text_of(d: &Decomp) -> Vec<String> {
     print::print(d, &NoEnv, &NoNames, "f")
         .lines
         .into_iter()
+        .filter(|l| l.kind != print::LineKind::Decl)
         .map(|l| l.text)
         .collect()
 }
@@ -665,8 +666,20 @@ fn prints_a_for_loop_when_its_parts_are_adjacent() {
     let d = counted(false);
     let printed = print::print(&d, &NoEnv, &NoNames, "f");
     let texts: Vec<&str> = printed.lines.iter().map(|l| l.text.as_str()).collect();
+    // The declarations of the variables come first, in view order.
     assert_eq!(
-        texts[2..6],
+        texts[2..4],
+        ["    uint64_t v1;", "    uint64_t v2;"],
+        "{texts:?}"
+    );
+    assert!(
+        printed.lines[2..4]
+            .iter()
+            .all(|l| l.kind == print::LineKind::Decl && l.ops.is_empty()),
+        "{texts:?}"
+    );
+    assert_eq!(
+        texts[4..8],
         [
             "    for (v1 = 0; v1 < 0xa; v1 = v1 + 1) {",
             "        v2 = v2 + v1;",
@@ -756,6 +769,7 @@ fn regress_comment_at_top_address() {
         [
             "void f(void)",
             "{",
+            "    uint64_t v1;",
             "    // pre top",
             "    v1 = 5; // eol top",
             "    // post top",

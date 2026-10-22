@@ -48,8 +48,8 @@
 {"code":"W_UNGROUNDED_FINDING","tool":"note_write","args":{"kind":"finding","text":"The check is weak."}}
 {"code":"W_NORETURN_SUSPECT","setup":"elf:suspect","before":[{"tool":"binary_load","args":{"path":"input.elf"}}],"tool":"func_get","args":{"target":"main"}}
 {"code":"W_NORETURN_ASSUMED","setup":"fixture:syscall_only.gcc-O2","tool":"func_get","args":{"target":"fn:0x401060","include":["decomp"]}}
-{"code":"W_JUMPTABLE_UNRESOLVED","tool":"func_get","args":{"target":"fn:0x1140"}}
-{"code":"W_INDIRECT_CALL_UNRESOLVED","setup":"fixture:func_ptrs.gcc-O2","tool":"func_get","args":{"target":"fn:0x1000","include":["decomp"]}}
+{"code":"W_JUMPTABLE_UNRESOLVED","setup":"fixture:func_ptrs.gcc-O2","tool":"func_get","args":{"target":"fn:0x1350"}}
+{"code":"W_INDIRECT_CALL_UNRESOLVED","setup":"fixture:func_ptrs.gcc-O0","tool":"func_get","args":{"target":"fn:0x1252","include":["decomp"]}}
 {"code":"W_LIFT_UNSUPPORTED","setup":"fixture:func_ptrs.gcc-O2","tool":"func_get","args":{"target":"fn:0x11b0","include":["summary","ir","decomp"]}}
 {"code":"W_SP_MISMATCH","setup":"elf:sp","before":[{"tool":"binary_load","args":{"path":"input.elf"}}],"tool":"func_get","args":{"target":"main"}}
 {"code":"W_BUDGET_FLAT","setup":"elf:wide","before":[{"tool":"binary_load","args":{"path":"input.elf"}}],"tool":"func_get","args":{"target":"main","include":["decomp"]}}

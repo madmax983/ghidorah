@@ -35,7 +35,7 @@
       "fixture": "switch.gcc-O2",
       "function": "run_command",
       "max_gotos": 0,
-      "snippets": ["switch (", "case 5:", "return puts(\"start\");", "return puts(\"unknown command\");"]
+      "snippets": ["void run_command(", "switch (", "case 5:", "puts(\"start\");\n        return;", "puts(\"unknown command\");\n        return;"]
     },
     {
       "fixture": "socket_client.gcc-O0",

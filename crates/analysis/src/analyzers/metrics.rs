@@ -38,6 +38,7 @@ use ghidorah_types::Category;
 use crate::analyzers::gaps::{self, Gap};
 use crate::callgraph::{CallGraph, Callee};
 use crate::cfg::{self, EdgeKind};
+use crate::ctx::UNIT_NULL_TARGET;
 
 /// The import categories that raise the priority.
 pub const RISKY: [Category; 6] = [
@@ -175,7 +176,7 @@ impl Remedy {
 pub enum ItemKind {
     /// An indirect jump with no jump table and no import slot.
     UnresolvedJump,
-    /// An indirect call with no call reference and no target override.
+    /// An indirect call with no call reference, no target override and no null target.
     UnresolvedCall,
     /// A function with the caveat `W_AGENT_OVERRIDE_CONFLICT`.
     OverrideConflict,
@@ -377,7 +378,7 @@ fn func_items(program: &Program, func: FuncId, out: &mut Vec<WorkItem>) {
         }
     }
     for (at, unit) in units_of(program, &view.func.body) {
-        let CodeUnit::Insn { flow, .. } = unit;
+        let CodeUnit::Insn { flow, flags, .. } = unit;
         let site = Address::ram(at);
         let called = program
             .refs_from(site)
@@ -386,7 +387,8 @@ fn func_items(program: &Program, func: FuncId, out: &mut Vec<WorkItem>) {
         let targets = program
             .flow_override(site)
             .is_some_and(|f| matches!(f.value, FlowOverride::IndirectTargets(_)));
-        if flow == FlowKind::ICall && !called && !targets {
+        let null = flags & UNIT_NULL_TARGET != 0;
+        if flow == FlowKind::ICall && !called && !targets && !null {
             push(
                 ItemKind::UnresolvedCall,
                 at,

@@ -208,7 +208,7 @@ const EX_CLAIMS: &str = concat!(
     r#"{"claims":["#,
     r#"{"rel":"calls","args":["main","imp:puts"]},"#,
     r#"{"rel":"calls","args":["check_password","imp:puts"]},"#,
-    r#"{"rel":"calls","args":["fn:0x1000","main"]},"#,
+    r#"{"rel":"calls","args":["fn:0x1000","imp:__gmon_start__"]},"#,
     r#"{"rel":"reaches","args":["main","imp:strlen",2]},"#,
     r#"{"rel":"uses_import","args":["check_password","imp:strlen"]},"#,
     r#"{"rel":"refs_string","args":["main","Access*"]},"#,
@@ -217,7 +217,7 @@ const EX_CLAIMS: &str = concat!(
     r#"{"rel":"const_arg","args":["imp:puts",0,"str:0x202d"]},"#,
     r#"{"rel":"has_syscall","args":["main","sys:write"]},"#,
     r#"{"rel":"noreturn","args":["main"]},"#,
-    r#"{"rel":"in_func","args":["0x10a1","main"]}"#,
+    r#"{"rel":"in_func","args":["0x11d0","main"]}"#,
     r#"]}"#
 );
 

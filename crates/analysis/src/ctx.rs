@@ -33,6 +33,12 @@ pub const UNIT_NORETURN_CALL: u8 = 0x1;
 /// The code unit flag of a noreturn call that only the known list flags (`W_NORETURN_ASSUMED`).
 pub const UNIT_NORETURN_ASSUMED: u8 = 0x2;
 
+/// The code unit flag of an indirect jump or call whose target is the constant 0.
+///
+/// An example is a weak symbol that the static linker sets to 0. A guard skips the site, so
+/// the site has no target ([`crate::slotsite`]).
+pub const UNIT_NULL_TARGET: u8 = 0x4;
+
 /// One code unit of a new body.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UnitRec {

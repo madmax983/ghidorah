@@ -25,7 +25,8 @@
 //! - Call names come from symbols, stub names and `sys:` IDs. The argument count comes from
 //!   the signature or the Tier-0 prototype of the callee, then from the parameter recovery.
 //! - A tail call prints as `return f(..);`. A callee with no return value gives `f(..);`, then
-//!   `return;`. A callee that does not return gives `f(..);` only. A tail call of a callee
+//!   `return;`. So does a function with no return value: its facts or its callers tell it
+//!   ([`PrintEnv::ret_value`] of its entry). A callee that does not return gives `f(..);` only. A tail call of a callee
 //!   with a floating return gives the head its type when no other return gives a value.
 //! - The result of a call is its `rax` def, or its `xmm0` def for a floating result. The facts
 //!   of the callee and the reads of the caller give the register (the `env` module).
@@ -33,6 +34,8 @@
 //!   head gives the type of the signature, else `float` or `double`.
 //! - Default variable names: `param_N`, `local_<hex>` for a stack slot and `v<N>` for a
 //!   register value. An agent name wins.
+//! - Each variable that the text names, other than a parameter, has a declaration line after
+//!   the `{` of the function, in view order: `uint64_t v9;`.
 //! - Comments: a PLATE comment comes before the function, a PRE comment before the first line
 //!   of its address, a POST comment after the last line of its address and an EOL comment at
 //!   the end of the first line of its address.
@@ -151,6 +154,8 @@ pub enum LineKind {
     Close,
     /// A statement.
     Stmt,
+    /// The declaration of a variable, for example `uint64_t v9;`.
+    Decl,
     /// A label: `L_<addr>:`.
     Label,
     /// A `goto` of the structure.
@@ -322,7 +327,8 @@ impl<'a> Printer<'a> {
         };
         p.mark_call_values();
         if sig_void.is_none() {
-            p.void_ret = p.returns_entry_rax();
+            let own = env.ret_value(d.view.entry) == Some(RetValue::Void);
+            p.void_ret = own || p.returns_entry_rax();
         }
         p
     }
@@ -458,6 +464,9 @@ pub fn print(
     let head = p.head(name);
     p.push(&head, LineKind::Head, 0, Buf::default());
     p.push("{", LineKind::Open, 0, Buf::default());
+    for decl in p.decls() {
+        p.push(&decl, LineKind::Decl, 1, Buf::default());
+    }
     p.lines.extend(body);
     p.push("}", LineKind::Close, 0, Buf::default());
     let lines = comments::insert(
