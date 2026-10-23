@@ -10,8 +10,8 @@
 //! [`decode`] also reads format version 1. It maps the old `ext:` addresses of the `analysis`,
 //! `base` and `notes` facts to their new addresses (the [`crate::migrate`] module).
 //!
-//! - `facts` holds the tables of both layers with their counters, the note store, the SHA-256
-//!   of the input and the types. The types are a number of types, or the number and the C
+//! - `facts` holds the tables of both layers, the note store with its counter, the SHA-256 of
+//!   the input and the types. The types are a number of types, or the number and the C
 //!   texts that added types after the prelude.
 //! - `journal_lines` is the number of journal lines that the snapshot covers. Replay applies
 //!   only the lines after them.
@@ -259,7 +259,7 @@ pub fn encode_to(
 
 /// Gives the JCS text of the tables of one layer to `sink`, row by row.
 fn layer_jcs(sink: &mut dyn FnMut(&str), tables: &Tables) -> Result<(), SnapshotError> {
-    tables_jcs_to(tables, true, sink).map_err(|e| SnapshotError::Jcs(e.to_string()))
+    tables_jcs_to(tables, sink).map_err(|e| SnapshotError::Jcs(e.to_string()))
 }
 
 /// Tells if `v` is a format version that a reader takes.
@@ -388,7 +388,7 @@ pub fn inputs_hash(program: &Program, engine: &Value, config: &Value) -> [u8; 32
 #[must_use]
 pub fn result_hash(set: &AnalysisSet) -> [u8; 32] {
     let mut hasher = Sha256::default();
-    match tables_jcs_to(set, true, &mut |piece| hasher.update(piece.as_bytes())) {
+    match tables_jcs_to(set, &mut |piece| hasher.update(piece.as_bytes())) {
         Ok(()) => hasher.finalize(),
         Err(_) => hash_value(&tables_to_json(set)),
     }

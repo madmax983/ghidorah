@@ -198,8 +198,8 @@ impl<'a> Obj<'a> {
 
 /// Gives the fact dump of a program: the input of the state hash.
 ///
-/// The dump holds `binary` (the SHA-256 of the file), `base` and `analysis` (the tables
-/// without counters), `notes` (without the ID counter) and `types` (see [`types_to_json`]).
+/// The dump holds `binary` (the SHA-256 of the file), `base` and `analysis` (the tables),
+/// `notes` (without the ID counter) and `types` (see [`types_to_json`]).
 #[must_use]
 pub fn facts(program: &Program) -> Value {
     tables::facts(program)
@@ -230,26 +230,25 @@ pub fn types_from_json(value: &Value) -> Result<(u64, Vec<TypeInput>), CodecErro
     Ok((u64::dec(value)?, Vec::new()))
 }
 
-/// Gives the JSON form of the tables of one layer, with the counter of new why-records.
+/// Gives the JSON form of the tables of one layer.
 #[must_use]
 pub fn tables_to_json(tables: &Tables) -> Value {
-    tables::encode(tables, true)
+    tables::encode(tables)
 }
 
 /// Writes the JCS text of [`tables_to_json`] to `sink` in pieces, one row at a time.
 ///
-/// `counters` adds `why_next`. The pieces join to the same bytes as the JCS text of the JSON
-/// form, but no JSON value of the whole layer exists.
+/// The pieces join to the same bytes as the JCS text of the JSON form, but no JSON value of
+/// the whole layer exists.
 ///
 /// # Errors
 ///
 /// Returns the [`ghidorah_json::JcsError`] of a row that has no JCS form.
 pub fn tables_jcs_to(
     tables: &Tables,
-    counters: bool,
     sink: &mut dyn FnMut(&str),
 ) -> Result<(), ghidorah_json::JcsError> {
-    tables::write_jcs_to(tables, counters, sink)
+    tables::write_jcs_to(tables, sink)
 }
 
 /// Reads the tables of one layer.

@@ -84,7 +84,7 @@ pub(super) fn encode(edit: &Edit) -> Value {
         Edit::SetDataDef { at, def } => obj([op, ("at", at.enc()), ("def", def.enc())]),
         Edit::WriteNote(note) => obj([op, ("note", note.enc())]),
         Edit::DeleteNote { id } => obj([op, ("id", id.enc())]),
-        Edit::ReplaceAnalysis(set) => obj([op, ("set", tables::encode(set, true))]),
+        Edit::ReplaceAnalysis(set) => obj([op, ("set", tables::encode(set))]),
     }
 }
 
