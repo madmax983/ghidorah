@@ -267,7 +267,8 @@ fn regress_why_store_keeps_derived_premises_compact() {
 /// The publish step keeps the derived why-records of code units and references as compact
 /// values. It packs the rows of the set as they come. Before, a map of full records and a
 /// list of full rows raised the peak. A full analysis peaked at 895 bytes for each code
-/// unit; now 811.
+/// unit. With the compact records it peaked at 811. The collection now goes before the
+/// tables of the set grow; now 762.
 #[test]
 fn regress_publish_keeps_derived_whys_compact() {
     let mut program = functions(5_000, false);
@@ -279,7 +280,7 @@ fn regress_publish_keeps_derived_whys_compact() {
     });
     let units = program.analysis().listing().unit_count();
     assert!(
-        stats.peak_bytes <= units * 850,
+        stats.peak_bytes <= units * 790,
         "a full analysis peaks at {} bytes for {units} code units",
         stats.peak_bytes
     );

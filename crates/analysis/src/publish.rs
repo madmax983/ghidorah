@@ -314,6 +314,8 @@ pub(crate) fn analysis_set(program: &Program, work: &Work) -> Result<AnalysisSet
         why.push(rec.key(), n, record)?;
     }
     drop(records);
+    // The rows hold every record now, so the collection goes before the tables grow.
+    drop(std::mem::take(&mut facts.whys));
     // The flow references and the operand references go in key order, so the table of the
     // set takes them in one bulk build.
     facts.refs.sort_unstable_by_key(|r| r.key);
