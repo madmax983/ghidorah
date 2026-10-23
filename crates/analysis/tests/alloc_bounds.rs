@@ -214,3 +214,53 @@ fn regress_snapshot_streams_its_text() {
         stats.peak_bytes
     );
 }
+
+/// The why store keeps two record shapes as compact values with no premise list. One is a
+/// code unit with its owner function. The other is a reference with the code unit of its
+/// source. A general record with a list kept 162 bytes for each record; now 50.
+#[test]
+fn regress_why_store_keeps_derived_premises_compact() {
+    use ghidorah_base::{Address, FuncId};
+    use ghidorah_db::codec::{SetRows, tables_from_rows};
+    use ghidorah_db::{FactKey, RefKey, RefType, RuleCode, Why};
+
+    let n = 20_000u64;
+    let flow = RuleCode::new("R_DISASM_FLOW").expect("a rule code");
+    let refer = RuleCode::new("R_FLOW_REF").expect("a rule code");
+    let (tables, stats) = ALLOC.measure(|| {
+        let units = (0..n).map(|i| {
+            let owner = FactKey::Func(FuncId(Address::ram(i / 8 * 32)));
+            let record = Why {
+                rule: flow.clone(),
+                premises: vec![owner],
+            };
+            (FactKey::CodeUnit(i * 4), i, record)
+        });
+        let refs = (0..n).map(|i| {
+            let key = RefKey {
+                from: Address::ram(i * 4),
+                op_index: -1,
+                to: Address::ram(0x1000),
+                kind: RefType::UnconditionalCall,
+            };
+            let record = Why {
+                rule: refer.clone(),
+                premises: vec![FactKey::CodeUnit(i * 4)],
+            };
+            (FactKey::Ref(key), n + i, record)
+        });
+        let rows = SetRows {
+            why: units.chain(refs).collect(),
+            why_next: 2 * n,
+            ..SetRows::default()
+        };
+        tables_from_rows(rows).expect("the rows")
+    });
+    let records = tables.why().len();
+    assert_eq!(records, 40_000);
+    assert!(
+        stats.retained_bytes <= records * 64,
+        "the store keeps {} bytes for {records} records",
+        stats.retained_bytes
+    );
+}

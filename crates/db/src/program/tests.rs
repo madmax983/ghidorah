@@ -454,7 +454,7 @@ fn merged_reads_see_analysis_facts() {
     assert_eq!(p.code_unit(0x1080).map(CodeUnit::len), Some(4));
     assert_eq!(p.string(0x2004), Some(&info()));
     assert_eq!(p.var(&s.v).name.unwrap().value, "rv");
-    assert_eq!(p.why(&FactKey::Func(FuncId(a))), Some(&s.why));
+    assert_eq!(p.why(&FactKey::Func(FuncId(a))), Some(s.why));
     assert!(p.data_def(0x10a0).is_none());
     assert!(p.flow_override(a).is_none());
     assert!(p.why(&FactKey::Entry(1)).is_none());
