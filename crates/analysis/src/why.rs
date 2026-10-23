@@ -38,6 +38,7 @@
 
 use std::fmt;
 
+use ghidorah_base::{Address, FuncId};
 use ghidorah_db::{FactKey, RuleCode, why::MAX_PREMISES};
 
 use crate::AnalysisError;
@@ -266,6 +267,15 @@ impl Why {
         Self { rule, premises }
     }
 
+    /// Makes a record with one premise.
+    #[must_use]
+    pub fn one(rule: Rule, premise: FactKey) -> Self {
+        Self {
+            rule,
+            premises: vec![premise],
+        }
+    }
+
     /// Makes a record with no premise.
     #[must_use]
     pub const fn bare(rule: Rule) -> Self {
@@ -274,4 +284,11 @@ impl Why {
             premises: Vec::new(),
         }
     }
+}
+
+/// Gives the why-record of a code unit of the function at `entry`: [`Rule::DisasmFlow`] with
+/// the function as its premise. The work state keeps the owner of each unit, not this record.
+#[must_use]
+pub fn unit_why(entry: u64) -> Why {
+    Why::one(Rule::DisasmFlow, FactKey::Func(FuncId(Address::ram(entry))))
 }

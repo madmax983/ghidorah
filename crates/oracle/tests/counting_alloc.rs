@@ -55,11 +55,21 @@ fn counting_alloc_counts() {
     );
     assert!(grow.peak_bytes >= 80_000);
 
+    // The result holds its bytes. The freed scratch buffer does not count.
+    let (kept, held) = ALLOC.measure(|| {
+        drop(black_box(vec![3u8; 64 << 10]));
+        black_box(vec![4u8; 16 << 10])
+    });
+    assert_eq!(kept.len(), 16 << 10);
+    assert_eq!(held.retained_bytes, 16 << 10);
+    assert!(held.peak_bytes >= 64 << 10);
+
     // A closure that allocates nothing gives zero.
     let (sum, none) = ALLOC.measure(|| black_box(2u64) + 3);
     assert_eq!(sum, 5);
     assert_eq!(none.allocations, 0);
     assert_eq!(none.peak_bytes, 0);
+    assert_eq!(none.retained_bytes, 0);
 
     // The process counters see the same heap.
     let before = ALLOC.allocations();

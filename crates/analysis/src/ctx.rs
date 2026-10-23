@@ -48,8 +48,6 @@ pub struct UnitRec {
     pub flow: FlowKind,
     /// The site flags, for example [`UNIT_NORETURN_CALL`].
     pub flags: u8,
-    /// The why-record.
-    pub why: Why,
 }
 
 /// The flow summary of a function body.

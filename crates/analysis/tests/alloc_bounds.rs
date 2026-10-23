@@ -5,6 +5,8 @@
 //! a fixed input is the same on each run, so the tests use no clock. A linear path allocates
 //! about twice the bytes for twice the input. A path that copies its state on each step
 //! allocates about four times the bytes.
+//!
+//! The memory tests count the bytes that a result keeps, for each record or code unit.
 
 #![allow(clippy::expect_used, reason = "test helpers fail through expect")]
 
@@ -110,5 +112,105 @@ fn regress_replace_analysis_shares_the_set() {
         "the swap allocates {} bytes; a copy of the set is {} bytes",
         swap.allocated_bytes,
         copy.allocated_bytes
+    );
+}
+
+/// Runs a full analysis of `n` small functions. Gives the program, the bytes that the
+/// published set keeps and the bytes that the work state of the scheduler keeps.
+fn kept_bytes(n: u64) -> (Program, usize, usize) {
+    let run = |program: &mut Program| {
+        let mut sched = Scheduler::new();
+        let out = sched
+            .run(program, Until::Full, &mut Fuel::new(u64::MAX))
+            .expect("a run");
+        assert_eq!(out.state, RunState::Complete);
+        sched
+    };
+    let mut program = functions(n, false);
+    let (sched, both) = ALLOC.measure(|| run(&mut program));
+    drop(sched);
+    let mut again = functions(n, false);
+    let ((), set) = ALLOC.measure(|| drop(run(&mut again)));
+    let work = both.retained_bytes.saturating_sub(set.retained_bytes);
+    (program, set.retained_bytes, work)
+}
+
+/// The work state keeps the owner of each code unit, not its why-record. The record of a
+/// unit is always `R_DISASM_FLOW` with the owner function, so the publish step makes it.
+/// A copy in each unit kept 459 bytes of work state for each unit; now 344.
+#[test]
+fn regress_work_state_keeps_no_unit_why() {
+    let (program, _, work) = kept_bytes(5_000);
+    let units = program.analysis().listing().unit_count();
+    assert!(
+        work <= units * 400,
+        "the work state keeps {work} bytes for {units} code units"
+    );
+}
+
+/// The why store builds its tree in one pass from rows in key order. The records of one rule
+/// share the text of its code. One insert at a time left each node about half full. Each
+/// record also kept its own copy of the code. The store kept 279 bytes for each record; now 162.
+#[test]
+fn regress_why_store_packs_its_records() {
+    use ghidorah_db::codec::{SetRows, tables_from_rows};
+    use ghidorah_db::{FactKey, RuleCode, Why};
+
+    let n = 20_000u64;
+    let rule = RuleCode::new("R_DISASM_FLOW").expect("a rule code");
+    let (tables, stats) = ALLOC.measure(|| {
+        let why = (0..n)
+            .map(|i| {
+                let record = Why {
+                    rule: rule.clone(),
+                    premises: vec![FactKey::Entry(0)],
+                };
+                (FactKey::CodeUnit(i * 4), i, record)
+            })
+            .collect();
+        let rows = SetRows {
+            why,
+            why_next: n,
+            ..SetRows::default()
+        };
+        tables_from_rows(rows).expect("the rows")
+    });
+    let records = tables.why().len();
+    assert_eq!(records, 20_000);
+    assert!(
+        stats.retained_bytes <= records * 200,
+        "the store keeps {} bytes for {records} records",
+        stats.retained_bytes
+    );
+}
+
+/// The publish step keeps the premises of each record in the list of the record. A filtered
+/// copy of each list reserved room for four keys: 446 bytes of set for each record; now 278.
+#[test]
+fn regress_published_set_keeps_exact_premise_lists() {
+    let (program, set, _) = kept_bytes(5_000);
+    let records = program.analysis().why().len();
+    assert!(
+        set <= records * 350,
+        "the published set keeps {set} bytes for {records} records"
+    );
+}
+
+/// The project writes a snapshot to its file one piece at a time. Before, the text of the
+/// whole snapshot was one string, and its growth held up to two copies of the text. The
+/// encoder peaks far below the length of the text.
+#[test]
+fn regress_snapshot_streams_its_text() {
+    let (program, _, _) = kept_bytes(5_000);
+    let (len, stats) = ALLOC.measure(|| {
+        let mut len = 0usize;
+        ghidorah_db::snapshot::encode_to(&program, 0, None, &mut |piece| len += piece.len())
+            .expect("a JCS text");
+        len
+    });
+    assert!(
+        stats.peak_bytes * 10 < len,
+        "the encoder peaks at {} bytes for a text of {len} bytes",
+        stats.peak_bytes
     );
 }

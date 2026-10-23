@@ -52,6 +52,9 @@ pub struct Stats {
     pub allocations: u64,
     /// The sum of the requested bytes of all allocations.
     pub allocated_bytes: u64,
+    /// The live heap bytes at the end above the level at the start. The result of the
+    /// closure holds these bytes. A free of memory from before the closure lowers the count.
+    pub retained_bytes: usize,
 }
 
 /// A global allocator that counts heap bytes. It forwards each call to [`System`].
@@ -107,6 +110,7 @@ impl CountingAlloc {
             peak_bytes: end.peak.saturating_sub(start.live),
             allocations: end.count.saturating_sub(start.count),
             allocated_bytes: end.bytes.saturating_sub(start.bytes),
+            retained_bytes: end.live.saturating_sub(start.live),
         };
         (result, stats)
     }

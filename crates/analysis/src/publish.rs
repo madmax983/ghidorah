@@ -14,6 +14,9 @@
 //! - The data references, the pointer slots and the strings come from `References` and
 //!   `Strings` (WP-17a).
 
+#[cfg(test)]
+mod tests;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
@@ -22,11 +25,11 @@ use ghidorah_db::codec::{SetRows, tables_from_rows};
 use ghidorah_db::listing::CodeUnit;
 use ghidorah_db::{
     AnalysisSet, Commit, Edit, Fact, FactKey, Function, JumpTable, Origin, Part, PartKind, Program,
-    Ref, RefKey, SessionLabel, Source, StartReason, StrInfo,
+    Ref, RefKey, RuleCode, SessionLabel, Source, StartReason, StrInfo,
 };
 
 use crate::AnalysisError;
-use crate::why::Why;
+use crate::why::{Rule, Why, unit_why};
 use crate::work::Work;
 
 /// The change counts of `analysis_run` between two analysis sets.
@@ -176,7 +179,7 @@ fn collect(program: &Program, work: &Work) -> Facts {
                 flags: u.flags,
             },
         ));
-        out.whys.insert(FactKey::CodeUnit(*at), u.why.clone());
+        out.whys.insert(FactKey::CodeUnit(*at), unit_why(u.owner));
     }
     for (key, why) in &work.refs {
         let owner = work.units.get(&key.from.off).map(|u| u.owner);
@@ -192,54 +195,80 @@ fn collect(program: &Program, work: &Work) -> Facts {
     out
 }
 
-/// Gives the creation order of each fact and its kept premises. A walk in key order visits
+/// Gives the mask bit of premise `j`, or 0 from premise 64.
+fn bit(j: usize) -> u64 {
+    u32::try_from(j)
+        .ok()
+        .and_then(|b| 1u64.checked_shl(b))
+        .unwrap_or(0)
+}
+
+/// Gives the creation order of each fact and a mask of its kept premises, by the position of
+/// the fact in key order. Bit `j` of the mask keeps premise `j`. A walk in key order visits
 /// the premises of each fact first. A premise outside the set and the inputs goes, and so
 /// does a premise that closes a cycle.
-fn order(p: &Program, whys: &BTreeMap<FactKey, Why>) -> BTreeMap<FactKey, (u64, Vec<FactKey>)> {
+///
+/// The step works on positions, so it makes no copy of a key. A record has at most 64
+/// premises, so its mask fits in a `u64`.
+fn order(p: &Program, whys: &BTreeMap<FactKey, Why>) -> Vec<(u64, u64)> {
+    /// The walk state of a fact.
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum Mark {
+        New,
+        Open,
+        Done,
+    }
     let inputs = Inputs::of(p);
-    let premises: BTreeMap<&FactKey, Vec<&FactKey>> = whys
+    let keys: Vec<&FactKey> = whys.keys().collect();
+    let records: Vec<&Why> = whys.values().collect();
+    let at = |q: &FactKey| keys.binary_search(&q).ok();
+    let mut out: Vec<(u64, u64)> = records
         .iter()
-        .map(|(k, w)| {
-            let kept = w
-                .premises
-                .iter()
-                .filter(|q| whys.contains_key(*q) || inputs.holds(p, q))
-                .collect();
-            (k, kept)
+        .map(|w| {
+            let mask = w.premises.iter().enumerate().fold(0u64, |m, (j, q)| {
+                let kept = at(q).is_some() || inputs.holds(p, q);
+                if kept { m | bit(j) } else { m }
+            });
+            (0, mask)
         })
         .collect();
-    let mut out: BTreeMap<FactKey, (u64, Vec<FactKey>)> = BTreeMap::new();
-    let mut open: BTreeSet<&FactKey> = BTreeSet::new();
-    let mut cut: BTreeSet<(&FactKey, &FactKey)> = BTreeSet::new();
+    let mut marks = vec![Mark::New; keys.len()];
     let mut next = 0u64;
-    for root in whys.keys() {
-        if out.contains_key(root) {
+    for root in 0..keys.len() {
+        if marks.get(root) != Some(&Mark::New) {
             continue;
         }
-        let mut stack: Vec<(&FactKey, usize)> = vec![(root, 0)];
-        open.insert(root);
-        while let Some((key, i)) = stack.pop() {
-            let list = premises.get(key).map(Vec::as_slice).unwrap_or_default();
-            if let Some(q) = list.get(i) {
-                stack.push((key, i.saturating_add(1)));
-                if !whys.contains_key(*q) || out.contains_key(*q) {
+        if let Some(m) = marks.get_mut(root) {
+            *m = Mark::Open;
+        }
+        let mut stack: Vec<(usize, usize)> = vec![(root, 0)];
+        while let Some((i, j)) = stack.pop() {
+            let premises = records.get(i).map_or(&[][..], |w| w.premises.as_slice());
+            if let Some(q) = premises.get(j) {
+                stack.push((i, j.saturating_add(1)));
+                let Some(k) = at(q) else {
                     continue;
-                }
-                if open.contains(q) {
-                    cut.insert((key, *q));
-                } else {
-                    open.insert(*q);
-                    stack.push((*q, 0));
+                };
+                match marks.get(k) {
+                    Some(Mark::New) => {
+                        if let Some(m) = marks.get_mut(k) {
+                            *m = Mark::Open;
+                        }
+                        stack.push((k, 0));
+                    }
+                    Some(Mark::Open) => {
+                        if let Some((_, mask)) = out.get_mut(i) {
+                            *mask &= !bit(j);
+                        }
+                    }
+                    Some(Mark::Done) | None => {}
                 }
                 continue;
             }
-            open.remove(key);
-            let kept = list
-                .iter()
-                .filter(|q| !cut.contains(&(key, **q)))
-                .map(|q| (*q).clone())
-                .collect();
-            out.insert(key.clone(), (next, kept));
+            if let (Some((o, _)), Some(m)) = (out.get_mut(i), marks.get_mut(i)) {
+                *o = next;
+                *m = Mark::Done;
+            }
             next = next.saturating_add(1);
         }
     }
@@ -266,14 +295,24 @@ pub(crate) fn analysis_set(program: &Program, work: &Work) -> Result<AnalysisSet
     let ordered = order(program, &facts.whys);
     let why_next = u64::try_from(ordered.len()).unwrap_or(u64::MAX);
     let mut why = Vec::with_capacity(ordered.len());
-    for (key, (n, premises)) in ordered {
-        let Some(found) = facts.whys.remove(&key) else {
-            continue;
+    let mut codes: BTreeMap<Rule, RuleCode> = BTreeMap::new();
+    for ((key, found), (n, mask)) in std::mem::take(&mut facts.whys).into_iter().zip(ordered) {
+        let mut premises: Vec<FactKey> = found
+            .premises
+            .into_iter()
+            .enumerate()
+            .filter(|(j, _)| mask & bit(*j) != 0)
+            .map(|(_, q)| q)
+            .collect();
+        premises.shrink_to_fit();
+        let rule = if let Some(code) = codes.get(&found.rule) {
+            code.clone()
+        } else {
+            let code = found.rule.rule_code()?;
+            codes.insert(found.rule, code.clone());
+            code
         };
-        let record = ghidorah_db::why::Why {
-            rule: found.rule.rule_code()?,
-            premises,
-        };
+        let record = ghidorah_db::why::Why { rule, premises };
         why.push((key, n, record));
     }
     let mut rows = SetRows {

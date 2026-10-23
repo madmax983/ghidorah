@@ -5,7 +5,7 @@ use std::path::Path;
 use ghidorah_base::{Address, FuncId, Rev};
 use ghidorah_json::Value;
 
-use super::{SnapshotError, decode, encode, inputs_hash, result_hash, write};
+use super::{SnapshotError, decode, encode, inputs_hash, result_hash, write, write_program};
 use crate::fs::Fs;
 use crate::meta::{MetaLine, apply};
 use crate::migrate::ExtMap;
@@ -183,4 +183,17 @@ fn result_hash_streams_the_jcs_text() {
         let text = ghidorah_json::write_jcs(&crate::codec::tables_to_json(set)).expect("JCS");
         assert_eq!(result_hash(set), ghidorah_base::sha256(text.as_bytes()));
     }
+}
+
+#[test]
+fn a_streamed_snapshot_is_the_encoded_text() {
+    let p = seeded();
+    let fs = SimFs::new();
+    let dir = Path::new("/p/0011223344556677");
+    let mut handle = fs.boxed();
+    handle.create_dir_all(dir).unwrap();
+    let inputs = Some([7u8; 32]);
+    write_program(handle.as_mut(), dir, &p, 12, inputs).unwrap();
+    let text = encode(&p, 12, inputs).unwrap();
+    assert_eq!(fs.get(&dir.join("snapshot.json")), Some(text.into_bytes()));
 }
