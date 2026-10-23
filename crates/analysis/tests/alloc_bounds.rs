@@ -164,12 +164,11 @@ fn regress_why_store_packs_its_records() {
                 rule: rule.clone(),
                 premises: vec![FactKey::Entry(0)],
             };
-            (FactKey::CodeUnit(i * 4), i, record)
+            (FactKey::CodeUnit(i * 4), record)
         }))
         .expect("the rows");
         let rows = SetRows {
             why,
-            why_next: n,
             ..SetRows::default()
         };
         tables_from_rows(rows).expect("the rows")
@@ -233,7 +232,7 @@ fn regress_why_store_keeps_derived_premises_compact() {
                 rule: flow.clone(),
                 premises: vec![owner],
             };
-            (FactKey::CodeUnit(i * 4), i, record)
+            (FactKey::CodeUnit(i * 4), record)
         });
         let refs = (0..n).map(|i| {
             let key = RefKey {
@@ -246,11 +245,10 @@ fn regress_why_store_keeps_derived_premises_compact() {
                 rule: refer.clone(),
                 premises: vec![FactKey::CodeUnit(i * 4)],
             };
-            (FactKey::Ref(key), n + i, record)
+            (FactKey::Ref(key), record)
         });
         let rows = SetRows {
             why: WhyRows::from_rows(units.chain(refs)).expect("the rows"),
-            why_next: 2 * n,
             ..SetRows::default()
         };
         tables_from_rows(rows).expect("the rows")
@@ -267,8 +265,8 @@ fn regress_why_store_keeps_derived_premises_compact() {
 /// The publish step keeps the derived why-records of code units and references as compact
 /// values. It packs the rows of the set as they come. Before, a map of full records and a
 /// list of full rows raised the peak. A full analysis peaked at 895 bytes for each code
-/// unit. With the compact records it peaked at 811. The collection now goes before the
-/// tables of the set grow; now 762.
+/// unit. The steps after that gave 811 (compact records), 762 (the collection goes before
+/// the tables grow) and 736 (no creation order in a record).
 #[test]
 fn regress_publish_keeps_derived_whys_compact() {
     let mut program = functions(5_000, false);
@@ -280,7 +278,7 @@ fn regress_publish_keeps_derived_whys_compact() {
     });
     let units = program.analysis().listing().unit_count();
     assert!(
-        stats.peak_bytes <= units * 790,
+        stats.peak_bytes <= units * 765,
         "a full analysis peaks at {} bytes for {units} code units",
         stats.peak_bytes
     );

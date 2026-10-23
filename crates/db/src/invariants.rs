@@ -10,7 +10,7 @@
 //! | 3 | Each body holds its entry. Bodies of one layer are disjoint. The ownership map equals the union of the bodies. | `FuncEntry`, `FuncOverlap`, `Ownership` |
 //! | 4 | Each address with symbols has one primary symbol. The name index equals the symbols. | `Primary`, `NameIndex` |
 //! | 5 | Code units of one layer do not overlap. Data definitions of one layer do not overlap. | `UnitOverlap`, `DataOverlap` |
-//! | 6 | Each analysis fact has a why-record. Each premise exists and has a lower creation order. | `NoWhy`, `WhyOrphan`, `Premise`, `PremiseOrder` |
+//! | 6 | Each analysis fact has a why-record. Each premise exists. The premises make no cycle. | `NoWhy`, `WhyOrphan`, `Premise`, `PremiseCycle` |
 //! | 7 | The events have one revision step at a time and end at `rev`. No epoch is above `rev`. | `EventRev`, `EpochAhead` |
 //! | 8 | Each jump-table target and indirect target is an instruction start in code or an import. | `JumpTarget`, `CallTarget` |
 //! | 9 | Each evidence entry and each ID member of a note parses as an ID. | `Evidence` |
@@ -125,8 +125,8 @@ pub enum Violation {
         /// The premise.
         premise: FactKey,
     },
-    /// Rule 6: a premise does not have a lower creation order than its fact.
-    PremiseOrder {
+    /// Rule 6: a premise closes a cycle of premises.
+    PremiseCycle {
         /// The fact.
         key: FactKey,
         /// The premise.
@@ -183,7 +183,7 @@ impl Violation {
             Self::NoWhy { .. }
             | Self::WhyOrphan { .. }
             | Self::Premise { .. }
-            | Self::PremiseOrder { .. } => 6,
+            | Self::PremiseCycle { .. } => 6,
             Self::EventRev { .. } | Self::EpochAhead { .. } => 7,
             Self::JumpTarget { .. } | Self::CallTarget { .. } => 8,
             Self::Evidence { .. } => 9,

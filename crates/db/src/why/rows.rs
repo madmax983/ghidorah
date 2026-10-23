@@ -9,14 +9,14 @@ use super::{FactKey, RuleCode, Why};
 use crate::fact::Invalid;
 use crate::refs::RefKey;
 
-/// The why-records of a new layer: key, creation order and record.
+/// The why-records of a new layer: key and record.
 ///
 /// A row with a key above the key of the row before it goes into the packed maps. After the first row out of key order,
 /// each row stays as it is. The store then sets these rows one at a time in push order.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct WhyRows {
     /// The general records in key order.
-    pub(super) map: Vec<(FactKey, (u64, Why))>,
+    pub(super) map: Vec<(FactKey, Why)>,
     /// The compact records of code units in key order.
     pub(super) units: Vec<(u64, Slim)>,
     /// The compact records of references in key order.
@@ -24,11 +24,9 @@ pub struct WhyRows {
     /// The rule codes of the compact records.
     pub(super) rules: Vec<RuleCode>,
     /// The rows from the first row out of key order, in push order.
-    pub(super) loose: Vec<(FactKey, u64, Why)>,
+    pub(super) loose: Vec<(FactKey, Why)>,
     /// The key of the last packed row.
     pub(super) last: Option<FactKey>,
-    /// The highest creation order of a row.
-    pub(super) top: Option<u64>,
 }
 
 impl WhyRows {
@@ -43,10 +41,10 @@ impl WhyRows {
     /// # Errors
     ///
     /// Returns [`Invalid::TooMany`] above [`crate::why::MAX_PREMISES`] premises.
-    pub fn from_rows(rows: impl IntoIterator<Item = (FactKey, u64, Why)>) -> Result<Self, Invalid> {
+    pub fn from_rows(rows: impl IntoIterator<Item = (FactKey, Why)>) -> Result<Self, Invalid> {
         let mut out = Self::new();
-        for (key, order, why) in rows {
-            out.push(key, order, why)?;
+        for (key, why) in rows {
+            out.push(key, why)?;
         }
         Ok(out)
     }
@@ -67,18 +65,17 @@ impl WhyRows {
         self.len() == 0
     }
 
-    /// Adds the record `why` of `key` with its creation order.
+    /// Adds the record `why` of `key`.
     ///
     /// # Errors
     ///
     /// Returns [`Invalid::TooMany`] above [`crate::why::MAX_PREMISES`] premises. Then the
     /// list does not change.
-    pub fn push(&mut self, key: FactKey, order: u64, why: Why) -> Result<(), Invalid> {
+    pub fn push(&mut self, key: FactKey, why: Why) -> Result<(), Invalid> {
         check(&why)?;
-        self.top = Some(self.top.map_or(order, |t| t.max(order)));
         let in_order = self.loose.is_empty() && self.last.as_ref().is_none_or(|l| *l < key);
         if !in_order {
-            self.loose.push((key, order, why));
+            self.loose.push((key, why));
             return Ok(());
         }
         self.last = Some(key.clone());
@@ -88,17 +85,12 @@ impl WhyRows {
             .and_then(|_| intern(&mut self.rules, &why.rule));
         match (shape, rule) {
             (Some(Compact::Unit(at, entry)), Some(rule)) => {
-                self.units.push((at, Slim { order, entry, rule }));
+                self.units.push((at, Slim { entry, rule }));
             }
             (Some(Compact::Ref(k)), Some(rule)) => {
-                let slim = Slim {
-                    order,
-                    entry: 0,
-                    rule,
-                };
-                self.refs.push((k, slim));
+                self.refs.push((k, Slim { entry: 0, rule }));
             }
-            _ => self.map.push((key, (order, why))),
+            _ => self.map.push((key, why)),
         }
         Ok(())
     }

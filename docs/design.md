@@ -678,7 +678,7 @@ flowchart TD
 3. Function bodies are disjoint, and each body contains its entry. The ownership map equals the union of bodies.
 4. Each address has at most one primary symbol.
 5. Code units do not overlap.
-6. Every ANALYSIS fact has a `Why`. Every premise of a `Why` exists and has a lower creation order (the graph is acyclic).
+6. Every ANALYSIS fact has a `Why`. Every premise of a `Why` exists, and the premise graph has no cycle. A why-record keeps no creation order (ADR-0031).
 7. `rev` increases by one per non-no-op commit, and the event ring covers each rev that it holds.
 8. Every jump-table target and every indirect call target is an instruction start inside an executable region or an import.
 9. Every note evidence ID parses.

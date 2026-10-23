@@ -8,7 +8,7 @@ Verified by: none yet
 
 - The engine keeps the whole analysis set and the whole work state in memory. Each publish replaces the whole set with one `ReplaceAnalysis` edit. The snapshot is one JSON file.
 - The compact records of the `perf/compact-units` branch cut the memory for each code unit. They give a constant factor only. The memory still grows with the size of the binary.
-- Some steps read the whole set: the creation order of the why-records, the noreturn propagation and the gap components. The engine uses one thread.
+- Some steps read the whole set: the premise walk of the why-records, the noreturn propagation and the gap components. The engine uses one thread.
 
 Measurements in Docker on Linux with a 16 GB limit:
 
@@ -53,7 +53,7 @@ The work goes in four stages. Each stage is one pull request with its own measur
 
 ## Rules that change
 
-- Invariant 6 of design Section 3.11 and ADR-0023: the creation order of the why-records. The rule stays. Only its scope changes from one set to a list of shards.
+- Invariant 6 of design Section 3.11: a why-record keeps no creation order. The rule becomes "the premise graph has no cycle".
 - AC-092, AC-093, AC-094 and AC-120a.
 - ADR-0016: one `ReplaceAnalysis` edit for each publish.
 - The snapshot format and its migration.
@@ -61,8 +61,11 @@ The work goes in four stages. Each stage is one pull request with its own measur
 ## Decisions of the owner
 
 1. The shard size is 4 MiB.
-2. The creation order of the why-records stays global (option A). One walk over the compact records of all shards gives the order. The facts do not change. The walk costs about 40 bytes for each record.
+2. The premise walk of the why-records stays global (option A). One walk over the compact records of all shards cuts the premises that close a cycle. So the facts and the premises do not change.
 3. The default `max_steps` of `binary_load` stays at 100 M. An agent continues a large binary with `analysis_run`.
+4. A why-record keeps no creation order. With a global counter, one new record changes the order of each later record in all shards. Then each publish changes all shards. The check of invariant 6 finds cycles with a walk of the premise graph.
+
+The owner chose decision 4 over option B after a measurement on 2026-10-23. A walk in each shard must cut each premise in a later shard. A simulation of libsystemd.so.0 with 64 KiB shards cut 0.8% of the premises. Then 437 of 2,173 functions and 581 of 4,132 strings had no premise.
 
 ## Alternatives
 

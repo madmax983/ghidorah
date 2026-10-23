@@ -46,7 +46,6 @@ fn check(path: &str, p: &Program) -> usize {
     assert!(found.is_empty(), "{path}: {found:?}");
     let a = p.analysis();
     let keys = fact_keys(a);
-    let mut order = BTreeMap::new();
     for key in &keys {
         let why = a
             .why()
@@ -57,22 +56,46 @@ fn check(path: &str, p: &Program) -> usize {
             "{path}: {} is a catalog rule",
             why.rule
         );
-        order.insert(key.clone(), a.why().order(key).expect("an order"));
     }
-    // A premise in the analysis layer has a lower order. Other premises are base-layer facts
-    // or inputs. So a walk from any fact ends.
+    // A premise in the analysis layer is an edge of the premise graph. Other premises are
+    // base-layer facts or inputs. A graph with no cycle drains in a topological order, so a
+    // walk from any fact ends.
     let held: BTreeSet<&FactKey> = keys.iter().collect();
+    let mut waits: BTreeMap<&FactKey, usize> = BTreeMap::new();
+    let mut users: BTreeMap<FactKey, Vec<&FactKey>> = BTreeMap::new();
     for key in &keys {
         let why = a.why().get(key).expect("a record");
-        for premise in &why.premises {
-            if held.contains(premise) {
-                assert!(
-                    order[premise] < order[key],
-                    "{path}: {premise:?} is older than {key:?}"
-                );
+        let inside: Vec<FactKey> = why
+            .premises
+            .into_iter()
+            .filter(|q| held.contains(q))
+            .collect();
+        waits.insert(key, inside.len());
+        for q in inside {
+            users.entry(q).or_default().push(key);
+        }
+    }
+    let mut ready: Vec<&FactKey> = waits
+        .iter()
+        .filter(|(_, n)| **n == 0)
+        .map(|(k, _)| *k)
+        .collect();
+    let mut drained = 0;
+    while let Some(key) = ready.pop() {
+        drained += 1;
+        for user in users.get(key).into_iter().flatten() {
+            let n = waits.get_mut(user).expect("a user");
+            *n -= 1;
+            if *n == 0 {
+                ready.push(user);
             }
         }
     }
+    assert_eq!(
+        drained,
+        keys.len(),
+        "{path}: the premise graph has no cycle"
+    );
     keys.len()
 }
 
@@ -82,7 +105,7 @@ fn ac_094_why_records() {
     let mut rules = BTreeSet::new();
     for (path, p) in all_t1() {
         facts += check(path, p);
-        for (_, _, why) in p.analysis().why().iter() {
+        for (_, why) in p.analysis().why().iter() {
             rules.insert(why.rule.as_str().to_owned());
         }
     }

@@ -12,8 +12,10 @@
 //! | `symbols` | `{"addr","key","kind","primary","name"}` |
 //! | `units` | `{"at","len","flow","flags"}` |
 //! | `vars` | `{"var","name","ty"}` |
-//! | `why` | `{"key","order","rule","premises"}` |
-//! | `why_next` | the creation order of the next why-record. The fact dump leaves it out. |
+//! | `why` | `{"key","rule","premises"}` |
+//!
+//! A reader also takes the `order` of a why row and the `why_next` member of format version 2
+//! and before. It ignores both values (ADR-0031).
 
 use std::collections::BTreeSet;
 
@@ -36,7 +38,7 @@ use crate::strings::StrInfo;
 use crate::symbols::Symbol;
 use crate::why::{RuleCode, Why, WhyRows};
 
-/// The member names of the tables of a layer.
+/// The member names of the tables of a layer. A writer leaves out `why_next`.
 const NAMES: [&str; 12] = [
     "comments",
     "data",
@@ -88,10 +90,9 @@ fn member_rows(t: &Tables) -> [(&'static str, Rows<'_>); 11] {
             ("flags", flags.enc()),
         ])
     });
-    let why = t.why.iter().map(|(key, order, why)| {
+    let why = t.why.iter().map(|(key, why)| {
         obj([
             ("key", key.enc()),
-            ("order", order.enc()),
             ("rule", why.rule.enc()),
             ("premises", why.premises.enc()),
         ])
@@ -132,30 +133,23 @@ fn member_rows(t: &Tables) -> [(&'static str, Rows<'_>); 11] {
     ]
 }
 
-/// Gives the JSON form of the tables of a layer. `counters` adds `why_next`.
-pub(super) fn encode(t: &Tables, counters: bool) -> Value {
-    let mut members: Vec<(&str, Value)> = member_rows(t)
-        .into_iter()
-        .map(|(name, rows)| (name, Value::Array(rows.collect())))
-        .collect();
-    if counters {
-        members.push(("why_next", t.why.next_order().enc()));
-    }
-    Value::object(members)
+/// Gives the JSON form of the tables of a layer.
+pub(super) fn encode(t: &Tables) -> Value {
+    Value::object(
+        member_rows(t)
+            .into_iter()
+            .map(|(name, rows)| (name, Value::Array(rows.collect()))),
+    )
 }
 
 /// Writes the JCS text of [`encode`] to `sink` in pieces, one row at a time. The pieces join
-/// to the same bytes as `write_jcs(&encode(t, counters))`, but no JSON value of the whole
+/// to the same bytes as `write_jcs(&encode(t))`, but no JSON value of the whole
 /// layer exists.
 ///
 /// # Errors
 ///
 /// Returns the [`JcsError`] of a row that has no JCS form.
-pub(super) fn write_jcs_to(
-    t: &Tables,
-    counters: bool,
-    sink: &mut dyn FnMut(&str),
-) -> Result<(), JcsError> {
+pub(super) fn write_jcs_to(t: &Tables, sink: &mut dyn FnMut(&str)) -> Result<(), JcsError> {
     sink("{");
     for (i, (name, rows)) in member_rows(t).into_iter().enumerate() {
         if i > 0 {
@@ -169,10 +163,6 @@ pub(super) fn write_jcs_to(
             sink(&write_jcs(&row)?);
         }
         sink("]");
-    }
-    if counters {
-        sink(",\"why_next\":");
-        sink(&write_jcs(&t.why.next_order().enc())?);
     }
     sink("}");
     Ok(())
@@ -247,10 +237,8 @@ pub struct SetRows {
     pub symbols: Vec<Symbol>,
     /// The code units by RAM offset.
     pub units: Vec<(u64, CodeUnit)>,
-    /// The why-records: key, creation order and record.
+    /// The why-records: key and record.
     pub why: WhyRows,
-    /// The creation order of the next why-record.
-    pub why_next: u64,
 }
 
 /// Makes the tables of an analysis set from `rows`. Each row goes through the write path
@@ -278,7 +266,6 @@ pub(super) fn from_rows(rows: SetRows) -> Result<Tables, CodecError> {
     }
     out.listing.extend_units(rows.units).map_err(|(_, e)| e)?;
     out.why.extend_rows(rows.why)?;
-    out.why.set_next(rows.why_next);
     Ok(out)
 }
 
@@ -380,11 +367,10 @@ fn records(form: Obj<'_>, out: &mut Tables) -> Result<(), CodecError> {
             rule,
             premises: cells.get("premises")?,
         };
-        whys.push(cells.get("key")?, cells.get("order")?, why)?;
+        whys.push(cells.get("key")?, why)?;
         Ok(())
     })?;
     out.why.extend_rows(whys)?;
-    out.why.set_next(form.get("why_next")?);
     Ok(())
 }
 
@@ -462,8 +448,8 @@ pub(super) fn facts(p: &Program) -> Value {
     let sha = ghidorah_base::hex::encode(&p.meta().sha256);
     let notes = Value::Array(p.notes().iter().map(Json::enc).collect());
     obj([
-        ("analysis", encode(p.analysis(), false)),
-        ("base", encode(p.base(), false)),
+        ("analysis", encode(p.analysis())),
+        ("base", encode(p.base())),
         ("binary", Value::from(sha)),
         ("notes", notes),
         ("types", super::types_to_json(p.types())),
