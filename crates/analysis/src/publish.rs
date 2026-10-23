@@ -314,6 +314,9 @@ pub(crate) fn analysis_set(program: &Program, work: &Work) -> Result<AnalysisSet
         why.push(rec.key(), n, record)?;
     }
     drop(records);
+    // The flow references and the operand references go in key order, so the table of the
+    // set takes them in one bulk build.
+    facts.refs.sort_unstable_by_key(|r| r.key);
     let mut rows = SetRows {
         data,
         funcs: facts.funcs,

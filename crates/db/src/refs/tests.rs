@@ -223,3 +223,47 @@ fn ref_ids_use_the_type_name() {
     let k = key(0x40_1136, 1, 0x40_2010, RefType::Read);
     assert_eq!(k.id().unwrap().to_string(), "ref:0x401136>0x402010:read");
 }
+
+#[test]
+fn a_bulk_build_of_refs_matches_one_add_at_a_time() {
+    let facts = |keys: &[RefKey]| -> Vec<crate::fact::Fact<Ref>> {
+        keys.iter()
+            .map(|k| {
+                agent().fact(Ref {
+                    key: *k,
+                    primary: true,
+                })
+            })
+            .collect()
+    };
+    let one_by_one = |facts: Vec<crate::fact::Fact<Ref>>| {
+        let mut refs = Refs::default();
+        for f in facts {
+            refs.add(f.value, &f.origin()).unwrap();
+        }
+        refs
+    };
+    let a = key(0x10, -1, 0x40, RefType::UnconditionalCall);
+    let b = key(0x10, 0, 0x30, RefType::Read);
+    let c = key(0x20, -1, 0x10, RefType::UnconditionalJump);
+    // Keys in order, out of order and twice.
+    for keys in [&[a, b, c][..], &[c, a, b], &[a, a, c], &[]] {
+        let mut bulk = Refs::default();
+        bulk.extend_new(facts(keys)).unwrap();
+        assert_eq!(bulk, one_by_one(facts(keys)), "{keys:?}");
+        assert!(bulk.to_index().eq(one_by_one(facts(keys)).to_index()));
+    }
+    let default = Origin::new(
+        Source::Default,
+        TxId(0),
+        SessionLabel::new("cli").unwrap(),
+        false,
+    );
+    let bad = vec![default.fact(Ref {
+        key: a,
+        primary: true,
+    })];
+    let mut refs = Refs::default();
+    assert!(refs.extend_new(bad).is_err());
+    assert!(refs.is_empty());
+}

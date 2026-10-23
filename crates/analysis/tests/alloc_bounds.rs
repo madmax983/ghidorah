@@ -329,3 +329,49 @@ fn regress_work_state_keeps_reference_keys_only() {
     let per_call = with_calls.saturating_sub(plain) / refs;
     assert!(per_call <= 1_480, "a call keeps {per_call} bytes");
 }
+
+/// The reference table and the listing of a new set take their rows in one bulk build each.
+/// One insert at a time in key order left each node about half full. A unit and a reference
+/// kept 328 bytes; now 177.
+#[test]
+fn regress_set_tables_build_full_nodes() {
+    use ghidorah_base::Address;
+    use ghidorah_db::codec::{SetRows, tables_from_rows};
+    use ghidorah_db::listing::{CodeUnit, FlowKind};
+    use ghidorah_db::{Origin, Ref, RefKey, RefType};
+
+    let n = 20_000u64;
+    let origin = Origin::analysis();
+    let (tables, stats) = ALLOC.measure(|| {
+        let unit = CodeUnit::Insn {
+            len: 4,
+            flow: FlowKind::Call,
+            flags: 0,
+        };
+        let key = |i: u64| RefKey {
+            from: Address::ram(i * 4),
+            op_index: -1,
+            to: Address::ram(0x10_0000),
+            kind: RefType::UnconditionalCall,
+        };
+        let rows = SetRows {
+            units: (0..n).map(|i| (i * 4, unit)).collect(),
+            refs: (0..n)
+                .map(|i| {
+                    origin.fact(Ref {
+                        key: key(i),
+                        primary: true,
+                    })
+                })
+                .collect(),
+            ..SetRows::default()
+        };
+        tables_from_rows(rows).expect("the rows")
+    });
+    assert_eq!(tables.refs().len(), 20_000);
+    assert!(
+        stats.retained_bytes <= 20_000 * 250,
+        "the tables keep {} bytes for 20,000 units and references",
+        stats.retained_bytes
+    );
+}

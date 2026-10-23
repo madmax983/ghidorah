@@ -166,3 +166,30 @@ fn data_follows_the_write_rule_and_does_not_overlap() {
     assert_eq!(l.set_data(0x100, None, &agent).unwrap(), None);
     l.set_data(0x0fe, Some(def(4)), &agent).unwrap();
 }
+
+#[test]
+fn a_bulk_build_of_units_matches_one_insert_at_a_time() {
+    let one_by_one = |units: &[(u64, CodeUnit)]| {
+        let mut l = Listing::default();
+        let mut result = Ok(());
+        for (i, (off, u)) in units.iter().enumerate() {
+            result = result.and_then(|()| l.insert_unit(*off, *u).map_err(|e| (i, e)));
+        }
+        (l, result)
+    };
+    let cases: [&[(u64, CodeUnit)]; 4] = [
+        &[(0x10, insn(4)), (0x14, insn(2)), (0x20, insn(15))],
+        &[(0x20, insn(4)), (0x10, insn(4))],
+        &[(0x10, insn(8)), (0x14, insn(2))],
+        &[(0x10, insn(0))],
+    ];
+    for units in cases {
+        let mut bulk = Listing::default();
+        let result = bulk.extend_units(units.to_vec());
+        let (single, expected) = one_by_one(units);
+        assert_eq!(result, expected, "{units:?}");
+        if result.is_ok() {
+            assert_eq!(bulk, single, "{units:?}");
+        }
+    }
+}
