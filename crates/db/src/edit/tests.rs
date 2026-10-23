@@ -512,7 +512,7 @@ fn signature_on_a_discovered_function_makes_a_holder_record() {
     assert_eq!(view.sig.map(|fact| fact.value), Some(fn_type));
     assert_eq!(
         view.func.body,
-        tx.program().analysis().funcs().get(f).unwrap().body
+        tx.program().analysis().func(f).unwrap().body
     );
     let e = Edit::SetNoreturn {
         id: FuncId(ram(0x1100)),

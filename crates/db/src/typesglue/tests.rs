@@ -153,8 +153,13 @@ fn a_snapshot_keeps_the_types() {
     .unwrap();
     tx.commit().unwrap();
     let text = crate::snapshot::encode(&p, 1, None).unwrap();
-    let snap =
-        crate::snapshot::decode(text.as_bytes(), &crate::migrate::ExtMap::default()).unwrap();
+    let mut read = crate::tests::shard_reader(&p);
+    let snap = crate::snapshot::decode(
+        text.as_bytes(),
+        &crate::migrate::ExtMap::default(),
+        &mut read,
+    )
+    .unwrap();
     let mut back = fresh;
     snap.restore(&mut back).unwrap();
     assert_eq!(back.types(), p.types());

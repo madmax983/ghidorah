@@ -4,9 +4,12 @@
 //! the JSON decoder. Each push packs a record of a compact shape at once, so no list of all
 //! full records exists. [`super::WhyStore`] takes the packed maps in one bulk build each.
 
+use std::collections::BTreeMap;
+
 use super::store::{Compact, Slim, check, compact, intern};
 use super::{FactKey, RuleCode, Why};
 use crate::fact::Invalid;
+use crate::program::ShardId;
 use crate::refs::RefKey;
 
 /// The why-records of a new layer: key and record.
@@ -94,4 +97,58 @@ impl WhyRows {
         }
         Ok(())
     }
+
+    /// Puts each row in the shard of its key. Each shard keeps the row order and a copy of
+    /// the rule list, so its compact rows keep their rule indexes.
+    #[must_use]
+    pub(crate) fn split(self) -> BTreeMap<ShardId, Self> {
+        let Self {
+            map,
+            units,
+            refs,
+            rules,
+            loose,
+            ..
+        } = self;
+        let mut out: BTreeMap<ShardId, Self> = BTreeMap::new();
+        for (key, why) in map {
+            part(&mut out, &rules, ShardId::of_key(&key))
+                .map
+                .push((key, why));
+        }
+        for (at, s) in units {
+            part(&mut out, &rules, ShardId::of_off(at))
+                .units
+                .push((at, s));
+        }
+        for (k, s) in refs {
+            part(&mut out, &rules, ShardId::of(k.from))
+                .refs
+                .push((k, s));
+        }
+        for (key, why) in loose {
+            part(&mut out, &rules, ShardId::of_key(&key))
+                .loose
+                .push((key, why));
+        }
+        for rows in out.values_mut() {
+            let unit = rows.units.last().map(|(at, _)| FactKey::CodeUnit(*at));
+            let r = rows.refs.last().map(|(k, _)| FactKey::Ref(*k));
+            let general = rows.map.last().map(|(k, _)| k.clone());
+            rows.last = [unit, r, general].into_iter().flatten().max();
+        }
+        out
+    }
+}
+
+/// Gives the rows of the shard `id` in `out`. A new shard gets a copy of `rules`.
+fn part<'a>(
+    out: &'a mut BTreeMap<ShardId, WhyRows>,
+    rules: &[RuleCode],
+    id: ShardId,
+) -> &'a mut WhyRows {
+    out.entry(id).or_insert_with(|| WhyRows {
+        rules: rules.to_vec(),
+        ..WhyRows::default()
+    })
 }

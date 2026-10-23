@@ -6,7 +6,7 @@ use ghidorah_kernel::RangeSet;
 use ghidorah_loader::{LoadOpts, load};
 use ghidorah_types::TypeId;
 
-use super::{AnalysisSet, Program};
+use super::{Program, Tables};
 use crate::comments::CommentKind;
 use crate::fact::{Invalid, Origin, SessionLabel};
 use crate::funcs::{Function, StartReason};
@@ -57,7 +57,7 @@ fn text(p: &Program, addr: Address) -> Option<(String, Source)> {
 fn default_names_computed_on_read() {
     let mut p = program("hello.gcc-O2.stripped");
     let symbols_before = p.base().symbols().len();
-    let analysis = p.layer_mut(Source::Analysis).unwrap();
+    let analysis = p.analysis_at_mut(ghidorah_base::Address::ram(0x1000));
     analysis
         .funcs
         .insert(func(0x1080, 0x1088, Source::Analysis))
@@ -126,7 +126,7 @@ fn default_names_computed_on_read() {
         symbols_before,
         "a read stores no name"
     );
-    assert!(p.analysis().symbols().is_empty());
+    assert!(p.analysis().shards().all(|(_, t)| t.symbols().is_empty()));
     assert!(p.addrs_named("FUN_00001080").is_empty());
 
     p.layer_mut(Source::Agent)
@@ -220,7 +220,7 @@ fn from_binary_gives_imported_symbols_and_imports() {
     assert_eq!(meta.file_size, u64::try_from(p.mem().file().len()).unwrap());
     assert_eq!(meta.bits, 64);
     assert_eq!(p.rev(), Rev(0));
-    assert!(p.analysis().funcs().is_empty());
+    assert!(p.analysis().funcs().next().is_none());
     assert!(p.notes().is_empty());
     assert!(p.progress().iter().next().is_none());
     assert!(p.types().store().lookup_typedef("size_t").is_some());
@@ -238,18 +238,25 @@ fn layers_route_writes_by_source() {
         p.layer_mut(s).unwrap().strings.insert(0x2000, info());
         assert_eq!(p.base().strings().len(), 1, "{s}");
     }
-    p.layer_mut(Source::Analysis)
-        .unwrap()
+    assert_eq!(
+        p.layer_mut(Source::Analysis).unwrap_err(),
+        Invalid::BadSource(Source::Analysis)
+    );
+    p.analysis_at_mut(Address::ram(0x2001))
         .strings
         .insert(0x2001, info());
-    assert_eq!(p.analysis().strings().len(), 1);
+    assert_eq!(p.string(0x2001), Some(&info()));
 
-    let mut fresh = AnalysisSet::default();
+    let mut fresh = Tables::default();
     fresh.strings.insert(0x2002, info());
+    let fresh = crate::codec::set_from_tables(&fresh).unwrap();
     let old = p.swap_analysis(Arc::new(fresh));
-    assert_eq!(old.strings().get(0x2001), Some(&info()));
-    assert_eq!(p.analysis().strings().get(0x2002), Some(&info()));
-    assert!(p.analysis().strings().get(0x2001).is_none());
+    assert_eq!(
+        old.at_off(0x2001).unwrap().strings().get(0x2001),
+        Some(&info())
+    );
+    assert_eq!(p.string(0x2002), Some(&info()));
+    assert!(p.string(0x2001).is_none());
 
     p.set_rev(Rev(5));
     assert_eq!(p.rev(), Rev(5));
@@ -278,7 +285,7 @@ fn merged_functions_take_the_body_from_analysis_and_the_source_from_base() {
     base.funcs
         .insert(func(0x11c0, 0x11c0, Source::Agent))
         .unwrap();
-    let analysis = p.layer_mut(Source::Analysis).unwrap();
+    let analysis = p.analysis_at_mut(ghidorah_base::Address::ram(0x1000));
     analysis
         .funcs
         .insert(func(0x1080, 0x1088, Source::Analysis))
@@ -387,7 +394,7 @@ fn seeded() -> (Program, Seed) {
         },
     };
     let origin = Origin::analysis();
-    let layer = p.layer_mut(Source::Analysis).unwrap();
+    let layer = p.analysis_at_mut(ghidorah_base::Address::ram(0x1000));
     layer
         .symbols
         .add(a, "main".to_string(), SymKind::Function, &origin)
@@ -551,7 +558,7 @@ fn regress_refs_from_merge_keeps_key_order() {
         to: ram(0x2000),
         kind: RefType::Read,
     };
-    let analysis = p.layer_mut(Source::Analysis).unwrap();
+    let analysis = p.analysis_at_mut(ghidorah_base::Address::ram(0x1000));
     let r = Ref {
         key: first,
         primary: true,

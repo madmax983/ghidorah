@@ -19,26 +19,36 @@
 
 use std::collections::BTreeSet;
 
-use ghidorah_base::{Address, JumpTableId, Range, Rev};
+use ghidorah_base::{Range, Rev};
 use ghidorah_json::{JcsError, Value, write_jcs};
 
 use super::edit::{var_from_row, var_row};
+use super::rows::{SetRows, from_rows, set_from_rows};
 use super::values::{Json, Off, obj};
 use super::{CodecError, Obj};
-use crate::comments::CommentKind;
-use crate::fact::{Fact, WriteError};
-use crate::funcs::Function;
-use crate::jumptables::JumpTable;
-use crate::listing::{CodeUnit, DataDef};
+use crate::listing::CodeUnit;
 use crate::notes::{Note, Notes};
-use crate::program::{Program, Tables};
+use crate::program::{AnalysisSet, Program, Tables};
 use crate::progress::{FuncProgress, Mark, Progress};
-use crate::refs::Ref;
-use crate::strings::StrInfo;
 use crate::symbols::Symbol;
 use crate::why::{RuleCode, Why, WhyRows};
 
-/// The member names of the tables of a layer. A writer leaves out `why_next`.
+/// The list members of the tables of a layer, in JCS order.
+const LIST: [&str; 11] = [
+    "comments",
+    "data",
+    "funcs",
+    "jumptables",
+    "overrides",
+    "refs",
+    "strings",
+    "symbols",
+    "units",
+    "vars",
+    "why",
+];
+
+/// The member names that a reader takes. A writer leaves out `why_next`.
 const NAMES: [&str; 12] = [
     "comments",
     "data",
@@ -59,14 +69,6 @@ const ALL: Range = Range {
     first: 0,
     last: u64::MAX,
 };
-
-/// Gives the codec error of a manager write.
-fn werr<T>(e: WriteError<T>) -> CodecError {
-    match e {
-        WriteError::Invalid(i) => i.into(),
-        WriteError::Blocked(_) => CodecError::text("unique key"),
-    }
-}
 
 /// The rows of one list member of the JSON form of a layer.
 type Rows<'a> = Box<dyn Iterator<Item = Value> + 'a>;
@@ -133,25 +135,39 @@ fn member_rows(t: &Tables) -> [(&'static str, Rows<'_>); 11] {
     ]
 }
 
-/// Gives the JSON form of the tables of a layer.
-pub(super) fn encode(t: &Tables) -> Value {
+/// The rows of each list member of a layer, in member order.
+type Members<'a> = [(&'static str, Rows<'a>); 11];
+
+/// Gives the rows of each list member of the set `set`. Each member gives the rows of each
+/// shard in address order.
+fn set_member_rows(set: &AnalysisSet) -> Members<'_> {
+    let mut parts: Vec<std::array::IntoIter<(&'static str, Rows<'_>), 11>> = set
+        .shards()
+        .map(|(_, t)| member_rows(t).into_iter())
+        .collect();
+    LIST.map(|name| {
+        let rows: Vec<Rows<'_>> = parts
+            .iter_mut()
+            .filter_map(|p| p.next().map(|(_, r)| r))
+            .collect();
+        let chained: Rows<'_> = Box::new(rows.into_iter().flatten());
+        (name, chained)
+    })
+}
+
+/// Gives the JSON form of the members `members`.
+fn encode_members(members: Members<'_>) -> Value {
     Value::object(
-        member_rows(t)
+        members
             .into_iter()
             .map(|(name, rows)| (name, Value::Array(rows.collect()))),
     )
 }
 
-/// Writes the JCS text of [`encode`] to `sink` in pieces, one row at a time. The pieces join
-/// to the same bytes as `write_jcs(&encode(t))`, but no JSON value of the whole
-/// layer exists.
-///
-/// # Errors
-///
-/// Returns the [`JcsError`] of a row that has no JCS form.
-pub(super) fn write_jcs_to(t: &Tables, sink: &mut dyn FnMut(&str)) -> Result<(), JcsError> {
+/// Writes the JCS text of the members `members` to `sink` in pieces, one row at a time.
+fn write_members(members: Members<'_>, sink: &mut dyn FnMut(&str)) -> Result<(), JcsError> {
     sink("{");
-    for (i, (name, rows)) in member_rows(t).into_iter().enumerate() {
+    for (i, (name, rows)) in members.into_iter().enumerate() {
         if i > 0 {
             sink(",");
         }
@@ -168,6 +184,39 @@ pub(super) fn write_jcs_to(t: &Tables, sink: &mut dyn FnMut(&str)) -> Result<(),
     Ok(())
 }
 
+/// Gives the JSON form of the tables of a layer.
+pub(super) fn encode(t: &Tables) -> Value {
+    encode_members(member_rows(t))
+}
+
+/// Gives the JSON form of an analysis set: the form of one layer with the rows of each
+/// shard in address order.
+pub(super) fn encode_set(set: &AnalysisSet) -> Value {
+    encode_members(set_member_rows(set))
+}
+
+/// Writes the JCS text of [`encode`] to `sink` in pieces, one row at a time. The pieces join
+/// to the same bytes as `write_jcs(&encode(t))`, but no JSON value of the whole layer exists.
+///
+/// # Errors
+///
+/// Returns the [`JcsError`] of a row that has no JCS form.
+pub(super) fn write_jcs_to(t: &Tables, sink: &mut dyn FnMut(&str)) -> Result<(), JcsError> {
+    write_members(member_rows(t), sink)
+}
+
+/// Writes the JCS text of [`encode_set`] to `sink` in pieces, one row at a time.
+///
+/// # Errors
+///
+/// Returns the [`JcsError`] of a row that has no JCS form.
+pub(super) fn write_set_jcs_to(
+    set: &AnalysisSet,
+    sink: &mut dyn FnMut(&str),
+) -> Result<(), JcsError> {
+    write_members(set_member_rows(set), sink)
+}
+
 fn symbol_row(s: &Symbol) -> Value {
     obj([
         ("addr", s.addr.enc()),
@@ -180,151 +229,59 @@ fn symbol_row(s: &Symbol) -> Value {
 
 /// Reads the tables of a layer. Each row goes through the write path of its manager.
 pub(super) fn decode(value: &Value) -> Result<Tables, CodecError> {
+    from_rows(parse(value)?)
+}
+
+/// Reads an analysis set. Each row goes in the shard of its key.
+pub(super) fn decode_set(value: &Value) -> Result<AnalysisSet, CodecError> {
+    set_from_rows(parse(value)?, &AnalysisSet::new())
+}
+
+/// Reads the typed rows of a layer.
+fn parse(value: &Value) -> Result<SetRows, CodecError> {
     let form = Obj::new(value, &NAMES)?;
-    let mut out = Tables::default();
-    form.each("comments", |row| {
-        let cells = Obj::new(row, &["addr", "kind", "text"])?;
-        put_comment(
-            &mut out,
-            cells.get("addr")?,
-            cells.get("kind")?,
-            cells.get("text")?,
-        )
-    })?;
-    form.each("data", |row| {
-        let cells = Obj::new(row, &["at", "def"])?;
-        put_data(&mut out, cells.get::<Off>("at")?.0, &cells.get("def")?)
-    })?;
-    form.each("funcs", |row| Ok(out.funcs.insert(Json::dec(row)?)?))?;
-    form.each("jumptables", |row| {
-        let cells = Obj::new(row, &["at", "table"])?;
-        put_jumptable(&mut out, cells.get("at")?, cells.get("table")?)
-    })?;
-    form.each("overrides", |row| {
-        let cells = Obj::new(row, &["at", "flow"])?;
-        let fact: Fact<_> = cells.get("flow")?;
-        let origin = fact.origin();
-        out.overrides
-            .set(cells.get("at")?, Some(fact.value), &origin)
-            .map_err(werr)
-            .map(drop)
-    })?;
-    let refs: Vec<Fact<Ref>> = form.each("refs", Json::dec)?;
-    out.refs
-        .extend_new(refs)
-        .map_err(|(i, e)| werr(e).at_index(i).at("refs"))?;
+    let mut out = SetRows {
+        comments: form.each("comments", |row| {
+            let cells = Obj::new(row, &["addr", "kind", "text"])?;
+            Ok((cells.get("addr")?, cells.get("kind")?, cells.get("text")?))
+        })?,
+        data: form.each("data", |row| {
+            let cells = Obj::new(row, &["at", "def"])?;
+            Ok((cells.get::<Off>("at")?.0, cells.get("def")?))
+        })?,
+        funcs: form.each("funcs", Json::dec)?,
+        jumptables: form.each("jumptables", |row| {
+            let cells = Obj::new(row, &["at", "table"])?;
+            Ok((cells.get("at")?, cells.get("table")?))
+        })?,
+        overrides: form.each("overrides", |row| {
+            let cells = Obj::new(row, &["at", "flow"])?;
+            Ok((cells.get("at")?, cells.get("flow")?))
+        })?,
+        refs: form.each("refs", Json::dec)?,
+        ..SetRows::default()
+    };
     records(form, &mut out)?;
     Ok(out)
 }
 
-/// The typed rows of an analysis set: the rows of [`crate::codec::tables_from_json`] with no
-/// JSON form. A layer of the analysis has no flow overrides and no variables.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct SetRows {
-    /// The comments: address, kind and text.
-    pub comments: Vec<(Address, CommentKind, Fact<String>)>,
-    /// The data definitions by RAM offset.
-    pub data: Vec<(u64, Fact<DataDef>)>,
-    /// The functions.
-    pub funcs: Vec<Function>,
-    /// The jump tables.
-    pub jumptables: Vec<(JumpTableId, Fact<JumpTable>)>,
-    /// The references.
-    pub refs: Vec<Fact<Ref>>,
-    /// The strings by RAM offset.
-    pub strings: Vec<(u64, StrInfo)>,
-    /// The symbols.
-    pub symbols: Vec<Symbol>,
-    /// The code units by RAM offset.
-    pub units: Vec<(u64, CodeUnit)>,
-    /// The why-records: key and record.
-    pub why: WhyRows,
-}
-
-/// Makes the tables of an analysis set from `rows`. Each row goes through the write path
-/// of its manager in the order of [`decode`], so both paths keep the same rules.
-pub(super) fn from_rows(rows: SetRows) -> Result<Tables, CodecError> {
-    let mut out = Tables::default();
-    for (addr, kind, text) in rows.comments {
-        put_comment(&mut out, addr, kind, text)?;
-    }
-    for (at, def) in &rows.data {
-        put_data(&mut out, *at, def)?;
-    }
-    for func in rows.funcs {
-        out.funcs.insert(func)?;
-    }
-    for (id, table) in rows.jumptables {
-        put_jumptable(&mut out, id, table)?;
-    }
-    out.refs.extend_new(rows.refs).map_err(|(_, e)| werr(e))?;
-    for (at, info) in rows.strings {
-        out.strings.insert(at, info);
-    }
-    for symbol in rows.symbols {
-        out.symbols.put_exact(symbol)?;
-    }
-    out.listing.extend_units(rows.units).map_err(|(_, e)| e)?;
-    out.why.extend_rows(rows.why)?;
-    Ok(out)
-}
-
-/// Writes one comment row.
-fn put_comment(
-    out: &mut Tables,
-    addr: Address,
-    kind: CommentKind,
-    text: Fact<String>,
-) -> Result<(), CodecError> {
-    let origin = text.origin();
-    out.comments
-        .set(addr, kind, Some(text.value), &origin)
-        .map_err(werr)
-        .map(drop)
-}
-
-/// Writes one data definition row.
-fn put_data(out: &mut Tables, at: u64, def: &Fact<DataDef>) -> Result<(), CodecError> {
-    let origin = def.origin();
-    out.listing
-        .set_data(at, Some(def.value), &origin)
-        .map_err(werr)
-        .map(drop)
-}
-
-/// Writes one jump table row.
-fn put_jumptable(
-    out: &mut Tables,
-    id: JumpTableId,
-    table: Fact<JumpTable>,
-) -> Result<(), CodecError> {
-    let origin = table.origin();
-    out.jumptables
-        .set(id, Some(table.value), &origin)
-        .map_err(werr)
-        .map(drop)
-}
-
 /// Reads the string, symbol, unit, variable and why rows of a layer.
-fn records(form: Obj<'_>, out: &mut Tables) -> Result<(), CodecError> {
-    form.each("strings", |row| {
+fn records(form: Obj<'_>, out: &mut SetRows) -> Result<(), CodecError> {
+    out.strings = form.each("strings", |row| {
         let cells = Obj::new(row, &["at", "info"])?;
-        out.strings
-            .insert(cells.get::<Off>("at")?.0, cells.get("info")?);
-        Ok(())
+        Ok((cells.get::<Off>("at")?.0, cells.get("info")?))
     })?;
-    form.each("symbols", |row| {
+    out.symbols = form.each("symbols", |row| {
         let cells = Obj::new(row, &["addr", "key", "kind", "primary", "name"])?;
-        let symbol = Symbol {
+        Ok(Symbol {
             addr: cells.get("addr")?,
             key: cells.get("key")?,
             name: cells.get("name")?,
             kind: cells.get("kind")?,
             primary: cells.get("primary")?,
-        };
-        Ok(out.symbols.put_exact(symbol).map(drop)?)
+        })
     })?;
-    let units = form.each("units", |row| {
+    out.units = form.each("units", |row| {
         let cells = Obj::new(row, &["at", "len", "flow", "flags"])?;
         let unit = CodeUnit::Insn {
             len: cells.get("len")?,
@@ -333,25 +290,7 @@ fn records(form: Obj<'_>, out: &mut Tables) -> Result<(), CodecError> {
         };
         Ok((cells.get::<Off>("at")?.0, unit))
     })?;
-    out.listing
-        .extend_units(units)
-        .map_err(|(i, e)| CodecError::from(e).at_index(i).at("units"))?;
-    form.each("vars", |row| {
-        let (var, facts) = var_from_row(row)?;
-        if let Some(n) = facts.name {
-            let origin = n.origin();
-            out.vars
-                .set_name(&var, Some(n.value), &origin)
-                .map_err(werr)?;
-        }
-        if let Some(ty) = facts.ty {
-            let origin = ty.origin();
-            out.vars
-                .set_type(&var, Some(ty.value), &origin)
-                .map_err(werr)?;
-        }
-        Ok(())
-    })?;
+    out.vars = form.each("vars", var_from_row)?;
     let mut whys = WhyRows::new();
     let mut codes: BTreeSet<RuleCode> = BTreeSet::new();
     form.each("why", |row| {
@@ -370,7 +309,7 @@ fn records(form: Obj<'_>, out: &mut Tables) -> Result<(), CodecError> {
         whys.push(cells.get("key")?, why)?;
         Ok(())
     })?;
-    out.why.extend_rows(whys)?;
+    out.why = whys;
     Ok(())
 }
 
@@ -448,7 +387,7 @@ pub(super) fn facts(p: &Program) -> Value {
     let sha = ghidorah_base::hex::encode(&p.meta().sha256);
     let notes = Value::Array(p.notes().iter().map(Json::enc).collect());
     obj([
-        ("analysis", encode(p.analysis())),
+        ("analysis", encode_set(p.analysis())),
         ("base", encode(p.base())),
         ("binary", Value::from(sha)),
         ("notes", notes),

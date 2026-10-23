@@ -152,7 +152,7 @@ fn premises_resolve_for_every_key_kind() {
         FactKey::Fde(0x1),
         FactKey::Note(NoteId(99)),
     ];
-    let layer = p.layer_mut(Source::Analysis).unwrap();
+    let layer = p.analysis_at_mut(ghidorah_base::Address::ram(0x1000));
     for (i, premise) in present.iter().chain(&absent).enumerate() {
         let at = 0x1180 + 4 * u64::try_from(i).unwrap();
         let unit = CodeUnit::Insn {

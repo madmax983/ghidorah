@@ -194,7 +194,7 @@ pub fn key_text(program: &Program, key: &FactKey) -> String {
             .base()
             .symbols()
             .get(*addr, *k)
-            .or_else(|| program.analysis().symbols().get(*addr, *k))
+            .or_else(|| program.analysis().symbol(*addr, *k))
             .and_then(|s| SymId::new(&s.name.value).ok())
             .map_or_else(|| addr.to_string(), |id| id.to_string()),
         FactKey::Func(f) | FactKey::Signature(f) | FactKey::Noreturn(f) => f.to_string(),
@@ -236,7 +236,7 @@ pub fn source_of(program: &Program, key: &FactKey) -> Option<Source> {
             .base()
             .refs()
             .get(k)
-            .or_else(|| p.analysis().refs().get(k))
+            .or_else(|| p.analysis().ref_get(k))
             .map(|r| r.source),
         FactKey::Comment(a, kind) => p.comment(*a, *kind).map(|c| c.source),
         FactKey::JumpTable(j) => p.jump_table(*j).map(|t| t.source),
@@ -252,14 +252,14 @@ pub fn source_of(program: &Program, key: &FactKey) -> Option<Source> {
             .base()
             .symbols()
             .get(*addr, *k)
-            .or_else(|| p.analysis().symbols().get(*addr, *k))
+            .or_else(|| p.analysis().symbol(*addr, *k))
             .map(|s| s.name.source),
         FactKey::Str(s) => layer_source(
-            s.0.is_ram() && p.analysis().strings().get(s.0.off).is_some(),
+            s.0.is_ram() && p.analysis().string(s.0.off).is_some(),
             s.0.is_ram() && p.base().strings().get(s.0.off).is_some(),
         ),
         FactKey::CodeUnit(off) => layer_source(
-            p.analysis().listing().unit(*off).is_some(),
+            p.analysis().unit(*off).is_some(),
             p.base().listing().unit(*off).is_some(),
         ),
         FactKey::Note(n) => p.notes().get(*n).map(|n| n.src),

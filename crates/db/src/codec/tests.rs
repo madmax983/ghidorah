@@ -371,10 +371,13 @@ fn tables_notes_and_progress_roundtrip() {
             &base,
         )
         .unwrap();
-    for tables in [p.base(), p.analysis()] {
-        let v = tables_to_json(tables);
-        assert_eq!(&tables_from_json(&reparse(&v)).unwrap(), tables);
-    }
+    let v = tables_to_json(p.base());
+    assert_eq!(&tables_from_json(&reparse(&v)).unwrap(), p.base());
+    let v = crate::codec::set_to_json(p.analysis());
+    assert_eq!(
+        &crate::codec::set_from_json(&reparse(&v)).unwrap(),
+        p.analysis()
+    );
     let notes = p.notes_mut();
     notes.write(note(NoteKind::Finding, None)).unwrap();
     let mut gone = note(NoteKind::Todo, None);
@@ -412,7 +415,11 @@ fn facts_dump_leaves_out_counters() {
     let names: Vec<&str> = dump.as_object().unwrap().iter().map(|(k, _)| k).collect();
     assert_eq!(names, vec!["analysis", "base", "binary", "notes", "types"]);
     assert!(dump.pointer("/analysis/why_next").is_none());
-    assert!(tables_to_json(p.analysis()).get("why_next").is_none());
+    assert!(
+        crate::codec::set_to_json(p.analysis())
+            .get("why_next")
+            .is_none()
+    );
     let sha = ghidorah_base::hex::encode(&p.meta().sha256);
     assert_eq!(
         dump.get("binary").and_then(Value::as_str),
@@ -552,6 +559,8 @@ fn set_rows() -> SetRows {
             (0x1080, unit(4, FlowKind::Seq)),
             (0x1084, unit(4, FlowKind::Jmp)),
         ],
+        overrides: Vec::new(),
+        vars: Vec::new(),
         why: WhyRows::from_rows([(
             FactKey::Func(FuncId(ram(0x1080))),
             Why {
@@ -617,12 +626,16 @@ fn layer_jcs_streams_the_same_bytes() {
         .funcs
         .insert(record().func)
         .unwrap();
-    for tables in [&typed, p.base(), p.analysis()] {
+    for tables in [&typed, p.base()] {
         let mut text = String::new();
         tables_jcs_to(tables, &mut |piece| text.push_str(piece)).unwrap();
         let want = write_jcs(&super::tables::encode(tables)).unwrap();
         assert_eq!(text, want);
     }
+    let mut text = String::new();
+    crate::codec::set_jcs_to(p.analysis(), &mut |piece| text.push_str(piece)).unwrap();
+    let want = write_jcs(&crate::codec::set_to_json(p.analysis())).unwrap();
+    assert_eq!(text, want);
 }
 
 /// A layer of format version 2 has an order in each why row and a `why_next` member. A

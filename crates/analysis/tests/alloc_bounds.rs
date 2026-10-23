@@ -87,7 +87,9 @@ fn regress_analysis_allocates_linearly() {
 }
 
 /// A `ReplaceAnalysis` commit shares the new set between the program and the log of the
-/// transaction. A copy of the set for the program allocated as many bytes as the set.
+/// transaction. A copy of the set for the program allocated as many bytes as the set. A
+/// clone of a set clones only the handles of its shards, so the copy below copies each
+/// shard.
 #[test]
 fn regress_replace_analysis_shares_the_set() {
     use std::sync::Arc;
@@ -98,7 +100,8 @@ fn regress_replace_analysis_shares_the_set() {
     Scheduler::new()
         .run(&mut analyzed, Until::Full, &mut Fuel::new(u64::MAX))
         .expect("a run");
-    let (set, copy) = ALLOC.measure(|| analyzed.analysis().clone());
+    let set = analyzed.analysis().clone();
+    let (_, copy) = ALLOC.measure(|| set.shards().map(|(_, t)| t.clone()).collect::<Vec<_>>());
     let mut fresh = functions(2_000, false);
     let label = SessionLabel::new(SessionLabel::ANALYSIS).expect("a label");
     let mut tx = fresh
@@ -141,7 +144,7 @@ fn kept_bytes(n: u64) -> (Program, usize, usize) {
 #[test]
 fn regress_work_state_keeps_no_unit_why() {
     let (program, _, work) = kept_bytes(5_000);
-    let units = program.analysis().listing().unit_count();
+    let units = program.analysis().unit_count();
     assert!(
         work <= units * 400,
         "the work state keeps {work} bytes for {units} code units"
@@ -187,16 +190,17 @@ fn regress_why_store_packs_its_records() {
 #[test]
 fn regress_published_set_keeps_exact_premise_lists() {
     let (program, set, _) = kept_bytes(5_000);
-    let records = program.analysis().why().len();
+    let records = program.analysis().whys().count();
     assert!(
         set <= records * 350,
         "the published set keeps {set} bytes for {records} records"
     );
 }
 
-/// The project writes a snapshot to its file one piece at a time. Before, the text of the
+/// The project writes a snapshot to its files one piece at a time. Before, the text of the
 /// whole snapshot was one string, and its growth held up to two copies of the text. The
-/// encoder peaks far below the length of the text.
+/// encoder peaks far below the length of the text. The snapshot file names the shard files,
+/// so the hash of each shard streams its text too.
 #[test]
 fn regress_snapshot_streams_its_text() {
     let (program, _, _) = kept_bytes(5_000);
@@ -204,6 +208,10 @@ fn regress_snapshot_streams_its_text() {
         let mut len = 0usize;
         ghidorah_db::snapshot::encode_to(&program, 0, None, &mut |piece| len += piece.len())
             .expect("a JCS text");
+        for (_, t) in program.analysis().shards() {
+            ghidorah_db::codec::tables_jcs_to(t, &mut |piece| len += piece.len())
+                .expect("a JCS text");
+        }
         len
     });
     assert!(
@@ -276,7 +284,7 @@ fn regress_publish_keeps_derived_whys_compact() {
             .map(drop)
             .expect("a run");
     });
-    let units = program.analysis().listing().unit_count();
+    let units = program.analysis().unit_count();
     assert!(
         stats.peak_bytes <= units * 765,
         "a full analysis peaks at {} bytes for {units} code units",
@@ -320,7 +328,7 @@ fn regress_work_state_keeps_reference_keys_only() {
     let callers = Program::from_binary(binary, mem, &Limits::DEFAULT).expect("a program");
     let (callers, with_calls) = kept_after_run(callers);
     let (_, plain) = kept_after_run(functions(n, false));
-    let refs = callers.analysis().refs().iter().count();
+    let refs = callers.analysis().refs().count();
     assert!(
         refs >= 4_999,
         "each call but the last has a reference: {refs}"

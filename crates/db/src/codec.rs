@@ -22,6 +22,7 @@
 
 mod edit;
 mod records;
+mod rows;
 mod tables;
 mod values;
 
@@ -35,12 +36,12 @@ use ghidorah_json::{DecodeError, DecodeKind, Fields, Value};
 use crate::edit::Edit;
 use crate::fact::Invalid;
 use crate::notes::Notes;
-use crate::program::{Program, Tables};
+use crate::program::{AnalysisSet, Program, Tables};
 use crate::progress::Progress;
 use crate::typesglue::{TypeInput, Types};
 use crate::why::FactKey;
 
-pub use tables::SetRows;
+pub use rows::SetRows;
 
 pub(crate) use values::Json;
 
@@ -260,14 +261,71 @@ pub fn tables_from_json(value: &Value) -> Result<Tables, CodecError> {
     tables::decode(value)
 }
 
-/// Makes the tables of an analysis set from typed rows. Each row goes through the same write
-/// path as in [`tables_from_json`], with no JSON form between.
+/// Makes the tables of a layer from typed rows. Each row goes through the same write path
+/// as in [`tables_from_json`], with no JSON form between.
 ///
 /// # Errors
 ///
 /// Returns a [`CodecError`] for a broken table rule.
 pub fn tables_from_rows(rows: SetRows) -> Result<Tables, CodecError> {
-    tables::from_rows(rows)
+    rows::from_rows(rows)
+}
+
+/// Makes an analysis set from typed rows. Each row goes in the shard of its key. A shard of
+/// `old` with the same facts goes into the new set as it is, so the two sets share it.
+///
+/// # Errors
+///
+/// Returns a [`CodecError`] for a broken table rule.
+pub fn set_from_rows(rows: SetRows, old: &AnalysisSet) -> Result<AnalysisSet, CodecError> {
+    rows::set_from_rows(rows, old)
+}
+
+/// Makes an analysis set from the tables of one layer. Each fact goes in the shard of its
+/// key.
+///
+/// # Errors
+///
+/// Returns a [`CodecError`] for a broken table rule.
+pub fn set_from_tables(tables: &Tables) -> Result<AnalysisSet, CodecError> {
+    rows::set_from_rows(rows::rows_of(tables)?, &AnalysisSet::new())
+}
+
+/// Gives the typed rows of the tables of one layer, each table in key order.
+///
+/// # Errors
+///
+/// Returns a [`CodecError`] for a why-record above the premise limit.
+pub(crate) fn rows_of_tables(tables: &Tables) -> Result<SetRows, CodecError> {
+    rows::rows_of(tables)
+}
+
+/// Gives the JSON form of an analysis set: the form of one layer, with the rows of each
+/// shard in address order.
+#[must_use]
+pub fn set_to_json(set: &AnalysisSet) -> Value {
+    tables::encode_set(set)
+}
+
+/// Writes the JCS text of [`set_to_json`] to `sink` in pieces, one row at a time.
+///
+/// # Errors
+///
+/// Returns the [`ghidorah_json::JcsError`] of a row that has no JCS form.
+pub fn set_jcs_to(
+    set: &AnalysisSet,
+    sink: &mut dyn FnMut(&str),
+) -> Result<(), ghidorah_json::JcsError> {
+    tables::write_set_jcs_to(set, sink)
+}
+
+/// Reads an analysis set: the JSON form of one layer. Each row goes in the shard of its key.
+///
+/// # Errors
+///
+/// Returns a [`CodecError`] for a bad shape, a bad text or a broken table rule.
+pub fn set_from_json(value: &Value) -> Result<AnalysisSet, CodecError> {
+    tables::decode_set(value)
 }
 
 /// Gives the JSON form of the note store, with the counter of new note IDs.

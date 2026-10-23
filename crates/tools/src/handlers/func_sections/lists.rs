@@ -161,7 +161,7 @@ pub fn type_text(program: &Program, ty: ghidorah_types::TypeId) -> Option<String
 #[must_use]
 pub fn vars(program: &Program, func: FuncId) -> Value {
     let mut ids: BTreeSet<VarId> = BTreeSet::new();
-    for layer in [program.base(), program.analysis()] {
+    for layer in program.layers() {
         ids.extend(
             layer
                 .vars()
@@ -294,7 +294,7 @@ pub fn jump_table(program: &Program, id: JumpTableId) -> Option<Value> {
 #[must_use]
 pub fn table_ids(program: &Program) -> Vec<JumpTableId> {
     let mut ids: BTreeSet<JumpTableId> = BTreeSet::new();
-    for layer in [program.base(), program.analysis()] {
+    for layer in program.layers() {
         ids.extend(layer.jumptables().iter().map(|(id, _)| id));
     }
     ids.into_iter().collect()
