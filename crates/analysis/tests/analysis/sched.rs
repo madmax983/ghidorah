@@ -446,13 +446,13 @@ fn regress_unit_cap_bounds_the_code_units() {
     assert!(kept > 0, "the walk decodes up to the cap");
 }
 
-/// The shipped cap of the code units is 8,388,608, about 6.7 GB at 0.8 KB of peak memory for
+/// The shipped cap of the code units is 20,971,520, about 8.4 GB at 0.4 KB of peak memory for
 /// each unit. The cap stays below the memory budget of 11 GB. The `Disasm` option
 /// `max_units` shows the same value.
 #[test]
 fn regress_unit_cap_default() {
     use ghidorah_analysis::analyzers::disasm::{MAX_UNITS, SPEC};
-    assert_eq!(MAX_UNITS, 8_388_608);
+    assert_eq!(MAX_UNITS, 20_971_520);
     let shown = SPEC.options.iter().find(|o| o.name == "max_units");
     assert_eq!(shown.map(|o| o.value), Some(MAX_UNITS));
 }
