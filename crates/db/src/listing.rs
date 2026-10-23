@@ -221,6 +221,40 @@ impl Listing {
         Ok(())
     }
 
+    /// Adds the code units of `units`, as [`Self::insert_unit`] does one at a time.
+    ///
+    /// An empty listing takes units in strict address order in one bulk build, so the map has
+    /// full nodes. Then a unit can only overlap the unit before it.
+    ///
+    /// # Errors
+    ///
+    /// Returns the position and the error of the first unit that [`Self::insert_unit`]
+    /// refuses.
+    pub(crate) fn extend_units(
+        &mut self,
+        units: Vec<(u64, CodeUnit)>,
+    ) -> Result<(), (usize, Invalid)> {
+        let sorted = units.windows(2).all(|w| matches!(w, [a, b] if a.0 < b.0));
+        if !self.units.is_empty() || !sorted {
+            for (i, (off, unit)) in units.into_iter().enumerate() {
+                self.insert_unit(off, unit).map_err(|e| (i, e))?;
+            }
+            return Ok(());
+        }
+        let mut before: Option<Range> = None;
+        for (i, (off, unit)) in units.iter().enumerate() {
+            let new = unit
+                .range(*off)
+                .ok_or_else(|| (i, Invalid::BadLength(u64::from(unit.len()))))?;
+            if let Some(existing) = before.filter(|b| b.last >= new.first) {
+                return Err((i, Invalid::Overlap { new, existing }));
+            }
+            before = Some(new);
+        }
+        self.units = units.into_iter().collect();
+        Ok(())
+    }
+
     /// Removes the code unit that starts at `off` and gives it.
     pub(crate) fn remove_unit(&mut self, off: u64) -> Option<CodeUnit> {
         self.units.remove(&off)

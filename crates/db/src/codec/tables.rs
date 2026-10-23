@@ -34,7 +34,7 @@ use crate::progress::{FuncProgress, Mark, Progress};
 use crate::refs::Ref;
 use crate::strings::StrInfo;
 use crate::symbols::Symbol;
-use crate::why::{FactKey, RuleCode, Why};
+use crate::why::{RuleCode, Why, WhyRows};
 
 /// The member names of the tables of a layer.
 const NAMES: [&str; 12] = [
@@ -219,7 +219,10 @@ pub(super) fn decode(value: &Value) -> Result<Tables, CodecError> {
             .map_err(werr)
             .map(drop)
     })?;
-    form.each("refs", |row| put_ref(&mut out, &Json::dec(row)?))?;
+    let refs: Vec<Fact<Ref>> = form.each("refs", Json::dec)?;
+    out.refs
+        .extend_new(refs)
+        .map_err(|(i, e)| werr(e).at_index(i).at("refs"))?;
     records(form, &mut out)?;
     Ok(out)
 }
@@ -245,7 +248,7 @@ pub struct SetRows {
     /// The code units by RAM offset.
     pub units: Vec<(u64, CodeUnit)>,
     /// The why-records: key, creation order and record.
-    pub why: Vec<(FactKey, u64, Why)>,
+    pub why: WhyRows,
     /// The creation order of the next why-record.
     pub why_next: u64,
 }
@@ -266,19 +269,15 @@ pub(super) fn from_rows(rows: SetRows) -> Result<Tables, CodecError> {
     for (id, table) in rows.jumptables {
         put_jumptable(&mut out, id, table)?;
     }
-    for fact in &rows.refs {
-        put_ref(&mut out, fact)?;
-    }
+    out.refs.extend_new(rows.refs).map_err(|(_, e)| werr(e))?;
     for (at, info) in rows.strings {
         out.strings.insert(at, info);
     }
     for symbol in rows.symbols {
         out.symbols.put_exact(symbol)?;
     }
-    for (at, unit) in rows.units {
-        out.listing.insert_unit(at, unit)?;
-    }
-    out.why.extend_at(rows.why)?;
+    out.listing.extend_units(rows.units).map_err(|(_, e)| e)?;
+    out.why.extend_rows(rows.why)?;
     out.why.set_next(rows.why_next);
     Ok(out)
 }
@@ -319,12 +318,6 @@ fn put_jumptable(
         .map(drop)
 }
 
-/// Writes one reference row.
-fn put_ref(out: &mut Tables, fact: &Fact<Ref>) -> Result<(), CodecError> {
-    let origin = fact.origin();
-    out.refs.add(fact.value, &origin).map_err(werr).map(drop)
-}
-
 /// Reads the string, symbol, unit, variable and why rows of a layer.
 fn records(form: Obj<'_>, out: &mut Tables) -> Result<(), CodecError> {
     form.each("strings", |row| {
@@ -344,15 +337,18 @@ fn records(form: Obj<'_>, out: &mut Tables) -> Result<(), CodecError> {
         };
         Ok(out.symbols.put_exact(symbol).map(drop)?)
     })?;
-    form.each("units", |row| {
+    let units = form.each("units", |row| {
         let cells = Obj::new(row, &["at", "len", "flow", "flags"])?;
         let unit = CodeUnit::Insn {
             len: cells.get("len")?,
             flow: cells.get("flow")?,
             flags: cells.get("flags")?,
         };
-        Ok(out.listing.insert_unit(cells.get::<Off>("at")?.0, unit)?)
+        Ok((cells.get::<Off>("at")?.0, unit))
     })?;
+    out.listing
+        .extend_units(units)
+        .map_err(|(i, e)| CodecError::from(e).at_index(i).at("units"))?;
     form.each("vars", |row| {
         let (var, facts) = var_from_row(row)?;
         if let Some(n) = facts.name {
@@ -369,7 +365,7 @@ fn records(form: Obj<'_>, out: &mut Tables) -> Result<(), CodecError> {
         }
         Ok(())
     })?;
-    let mut whys = Vec::new();
+    let mut whys = WhyRows::new();
     let mut codes: BTreeSet<RuleCode> = BTreeSet::new();
     form.each("why", |row| {
         let cells = Obj::new(row, &["key", "order", "rule", "premises"])?;
@@ -384,10 +380,10 @@ fn records(form: Obj<'_>, out: &mut Tables) -> Result<(), CodecError> {
             rule,
             premises: cells.get("premises")?,
         };
-        whys.push((cells.get("key")?, cells.get("order")?, why));
+        whys.push(cells.get("key")?, cells.get("order")?, why)?;
         Ok(())
     })?;
-    out.why.extend_at(whys)?;
+    out.why.extend_rows(whys)?;
     out.why.set_next(form.get("why_next")?);
     Ok(())
 }

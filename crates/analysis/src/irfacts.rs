@@ -204,7 +204,7 @@ pub(crate) fn rows(
     program: &Program,
     work: &Work,
     funcs: &[Function],
-    whys: &mut BTreeMap<FactKey, Why>,
+    whys: &mut crate::publish::whys::Whys,
 ) -> Rows {
     let kept: BTreeSet<u64> = funcs.iter().map(|f| f.entry.off).collect();
     let owns = |owner: u64, at: u64| kept.contains(&owner) && work.owner(at) == Some(owner);

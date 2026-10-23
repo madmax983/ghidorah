@@ -266,6 +266,40 @@ impl Refs {
         Ok(self.from.insert(r.key, origin.fact(r)))
     }
 
+    /// Adds the references of `facts` by the write rule, as [`Self::add`] does one at a time
+    /// with the origin of each fact.
+    ///
+    /// An empty layer takes facts in strict key order in one bulk build of each index, so
+    /// each index has full nodes. One add at a time in key order leaves each node about half
+    /// full.
+    ///
+    /// # Errors
+    ///
+    /// Returns the position and the [`WriteError`] of the first fact that [`Self::add`]
+    /// refuses.
+    pub(crate) fn extend_new(
+        &mut self,
+        facts: Vec<Fact<Ref>>,
+    ) -> Result<(), (usize, WriteError<Ref>)> {
+        let sorted = facts
+            .windows(2)
+            .all(|w| matches!(w, [a, b] if a.value.key < b.value.key));
+        if !self.from.is_empty() || !sorted {
+            for (i, fact) in facts.into_iter().enumerate() {
+                self.add(fact.value, &fact.origin()).map_err(|e| (i, e))?;
+            }
+            return Ok(());
+        }
+        for (i, fact) in facts.iter().enumerate() {
+            check(None, &fact.origin()).map_err(|e| (i, e))?;
+        }
+        let mut to: Vec<ToKey> = facts.iter().map(|f| to_key(&f.value.key)).collect();
+        to.sort_unstable();
+        self.to = to.into_iter().collect();
+        self.from = facts.into_iter().map(|f| (f.value.key, f)).collect();
+        Ok(())
+    }
+
     /// Removes a reference by the write rule. Gives the old fact, or `None` for no reference.
     ///
     /// # Errors

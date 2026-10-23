@@ -134,3 +134,112 @@ fn clones_of_a_rule_code_share_its_text() {
     let copy = code.clone();
     assert!(std::ptr::eq(code.as_str(), copy.as_str()));
 }
+
+fn call_ref(from: u64, to: u64) -> FactKey {
+    FactKey::Ref(crate::refs::RefKey {
+        from: Address::ram(from),
+        op_index: -1,
+        to: Address::ram(to),
+        kind: crate::refs::RefType::UnconditionalCall,
+    })
+}
+
+fn func(entry: u64) -> FactKey {
+    FactKey::Func(FuncId(Address::ram(entry)))
+}
+
+/// Records of each shape: compact unit and reference records, and general records with a
+/// premise that does not follow from the key.
+fn mixed() -> Vec<(FactKey, u64, Why)> {
+    let ext = FactKey::Func(FuncId(Address::external(0x10)));
+    vec![
+        (
+            FactKey::CodeUnit(0x10),
+            3,
+            why("R_DISASM_FLOW", vec![func(0x10)]),
+        ),
+        (FactKey::CodeUnit(0x14), 4, why("R_DISASM_FLOW", vec![ext])),
+        (
+            FactKey::CodeUnit(0x18),
+            5,
+            why("R_OTHER", vec![func(0x10), func(0x20)]),
+        ),
+        (FactKey::CodeUnit(0x1c), 6, why("R_DISASM_FLOW", Vec::new())),
+        (func(0x10), 0, why("R_ENTRY", vec![FactKey::Entry(0x10)])),
+        (
+            call_ref(0x10, 0x40),
+            7,
+            why("R_FLOW_REF", vec![FactKey::CodeUnit(0x10)]),
+        ),
+        (
+            call_ref(0x14, 0x40),
+            8,
+            why("R_FLOW_REF", vec![FactKey::CodeUnit(0x10)]),
+        ),
+        (FactKey::Entry(0x10), 1, why("R_INPUT", Vec::new())),
+    ]
+}
+
+#[test]
+fn compact_records_read_back_as_inserted() {
+    let mut rows = mixed();
+    rows.sort_by(|a, b| a.0.cmp(&b.0));
+    let mut bulk = WhyStore::default();
+    bulk.extend_at(rows.clone()).unwrap();
+    let mut single = WhyStore::default();
+    for (k, o, w) in rows.iter().rev().cloned() {
+        single.insert_at(k, o, w).unwrap();
+    }
+    assert_eq!(bulk, single);
+    assert_eq!(bulk.len(), rows.len());
+    let read: Vec<(FactKey, u64, Why)> = bulk.iter().collect();
+    assert_eq!(
+        read, rows,
+        "every record and order reads back, in key order"
+    );
+    for (k, o, w) in &rows {
+        assert_eq!(bulk.get(k).as_ref(), Some(w), "{k:?}");
+        assert_eq!(bulk.order(k), Some(*o), "{k:?}");
+    }
+}
+
+#[test]
+fn a_key_moves_between_the_compact_and_the_general_map() {
+    let mut store = WhyStore::default();
+    let unit = FactKey::CodeUnit(0x10);
+    let flow = why("R_DISASM_FLOW", vec![func(0x10)]);
+    let other = why("R_OTHER", vec![func(0x10), func(0x20)]);
+    assert_eq!(store.insert(unit.clone(), flow.clone()).unwrap(), None);
+    assert_eq!(
+        store.insert(unit.clone(), other.clone()).unwrap(),
+        Some(flow.clone())
+    );
+    assert_eq!((store.len(), store.get(&unit)), (1, Some(other.clone())));
+    assert_eq!(
+        store.insert(unit.clone(), flow.clone()).unwrap(),
+        Some(other)
+    );
+    assert_eq!((store.len(), store.order(&unit)), (1, Some(2)));
+    assert_eq!(store.remove(&unit), Some(flow));
+    assert!(store.is_empty());
+    assert_eq!(store.get(&unit), None);
+}
+
+#[test]
+fn rows_out_of_key_order_set_one_at_a_time() {
+    let mut rows = mixed();
+    rows.sort_by(|a, b| a.0.cmp(&b.0));
+    // A copy of one key after the others: the last row of a key wins.
+    let late = (FactKey::CodeUnit(0x10), 9, why("R_OTHER", Vec::new()));
+    let pushed = super::WhyRows::from_rows(rows.iter().cloned().chain([late.clone()])).unwrap();
+    assert_eq!(pushed.len(), rows.len() + 1);
+    let mut store = WhyStore::default();
+    store.extend_rows(pushed).unwrap();
+    let mut single = WhyStore::default();
+    for (k, o, w) in rows.into_iter().chain([late.clone()]) {
+        single.insert_at(k, o, w).unwrap();
+    }
+    assert_eq!(store, single);
+    assert_eq!(store.get(&late.0), Some(late.2));
+    assert_eq!(store.next_order(), 10);
+}

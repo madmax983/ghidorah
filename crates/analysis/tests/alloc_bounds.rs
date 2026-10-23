@@ -154,20 +154,19 @@ fn regress_work_state_keeps_no_unit_why() {
 #[test]
 fn regress_why_store_packs_its_records() {
     use ghidorah_db::codec::{SetRows, tables_from_rows};
-    use ghidorah_db::{FactKey, RuleCode, Why};
+    use ghidorah_db::{FactKey, RuleCode, Why, WhyRows};
 
     let n = 20_000u64;
     let rule = RuleCode::new("R_DISASM_FLOW").expect("a rule code");
     let (tables, stats) = ALLOC.measure(|| {
-        let why = (0..n)
-            .map(|i| {
-                let record = Why {
-                    rule: rule.clone(),
-                    premises: vec![FactKey::Entry(0)],
-                };
-                (FactKey::CodeUnit(i * 4), i, record)
-            })
-            .collect();
+        let why = WhyRows::from_rows((0..n).map(|i| {
+            let record = Why {
+                rule: rule.clone(),
+                premises: vec![FactKey::Entry(0)],
+            };
+            (FactKey::CodeUnit(i * 4), i, record)
+        }))
+        .expect("the rows");
         let rows = SetRows {
             why,
             why_next: n,
@@ -212,5 +211,168 @@ fn regress_snapshot_streams_its_text() {
         stats.peak_bytes * 10 < len,
         "the encoder peaks at {} bytes for a text of {len} bytes",
         stats.peak_bytes
+    );
+}
+
+/// The why store keeps two record shapes as compact values with no premise list. One is a
+/// code unit with its owner function. The other is a reference with the code unit of its
+/// source. A general record with a list kept 162 bytes for each record; now 50.
+#[test]
+fn regress_why_store_keeps_derived_premises_compact() {
+    use ghidorah_base::{Address, FuncId};
+    use ghidorah_db::codec::{SetRows, tables_from_rows};
+    use ghidorah_db::{FactKey, RefKey, RefType, RuleCode, Why, WhyRows};
+
+    let n = 20_000u64;
+    let flow = RuleCode::new("R_DISASM_FLOW").expect("a rule code");
+    let refer = RuleCode::new("R_FLOW_REF").expect("a rule code");
+    let (tables, stats) = ALLOC.measure(|| {
+        let units = (0..n).map(|i| {
+            let owner = FactKey::Func(FuncId(Address::ram(i / 8 * 32)));
+            let record = Why {
+                rule: flow.clone(),
+                premises: vec![owner],
+            };
+            (FactKey::CodeUnit(i * 4), i, record)
+        });
+        let refs = (0..n).map(|i| {
+            let key = RefKey {
+                from: Address::ram(i * 4),
+                op_index: -1,
+                to: Address::ram(0x1000),
+                kind: RefType::UnconditionalCall,
+            };
+            let record = Why {
+                rule: refer.clone(),
+                premises: vec![FactKey::CodeUnit(i * 4)],
+            };
+            (FactKey::Ref(key), n + i, record)
+        });
+        let rows = SetRows {
+            why: WhyRows::from_rows(units.chain(refs)).expect("the rows"),
+            why_next: 2 * n,
+            ..SetRows::default()
+        };
+        tables_from_rows(rows).expect("the rows")
+    });
+    let records = tables.why().len();
+    assert_eq!(records, 40_000);
+    assert!(
+        stats.retained_bytes <= records * 64,
+        "the store keeps {} bytes for {records} records",
+        stats.retained_bytes
+    );
+}
+
+/// The publish step keeps the derived why-records of code units and references as compact
+/// values. It packs the rows of the set as they come. Before, a map of full records and a
+/// list of full rows raised the peak. A full analysis peaked at 895 bytes for each code
+/// unit. With the compact records it peaked at 811. The collection now goes before the
+/// tables of the set grow; now 762.
+#[test]
+fn regress_publish_keeps_derived_whys_compact() {
+    let mut program = functions(5_000, false);
+    let ((), stats) = ALLOC.measure(|| {
+        Scheduler::new()
+            .run(&mut program, Until::Full, &mut Fuel::new(u64::MAX))
+            .map(drop)
+            .expect("a run");
+    });
+    let units = program.analysis().listing().unit_count();
+    assert!(
+        stats.peak_bytes <= units * 790,
+        "a full analysis peaks at {} bytes for {units} code units",
+        stats.peak_bytes
+    );
+}
+
+/// The code of one frame-pointer function that calls the next function, and its padding.
+const CALLER: [u8; 16] = [
+    0x55, 0x48, 0x89, 0xe5, 0xe8, 0x07, 0x00, 0x00, 0x00, 0x5d, 0xc3, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc,
+];
+
+/// Gives the bytes that the set and the work state keep after a full analysis of `program`.
+fn kept_after_run(mut program: Program) -> (Program, usize) {
+    let (sched, stats) = ALLOC.measure(|| {
+        let mut sched = Scheduler::new();
+        sched
+            .run(&mut program, Until::Full, &mut Fuel::new(u64::MAX))
+            .expect("a run");
+        sched
+    });
+    drop(sched);
+    (program, stats.retained_bytes)
+}
+
+/// The work state keeps each flow and operand reference as a key. The why-record of such a
+/// reference is its rule with the code unit at its source, so the publish step makes it.
+/// The bytes of one call are the bytes of `n` functions with a call each, less the bytes of
+/// `n` functions with no call. A call kept 1,542 bytes with a full record; now 1,428.
+#[test]
+fn regress_work_state_keeps_reference_keys_only() {
+    let n = 5_000u64;
+    let text: Vec<u8> = (0..n).flat_map(|_| CALLER).collect();
+    let mut elf = ElfBuilder::exec()
+        .section(Section::code(".text", &text))
+        .entry(Loc::section(".text", 0));
+    for i in 0..n {
+        elf = elf.fde(Fde::frame_pointer(Loc::section(".text", i * 16), 11));
+    }
+    let (binary, mem) = load(&elf.build(), &LoadOpts::AUTO, &Limits::DEFAULT).expect("a load");
+    let callers = Program::from_binary(binary, mem, &Limits::DEFAULT).expect("a program");
+    let (callers, with_calls) = kept_after_run(callers);
+    let (_, plain) = kept_after_run(functions(n, false));
+    let refs = callers.analysis().refs().iter().count();
+    assert!(
+        refs >= 4_999,
+        "each call but the last has a reference: {refs}"
+    );
+    let per_call = with_calls.saturating_sub(plain) / refs;
+    assert!(per_call <= 1_480, "a call keeps {per_call} bytes");
+}
+
+/// The reference table and the listing of a new set take their rows in one bulk build each.
+/// One insert at a time in key order left each node about half full. A unit and a reference
+/// kept 328 bytes; now 177.
+#[test]
+fn regress_set_tables_build_full_nodes() {
+    use ghidorah_base::Address;
+    use ghidorah_db::codec::{SetRows, tables_from_rows};
+    use ghidorah_db::listing::{CodeUnit, FlowKind};
+    use ghidorah_db::{Origin, Ref, RefKey, RefType};
+
+    let n = 20_000u64;
+    let origin = Origin::analysis();
+    let (tables, stats) = ALLOC.measure(|| {
+        let unit = CodeUnit::Insn {
+            len: 4,
+            flow: FlowKind::Call,
+            flags: 0,
+        };
+        let key = |i: u64| RefKey {
+            from: Address::ram(i * 4),
+            op_index: -1,
+            to: Address::ram(0x10_0000),
+            kind: RefType::UnconditionalCall,
+        };
+        let rows = SetRows {
+            units: (0..n).map(|i| (i * 4, unit)).collect(),
+            refs: (0..n)
+                .map(|i| {
+                    origin.fact(Ref {
+                        key: key(i),
+                        primary: true,
+                    })
+                })
+                .collect(),
+            ..SetRows::default()
+        };
+        tables_from_rows(rows).expect("the rows")
+    });
+    assert_eq!(tables.refs().len(), 20_000);
+    assert!(
+        stats.retained_bytes <= 20_000 * 250,
+        "the tables keep {} bytes for 20,000 units and references",
+        stats.retained_bytes
     );
 }

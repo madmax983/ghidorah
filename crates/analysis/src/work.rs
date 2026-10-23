@@ -97,8 +97,9 @@ pub(crate) struct Work {
     pub funcs: BTreeMap<u64, WFunc>,
     /// The code units by start.
     pub units: BTreeMap<u64, WUnit>,
-    /// The flow references.
-    pub refs: BTreeMap<RefKey, Why>,
+    /// The flow references. The why-record of each is `R_FLOW_REF` with the code unit at its
+    /// source.
+    pub refs: BTreeSet<RefKey>,
     /// The noreturn flags from the known list, by function entry.
     pub known: BTreeMap<u64, Why>,
     /// The noreturn flags from the flow, by function entry.
@@ -312,10 +313,10 @@ impl Work {
         let Some(f) = self.funcs.get_mut(&entry) else {
             return evicted;
         };
-        for (key, why) in body.refs {
+        for key in body.refs {
             if kept.contains(&key.from.off) {
                 f.refs.insert(key);
-                self.refs.insert(key, why);
+                self.refs.insert(key);
             }
         }
         for x in &body.summary.exits {
@@ -356,7 +357,7 @@ impl Work {
             && body
                 .refs
                 .iter()
-                .all(|(k, why)| f.refs.contains(k) && self.refs.get(k) == Some(why))
+                .all(|k| f.refs.contains(k) && self.refs.contains(k))
     }
 }
 

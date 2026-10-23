@@ -195,8 +195,9 @@ fn regress_fallthrough_flag_is_stable() {
     assert_eq!(why.rule.as_str(), Rule::NoreturnFallthrough.code());
     let first = FuncId(Address::ram(BASE + 0x100));
     assert_eq!(
-        p.why(&FactKey::Noreturn(first)).map(|w| w.rule.as_str()),
-        Some(Rule::NoreturnBody.code())
+        p.why(&FactKey::Noreturn(first))
+            .map(|w| w.rule.as_str().to_owned()),
+        Some(Rule::NoreturnBody.code().to_owned())
     );
     for k in [1, 4] {
         let mut sliced = blob.load(Some(0));

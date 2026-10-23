@@ -294,7 +294,7 @@ fn walk(
     let mut node = Node {
         key: key.clone(),
         id: key_text(program, key),
-        rule: why.map(|w| w.rule.clone()),
+        rule: why.as_ref().map(|w| w.rule.clone()),
         source: if why.is_none() {
             source_of(program, key)
         } else {

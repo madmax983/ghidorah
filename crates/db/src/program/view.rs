@@ -293,7 +293,7 @@ impl Program {
 
     /// Gives the why-record of a fact. The analysis layer comes first.
     #[must_use]
-    pub fn why(&self, key: &FactKey) -> Option<&Why> {
+    pub fn why(&self, key: &FactKey) -> Option<Why> {
         self.analysis
             .why
             .get(key)

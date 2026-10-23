@@ -16,6 +16,7 @@
 
 #[cfg(test)]
 mod tests;
+pub(crate) mod whys;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -25,12 +26,13 @@ use ghidorah_db::codec::{SetRows, tables_from_rows};
 use ghidorah_db::listing::CodeUnit;
 use ghidorah_db::{
     AnalysisSet, Commit, Edit, Fact, FactKey, Function, JumpTable, Origin, Part, PartKind, Program,
-    Ref, RefKey, RuleCode, SessionLabel, Source, StartReason, StrInfo,
+    Ref, RefKey, RuleCode, SessionLabel, Source, StartReason, StrInfo, WhyRows,
 };
 
 use crate::AnalysisError;
-use crate::why::{Rule, Why, unit_why};
+use crate::why::Rule;
 use crate::work::Work;
+use whys::{Rec, Whys};
 
 /// The change counts of `analysis_run` between two analysis sets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -119,7 +121,7 @@ struct Facts {
     funcs: Vec<Function>,
     units: Vec<(u64, CodeUnit)>,
     refs: Vec<Ref>,
-    whys: BTreeMap<FactKey, Why>,
+    whys: Whys,
     kept: BTreeSet<u64>,
 }
 
@@ -130,7 +132,7 @@ fn collect(program: &Program, work: &Work) -> Facts {
         funcs: Vec::new(),
         units: Vec::new(),
         refs: Vec::new(),
-        whys: BTreeMap::new(),
+        whys: Whys::default(),
         kept: BTreeSet::new(),
     };
     let mut kept = BTreeSet::new();
@@ -179,16 +181,16 @@ fn collect(program: &Program, work: &Work) -> Facts {
                 flags: u.flags,
             },
         ));
-        out.whys.insert(FactKey::CodeUnit(*at), unit_why(u.owner));
+        out.whys.insert_unit(*at, u.owner);
     }
-    for (key, why) in &work.refs {
+    for key in &work.refs {
         let owner = work.units.get(&key.from.off).map(|u| u.owner);
         if owner.is_some_and(|o| kept.contains(&o)) {
             out.refs.push(Ref {
                 key: *key,
                 primary: true,
             });
-            out.whys.insert(FactKey::Ref(*key), why.clone());
+            out.whys.insert_ref(*key, Rule::FlowRef);
         }
     }
     out.kept = kept;
@@ -210,7 +212,7 @@ fn bit(j: usize) -> u64 {
 ///
 /// The step works on positions, so it makes no copy of a key. A record has at most 64
 /// premises, so its mask fits in a `u64`.
-fn order(p: &Program, whys: &BTreeMap<FactKey, Why>) -> Vec<(u64, u64)> {
+fn order(p: &Program, records: &[Rec<'_>]) -> Vec<(u64, u64)> {
     /// The walk state of a fact.
     #[derive(Clone, Copy, PartialEq, Eq)]
     enum Mark {
@@ -219,22 +221,22 @@ fn order(p: &Program, whys: &BTreeMap<FactKey, Why>) -> Vec<(u64, u64)> {
         Done,
     }
     let inputs = Inputs::of(p);
-    let keys: Vec<&FactKey> = whys.keys().collect();
-    let records: Vec<&Why> = whys.values().collect();
-    let at = |q: &FactKey| keys.binary_search(&q).ok();
+    let at = |q: &FactKey| records.binary_search_by(|r| r.cmp_key(q)).ok();
     let mut out: Vec<(u64, u64)> = records
         .iter()
-        .map(|w| {
-            let mask = w.premises.iter().enumerate().fold(0u64, |m, (j, q)| {
-                let kept = at(q).is_some() || inputs.holds(p, q);
+        .map(|r| {
+            let mask = (0..r.premise_count()).fold(0u64, |m, j| {
+                let kept = r
+                    .premise(j)
+                    .is_some_and(|q| at(&q).is_some() || inputs.holds(p, &q));
                 if kept { m | bit(j) } else { m }
             });
             (0, mask)
         })
         .collect();
-    let mut marks = vec![Mark::New; keys.len()];
+    let mut marks = vec![Mark::New; records.len()];
     let mut next = 0u64;
-    for root in 0..keys.len() {
+    for root in 0..records.len() {
         if marks.get(root) != Some(&Mark::New) {
             continue;
         }
@@ -243,10 +245,9 @@ fn order(p: &Program, whys: &BTreeMap<FactKey, Why>) -> Vec<(u64, u64)> {
         }
         let mut stack: Vec<(usize, usize)> = vec![(root, 0)];
         while let Some((i, j)) = stack.pop() {
-            let premises = records.get(i).map_or(&[][..], |w| w.premises.as_slice());
-            if let Some(q) = premises.get(j) {
+            if let Some(q) = records.get(i).and_then(|r| r.premise(j)) {
                 stack.push((i, j.saturating_add(1)));
-                let Some(k) = at(q) else {
+                let Some(k) = at(&q) else {
                     continue;
                 };
                 match marks.get(k) {
@@ -292,29 +293,32 @@ pub(crate) fn analysis_set(program: &Program, work: &Work) -> Result<AnalysisSet
     let strings = crate::analyzers::strings::collect(work, &mut facts.whys);
     let extra = crate::irfacts::rows(program, work, &facts.funcs, &mut facts.whys);
     let origin = Origin::analysis();
-    let ordered = order(program, &facts.whys);
+    let records = facts.whys.records();
+    let ordered = order(program, &records);
     let why_next = u64::try_from(ordered.len()).unwrap_or(u64::MAX);
-    let mut why = Vec::with_capacity(ordered.len());
+    let mut why = WhyRows::new();
     let mut codes: BTreeMap<Rule, RuleCode> = BTreeMap::new();
-    for ((key, found), (n, mask)) in std::mem::take(&mut facts.whys).into_iter().zip(ordered) {
-        let mut premises: Vec<FactKey> = found
-            .premises
-            .into_iter()
-            .enumerate()
-            .filter(|(j, _)| mask & bit(*j) != 0)
-            .map(|(_, q)| q)
+    for (rec, (n, mask)) in records.iter().zip(ordered) {
+        let premises: Vec<FactKey> = (0..rec.premise_count())
+            .filter(|j| mask & bit(*j) != 0)
+            .filter_map(|j| rec.premise(j))
             .collect();
-        premises.shrink_to_fit();
-        let rule = if let Some(code) = codes.get(&found.rule) {
+        let rule = if let Some(code) = codes.get(&rec.rule()) {
             code.clone()
         } else {
-            let code = found.rule.rule_code()?;
-            codes.insert(found.rule, code.clone());
+            let code = rec.rule().rule_code()?;
+            codes.insert(rec.rule(), code.clone());
             code
         };
         let record = ghidorah_db::why::Why { rule, premises };
-        why.push((key, n, record));
+        why.push(rec.key(), n, record)?;
     }
+    drop(records);
+    // The rows hold every record now, so the collection goes before the tables grow.
+    drop(std::mem::take(&mut facts.whys));
+    // The flow references and the operand references go in key order, so the table of the
+    // set takes them in one bulk build.
+    facts.refs.sort_unstable_by_key(|r| r.key);
     let mut rows = SetRows {
         data,
         funcs: facts.funcs,

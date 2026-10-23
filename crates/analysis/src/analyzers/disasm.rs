@@ -19,7 +19,7 @@
 use std::collections::BTreeSet;
 
 use ghidorah_base::{Address, Range};
-use ghidorah_db::{FactKey, RefKey, RefType};
+use ghidorah_db::{RefKey, RefType};
 use ghidorah_kernel::RangeSet;
 use ghidorah_x86::{Flow, Insn};
 
@@ -31,7 +31,6 @@ use crate::overrides::SiteFlow;
 use crate::registry::AnalyzerId;
 use crate::slotsite::SiteTarget;
 use crate::spec::{AnalyzerSpec, Grain, Opt, Step, Trigger};
-use crate::why::{Rule, Why};
 
 /// The largest number of instructions in one function body.
 pub const MAX_INSNS: u64 = 100_000;
@@ -39,9 +38,9 @@ pub const MAX_INSNS: u64 = 100_000;
 /// The largest number of code units of the program.
 ///
 /// A walk stops at the cap, so the memory of the analysis stays bounded for a large or
-/// hostile binary. One unit takes about 0.8 KB of peak memory, so the cap is about 6.7 GB.
-/// The memory budget of a run is 11 GB.
-pub const MAX_UNITS: u64 = 8_388_608;
+/// hostile binary. One unit takes about 0.4 KB of peak memory, so the cap is about 8.4 GB.
+/// The memory budget of a run is 11 GB. Godot 4.7.2 has 17,612,335 units, below the cap.
+pub const MAX_UNITS: u64 = 20_971_520;
 
 /// The largest number of body changes of one function. Then its body stays.
 pub const MAX_CHANGES: u64 = 64;
@@ -185,8 +184,7 @@ impl<'c, 'a> Walk<'c, 'a> {
             to,
             kind,
         };
-        let why = Why::new(Rule::FlowRef, vec![FactKey::CodeUnit(at)]);
-        self.body.refs.insert(key, why);
+        self.body.refs.insert(key);
     }
 
     /// Gives the import slot of the indirect site `insn` at `at` and the EXTERNAL address of

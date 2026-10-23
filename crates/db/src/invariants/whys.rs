@@ -101,7 +101,7 @@ pub(super) fn check(p: &Program, out: &mut Vec<Violation>) {
     let held: BTreeSet<&FactKey> = facts.iter().collect();
     let inputs = Inputs::of(p);
     for (key, order, why) in a.why().iter() {
-        if !held.contains(key) {
+        if !held.contains(&key) {
             out.push(Violation::WhyOrphan { key: key.clone() });
         }
         for premise in &why.premises {

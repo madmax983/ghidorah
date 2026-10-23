@@ -129,4 +129,4 @@ pub use tx::{Applied, Commit, Nested, Tx, TxError, TxLabel};
 pub use typesglue::{InputError, TypeInput, TypeMode, Types};
 pub use undo::{UndoError, UndoOutcome, UndoRequest};
 pub use vars::{VarFact, Vars};
-pub use why::{FactKey, RuleCode, Why, WhyStore};
+pub use why::{FactKey, RuleCode, Why, WhyRows, WhyStore};

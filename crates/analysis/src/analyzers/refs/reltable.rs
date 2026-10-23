@@ -222,7 +222,7 @@ pub(crate) fn entries(program: &Program, data: &DataRefs) -> BTreeMap<u64, Entry
     }
     let mut marks: BTreeSet<u64> = data
         .operands
-        .keys()
+        .iter()
         .filter(|k| k.to.is_ram())
         .map(|k| k.to.off)
         .collect();

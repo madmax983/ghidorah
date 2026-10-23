@@ -10,7 +10,12 @@
 #[cfg(test)]
 mod tests;
 
-use std::collections::BTreeMap;
+mod rows;
+mod store;
+
+pub use rows::WhyRows;
+pub use store::WhyStore;
+
 use std::fmt;
 use std::sync::Arc;
 
@@ -116,128 +121,4 @@ pub struct Why {
     pub rule: RuleCode,
     /// The premises, at most [`MAX_PREMISES`].
     pub premises: Vec<FactKey>,
-}
-
-/// The why-records of one layer.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct WhyStore {
-    map: BTreeMap<FactKey, (u64, Why)>,
-    next: u64,
-}
-
-impl WhyStore {
-    /// Gives the number of records.
-    #[must_use]
-    pub fn len(&self) -> usize {
-        self.map.len()
-    }
-
-    /// Tells if the layer has no record.
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.map.is_empty()
-    }
-
-    /// Gives the record of a fact.
-    #[must_use]
-    pub fn get(&self, key: &FactKey) -> Option<&Why> {
-        self.map.get(key).map(|(_, w)| w)
-    }
-
-    /// Gives the creation order of the record of a fact.
-    #[must_use]
-    pub fn order(&self, key: &FactKey) -> Option<u64> {
-        self.map.get(key).map(|(o, _)| *o)
-    }
-
-    /// Gives all records in key order with their creation order.
-    pub fn iter(&self) -> impl Iterator<Item = (&FactKey, u64, &Why)> {
-        self.map.iter().map(|(k, (o, w))| (k, *o, w))
-    }
-
-    /// Sets the record of a fact. The record gets the next creation order. Gives the old record.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Invalid::TooMany`] above [`MAX_PREMISES`] premises.
-    pub(crate) fn insert(&mut self, key: FactKey, why: Why) -> Result<Option<Why>, Invalid> {
-        if why.premises.len() > MAX_PREMISES {
-            return Err(Invalid::TooMany {
-                count: why.premises.len(),
-                max: MAX_PREMISES,
-            });
-        }
-        let order = self.next;
-        self.next = self.next.saturating_add(1);
-        Ok(self.map.insert(key, (order, why)).map(|(_, w)| w))
-    }
-
-    /// Removes the record of a fact and gives it.
-    pub(crate) fn remove(&mut self, key: &FactKey) -> Option<Why> {
-        self.map.remove(key).map(|(_, w)| w)
-    }
-
-    /// Gives the creation order of the next new record.
-    #[must_use]
-    pub const fn next_order(&self) -> u64 {
-        self.next
-    }
-
-    /// Sets the record of a fact with its creation order. Gives the old record.
-    ///
-    /// The next order stays above `order`. The JSON codec uses this function for an exact copy.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Invalid::TooMany`] above [`MAX_PREMISES`] premises.
-    pub(crate) fn insert_at(
-        &mut self,
-        key: FactKey,
-        order: u64,
-        why: Why,
-    ) -> Result<Option<Why>, Invalid> {
-        if why.premises.len() > MAX_PREMISES {
-            return Err(Invalid::TooMany {
-                count: why.premises.len(),
-                max: MAX_PREMISES,
-            });
-        }
-        self.next = self.next.max(order.saturating_add(1));
-        Ok(self.map.insert(key, (order, why)).map(|(_, w)| w))
-    }
-
-    /// Sets the records of `rows`, each with its creation order, as [`Self::insert_at`] does
-    /// one at a time.
-    ///
-    /// When the store is empty and each key is above the key before it, one bulk build
-    /// makes the tree with full nodes. One insert at a time in key order leaves each node about half full.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Invalid::TooMany`] above [`MAX_PREMISES`] premises.
-    pub(crate) fn extend_at(&mut self, rows: Vec<(FactKey, u64, Why)>) -> Result<(), Invalid> {
-        let sorted = rows.windows(2).all(|w| matches!(w, [a, b] if a.0 < b.0));
-        if !self.map.is_empty() || !sorted {
-            for (key, order, why) in rows {
-                self.insert_at(key, order, why)?;
-            }
-            return Ok(());
-        }
-        if let Some((_, _, why)) = rows.iter().find(|r| r.2.premises.len() > MAX_PREMISES) {
-            return Err(Invalid::TooMany {
-                count: why.premises.len(),
-                max: MAX_PREMISES,
-            });
-        }
-        if let Some(top) = rows.iter().map(|r| r.1).max() {
-            self.next = self.next.max(top.saturating_add(1));
-        }
-        self.map = rows.into_iter().map(|(k, o, w)| (k, (o, w))).collect();
-        Ok(())
-    }
-
-    /// Sets the creation order of the next new record. The order never goes below a stored order.
-    pub(crate) fn set_next(&mut self, next: u64) {
-        self.next = self.next.max(next);
-    }
 }
