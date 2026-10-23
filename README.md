@@ -17,7 +17,14 @@ No tool runs the binary.
 
 ## Quick start for agents
 
-Build the binary with the pinned toolchain of `rust-toolchain.toml` (Rust 1.97.0):
+Install the binary from crates.io (Rust 1.97 or later):
+
+```sh
+cargo install ghidorah
+ghidorah doctor
+```
+
+Or build the binary from this tree with the pinned toolchain of `rust-toolchain.toml` (Rust 1.97.0):
 
 ```sh
 cargo build --release -p ghidorah

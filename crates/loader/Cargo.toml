@@ -4,7 +4,11 @@ description = "Format probe, ELF64 LE parser, raw loader, MemoryMap and the owne
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-publish.workspace = true
+publish = true
+repository.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
 rust-version.workspace = true
 
 [lib]
@@ -12,8 +16,8 @@ name = "ghidorah_loader"
 path = "src/lib.rs"
 
 [dependencies]
-ghidorah-base = { path = "../base" }
-ghidorah-kernel = { path = "../kernel" }
+ghidorah-base.workspace = true
+ghidorah-kernel.workspace = true
 
 [dev-dependencies]
 ghidorah-oracle = { path = "../oracle" }

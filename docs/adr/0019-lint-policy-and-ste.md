@@ -1,6 +1,6 @@
 # ADR-0019: Lint policy and STE enforcement levels
 
-Status: Accepted (amended 2026-10-21)
+Status: Accepted (amended 2026-10-22)
 Date: 2026-10-16
 Verified by: AC-010, AC-011, AC-016, AC-024, AC-025, AC-225
 
@@ -75,3 +75,8 @@ Each row names one source file, one group lint and its reason. `xtask gates AC-0
 - The AC-010 gate scans the non-test sources for clippy exceptions. The reviewed item list is new.
 - The AC-011 gate scans the non-test sources for `missing_docs` and `rustdoc` exceptions.
 - The workspace allowlist does not hold `cargo_common_metadata`. Clippy does not apply that lint to a package with `publish = false`.
+
+## Amendment 2026-10-22
+
+- ADR-0030 makes the production packages publishable. Clippy then applies `cargo_common_metadata` to them.
+- The production packages take `repository`, `readme`, `keywords` and `categories` from `[workspace.package]`. The lint passes, and the allowlist stays the same.

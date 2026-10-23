@@ -4,7 +4,11 @@ version.workspace = true
 description = "Strict RFC 8259 JSON: value, parser, writer, JCS, pointer dialect and the json_record! macro."
 edition.workspace = true
 license.workspace = true
-publish.workspace = true
+publish = true
+repository.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
 rust-version.workspace = true
 
 [lib]

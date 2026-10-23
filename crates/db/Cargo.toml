@@ -5,7 +5,11 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-publish.workspace = true
+publish = true
+repository.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
 
 # Unit tests live in `src/**/tests.rs`, because the manager mutators are `pub(crate)`.
 # The test binary `tests/db/main.rs` checks the public read API.
@@ -14,12 +18,12 @@ name = "ghidorah_db"
 path = "src/lib.rs"
 
 [dependencies]
-ghidorah-base = { path = "../base" }
-ghidorah-kernel = { path = "../kernel" }
+ghidorah-base.workspace = true
+ghidorah-kernel.workspace = true
 # The JSON codec of WP-11b uses this crate.
-ghidorah-json = { path = "../json" }
-ghidorah-loader = { path = "../loader" }
-ghidorah-types = { path = "../types" }
+ghidorah-json.workspace = true
+ghidorah-loader.workspace = true
+ghidorah-types.workspace = true
 
 [dev-dependencies]
 ghidorah-testkit = { path = "../testkit" }

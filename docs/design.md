@@ -198,7 +198,7 @@ Revision 3 makes SSA and the decompiler part of the MVP. Revision 2 called them 
 
 ### 2.1 Crate list
 
-The MVP workspace has 17 packages. Production crates ship in the `ghidorah` binary. Dev crates never enter the binary closure (AC-004). Each WP creates the skeleton of the crate that it owns first (Section 14.3). The root `Cargo.toml` lists members with the globs `crates/*` and `xtask`.
+The MVP workspace has 17 packages. Production crates ship in the `ghidorah` binary and go to crates.io (ADR-0030). Dev crates never enter the binary closure (AC-004), and they stay private. Each WP creates the skeleton of the crate that it owns first (Section 14.3). The root `Cargo.toml` lists members with the globs `crates/*` and `xtask`.
 
 | Package | Directory | Kind | Purpose (one line) | Plan LOC | Upper LOC |
 |---|---|---|---|---|---|
@@ -3087,7 +3087,7 @@ Rules for this section:
 | AC-001b | `Cargo.lock` has no `[[package]]` with a `source` key. | `test:xtask::ac_001b_no_source_key@T1` | 01 | - |
 | AC-001c | Every dependency of every package is a workspace package or the built-in `proc_macro` crate. | `test:xtask::ac_001c_workspace_deps_only@T1` | 01 | - |
 | AC-001d | No `Cargo.toml` has `[patch]` or `[replace]`, and `.cargo/config.toml` has no `[source]` or `[patch]` table. | `test:xtask::ac_001d_no_patch_tables@T1` | 01 | - |
-| AC-001e | Every package sets `publish = false` and `license = "Apache-2.0"`. | `test:xtask::ac_001e_publish_and_license@T1` | 01 | - |
+| AC-001e | Every package sets `license = "Apache-2.0"`. Each production package is publishable, gives a version for each normal dependency and holds copies of the root `LICENSE` and `NOTICE`. Each dev package sets `publish = false` (ADR-0030). | `test:xtask::ac_001e_publish_and_license@T1`, `test:xtask::ac_001e_legal_copies@T1` | 01 | - |
 | AC-002 | `.cargo/config.toml` sets `net.offline = true`, and an offline build passes with an empty `CARGO_HOME` registry. | `xtask:ci#/steps/offline_build/ok == true` | 01 | - |
 | AC-003 | Every dependency edge is in the allowed-edge table of Section 2.2, and `docs/architecture/crates.mmd` equals the generated graph. | `test:xtask::ac_003_crate_dag@T1` | 01 | - |
 | AC-004 | No crate in the dependency closure of the `ghidorah` binary contains `unsafe` or `expect(unsafe_code`. | `test:xtask::ac_004_no_unsafe_in_shipped@T1` | 01 | - |

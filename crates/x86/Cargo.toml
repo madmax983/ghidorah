@@ -5,7 +5,11 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-publish.workspace = true
+publish = true
+repository.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
 
 # The crate has no unit tests. Its tests are in the test binary `tests/x86/main.rs`
 # and in the fuzz binaries `tests/fuzz_x86_decode.rs` and `tests/fuzz_x86_lift_interp.rs`.
@@ -15,7 +19,7 @@ path = "src/lib.rs"
 test = false
 
 [dependencies]
-ghidorah-ir = { path = "../ir" }
+ghidorah-ir.workspace = true
 
 [dev-dependencies]
 ghidorah-base = { path = "../base" }

@@ -5,7 +5,11 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-publish.workspace = true
+publish = true
+repository.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
 
 # The kernel has no unit tests. All its tests are in the test binary `tests/kernel/main.rs`,
 # so the coverage run sees one copy of each kernel function.
@@ -13,7 +17,7 @@ publish.workspace = true
 test = false
 
 [dependencies]
-ghidorah-spec = { path = "../spec" }
+ghidorah-spec.workspace = true
 
 [dev-dependencies]
 ghidorah-testkit = { path = "../testkit" }

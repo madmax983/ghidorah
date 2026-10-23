@@ -35,6 +35,8 @@ Revision 3 decisions of the owner apply over the design text. SSA and the decomp
 | Eval harness | `cargo xtask eval [--json \| --explain \| --bless --reason TEXT \| replay FILE]` |
 | Long fuzz runs | `cargo xtask fuzz [<target>..] [--iters N] [--seed S] [--timeout SECS]` |
 | Benchmarks | `cargo xtask bench [<key>..]` |
+| Publish check | `cargo publish --workspace --dry-run --config net.offline=false` |
+| Publish (owner only) | `cargo publish --workspace --config net.offline=false` |
 
 - Each xtask command prints one JSON object on stdout. The exit code is 0 for `ok: true`, 1 for `ok: false` and 2 for an error.
 - Set `GHIDORAH_VERUS_OPTIONAL=1` to get `status: skipped` from `xtask verify` when Verus is missing.
@@ -73,7 +75,11 @@ CI (`.github/workflows/ci.yml`) runs three jobs: `tier1`, `tier2` and `verus`.
 
 ## Manifests
 
-- Each package `Cargo.toml` takes `version`, `edition`, `rust-version`, `license` and `publish` from the workspace with `.workspace = true`.
+- Each package `Cargo.toml` takes `version`, `edition`, `rust-version` and `license` from the workspace with `.workspace = true`.
+- A dev package takes `publish` from the workspace. A production package sets `publish = true` (ADR-0030).
+- A production package also takes `repository`, `readme`, `keywords` and `categories` from the workspace.
+- A production package takes each production crate dependency from `[workspace.dependencies]` with `.workspace = true`.
+- Each production package holds byte copies of the root `LICENSE` and `NOTICE`. Change all 14 copies together.
 - Each package sets `[lints] workspace = true`. The root `Cargo.toml` holds the lint policy of ADR-0019.
 - Add no `allow` entry outside the reviewed allowlist of ADR-0019. `cargo xtask gates AC-010` checks it.
 - A new crate edge needs a design change first. Then add one line to `ALLOWED` in `xtask/src/dag.rs`.
@@ -109,6 +115,15 @@ CI (`.github/workflows/ci.yml`) runs three jobs: `tier1`, `tier2` and `verus`.
 - Run `GHIDORAH_BLESS=1 cargo test -p <crate>`. Then read each changed golden file in `git diff`.
 - Commit the golden files with the code change that changes them.
 - No test sets the variable in its own process (ADR-0012).
+
+## Release procedure (ADR-0030)
+
+1. Change `version` in `[workspace.package]` of the root `Cargo.toml`.
+2. Change the version in each line of `[workspace.dependencies]` to the same value.
+3. Run the gates. Then run the publish check.
+4. The owner runs the publish command with a crates.io token.
+
+- When the publish stops at the crates.io rate limit, run the same command again. It skips the versions that are on crates.io.
 
 ## STE rules for comments and docs (ADR-0019)
 
