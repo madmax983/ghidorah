@@ -154,20 +154,19 @@ fn regress_work_state_keeps_no_unit_why() {
 #[test]
 fn regress_why_store_packs_its_records() {
     use ghidorah_db::codec::{SetRows, tables_from_rows};
-    use ghidorah_db::{FactKey, RuleCode, Why};
+    use ghidorah_db::{FactKey, RuleCode, Why, WhyRows};
 
     let n = 20_000u64;
     let rule = RuleCode::new("R_DISASM_FLOW").expect("a rule code");
     let (tables, stats) = ALLOC.measure(|| {
-        let why = (0..n)
-            .map(|i| {
-                let record = Why {
-                    rule: rule.clone(),
-                    premises: vec![FactKey::Entry(0)],
-                };
-                (FactKey::CodeUnit(i * 4), i, record)
-            })
-            .collect();
+        let why = WhyRows::from_rows((0..n).map(|i| {
+            let record = Why {
+                rule: rule.clone(),
+                premises: vec![FactKey::Entry(0)],
+            };
+            (FactKey::CodeUnit(i * 4), i, record)
+        }))
+        .expect("the rows");
         let rows = SetRows {
             why,
             why_next: n,
@@ -222,7 +221,7 @@ fn regress_snapshot_streams_its_text() {
 fn regress_why_store_keeps_derived_premises_compact() {
     use ghidorah_base::{Address, FuncId};
     use ghidorah_db::codec::{SetRows, tables_from_rows};
-    use ghidorah_db::{FactKey, RefKey, RefType, RuleCode, Why};
+    use ghidorah_db::{FactKey, RefKey, RefType, RuleCode, Why, WhyRows};
 
     let n = 20_000u64;
     let flow = RuleCode::new("R_DISASM_FLOW").expect("a rule code");
@@ -250,7 +249,7 @@ fn regress_why_store_keeps_derived_premises_compact() {
             (FactKey::Ref(key), n + i, record)
         });
         let rows = SetRows {
-            why: units.chain(refs).collect(),
+            why: WhyRows::from_rows(units.chain(refs)).expect("the rows"),
             why_next: 2 * n,
             ..SetRows::default()
         };
@@ -262,5 +261,26 @@ fn regress_why_store_keeps_derived_premises_compact() {
         stats.retained_bytes <= records * 64,
         "the store keeps {} bytes for {records} records",
         stats.retained_bytes
+    );
+}
+
+/// The publish step keeps the derived why-records of code units and references as compact
+/// values. It packs the rows of the set as they come. Before, a map of full records and a
+/// list of full rows raised the peak. A full analysis peaked at 895 bytes for each code
+/// unit; now 811.
+#[test]
+fn regress_publish_keeps_derived_whys_compact() {
+    let mut program = functions(5_000, false);
+    let ((), stats) = ALLOC.measure(|| {
+        Scheduler::new()
+            .run(&mut program, Until::Full, &mut Fuel::new(u64::MAX))
+            .map(drop)
+            .expect("a run");
+    });
+    let units = program.analysis().listing().unit_count();
+    assert!(
+        stats.peak_bytes <= units * 850,
+        "a full analysis peaks at {} bytes for {units} code units",
+        stats.peak_bytes
     );
 }

@@ -34,7 +34,7 @@ use crate::progress::{FuncProgress, Mark, Progress};
 use crate::refs::Ref;
 use crate::strings::StrInfo;
 use crate::symbols::Symbol;
-use crate::why::{FactKey, RuleCode, Why};
+use crate::why::{RuleCode, Why, WhyRows};
 
 /// The member names of the tables of a layer.
 const NAMES: [&str; 12] = [
@@ -245,7 +245,7 @@ pub struct SetRows {
     /// The code units by RAM offset.
     pub units: Vec<(u64, CodeUnit)>,
     /// The why-records: key, creation order and record.
-    pub why: Vec<(FactKey, u64, Why)>,
+    pub why: WhyRows,
     /// The creation order of the next why-record.
     pub why_next: u64,
 }
@@ -278,7 +278,7 @@ pub(super) fn from_rows(rows: SetRows) -> Result<Tables, CodecError> {
     for (at, unit) in rows.units {
         out.listing.insert_unit(at, unit)?;
     }
-    out.why.extend_at(rows.why)?;
+    out.why.extend_rows(rows.why)?;
     out.why.set_next(rows.why_next);
     Ok(out)
 }
@@ -369,7 +369,7 @@ fn records(form: Obj<'_>, out: &mut Tables) -> Result<(), CodecError> {
         }
         Ok(())
     })?;
-    let mut whys = Vec::new();
+    let mut whys = WhyRows::new();
     let mut codes: BTreeSet<RuleCode> = BTreeSet::new();
     form.each("why", |row| {
         let cells = Obj::new(row, &["key", "order", "rule", "premises"])?;
@@ -384,10 +384,10 @@ fn records(form: Obj<'_>, out: &mut Tables) -> Result<(), CodecError> {
             rule,
             premises: cells.get("premises")?,
         };
-        whys.push((cells.get("key")?, cells.get("order")?, why));
+        whys.push(cells.get("key")?, cells.get("order")?, why)?;
         Ok(())
     })?;
-    out.why.extend_at(whys)?;
+    out.why.extend_rows(whys)?;
     out.why.set_next(form.get("why_next")?);
     Ok(())
 }

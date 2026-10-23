@@ -28,7 +28,7 @@ use crate::strings::{Encoding, StrInfo};
 use crate::symbols::{SymKey, SymKind, Symbol};
 use crate::tests::{origin, ram, seeded, session};
 use crate::vars::VarFact;
-use crate::why::{FactKey, RuleCode, Why};
+use crate::why::{FactKey, RuleCode, Why, WhyRows};
 
 fn agent() -> Origin {
     let mut o = origin(Source::Agent, 42, "mcp-1");
@@ -552,14 +552,15 @@ fn set_rows() -> SetRows {
             (0x1080, unit(4, FlowKind::Seq)),
             (0x1084, unit(4, FlowKind::Jmp)),
         ],
-        why: vec![(
+        why: WhyRows::from_rows([(
             FactKey::Func(FuncId(ram(0x1080))),
             0,
             Why {
                 rule: RuleCode::new("R_ENTRY").unwrap(),
                 premises: Vec::new(),
             },
-        )],
+        )])
+        .unwrap(),
         why_next: 1,
     }
 }

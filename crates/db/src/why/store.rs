@@ -16,19 +16,19 @@ use std::iter::Peekable;
 
 use ghidorah_base::{Address, FuncId, SpaceId};
 
-use super::{FactKey, MAX_PREMISES, RuleCode, Why};
+use super::{FactKey, MAX_PREMISES, RuleCode, Why, WhyRows};
 use crate::fact::Invalid;
 use crate::refs::RefKey;
 
 /// A record whose one premise follows from its key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct Slim {
+pub(super) struct Slim {
     /// The creation order.
-    order: u64,
+    pub(super) order: u64,
     /// The entry of the premise function of a code unit. A reference keeps 0.
-    entry: u64,
-    /// The index of the rule in [`WhyStore::rules`].
-    rule: u16,
+    pub(super) entry: u64,
+    /// The index of the rule in the rule list of the store.
+    pub(super) rule: u16,
 }
 
 /// The why-records of one layer.
@@ -47,7 +47,7 @@ pub struct WhyStore {
 }
 
 /// The compact form of a record.
-enum Compact {
+pub(super) enum Compact {
     /// A code unit at a RAM offset and the entry of its premise function.
     Unit(u64, u64),
     /// A reference.
@@ -55,7 +55,7 @@ enum Compact {
 }
 
 /// Gives the compact form of the record `why` of `key`, or `None` for a general record.
-fn compact(key: &FactKey, why: &Why) -> Option<Compact> {
+pub(super) fn compact(key: &FactKey, why: &Why) -> Option<Compact> {
     match (key, why.premises.as_slice()) {
         (FactKey::CodeUnit(at), [FactKey::Func(FuncId(a))]) if a.space == SpaceId::RAM => {
             Some(Compact::Unit(*at, a.off))
@@ -70,7 +70,7 @@ fn compact(key: &FactKey, why: &Why) -> Option<Compact> {
 }
 
 /// Checks the number of premises of a record.
-fn check(why: &Why) -> Result<(), Invalid> {
+pub(super) fn check(why: &Why) -> Result<(), Invalid> {
     if why.premises.len() > MAX_PREMISES {
         return Err(Invalid::TooMany {
             count: why.premises.len(),
@@ -78,6 +78,31 @@ fn check(why: &Why) -> Result<(), Invalid> {
         });
     }
     Ok(())
+}
+
+/// Makes the record of the compact value `s` of `key` again, with the rule list `rules`.
+pub(super) fn expand(rules: &[RuleCode], key: &FactKey, s: Slim) -> Option<Why> {
+    let rule = rules.get(usize::from(s.rule))?.clone();
+    let premise = match key {
+        FactKey::CodeUnit(_) => FactKey::Func(FuncId(Address::ram(s.entry))),
+        FactKey::Ref(k) => FactKey::CodeUnit(k.from.off),
+        _ => return None,
+    };
+    Some(Why {
+        rule,
+        premises: vec![premise],
+    })
+}
+
+/// Gives the index of `rule` in `rules`. A new rule goes at the end. Gives `None` when the
+/// list is full.
+pub(super) fn intern(rules: &mut Vec<RuleCode>, rule: &RuleCode) -> Option<u16> {
+    if let Some(i) = rules.iter().position(|r| r == rule) {
+        return u16::try_from(i).ok();
+    }
+    let i = u16::try_from(rules.len()).ok()?;
+    rules.push(rule.clone());
+    Some(i)
 }
 
 impl PartialEq for WhyStore {
@@ -152,26 +177,12 @@ impl WhyStore {
 
     /// Makes the record of the compact value `s` of `key` again.
     fn expand(&self, key: &FactKey, s: Slim) -> Option<Why> {
-        let rule = self.rules.get(usize::from(s.rule))?.clone();
-        let premise = match key {
-            FactKey::CodeUnit(_) => FactKey::Func(FuncId(Address::ram(s.entry))),
-            FactKey::Ref(k) => FactKey::CodeUnit(k.from.off),
-            _ => return None,
-        };
-        Some(Why {
-            rule,
-            premises: vec![premise],
-        })
+        expand(&self.rules, key, s)
     }
 
     /// Gives the index of `rule` in the rule list, or `None` when the list is full.
     fn rule_index(&mut self, rule: &RuleCode) -> Option<u16> {
-        if let Some(i) = self.rules.iter().position(|r| r == rule) {
-            return u16::try_from(i).ok();
-        }
-        let i = u16::try_from(self.rules.len()).ok()?;
-        self.rules.push(rule.clone());
-        Some(i)
+        intern(&mut self.rules, rule)
     }
 
     /// Puts the record of `key` with its order in its map. Gives the old record.
@@ -253,49 +264,56 @@ impl WhyStore {
     /// Sets the records of `rows`, each with its creation order, as [`Self::insert_at`] does
     /// one at a time.
     ///
-    /// When the store is empty and each key is above the key before it, one bulk build makes
-    /// each map with full nodes. One insert at a time in key order leaves each node about
-    /// half full.
+    /// # Errors
+    ///
+    /// Returns [`Invalid::TooMany`] above [`MAX_PREMISES`] premises. Then the store does not
+    /// change.
+    pub(crate) fn extend_at(&mut self, rows: Vec<(FactKey, u64, Why)>) -> Result<(), Invalid> {
+        self.extend_rows(WhyRows::from_rows(rows)?)
+    }
+
+    /// Sets the records of `rows`, as [`Self::insert_at`] does one at a time in push order.
+    ///
+    /// An empty store takes the packed maps of `rows` in one bulk build each, so each map has
+    /// full nodes. One insert at a time in key order leaves each node about half full.
     ///
     /// # Errors
     ///
-    /// Returns [`Invalid::TooMany`] above [`MAX_PREMISES`] premises.
-    pub(crate) fn extend_at(&mut self, rows: Vec<(FactKey, u64, Why)>) -> Result<(), Invalid> {
-        let sorted = rows.windows(2).all(|w| matches!(w, [a, b] if a.0 < b.0));
-        if !self.is_empty() || !sorted {
-            for (key, order, why) in rows {
-                self.insert_at(key, order, why)?;
-            }
-            return Ok(());
-        }
-        rows.iter().try_for_each(|r| check(&r.2))?;
-        if let Some(top) = rows.iter().map(|r| r.1).max() {
+    /// Returns [`Invalid::TooMany`] above [`MAX_PREMISES`] premises. Each row of [`WhyRows`]
+    /// passes this check on its push, so the error does not occur.
+    pub(crate) fn extend_rows(&mut self, rows: WhyRows) -> Result<(), Invalid> {
+        let WhyRows {
+            map,
+            units,
+            refs,
+            rules,
+            loose,
+            top,
+            ..
+        } = rows;
+        if let Some(top) = top {
             self.next = self.next.max(top.saturating_add(1));
         }
-        let (mut map, mut units, mut refs) = (Vec::new(), Vec::new(), Vec::new());
-        for (key, order, why) in rows {
-            let shape = compact(&key, &why);
-            let rule = shape.as_ref().and_then(|_| self.rule_index(&why.rule));
-            match (shape, rule) {
-                (Some(Compact::Unit(at, entry)), Some(rule)) => {
-                    units.push((at, Slim { order, entry, rule }));
+        if self.is_empty() {
+            self.map = map.into_iter().collect();
+            self.units = units.into_iter().collect();
+            self.refs = refs.into_iter().collect();
+            self.rules = rules;
+        } else {
+            for (key, (order, why)) in map {
+                self.insert_at(key, order, why)?;
+            }
+            let units = units.into_iter().map(|(at, s)| (FactKey::CodeUnit(at), s));
+            let refs = refs.into_iter().map(|(k, s)| (FactKey::Ref(k), s));
+            for (key, s) in units.chain(refs) {
+                if let Some(why) = expand(&rules, &key, s) {
+                    self.insert_at(key, s.order, why)?;
                 }
-                (Some(Compact::Ref(k)), Some(rule)) => {
-                    refs.push((
-                        k,
-                        Slim {
-                            order,
-                            entry: 0,
-                            rule,
-                        },
-                    ));
-                }
-                _ => map.push((key, (order, why))),
             }
         }
-        self.map = map.into_iter().collect();
-        self.units = units.into_iter().collect();
-        self.refs = refs.into_iter().collect();
+        for (key, order, why) in loose {
+            self.insert_at(key, order, why)?;
+        }
         Ok(())
     }
 

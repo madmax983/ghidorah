@@ -527,7 +527,7 @@ pub fn run(ctx: &mut AnalysisCtx<'_>, ranges: &RangeSet) -> Step {
 }
 
 /// Adds the strings of `work` to the why-records of a publish step. Gives the string rows.
-pub(crate) fn collect(work: &Work, whys: &mut BTreeMap<FactKey, Why>) -> Vec<(u64, StrInfo)> {
+pub(crate) fn collect(work: &Work, whys: &mut crate::publish::whys::Whys) -> Vec<(u64, StrInfo)> {
     let mut rows = Vec::with_capacity(work.strings.len());
     for (at, (info, why)) in &work.strings {
         rows.push((*at, *info));

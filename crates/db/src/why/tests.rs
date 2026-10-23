@@ -224,3 +224,22 @@ fn a_key_moves_between_the_compact_and_the_general_map() {
     assert!(store.is_empty());
     assert_eq!(store.get(&unit), None);
 }
+
+#[test]
+fn rows_out_of_key_order_set_one_at_a_time() {
+    let mut rows = mixed();
+    rows.sort_by(|a, b| a.0.cmp(&b.0));
+    // A copy of one key after the others: the last row of a key wins.
+    let late = (FactKey::CodeUnit(0x10), 9, why("R_OTHER", Vec::new()));
+    let pushed = super::WhyRows::from_rows(rows.iter().cloned().chain([late.clone()])).unwrap();
+    assert_eq!(pushed.len(), rows.len() + 1);
+    let mut store = WhyStore::default();
+    store.extend_rows(pushed).unwrap();
+    let mut single = WhyStore::default();
+    for (k, o, w) in rows.into_iter().chain([late.clone()]) {
+        single.insert_at(k, o, w).unwrap();
+    }
+    assert_eq!(store, single);
+    assert_eq!(store.get(&late.0), Some(late.2));
+    assert_eq!(store.next_order(), 10);
+}

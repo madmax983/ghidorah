@@ -10,8 +10,10 @@
 #[cfg(test)]
 mod tests;
 
+mod rows;
 mod store;
 
+pub use rows::WhyRows;
 pub use store::WhyStore;
 
 use std::fmt;

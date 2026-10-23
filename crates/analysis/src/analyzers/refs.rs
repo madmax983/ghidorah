@@ -510,7 +510,7 @@ pub(crate) fn collect(
     work: &Work,
     kept: &BTreeSet<u64>,
     refs: &mut Vec<Ref>,
-    whys: &mut BTreeMap<FactKey, Why>,
+    whys: &mut crate::publish::whys::Whys,
 ) -> Vec<(u64, Fact<DataDef>)> {
     let is_kept = |at: u64| work.units.get(&at).is_some_and(|u| kept.contains(&u.owner));
     for (key, why) in &work.data.operands {
