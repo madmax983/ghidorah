@@ -179,7 +179,10 @@ fn ac_092_fuel_slicing() {
         first.commit.is_some(),
         "the first analysis publishes each slice"
     );
-    assert!(!p.analysis().funcs().is_empty(), "reads see a partial set");
+    assert!(
+        p.analysis().funcs().next().is_some(),
+        "reads see a partial set"
+    );
 }
 
 #[test]
@@ -417,7 +420,7 @@ fn many_fdes_complete() {
     let (_, out) = analyze(&mut p);
     assert_eq!(out.state, RunState::Complete);
     assert_eq!(
-        p.analysis().funcs().len(),
+        p.analysis().funcs().count(),
         usize::try_from(N).expect("N fits")
     );
 }
@@ -430,7 +433,7 @@ fn regress_unit_cap_bounds_the_code_units() {
     let (sched, out) = analyze(&mut free);
     assert_eq!(out.state, RunState::Complete);
     assert!(!sched.capped());
-    let all = free.analysis().listing().units_in(sched::ALL).count();
+    let all = free.analysis().units_in(sched::ALL).count();
     assert!(all > 400, "the free run decodes every function: {all}");
 
     let mut capped = many_fdes(200);
@@ -441,7 +444,7 @@ fn regress_unit_cap_bounds_the_code_units() {
         .expect("the run");
     assert_eq!(out.state, RunState::Complete);
     assert!(sched.capped());
-    let kept = capped.analysis().listing().units_in(sched::ALL).count();
+    let kept = capped.analysis().units_in(sched::ALL).count();
     assert!(kept <= 100, "the cap holds: {kept}");
     assert!(kept > 0, "the walk decodes up to the cap");
 }

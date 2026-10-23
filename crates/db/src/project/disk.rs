@@ -263,7 +263,9 @@ fn restore_snapshot(
     let Ok(bytes) = fs.read(&dir.join(SNAPSHOT_FILE)) else {
         return 0;
     };
-    let Ok(snap) = snapshot::decode(&bytes, v1) else {
+    let shards = dir.join(snapshot::SHARDS_DIR);
+    let mut read = |name: &str| fs.read(&shards.join(name)).ok();
+    let Ok(snap) = snapshot::decode(&bytes, v1, &mut read) else {
         return 0;
     };
     let Some(covered) = usize::try_from(snap.journal_lines)

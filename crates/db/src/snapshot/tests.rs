@@ -13,7 +13,7 @@ use crate::progress::FuncProgress;
 use crate::project::tests::fs_sim::SimFs;
 use crate::project::tests::{input, sim};
 use crate::source::Source;
-use crate::tests::{seeded, session};
+use crate::tests::{seeded, session, shard_reader};
 
 #[test]
 fn ac_120a_snapshot_op_log() {
@@ -45,9 +45,63 @@ fn ac_120a_snapshot_op_log() {
     let _ = fs.take_log();
     project.snapshot(&program).unwrap();
     let log = fs.take_log();
-    assert_eq!(log.len(), 5, "{log:?}");
+    assert_eq!(log.len(), 5, "no shard: {log:?}");
     assert!(log[0].starts_with("create_new snapshot.json.tmp"));
     assert!(log[4].starts_with("sync_dir"));
+}
+
+/// Each new shard file goes in with the steps of AC-120a before the snapshot file. A shard
+/// with no change keeps its file, and the file of an old shard goes after the snapshot file.
+#[test]
+fn ac_120a_shard_files_go_first() {
+    let fs = sim(&[100]);
+    let (mut project, _, _) = crate::project::tests::create(&fs, 100);
+    let mut p = seeded();
+    let _ = fs.take_log();
+    project.snapshot(&p).unwrap();
+    let log = fs.take_log();
+    let names = super::files::names(p.analysis());
+    assert_eq!(names.len(), 1, "the seeded facts are in shard 0");
+    let tmp = log[1].strip_prefix("create_new ").unwrap().to_owned();
+    assert!(tmp.starts_with("shard.json.tmp."), "{log:?}");
+    let shard_ops = [
+        "create_dir_all shards".to_owned(),
+        format!("create_new {tmp}"),
+        format!("write_all {tmp}"),
+        format!("sync_file {tmp}"),
+        format!("rename {tmp} {}", names[0]),
+        "sync_dir shards".to_owned(),
+    ];
+    assert_eq!(log[..6], shard_ops, "{log:?}");
+    assert!(
+        log[6].starts_with("create_new snapshot.json.tmp"),
+        "{log:?}"
+    );
+    assert_eq!(log.len(), 11, "{log:?}");
+
+    project.snapshot(&p).unwrap();
+    let log = fs.take_log();
+    assert_eq!(
+        log.len(),
+        5,
+        "a shard with no change keeps its file: {log:?}"
+    );
+
+    p.analysis_at_mut(Address::ram(0x1080))
+        .comments
+        .set(
+            Address::ram(0x1080),
+            crate::comments::CommentKind::Eol,
+            Some("sys:write".to_owned()),
+            &crate::fact::Origin::analysis(),
+        )
+        .unwrap();
+    project.snapshot(&p).unwrap();
+    let log = fs.take_log();
+    let new = super::files::names(p.analysis());
+    assert_ne!(new, names);
+    assert_eq!(log.last(), Some(&format!("remove {}", names[0])), "{log:?}");
+    assert!(log.iter().any(|l| l.ends_with(&new[0])), "{log:?}");
 }
 
 #[test]
@@ -78,7 +132,7 @@ fn snapshot_roundtrip_restores_the_state() {
         text,
         "JCS text"
     );
-    let snap = decode(text.as_bytes(), &ExtMap::default()).unwrap();
+    let snap = decode(text.as_bytes(), &ExtMap::default(), &mut shard_reader(&p)).unwrap();
     assert_eq!(snap.journal_lines, 3);
     assert_eq!(snap.analysis_inputs_hash, Some([5; 32]));
     let (_, fresh) = input("hello.gcc-O2");
@@ -102,29 +156,37 @@ fn snapshot_roundtrip_restores_the_state() {
 
 #[test]
 fn decode_refuses_bad_snapshots() {
+    let mut none = |_: &str| None;
     assert!(matches!(
-        decode(b"[1", &ExtMap::default()),
+        decode(b"[1", &ExtMap::default(), &mut none),
         Err(SnapshotError::Json(_))
     ));
     assert!(matches!(
-        decode(b"{}", &ExtMap::default()),
+        decode(b"{}", &ExtMap::default(), &mut none),
         Err(SnapshotError::Shape(_))
     ));
     let p = seeded();
     let text = encode(&p, 0, None).unwrap();
-    for v in [0u64, 3] {
+    for v in [0u64, 4] {
         let other = text.replacen(
-            "\"format_version\":2",
+            "\"format_version\":3",
             &format!("\"format_version\":{v}"),
             1,
         );
         assert_eq!(
-            decode(other.as_bytes(), &ExtMap::default()),
+            decode(other.as_bytes(), &ExtMap::default(), &mut none),
             Err(SnapshotError::Version(v))
         );
     }
+    assert!(
+        matches!(
+            decode(text.as_bytes(), &ExtMap::default(), &mut none),
+            Err(SnapshotError::Shard(_))
+        ),
+        "a missing shard file"
+    );
     let (_, mut fresh) = input("crackme.gcc-O2");
-    let snap = decode(text.as_bytes(), &ExtMap::default()).unwrap();
+    let snap = decode(text.as_bytes(), &ExtMap::default(), &mut shard_reader(&p)).unwrap();
     assert_eq!(snap.restore(&mut fresh), Err(SnapshotError::Binary));
 }
 
@@ -165,12 +227,12 @@ fn inputs_hash_follows_analysis_inputs() {
     );
 }
 
-/// The streamed result hash equals the SHA-256 of the whole JCS text of the layer.
+/// The result hash is the SHA-256 of the shard file names, and each name holds the SHA-256
+/// of the JCS text of its shard.
 #[test]
-fn result_hash_streams_the_jcs_text() {
+fn result_hash_names_the_shard_texts() {
     let mut p = seeded();
-    p.layer_mut(Source::Analysis)
-        .expect("the analysis layer")
+    p.analysis_at_mut(Address::ram(0x1080))
         .comments
         .set(
             Address::ram(0x1080),
@@ -179,10 +241,15 @@ fn result_hash_streams_the_jcs_text() {
             &crate::fact::Origin::analysis(),
         )
         .expect("a comment");
-    for set in [p.base(), p.analysis()] {
-        let text = ghidorah_json::write_jcs(&crate::codec::tables_to_json(set)).expect("JCS");
-        assert_eq!(result_hash(set), ghidorah_base::sha256(text.as_bytes()));
+    let set = p.analysis();
+    let mut lines = String::new();
+    for (name, text) in super::shard_texts(set).unwrap() {
+        let (_, hash) = super::parse_name(&name).unwrap();
+        assert_eq!(hash, ghidorah_base::sha256(text.as_bytes()));
+        lines.push_str(&name);
+        lines.push('\n');
     }
+    assert_eq!(result_hash(set), ghidorah_base::sha256(lines.as_bytes()));
 }
 
 #[test]

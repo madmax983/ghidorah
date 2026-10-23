@@ -112,8 +112,7 @@ fn check(path: &str, p: &Program) {
             );
         }
     }
-    assert!(p.analysis().symbols().is_empty());
-    assert!(p.analysis().funcs().is_empty());
+    assert!(p.analysis().is_empty());
     assert!(p.base().refs().is_empty());
     assert!(p.funcs().is_empty());
 }

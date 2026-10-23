@@ -12,7 +12,7 @@ fn reason(p: &Program, at: u64) -> Option<StartReason> {
 
 /// Tells if a call reference from the body of `caller` goes to `to`.
 fn calls(p: &Program, caller: u64, to: Address) -> bool {
-    p.analysis().refs().iter().any(|r| {
+    p.analysis().refs().any(|r| {
         r.value.key.kind == RefType::UnconditionalCall
             && r.value.key.to == to
             && p.owner_of(r.value.key.from) == Some(fid(caller))

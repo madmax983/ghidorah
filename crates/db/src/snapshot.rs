@@ -4,25 +4,31 @@
 //!
 //! ```text
 //! {"analysis_inputs_hash": hex or null, "facts": {analysis, base, binary, notes, types},
-//!  "format_version": 2, "journal_lines": n, "marks": [..], "progress": [..], "rev": r}
+//!  "format_version": 3, "journal_lines": n, "marks": [..], "progress": [..], "rev": r}
 //! ```
 //!
-//! [`decode`] also reads format version 1. It maps the old `ext:` addresses of the `analysis`,
-//! `base` and `notes` facts to their new addresses (the [`crate::migrate`] module).
+//! [`decode`] also reads format versions 1 and 2. It maps the old `ext:` addresses of a
+//! version 1 snapshot to their new addresses (the [`crate::migrate`] module).
 //!
-//! - `facts` holds the tables of both layers with their counters, the note store, the SHA-256
-//!   of the input and the types. The types are a number of types, or the number and the C
-//!   texts that added types after the prelude.
+//! - `facts` holds the base layer, the note store with its counter, the SHA-256 of the input
+//!   and the types. The types are a number of types, or the number and the C texts that added
+//!   types after the prelude.
+//! - `facts.analysis` holds the names of the shard files in shard order (the [`files`]
+//!   module). Format versions 1 and 2 hold the tables of the analysis layer there.
 //! - `journal_lines` is the number of journal lines that the snapshot covers. Replay applies
 //!   only the lines after them.
 //! - `analysis_inputs_hash` is the inputs hash of the last analysis run, or `null`.
 //!
-//! A snapshot write is exactly this operation sequence (AC-120a): `create_new` of
+//! A snapshot write first puts each new shard file (the [`files`] module). Then the snapshot
+//! file follows with exactly this operation sequence (AC-120a): `create_new` of
 //! `snapshot.json.tmp.<pid>.<n>`, `write_all`, `sync_file`, `rename` to `snapshot.json` and
 //! `sync_dir`. The temporary file has a name of this process (see [`crate::fs`]).
 
+pub mod files;
 #[cfg(test)]
 mod tests;
+
+pub use files::{SHARD_TMP, SHARDS_DIR, parse_name, shard_name, shard_texts};
 
 use std::fmt;
 use std::path::Path;
@@ -33,7 +39,7 @@ use ghidorah_json::{Limits, Value, write_jcs};
 
 use crate::codec::{
     CodecError, Json, Obj, notes_from_json, notes_to_json, progress_from_json, progress_to_json,
-    tables_from_json, tables_jcs_to, tables_to_json, types_from_json, types_to_json,
+    set_from_json, tables_from_json, tables_jcs_to, tables_to_json, types_from_json, types_to_json,
 };
 use crate::fs::{Fs, FsError, replace_file, replace_file_from};
 use crate::migrate::ExtMap;
@@ -44,7 +50,7 @@ use crate::source::Source;
 use crate::typesglue::{TypeInput, Types};
 
 /// The format version of the project files.
-pub const FORMAT_VERSION: u64 = 2;
+pub const FORMAT_VERSION: u64 = 3;
 
 /// The oldest format version that a migration reads.
 pub const MIN_FORMAT_VERSION: u64 = 1;
@@ -95,6 +101,8 @@ pub enum SnapshotError {
     },
     /// The dump has no JCS form.
     Jcs(String),
+    /// A shard file is bad: the text tells the name and the fault.
+    Shard(String),
 }
 
 impl fmt::Display for SnapshotError {
@@ -109,6 +117,7 @@ impl fmt::Display for SnapshotError {
                 "The snapshot has {want} types, and the program has {have} types."
             ),
             Self::Jcs(e) => write!(f, "The snapshot has no JCS form: {e}"),
+            Self::Shard(e) => write!(f, "A shard file of the snapshot is bad: {e}"),
         }
     }
 }
@@ -234,7 +243,10 @@ pub fn encode_to(
     sink("{\"analysis_inputs_hash\":");
     sink(&jcs(&hash_json(inputs.as_ref()))?);
     sink(",\"facts\":{\"analysis\":");
-    layer_jcs(sink, program.analysis())?;
+    let names = files::names(program.analysis());
+    sink(&jcs(&Value::Array(
+        names.into_iter().map(Value::from).collect(),
+    ))?);
     sink(",\"base\":");
     layer_jcs(sink, program.base())?;
     sink(",\"binary\":");
@@ -259,7 +271,7 @@ pub fn encode_to(
 
 /// Gives the JCS text of the tables of one layer to `sink`, row by row.
 fn layer_jcs(sink: &mut dyn FnMut(&str), tables: &Tables) -> Result<(), SnapshotError> {
-    tables_jcs_to(tables, true, sink).map_err(|e| SnapshotError::Jcs(e.to_string()))
+    tables_jcs_to(tables, sink).map_err(|e| SnapshotError::Jcs(e.to_string()))
 }
 
 /// Tells if `v` is a format version that a reader takes.
@@ -267,12 +279,18 @@ const fn known(v: u64) -> bool {
     MIN_FORMAT_VERSION <= v && v <= FORMAT_VERSION
 }
 
-/// Reads a snapshot. A version 1 snapshot gets the new `ext:` addresses of `v1`.
+/// Reads a snapshot. A version 1 snapshot gets the new `ext:` addresses of `v1`. `read` gives
+/// the bytes of a shard file by name, or `None` when the file is missing.
 ///
 /// # Errors
 ///
-/// Returns a [`SnapshotError`] for text that is not JSON, a bad shape or another version.
-pub fn decode(bytes: &[u8], v1: &ExtMap) -> Result<Snapshot, SnapshotError> {
+/// Returns a [`SnapshotError`] for text that is not JSON, a bad shape, another version or a
+/// bad shard file.
+pub fn decode(
+    bytes: &[u8],
+    v1: &ExtMap,
+    read: &mut dyn FnMut(&str) -> Option<Vec<u8>>,
+) -> Result<Snapshot, SnapshotError> {
     let text =
         std::str::from_utf8(bytes).map_err(|_| SnapshotError::Json("not UTF-8".to_owned()))?;
     let mut value = ghidorah_json::parse(text, &SNAPSHOT_LIMITS)
@@ -313,7 +331,11 @@ pub fn decode(bytes: &[u8], v1: &ExtMap) -> Result<Snapshot, SnapshotError> {
         types,
         type_inputs,
         base: f.with("base", tables_from_json).map_err(at)?,
-        analysis: f.with("analysis", tables_from_json).map_err(at)?,
+        analysis: if format >= 3 {
+            files::read_set(f.member("analysis").map_err(at)?, read)?
+        } else {
+            f.with("analysis", set_from_json).map_err(at)?
+        },
         notes: f.with("notes", notes_from_json).map_err(at)?,
         progress: progress_from_json(&progress)?,
     })
@@ -333,8 +355,12 @@ pub fn write(fs: &mut dyn Fs, dir: &Path, text: &str) -> Result<(), FsError> {
     fs.sync_dir(dir)
 }
 
-/// Writes the snapshot of `program` in `dir`, as [`write()`] does with the text of [`encode`].
-/// The text goes to the file one piece at a time, so no text of the whole snapshot exists.
+/// Writes the snapshot of `program` in `dir`, shard files first.
+///
+/// The new shard files go first (the [`files`] module). Then the snapshot file follows as
+/// [`write()`] does with the text of [`encode`]. The text goes one piece at a time, so no
+/// text of the whole snapshot exists. Last, the shard files that the snapshot does not name
+/// go.
 ///
 /// # Errors
 ///
@@ -347,6 +373,7 @@ pub fn write_program(
     journal_lines: u64,
     inputs: Option<[u8; 32]>,
 ) -> Result<(), FsError> {
+    let names = files::write_shards(fs, dir, program.analysis())?;
     let tmp = dir.join(SNAPSHOT_TMP);
     let mut fill = |put: &mut dyn FnMut(&[u8])| {
         encode_to(program, journal_lines, inputs, &mut |piece| {
@@ -355,7 +382,9 @@ pub fn write_program(
         .map_err(|e| e.to_string())
     };
     replace_file_from(fs, &dir.join(SNAPSHOT_FILE), &tmp, &mut fill)?;
-    fs.sync_dir(dir)
+    fs.sync_dir(dir)?;
+    files::sweep(fs, dir, &names);
+    Ok(())
 }
 
 /// Gives the analysis inputs hash of `program` (design Section 3.9).
@@ -384,14 +413,19 @@ pub fn inputs_hash(program: &Program, engine: &Value, config: &Value) -> [u8; 32
     hash_value(&all)
 }
 
-/// Gives the SHA-256 of the JCS text of the tables of an analysis layer.
+/// Gives the result hash of an analysis layer.
+///
+/// The hash is the SHA-256 of the shard file names in shard order, each name with a line feed.
+/// A name holds the SHA-256 of the JCS text of its shard. A shard keeps that hash, so a shard
+/// with no change costs no encode.
 #[must_use]
 pub fn result_hash(set: &AnalysisSet) -> [u8; 32] {
     let mut hasher = Sha256::default();
-    match tables_jcs_to(set, true, &mut |piece| hasher.update(piece.as_bytes())) {
-        Ok(()) => hasher.finalize(),
-        Err(_) => hash_value(&tables_to_json(set)),
+    for name in files::names(set) {
+        hasher.update(name.as_bytes());
+        hasher.update(b"\n");
     }
+    hasher.finalize()
 }
 
 /// Gives the SHA-256 of the JCS text of `value`, or of its compact text without a JCS form.

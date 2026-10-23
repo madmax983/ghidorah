@@ -19,7 +19,7 @@ use crate::fact::{Origin, SessionLabel};
 use crate::funcs::{Function, StartReason};
 use crate::jumptables::{JtMethod, JumpTable};
 use crate::listing::{CodeUnit, FlowKind};
-use crate::program::{AnalysisSet, Program};
+use crate::program::{AnalysisSet, Program, Tables};
 use crate::refs::{Ref, RefKey, RefType};
 use crate::source::Source;
 use crate::strings::{Encoding, StrInfo};
@@ -87,7 +87,7 @@ fn body(first: u64, last: u64) -> RangeSet {
 /// Builds a seeded analysis set. `variant` 1 adds a fourth function and a second string.
 pub(crate) fn analysis_set(p: &Program, variant: u8) -> AnalysisSet {
     let entry = p.binary().entry_points.first().map_or(0, |e| e.addr);
-    let mut t = AnalysisSet::default();
+    let mut t = Tables::default();
     for off in units() {
         let flow = if off == JUMP {
             FlowKind::IJmp
@@ -127,11 +127,11 @@ pub(crate) fn analysis_set(p: &Program, variant: u8) -> AnalysisSet {
             .unwrap();
     }
     add_rest(&mut t, variant);
-    t
+    crate::codec::set_from_tables(&t).unwrap()
 }
 
 /// Adds the references, the strings, the symbol and the jump table of a seeded set.
-fn add_rest(t: &mut AnalysisSet, variant: u8) {
+fn add_rest(t: &mut Tables, variant: u8) {
     let o = Origin::analysis();
     let refs = [
         (0x1084, 0x10c0, RefType::UnconditionalCall),
@@ -230,4 +230,11 @@ pub(crate) fn seeded() -> Program {
             p
         })
         .clone()
+}
+
+/// Gives the bytes of each shard file of the analysis layer of `p` by name, for
+/// [`crate::snapshot::decode`].
+pub(crate) fn shard_reader(p: &Program) -> impl FnMut(&str) -> Option<Vec<u8>> + use<> {
+    let texts = crate::snapshot::shard_texts(p.analysis()).unwrap();
+    move |name: &str| texts.get(name).map(|t| t.clone().into_bytes())
 }

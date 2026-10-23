@@ -186,7 +186,7 @@ pub fn items(program: &Program) -> Vec<Gap> {
         return out;
     }
     let mut owned = fixed(program);
-    for layer in [program.base(), program.analysis()] {
+    for layer in program.layers() {
         for f in layer.funcs().iter() {
             for r in f.body.ranges() {
                 owned.insert(*r);

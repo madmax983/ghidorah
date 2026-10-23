@@ -70,13 +70,13 @@ pub(super) fn werr<T>(e: WriteError<T>) -> EditError {
     }
 }
 
-/// Gives the tables of a layer for a change.
-pub(super) fn tables(p: &mut Program, layer: Layer) -> Result<&mut Tables, EditError> {
-    let source = match layer {
-        Layer::Base => Source::Agent,
-        Layer::Analysis => Source::Analysis,
-    };
-    Ok(p.layer_mut(source)?)
+/// Gives the tables of a layer for a change of a fact at `at`. The analysis layer gives the
+/// shard of `at`.
+pub(super) fn tables(p: &mut Program, layer: Layer, at: Address) -> Result<&mut Tables, EditError> {
+    match layer {
+        Layer::Base => Ok(p.layer_mut(Source::Agent)?),
+        Layer::Analysis => Ok(p.analysis_at_mut(at)),
+    }
 }
 
 /// Puts the exact slot `new` with `write`. Gives the old fact.
@@ -108,6 +108,15 @@ pub(crate) fn apply(
     edit: &Edit,
     ctx: &Ctx<'_>,
 ) -> Result<Option<Edit>, EditError> {
+    let out = apply_one(program, edit, ctx);
+    if ctx.layer() == Layer::Analysis && !matches!(edit, Edit::ReplaceAnalysis(_)) {
+        program.tidy_analysis();
+    }
+    out
+}
+
+/// Applies `edit` to `program` with no clean-up of the analysis shards.
+fn apply_one(program: &mut Program, edit: &Edit, ctx: &Ctx<'_>) -> Result<Option<Edit>, EditError> {
     match edit {
         Edit::SetName {
             addr,
@@ -161,7 +170,7 @@ fn set_var_fact(
         var_type(p, field)?;
     }
     let key = FactKey::Var(var.clone());
-    let t = tables(p, ctx.layer())?;
+    let t = tables(p, ctx.layer(), var.func.0)?;
     let current = t.vars.get(var).cloned().unwrap_or_default();
     let field = match field {
         VarField::Name(n) => {
@@ -199,7 +208,7 @@ fn set_jump_table(
     {
         targets(p, &t.value.targets)?;
     }
-    let t = tables(p, ctx.layer())?;
+    let t = tables(p, ctx.layer(), id.0)?;
     if gate(ctx, &key, t.jumptables.get(id), new)? {
         return Ok(None);
     }
@@ -224,7 +233,7 @@ fn set_flow(
     {
         targets(p, list)?;
     }
-    let t = tables(p, ctx.layer())?;
+    let t = tables(p, ctx.layer(), at)?;
     if gate(ctx, &key, t.overrides.get(at), new)? {
         return Ok(None);
     }
@@ -249,7 +258,7 @@ fn set_data(
     {
         known(p, d.value.ty)?;
     }
-    let t = tables(p, ctx.layer())?;
+    let t = tables(p, ctx.layer(), at)?;
     if gate(ctx, &key, t.listing.data(at.off), new)? {
         return Ok(None);
     }
@@ -281,7 +290,7 @@ fn set_name(
     (kind, primary): (SymKind, bool),
     name: Option<&Fact<String>>,
 ) -> Result<Option<Edit>, EditError> {
-    let t = tables(p, ctx.layer())?;
+    let t = tables(p, ctx.layer(), addr)?;
     let target = match key {
         Some(k) => t.symbols.get(addr, k),
         None => t.symbols.primary(addr),
@@ -345,7 +354,7 @@ fn set_comment(
 ) -> Result<Option<Edit>, EditError> {
     let key = FactKey::Comment(addr, kind);
     let new = slot(ctx, &key, text)?;
-    let t = tables(p, ctx.layer())?;
+    let t = tables(p, ctx.layer(), addr)?;
     if gate(ctx, &key, t.comments.get(addr, kind), new)? {
         return Ok(None);
     }
@@ -365,7 +374,7 @@ fn add_ref(p: &mut Program, ctx: &Ctx<'_>, fact: &Fact<Ref>) -> Result<Option<Ed
     if ctx.forward() && !starts_unit(p, key.from) {
         return Err(EditError::NotCode(key.from));
     }
-    let t = tables(p, ctx.layer())?;
+    let t = tables(p, ctx.layer(), fact.value.key.from)?;
     if gate(ctx, &fkey, t.refs.get(&key), Some(fact))? {
         return Ok(None);
     }
@@ -378,7 +387,7 @@ fn add_ref(p: &mut Program, ctx: &Ctx<'_>, fact: &Fact<Ref>) -> Result<Option<Ed
 
 /// Applies a `RemoveRef` edit.
 fn remove_ref(p: &mut Program, ctx: &Ctx<'_>, key: RefKey) -> Result<Option<Edit>, EditError> {
-    let t = tables(p, ctx.layer())?;
+    let t = tables(p, ctx.layer(), key.from)?;
     if gate(ctx, &FactKey::Ref(key), t.refs.get(&key), None)? {
         return Ok(None);
     }

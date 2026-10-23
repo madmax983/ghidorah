@@ -113,8 +113,8 @@ pub use meta::MetaLine;
 pub use notes::{Claim, Note, NoteKind, NoteSet, NoteStatus, Notes, SetMembers, SetOp};
 pub use overrides::{FlowOverride, FlowOverrides};
 pub use program::{
-    AnalysisSet, BinaryMeta, ExportRow, FuncView, ImportRow, Name, Program, ProgramError, Tables,
-    VarView,
+    AnalysisSet, BinaryMeta, ExportRow, FuncView, ImportRow, Name, Program, ProgramError,
+    SHARD_BITS, ShardId, Tables, VarView,
 };
 pub use progress::{FuncProgress, Mark, Progress, ProgressCounts};
 pub use project::{

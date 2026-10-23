@@ -2,7 +2,7 @@
 
 use ghidorah_analysis::{Changed, Scheduler, Until, inputs_hash};
 use ghidorah_base::{Address, Fuel, FuncId, TxId};
-use ghidorah_db::{Edit, SessionLabel, Source, Tables};
+use ghidorah_db::{AnalysisSet, Edit, SessionLabel, Source};
 
 use crate::support::{analyze, named, program};
 
@@ -11,8 +11,8 @@ fn facts_have_one_origin() {
     let mut p = program("fixtures/bin/two_helpers.gcc-O2");
     let (sched, _) = analyze(&mut p);
     let a = p.analysis();
-    assert!(!a.funcs().is_empty());
-    for f in a.funcs().iter() {
+    assert!(a.funcs().next().is_some());
+    for f in a.funcs() {
         assert_eq!(f.source, Source::Analysis);
         if let Some(n) = &f.flags.noreturn {
             assert_eq!(n.source, Source::Analysis);
@@ -20,7 +20,7 @@ fn facts_have_one_origin() {
             assert_eq!(n.session.as_str(), SessionLabel::ANALYSIS);
         }
     }
-    for r in a.refs().iter() {
+    for r in a.refs() {
         assert_eq!((r.source, r.tx), (Source::Analysis, TxId(0)));
         assert_eq!(r.session.as_str(), SessionLabel::ANALYSIS);
     }
@@ -32,23 +32,23 @@ fn facts_have_one_origin() {
 fn changed_counts_tables() {
     let mut p = program("fixtures/bin/two_helpers.gcc-O2");
     let _ = analyze(&mut p);
-    let empty = Tables::default();
+    let empty = AnalysisSet::default();
     let all = Changed::between(&empty, p.analysis());
     assert_eq!(
         all.functions,
-        u64::try_from(p.analysis().funcs().len()).expect("small")
+        u64::try_from(p.analysis().funcs().count()).expect("small")
     );
     assert_eq!(
         all.refs,
-        u64::try_from(p.analysis().refs().len()).expect("small")
+        u64::try_from(p.analysis().refs().count()).expect("small")
     );
     assert_eq!(
         all.strings,
-        u64::try_from(p.analysis().strings().len()).expect("small")
+        u64::try_from(p.analysis().strings().count()).expect("small")
     );
     assert_eq!(
         all.jumptables,
-        u64::try_from(p.analysis().jumptables().len()).expect("small")
+        u64::try_from(p.analysis().jumptables().count()).expect("small")
     );
     assert_eq!(
         Changed::between(p.analysis(), p.analysis()),

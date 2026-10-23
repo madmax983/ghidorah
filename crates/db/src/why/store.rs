@@ -5,8 +5,8 @@
 //!
 //! | Key | Premise | Compact value |
 //! |---|---|---|
-//! | `CodeUnit(at)` | `Func` at a RAM entry | the order, the entry and the rule |
-//! | `Ref(k)` | `CodeUnit` at the RAM `from` of `k` | the order and the rule |
+//! | `CodeUnit(at)` | `Func` at a RAM entry | the entry and the rule |
+//! | `Ref(k)` | `CodeUnit` at the RAM `from` of `k` | the rule |
 //!
 //! Each other record goes in the general map. A key is in one map only. A read makes the
 //! record of a compact value again, so the readers see the same records in the same order.
@@ -23,8 +23,6 @@ use crate::refs::RefKey;
 /// A record whose one premise follows from its key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct Slim {
-    /// The creation order.
-    pub(super) order: u64,
     /// The entry of the premise function of a code unit. A reference keeps 0.
     pub(super) entry: u64,
     /// The index of the rule in the rule list of the store.
@@ -35,15 +33,13 @@ pub(super) struct Slim {
 #[derive(Debug, Clone, Default)]
 pub struct WhyStore {
     /// The records that have no compact form.
-    map: BTreeMap<FactKey, (u64, Why)>,
+    map: BTreeMap<FactKey, Why>,
     /// The records of code units with one premise function.
     units: BTreeMap<u64, Slim>,
     /// The records of references with the code unit of their source as the premise.
     refs: BTreeMap<RefKey, Slim>,
     /// The rule codes of the compact records. A record keeps the index of its rule.
     rules: Vec<RuleCode>,
-    /// The creation order of the next new record.
-    next: u64,
 }
 
 /// The compact form of a record.
@@ -107,7 +103,7 @@ pub(super) fn intern(rules: &mut Vec<RuleCode>, rule: &RuleCode) -> Option<u16> 
 
 impl PartialEq for WhyStore {
     fn eq(&self, other: &Self) -> bool {
-        self.next == other.next && self.len() == other.len() && self.iter().eq(other.iter())
+        self.len() == other.len() && self.iter().eq(other.iter())
     }
 }
 
@@ -134,19 +130,17 @@ impl WhyStore {
     pub fn get(&self, key: &FactKey) -> Option<Why> {
         self.slim(key)
             .and_then(|s| self.expand(key, s))
-            .or_else(|| self.map.get(key).map(|(_, w)| w.clone()))
+            .or_else(|| self.map.get(key).cloned())
     }
 
-    /// Gives the creation order of the record of a fact.
+    /// Tells if the layer has a record of `key`.
     #[must_use]
-    pub fn order(&self, key: &FactKey) -> Option<u64> {
-        self.slim(key)
-            .map(|s| s.order)
-            .or_else(|| self.map.get(key).map(|(o, _)| *o))
+    pub fn contains(&self, key: &FactKey) -> bool {
+        self.slim(key).is_some() || self.map.contains_key(key)
     }
 
-    /// Gives all records in key order with their creation order.
-    pub fn iter(&self) -> impl Iterator<Item = (FactKey, u64, Why)> + '_ {
+    /// Gives all records in key order.
+    pub fn iter(&self) -> impl Iterator<Item = (FactKey, Why)> + '_ {
         let units = self
             .units
             .iter()
@@ -154,12 +148,9 @@ impl WhyStore {
         let refs = self.refs.iter().map(|(k, s)| (FactKey::Ref(*k), *s));
         let slims = units.chain(refs).filter_map(|(key, s)| {
             let why = self.expand(&key, s)?;
-            Some((key, s.order, why))
+            Some((key, why))
         });
-        let general = self
-            .map
-            .iter()
-            .map(|(k, (o, w))| (k.clone(), *o, w.clone()));
+        let general = self.map.iter().map(|(k, w)| (k.clone(), w.clone()));
         Merge {
             a: general.peekable(),
             b: slims.peekable(),
@@ -185,13 +176,11 @@ impl WhyStore {
         intern(&mut self.rules, rule)
     }
 
-    /// Puts the record of `key` with its order in its map. Gives the old record.
-    fn put(&mut self, key: FactKey, order: u64, why: Why) -> Option<Why> {
+    /// Puts the record of `key` in its map. Gives the old record.
+    fn put(&mut self, key: FactKey, why: Why) -> Option<Why> {
         let old = self.remove(&key);
         let slim = |store: &mut Self, entry: u64| {
-            store
-                .rule_index(&why.rule)
-                .map(|rule| Slim { order, entry, rule })
+            store.rule_index(&why.rule).map(|rule| Slim { entry, rule })
         };
         match compact(&key, &why) {
             Some(Compact::Unit(at, entry)) => {
@@ -208,20 +197,18 @@ impl WhyStore {
             }
             None => {}
         }
-        self.map.insert(key, (order, why));
+        self.map.insert(key, why);
         old
     }
 
-    /// Sets the record of a fact. The record gets the next creation order. Gives the old record.
+    /// Sets the record of a fact. Gives the old record.
     ///
     /// # Errors
     ///
     /// Returns [`Invalid::TooMany`] above [`MAX_PREMISES`] premises.
     pub(crate) fn insert(&mut self, key: FactKey, why: Why) -> Result<Option<Why>, Invalid> {
         check(&why)?;
-        let order = self.next;
-        self.next = self.next.saturating_add(1);
-        Ok(self.put(key, order, why))
+        Ok(self.put(key, why))
     }
 
     /// Removes the record of a fact and gives it.
@@ -233,46 +220,21 @@ impl WhyStore {
         };
         match slim {
             Some(s) => self.expand(key, s),
-            None => self.map.remove(key).map(|(_, w)| w),
+            None => self.map.remove(key),
         }
     }
 
-    /// Gives the creation order of the next new record.
-    #[must_use]
-    pub const fn next_order(&self) -> u64 {
-        self.next
-    }
-
-    /// Sets the record of a fact with its creation order. Gives the old record.
-    ///
-    /// The next order stays above `order`. The JSON codec uses this function for an exact copy.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Invalid::TooMany`] above [`MAX_PREMISES`] premises.
-    pub(crate) fn insert_at(
-        &mut self,
-        key: FactKey,
-        order: u64,
-        why: Why,
-    ) -> Result<Option<Why>, Invalid> {
-        check(&why)?;
-        self.next = self.next.max(order.saturating_add(1));
-        Ok(self.put(key, order, why))
-    }
-
-    /// Sets the records of `rows`, each with its creation order, as [`Self::insert_at`] does
-    /// one at a time.
+    /// Sets the records of `rows` in their order, as [`Self::insert`] does one at a time.
     ///
     /// # Errors
     ///
     /// Returns [`Invalid::TooMany`] above [`MAX_PREMISES`] premises. Then the store does not
     /// change.
-    pub(crate) fn extend_at(&mut self, rows: Vec<(FactKey, u64, Why)>) -> Result<(), Invalid> {
+    pub(crate) fn extend(&mut self, rows: Vec<(FactKey, Why)>) -> Result<(), Invalid> {
         self.extend_rows(WhyRows::from_rows(rows)?)
     }
 
-    /// Sets the records of `rows`, as [`Self::insert_at`] does one at a time in push order.
+    /// Sets the records of `rows`, as [`Self::insert`] does one at a time in push order.
     ///
     /// An empty store takes the packed maps of `rows` in one bulk build each, so each map has
     /// full nodes. One insert at a time in key order leaves each node about half full.
@@ -288,38 +250,29 @@ impl WhyStore {
             refs,
             rules,
             loose,
-            top,
             ..
         } = rows;
-        if let Some(top) = top {
-            self.next = self.next.max(top.saturating_add(1));
-        }
         if self.is_empty() {
             self.map = map.into_iter().collect();
             self.units = units.into_iter().collect();
             self.refs = refs.into_iter().collect();
             self.rules = rules;
         } else {
-            for (key, (order, why)) in map {
-                self.insert_at(key, order, why)?;
+            for (key, why) in map {
+                self.insert(key, why)?;
             }
             let units = units.into_iter().map(|(at, s)| (FactKey::CodeUnit(at), s));
             let refs = refs.into_iter().map(|(k, s)| (FactKey::Ref(k), s));
             for (key, s) in units.chain(refs) {
                 if let Some(why) = expand(&rules, &key, s) {
-                    self.insert_at(key, s.order, why)?;
+                    self.insert(key, why)?;
                 }
             }
         }
-        for (key, order, why) in loose {
-            self.insert_at(key, order, why)?;
+        for (key, why) in loose {
+            self.insert(key, why)?;
         }
         Ok(())
-    }
-
-    /// Sets the creation order of the next new record. The order never goes below a stored order.
-    pub(crate) fn set_next(&mut self, next: u64) {
-        self.next = self.next.max(next);
     }
 }
 
@@ -331,10 +284,10 @@ struct Merge<A: Iterator, B: Iterator> {
 
 impl<A, B> Iterator for Merge<A, B>
 where
-    A: Iterator<Item = (FactKey, u64, Why)>,
-    B: Iterator<Item = (FactKey, u64, Why)>,
+    A: Iterator<Item = (FactKey, Why)>,
+    B: Iterator<Item = (FactKey, Why)>,
 {
-    type Item = (FactKey, u64, Why);
+    type Item = (FactKey, Why);
 
     fn next(&mut self) -> Option<Self::Item> {
         let a_first = match (self.a.peek(), self.b.peek()) {

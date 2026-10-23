@@ -99,7 +99,7 @@ fn ac_126_orphans_of_a_lost_function() {
             }),
         }]
     });
-    assert!(p.analysis().funcs().get(FuncId(at(0x20))).is_some());
+    assert!(p.analysis().func(FuncId(at(0x20))).is_some());
     edit(&mut p, &mut sched, |o| {
         vec![
             Edit::SetVarFact {
@@ -118,7 +118,7 @@ fn ac_126_orphans_of_a_lost_function() {
     });
     assert!(find(&p).is_empty(), "every fact has its anchor");
     edit(&mut p, &mut sched, |_| vec![Edit::RemoveRef { key: seed }]);
-    assert!(p.analysis().funcs().get(FuncId(at(0x20))).is_none());
+    assert!(p.analysis().func(FuncId(at(0x20))).is_none());
     let found = find(&p);
     let kinds: Vec<OrphanKind> = found.iter().map(|o| o.kind).collect();
     assert_eq!(kinds, [OrphanKind::Name, OrphanKind::Var], "{found:?}");
