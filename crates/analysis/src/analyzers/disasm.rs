@@ -19,7 +19,7 @@
 use std::collections::BTreeSet;
 
 use ghidorah_base::{Address, Range};
-use ghidorah_db::{FactKey, RefKey, RefType};
+use ghidorah_db::{RefKey, RefType};
 use ghidorah_kernel::RangeSet;
 use ghidorah_x86::{Flow, Insn};
 
@@ -31,7 +31,6 @@ use crate::overrides::SiteFlow;
 use crate::registry::AnalyzerId;
 use crate::slotsite::SiteTarget;
 use crate::spec::{AnalyzerSpec, Grain, Opt, Step, Trigger};
-use crate::why::{Rule, Why};
 
 /// The largest number of instructions in one function body.
 pub const MAX_INSNS: u64 = 100_000;
@@ -185,8 +184,7 @@ impl<'c, 'a> Walk<'c, 'a> {
             to,
             kind,
         };
-        let why = Why::new(Rule::FlowRef, vec![FactKey::CodeUnit(at)]);
-        self.body.refs.insert(key, why);
+        self.body.refs.insert(key);
     }
 
     /// Gives the import slot of the indirect site `insn` at `at` and the EXTERNAL address of

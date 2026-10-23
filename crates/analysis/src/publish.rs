@@ -30,7 +30,7 @@ use ghidorah_db::{
 };
 
 use crate::AnalysisError;
-use crate::why::{Rule, unit_why};
+use crate::why::Rule;
 use crate::work::Work;
 use whys::{Rec, Whys};
 
@@ -181,16 +181,16 @@ fn collect(program: &Program, work: &Work) -> Facts {
                 flags: u.flags,
             },
         ));
-        out.whys.insert(FactKey::CodeUnit(*at), unit_why(u.owner));
+        out.whys.insert_unit(*at, u.owner);
     }
-    for (key, why) in &work.refs {
+    for key in &work.refs {
         let owner = work.units.get(&key.from.off).map(|u| u.owner);
         if owner.is_some_and(|o| kept.contains(&o)) {
             out.refs.push(Ref {
                 key: *key,
                 primary: true,
             });
-            out.whys.insert(FactKey::Ref(*key), why.clone());
+            out.whys.insert_ref(*key, Rule::FlowRef);
         }
     }
     out.kept = kept;

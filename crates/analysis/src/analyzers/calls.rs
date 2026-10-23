@@ -60,7 +60,7 @@ pub fn run(ctx: &mut AnalysisCtx<'_>, ranges: &RangeSet) -> Step {
                 to: Address::ram(*target),
                 kind: RefType::UnconditionalCall,
             };
-            if !ctx.work.refs.contains_key(&key) {
+            if !ctx.work.refs.contains(&key) {
                 continue;
             }
             reached.entry(*target).or_insert(key);

@@ -479,7 +479,7 @@ pub fn run(ctx: &mut AnalysisCtx<'_>, ranges: &RangeSet) -> Step {
     let program = ctx.program();
     let mut premises: BTreeMap<u64, Vec<FactKey>> = BTreeMap::new();
     let data = &ctx.work.data;
-    for key in data.operands.keys().filter(|k| k.to.is_ram()) {
+    for key in data.operands.iter().filter(|k| k.to.is_ram()) {
         premises
             .entry(key.to.off)
             .or_default()

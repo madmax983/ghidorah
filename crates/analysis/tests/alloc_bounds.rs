@@ -284,3 +284,48 @@ fn regress_publish_keeps_derived_whys_compact() {
         stats.peak_bytes
     );
 }
+
+/// The code of one frame-pointer function that calls the next function, and its padding.
+const CALLER: [u8; 16] = [
+    0x55, 0x48, 0x89, 0xe5, 0xe8, 0x07, 0x00, 0x00, 0x00, 0x5d, 0xc3, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc,
+];
+
+/// Gives the bytes that the set and the work state keep after a full analysis of `program`.
+fn kept_after_run(mut program: Program) -> (Program, usize) {
+    let (sched, stats) = ALLOC.measure(|| {
+        let mut sched = Scheduler::new();
+        sched
+            .run(&mut program, Until::Full, &mut Fuel::new(u64::MAX))
+            .expect("a run");
+        sched
+    });
+    drop(sched);
+    (program, stats.retained_bytes)
+}
+
+/// The work state keeps each flow and operand reference as a key. The why-record of such a
+/// reference is its rule with the code unit at its source, so the publish step makes it.
+/// The bytes of one call are the bytes of `n` functions with a call each, less the bytes of
+/// `n` functions with no call. A call kept 1,542 bytes with a full record; now 1,428.
+#[test]
+fn regress_work_state_keeps_reference_keys_only() {
+    let n = 5_000u64;
+    let text: Vec<u8> = (0..n).flat_map(|_| CALLER).collect();
+    let mut elf = ElfBuilder::exec()
+        .section(Section::code(".text", &text))
+        .entry(Loc::section(".text", 0));
+    for i in 0..n {
+        elf = elf.fde(Fde::frame_pointer(Loc::section(".text", i * 16), 11));
+    }
+    let (binary, mem) = load(&elf.build(), &LoadOpts::AUTO, &Limits::DEFAULT).expect("a load");
+    let callers = Program::from_binary(binary, mem, &Limits::DEFAULT).expect("a program");
+    let (callers, with_calls) = kept_after_run(callers);
+    let (_, plain) = kept_after_run(functions(n, false));
+    let refs = callers.analysis().refs().iter().count();
+    assert!(
+        refs >= 4_999,
+        "each call but the last has a reference: {refs}"
+    );
+    let per_call = with_calls.saturating_sub(plain) / refs;
+    assert!(per_call <= 1_480, "a call keeps {per_call} bytes");
+}

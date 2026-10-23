@@ -122,8 +122,9 @@ impl Slot {
 /// The data references of the work state.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub(crate) struct DataRefs {
-    /// The operand references by key, each with its why-record.
-    pub operands: BTreeMap<RefKey, Why>,
+    /// The operand references. The why-record of each is `R_OPERAND_REF` with the code unit
+    /// at its source.
+    pub operands: BTreeSet<RefKey>,
     /// The pointer slots by address.
     pub slots: BTreeMap<u64, Slot>,
     /// The table start of each relative table read, by the address of its `lea`.
@@ -415,7 +416,7 @@ pub fn run(ctx: &mut AnalysisCtx<'_>, ranges: &RangeSet) -> Step {
         return Step { work: 1 };
     }
     let mut work = 1u64;
-    let mut fresh = BTreeMap::new();
+    let mut fresh = BTreeSet::new();
     let mut fresh_sites = BTreeMap::new();
     for r in ranges.ranges() {
         for at in ctx.work.units.range(r.first..=r.last).map(|(at, _)| *at) {
@@ -433,20 +434,20 @@ pub fn run(ctx: &mut AnalysisCtx<'_>, ranges: &RangeSet) -> Step {
                     to,
                     kind,
                 };
-                fresh.insert(key, Why::new(Rule::OperandRef, vec![FactKey::CodeUnit(at)]));
+                fresh.insert(key);
             }
         }
     }
     let data = &mut ctx.work.data;
-    let old: BTreeMap<RefKey, Why> = data
+    let old: BTreeSet<RefKey> = data
         .operands
         .iter()
-        .filter(|(k, _)| ranges.contains(k.from.off))
-        .map(|(k, w)| (*k, w.clone()))
+        .filter(|k| ranges.contains(k.from.off))
+        .copied()
         .collect();
     let mut changed = old != fresh;
     if changed {
-        data.operands.retain(|k, _| !ranges.contains(k.from.off));
+        data.operands.retain(|k| !ranges.contains(k.from.off));
         data.operands.extend(fresh);
     }
     changed |= update_sites(data, ranges, fresh_sites);
@@ -513,13 +514,13 @@ pub(crate) fn collect(
     whys: &mut crate::publish::whys::Whys,
 ) -> Vec<(u64, Fact<DataDef>)> {
     let is_kept = |at: u64| work.units.get(&at).is_some_and(|u| kept.contains(&u.owner));
-    for (key, why) in &work.data.operands {
+    for key in &work.data.operands {
         if is_kept(key.from.off) {
             refs.push(Ref {
                 key: *key,
                 primary: true,
             });
-            whys.insert(FactKey::Ref(*key), why.clone());
+            whys.insert_ref(*key, Rule::OperandRef);
         }
     }
     let slot_def = DataDef {

@@ -43,6 +43,23 @@ impl Whys {
         }
     }
 
+    /// Sets the record of the code unit at `at`: [`crate::why::unit_why`] of `owner`.
+    pub(crate) fn insert_unit(&mut self, at: u64, owner: u64) {
+        self.remove(&FactKey::CodeUnit(at));
+        self.put_unit(at, owner, Rule::DisasmFlow);
+    }
+
+    /// Sets the record of the reference `key`: `rule` with the code unit at its RAM source.
+    pub(crate) fn insert_ref(&mut self, key: RefKey, rule: Rule) {
+        let premise = FactKey::CodeUnit(key.from.off);
+        if key.from.space != SpaceId::RAM {
+            self.insert(FactKey::Ref(key), Why::new(rule, vec![premise]));
+            return;
+        }
+        self.remove(&FactKey::Ref(key));
+        self.refs.insert(key, rule);
+    }
+
     /// Removes the record of `key`.
     fn remove(&mut self, key: &FactKey) {
         match key {

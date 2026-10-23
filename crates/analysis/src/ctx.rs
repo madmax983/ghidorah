@@ -73,8 +73,9 @@ pub struct Summary {
 pub struct Body {
     /// The code units by start.
     pub units: BTreeMap<u64, UnitRec>,
-    /// The flow references, each with its why-record.
-    pub refs: BTreeMap<RefKey, Why>,
+    /// The flow references. The why-record of each is `R_FLOW_REF` with the code unit at its
+    /// source.
+    pub refs: BTreeSet<RefKey>,
     /// The summary.
     pub summary: Summary,
 }
