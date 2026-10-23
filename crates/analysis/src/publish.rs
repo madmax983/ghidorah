@@ -2,7 +2,7 @@
 //! (design Section 3.9).
 //!
 //! The step makes the typed rows of the analysis layer and gives them to
-//! [`tables_from_rows`]. So each row goes through the write rules of its table, with no JSON
+//! [`set_from_rows`]. So each row goes through the write rules of its table, with no JSON
 //! form between. Rules of the step:
 //!
 //! - Each fact has the origin `Analysis`, transaction 0, session `analysis`. So the set does
@@ -22,11 +22,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use ghidorah_base::{Address, FuncId, JumpTableId};
-use ghidorah_db::codec::{SetRows, tables_from_rows};
+use ghidorah_db::codec::{SetRows, set_from_rows};
 use ghidorah_db::listing::CodeUnit;
 use ghidorah_db::{
     AnalysisSet, Commit, Edit, Fact, FactKey, Function, JumpTable, Origin, Part, PartKind, Program,
-    Ref, RefKey, RuleCode, SessionLabel, Source, StartReason, StrInfo, WhyRows,
+    Ref, RefKey, RuleCode, SessionLabel, Source, StartReason, StrInfo, Tables, WhyRows,
 };
 
 use crate::AnalysisError;
@@ -58,24 +58,33 @@ impl Changed {
     /// Counts the changes from `old` to `new`.
     #[must_use]
     pub fn between(old: &AnalysisSet, new: &AnalysisSet) -> Self {
-        fn funcs(t: &AnalysisSet) -> BTreeMap<Address, &Function> {
-            t.funcs().iter().map(|f| (f.entry, f)).collect()
+        fn funcs(t: Option<&Tables>) -> BTreeMap<Address, &Function> {
+            t.into_iter()
+                .flat_map(|t| t.funcs().iter().map(|f| (f.entry, f)))
+                .collect()
         }
-        fn refs(t: &AnalysisSet) -> BTreeMap<RefKey, &Fact<Ref>> {
-            t.refs().iter().map(|r| (r.value.key, r)).collect()
+        fn refs(t: Option<&Tables>) -> BTreeMap<RefKey, &Fact<Ref>> {
+            t.into_iter()
+                .flat_map(|t| t.refs().iter().map(|r| (r.value.key, r)))
+                .collect()
         }
-        fn strings(t: &AnalysisSet) -> BTreeMap<u64, &StrInfo> {
-            t.strings().iter().collect()
+        fn strings(t: Option<&Tables>) -> BTreeMap<u64, &StrInfo> {
+            t.into_iter().flat_map(|t| t.strings().iter()).collect()
         }
-        fn tables(t: &AnalysisSet) -> BTreeMap<JumpTableId, &Fact<JumpTable>> {
-            t.jumptables().iter().collect()
+        fn tables(t: Option<&Tables>) -> BTreeMap<JumpTableId, &Fact<JumpTable>> {
+            t.into_iter().flat_map(|t| t.jumptables().iter()).collect()
         }
-        Self {
-            functions: diff(&funcs(old), &funcs(new)),
-            refs: diff(&refs(old), &refs(new)),
-            strings: diff(&strings(old), &strings(new)),
-            jumptables: diff(&tables(old), &tables(new)),
+        // A shard that both sets share has no change, so only the other shards count.
+        let mut out = Self::default();
+        for id in old.changed_shards(new) {
+            let (a, b) = (old.shard(id), new.shard(id));
+            let add = |x: u64, y: u64| x.saturating_add(y);
+            out.functions = add(out.functions, diff(&funcs(a), &funcs(b)));
+            out.refs = add(out.refs, diff(&refs(a), &refs(b)));
+            out.strings = add(out.strings, diff(&strings(a), &strings(b)));
+            out.jumptables = add(out.jumptables, diff(&tables(a), &tables(b)));
         }
+        out
     }
 }
 
@@ -325,7 +334,8 @@ pub(crate) fn analysis_set(program: &Program, work: &Work) -> Result<AnalysisSet
         ..SetRows::default()
     };
     extra.add_to(&mut rows);
-    Ok(tables_from_rows(rows)?)
+    // A shard with no change keeps the old allocation, so the new set shares it.
+    Ok(set_from_rows(rows, program.analysis())?)
 }
 
 /// Commits the analysis set of `work` with one `ReplaceAnalysis` edit.

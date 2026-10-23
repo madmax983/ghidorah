@@ -730,7 +730,10 @@ fn snapshot_every_256_lines() {
     }
     assert_eq!(snapshots, vec![SNAPSHOT_EVERY]);
     let text = fs.get(&dir.join(SNAPSHOT_FILE)).unwrap();
-    let snap = crate::snapshot::decode(&text, &crate::migrate::ExtMap::default()).unwrap();
+    let shards = dir.join(crate::snapshot::SHARDS_DIR);
+    let mut read = |name: &str| fs.get(&shards.join(name));
+    let snap =
+        crate::snapshot::decode(&text, &crate::migrate::ExtMap::default(), &mut read).unwrap();
     assert_eq!(snap.rev, Rev(SNAPSHOT_EVERY));
     assert_eq!(snap.journal_lines, SNAPSHOT_EVERY);
     drop(project);
@@ -1055,4 +1058,49 @@ fn regress_sweep_removes_dead_crash_temps() {
     assert!(raw.kind(&folder).is_some(), "a directory stays");
     assert!(fs.get(&link).is_some(), "a symbolic link stays");
     drop(opened);
+}
+
+/// A snapshot keeps the analysis layer in shard files, so the snapshot file stays small. Before,
+/// the snapshot file held the whole layer. A full analysis of Godot gave 5.3 GB of text. That
+/// is above the JSON limit of 1 GiB, so an open dropped the snapshot and lost the analysis.
+#[test]
+fn regress_snapshot_keeps_the_analysis_in_shard_files() {
+    use crate::listing::{CodeUnit, FlowKind};
+    use crate::program::{SHARD_BITS, Tables};
+
+    let fs = sim(&[100]);
+    let (mut project, mut p, dir) = create(&fs, 100);
+    project.snapshot(&p).unwrap();
+    let small = fs.get(&dir.join(SNAPSHOT_FILE)).unwrap().len();
+    let mut t = Tables::default();
+    let unit = CodeUnit::Insn {
+        len: 4,
+        flow: FlowKind::Seq,
+        flags: 0,
+    };
+    for i in 0..5_000u64 {
+        t.listing.insert_unit(0x1000 + 4 * i, unit).unwrap();
+    }
+    t.listing.insert_unit(2 << SHARD_BITS, unit).unwrap();
+    let set = crate::codec::set_from_tables(&t).unwrap();
+    p.swap_analysis(std::sync::Arc::new(set));
+    project.snapshot(&p).unwrap();
+    let text = fs.get(&dir.join(SNAPSHOT_FILE)).unwrap();
+    assert!(
+        text.len() < small + 300,
+        "the snapshot file names two shard files: {} bytes, {small} with no analysis",
+        text.len()
+    );
+    let shards = fs
+        .boxed()
+        .list(&dir.join(crate::snapshot::SHARDS_DIR))
+        .unwrap();
+    assert_eq!(shards.len(), 2, "{shards:?}");
+    drop(project);
+    let opened = reopen(&fs, &dir, &write(100)).unwrap();
+    assert_eq!(
+        hash(&opened.program),
+        hash(&p),
+        "the open reads the shard files"
+    );
 }

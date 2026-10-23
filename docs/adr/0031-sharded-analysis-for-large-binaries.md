@@ -2,7 +2,7 @@
 
 Status: Accepted
 Date: 2026-10-23
-Verified by: none yet
+Verified by: AC-092, AC-093, AC-094, AC-120a
 
 ## Context
 
@@ -28,11 +28,12 @@ The work goes in four stages. Each stage is one pull request with its own measur
 ### Stage 2: shards of the analysis set
 
 - A shard is a fixed range of RAM offsets. The size is 4 MiB.
-- Each analysis fact belongs to the shard of its address. The address of a reference is its `from` address. The address of a function is its entry.
-- Each shard has its own tables and its own why store. The analysis set is a list of shards in address order.
-- `Edit::ReplaceShard { shard, set }` replaces one shard. A publish commits only the shards that change. AC-093 then applies to each shard.
-- The snapshot becomes format version 3: a manifest and one file for each shard. A snapshot writes only the changed shards. Each shard file uses the sequence of AC-120a. The manifest goes last.
-- A reader of format version 2 puts the whole set in shard 0.
+- Each analysis fact belongs to the shard of its address. The address of a reference is its `from` address. The address of a function is its entry. The facts at an address outside RAM go in one shard after the RAM shards.
+- Each shard has its own tables and its own why store. The analysis set is a list of shards in address order. A set keeps each shard behind an `Arc`.
+- `ReplaceAnalysis` stays the one edit of a publish. A publish builds the shards again and keeps the old `Arc` of each shard with the same facts. So the new set shares each shard with no change, and a commit compares the other shards only. AC-093 does not change.
+- A read of one key goes to the shard of the key. A read of the owner of an address also asks each shard with a function body outside the shard. A read of the references to an address asks each shard in address order.
+- The snapshot becomes format version 3. `snapshot.json` names one file for each shard: the index and the SHA-256 of its JCS text. A shard keeps its hash, so a snapshot writes the changed shards only. Each shard file uses the sequence of AC-120a. The snapshot file goes last, and the old shard files go after it.
+- A reader of format version 2 puts each fact of the one layer in the shard of its key.
 
 ### Stage 3: the work state outside memory
 

@@ -122,10 +122,17 @@ fn changed(seed: &Value, input: &[u8]) -> Value {
     tree
 }
 
+/// Gives the bytes of each shard file of the analysis layer of `start` by name.
+fn reader(start: &Program) -> impl FnMut(&str) -> Option<Vec<u8>> + use<> {
+    let texts = snapshot::shard_texts(start.analysis()).expect("the shard texts");
+    move |name: &str| texts.get(name).map(|t| t.clone().into_bytes())
+}
+
 fn target(start: &Program, seed: &Value, input: &[u8]) -> Outcome {
-    let _ = snapshot::decode(input, &swap());
+    let mut read = reader(start);
+    let _ = snapshot::decode(input, &swap(), &mut read);
     let text = ghidorah_json::write(&changed(seed, input));
-    let Ok(snap) = snapshot::decode(text.as_bytes(), &ExtMap::default()) else {
+    let Ok(snap) = snapshot::decode(text.as_bytes(), &ExtMap::default(), &mut read) else {
         return Outcome::reached(0);
     };
     let mut p = start.clone();
@@ -142,7 +149,7 @@ fn fuzz_snapshot_load() {
     let text = snapshot::encode(&start, 0, None).expect("the snapshot");
     let seed = ghidorah_json::parse(&text, &snapshot::SNAPSHOT_LIMITS).expect("the snapshot JSON");
     assert!(
-        snapshot::decode(text.as_bytes(), &ExtMap::default()).is_ok(),
+        snapshot::decode(text.as_bytes(), &ExtMap::default(), &mut reader(&start)).is_ok(),
         "the seed decodes"
     );
     let corpus = vec![vec![0, 0, 0], text.into_bytes()];

@@ -237,7 +237,7 @@ fn size_of(body: &RangeSet) -> u64 {
 /// Gives the code units of `body` in address order. The analysis layer comes first.
 fn units_of(program: &Program, body: &RangeSet) -> Vec<(u64, CodeUnit)> {
     let mut out = BTreeMap::new();
-    for layer in [program.base(), program.analysis()] {
+    for layer in program.layers() {
         for r in body.ranges() {
             out.extend(layer.listing().units_in(*r).map(|(at, u)| (at, *u)));
         }
@@ -316,7 +316,7 @@ pub fn all(program: &Program) -> Vec<FuncMetrics> {
 #[must_use]
 pub fn coverage(program: &Program) -> Coverage {
     let mut commented = BTreeSet::new();
-    for layer in [program.base(), program.analysis()] {
+    for layer in program.layers() {
         for (addr, _, _) in layer.comments().iter() {
             commented.extend(program.owner_of(addr));
         }
@@ -397,7 +397,7 @@ fn func_items(program: &Program, func: FuncId, out: &mut Vec<WorkItem>) {
         }
     }
     let mut conflicts = BTreeSet::new();
-    for layer in [program.base(), program.analysis()] {
+    for layer in program.layers() {
         let caveats = layer.funcs().get(func).map(|f| f.caveats.as_slice());
         for caveat in caveats.unwrap_or_default() {
             if caveat.code == WarningCode::AgentOverrideConflict {
@@ -469,7 +469,6 @@ pub fn priority(program: &Program) -> Vec<Ranked> {
     }
     let mut stats: BTreeMap<FuncId, Stat> = a
         .funcs()
-        .iter()
         .map(|f| {
             let stat = Stat {
                 size: size_of(&f.body),
@@ -478,13 +477,9 @@ pub fn priority(program: &Program) -> Vec<Ranked> {
             (f.id(), stat)
         })
         .collect();
-    for r in a.refs().iter() {
+    for r in a.refs() {
         let k = r.value.key;
-        let owner = k
-            .from
-            .is_ram()
-            .then(|| a.funcs().owner_of(k.from.off))
-            .flatten();
+        let owner = k.from.is_ram().then(|| a.owner_of(k.from.off)).flatten();
         if k.to.is_ram()
             && owner != Some(FuncId(k.to))
             && let Some(s) = stats.get_mut(&FuncId(k.to))
@@ -494,7 +489,7 @@ pub fn priority(program: &Program) -> Vec<Ranked> {
         let Some(s) = owner.and_then(|o| stats.get_mut(&o)) else {
             continue;
         };
-        if !k.kind.is_flow() && k.to.is_ram() && a.strings().get(k.to.off).is_some() {
+        if !k.kind.is_flow() && k.to.is_ram() && a.string(k.to.off).is_some() {
             s.strings = s.strings.saturating_add(1);
         }
         if k.kind.is_call() && risky_at.contains(&k.to) {

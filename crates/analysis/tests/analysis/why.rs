@@ -45,11 +45,10 @@ fn check(path: &str, p: &Program) -> usize {
     let found = p.check_invariants();
     assert!(found.is_empty(), "{path}: {found:?}");
     let a = p.analysis();
-    let keys = fact_keys(a);
+    let keys: Vec<FactKey> = a.shards().flat_map(|(_, t)| fact_keys(t)).collect();
     for key in &keys {
         let why = a
-            .why()
-            .get(key)
+            .why(key)
             .unwrap_or_else(|| panic!("{path}: {key:?} has no why-record"));
         assert!(
             Rule::parse(why.rule.as_str()).is_some(),
@@ -64,7 +63,7 @@ fn check(path: &str, p: &Program) -> usize {
     let mut waits: BTreeMap<&FactKey, usize> = BTreeMap::new();
     let mut users: BTreeMap<FactKey, Vec<&FactKey>> = BTreeMap::new();
     for key in &keys {
-        let why = a.why().get(key).expect("a record");
+        let why = a.why(key).expect("a record");
         let inside: Vec<FactKey> = why
             .premises
             .into_iter()
@@ -105,7 +104,7 @@ fn ac_094_why_records() {
     let mut rules = BTreeSet::new();
     for (path, p) in all_t1() {
         facts += check(path, p);
-        for (_, why) in p.analysis().why().iter() {
+        for (_, why) in p.analysis().whys() {
             rules.insert(why.rule.as_str().to_owned());
         }
     }

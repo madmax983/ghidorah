@@ -47,7 +47,7 @@ fn why_tree_acyclic() {
         let (mut s, id) = open(fixture);
         let p = program(&s, id);
         let mut ids: Vec<String> = p.funcs().iter().map(|v| v.id().to_string()).collect();
-        for r in p.analysis().refs().iter().take(40) {
+        for r in p.analysis().refs().take(40) {
             if let Ok(rid) = r.value.key.id() {
                 ids.push(rid.to_string());
             }

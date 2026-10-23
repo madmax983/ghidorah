@@ -190,14 +190,14 @@ fn broken() -> crate::Program {
         .refs
         .add(bad, &agent)
         .unwrap();
-    let layer = p.layer_mut(Source::Analysis).unwrap();
+    let layer = p.analysis_at_mut(ghidorah_base::Address::ram(0x1000));
     layer.refs.add(bad, &a).unwrap();
     layer
         .why
         .insert(FactKey::Ref(bad_ref), why("R_TEST_REF", Vec::new()))
         .unwrap();
     // Rule 6: an analysis code unit without a why-record, and a premise that does not exist.
-    let layer = p.layer_mut(Source::Analysis).unwrap();
+    let layer = p.analysis_at_mut(ghidorah_base::Address::ram(0x1000));
     layer
         .listing
         .insert_unit(

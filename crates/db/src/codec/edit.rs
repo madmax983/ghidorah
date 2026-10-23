@@ -84,7 +84,7 @@ pub(super) fn encode(edit: &Edit) -> Value {
         Edit::SetDataDef { at, def } => obj([op, ("at", at.enc()), ("def", def.enc())]),
         Edit::WriteNote(note) => obj([op, ("note", note.enc())]),
         Edit::DeleteNote { id } => obj([op, ("id", id.enc())]),
-        Edit::ReplaceAnalysis(set) => obj([op, ("set", tables::encode(set))]),
+        Edit::ReplaceAnalysis(set) => obj([op, ("set", tables::encode_set(set))]),
     }
 }
 
@@ -203,7 +203,7 @@ pub(super) fn decode(v: &Value) -> Result<Edit, CodecError> {
         EditKind::WriteNote => Edit::WriteNote(o.get("note")?),
         EditKind::DeleteNote => Edit::DeleteNote { id: o.get("id")? },
         EditKind::ReplaceAnalysis => {
-            Edit::ReplaceAnalysis(Arc::new(o.with("set", tables::decode)?))
+            Edit::ReplaceAnalysis(Arc::new(o.with("set", tables::decode_set)?))
         }
     })
 }

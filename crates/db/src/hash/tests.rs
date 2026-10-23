@@ -49,15 +49,13 @@ fn state_hash_ignores_insertion_order() {
     let o = Origin::analysis();
     let comments = [(0x1084, "one"), (0x1088, "two"), (0x108c, "three")];
     for (at, text) in comments {
-        a.layer_mut(Source::Analysis)
-            .unwrap()
+        a.analysis_at_mut(ghidorah_base::Address::ram(0x1000))
             .comments
             .set(ram(at), CommentKind::Eol, Some(text.to_string()), &o)
             .unwrap();
     }
     for (at, text) in comments.into_iter().rev() {
-        b.layer_mut(Source::Analysis)
-            .unwrap()
+        b.analysis_at_mut(ghidorah_base::Address::ram(0x1000))
             .comments
             .set(ram(at), CommentKind::Eol, Some(text.to_string()), &o)
             .unwrap();

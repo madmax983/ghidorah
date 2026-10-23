@@ -274,7 +274,7 @@ pub fn units_of(program: &Program, id: FuncId) -> Option<BTreeMap<u64, Unit>> {
     let view = program.func(id)?;
     let mut out = BTreeMap::new();
     for r in view.func.body.ranges() {
-        for t in [program.base(), program.analysis()] {
+        for t in program.layers() {
             for (at, unit) in t.listing().units_in(*r) {
                 let CodeUnit::Insn { len, flow, flags } = *unit;
                 out.insert(at, Unit { len, flow, flags });

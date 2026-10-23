@@ -628,6 +628,7 @@ Default projects root: `$XDG_DATA_HOME/ghidorah/projects` (fallback `$HOME/.loca
   bin/<sha256>       immutable input copy, mode 0444, no exec bit
   journal.jsonl      append-only, one sync per commit, meta lines without a rev change
   snapshot.json      canonical JCS: {format_version, rev, journal_lines, analysis_inputs_hash, facts, progress, marks}
+  shards/<index>-<sha256>.json   JCS text of one analysis shard (version 3)
   project.lock       {pid, start_time, boot_id}
   crash/<id>.json    crash repro: tool, args, rev, panic text
 ```
@@ -635,6 +636,7 @@ Default projects root: `$XDG_DATA_HOME/ghidorah/projects` (fallback `$HOME/.loca
 - All file access goes through the `Fs` trait at the `db` edge: `create_new`, `append`, `write_all`, `sync_file`, `rename`, `sync_dir`, `remove`, `read`, `modified`. Production uses `RealFs`. Tests use `SimFs`: an operation log, a crash point that drops every write with no sync, and a clock.
 - A commit is `append` of one journal line, then `sync_file`.
 - A snapshot is `create_new` of its temp file in the same directory, `write_all`, `sync_file`, `rename` and `sync_dir` (AC-120a). The session writes a snapshot after each completed analysis run, every 256 journal lines and at clean shutdown.
+- Before `snapshot.json`, a snapshot writes each new shard file with the same steps in `shards/`, then `sync_dir` of `shards/` (ADR-0031). A shard with no change keeps its file. After `snapshot.json`, the write removes the shard files and the shard temp files that the snapshot does not name.
 - Temp files: the snapshot, the input copy, `project.json`, the journal, the lock and each crash record write their temp files with the per-process name `<base>.<pid>.<n>`.
 - `<base>` is the name of the target file, and `<n>` counts the temp files of the process. A crash record `crash/<id>.json` uses the base `<id>.tmp`.
 - So two processes never write to the same temp file. A write open removes the temp files of dead processes from the project directory, `bin/` and `crash/`.
@@ -642,6 +644,8 @@ Default projects root: `$XDG_DATA_HOME/ghidorah/projects` (fallback `$HOME/.loca
 - `project.json` member `load` is `Auto` or `Raw { base, entry }`. A reopen loads the input copy the same way again.
 - `snapshot.json` member `journal_lines` is the count of journal lines that the snapshot covers. A valid snapshot has two properties. `journal_lines` is at most the line count of the journal. The rev of the last covered line equals the snapshot `rev`.
 - `format_version` starts at 1. Each later version ships a migration function and a golden v1 project fixture (AC-120c).
+- Version 3 moves the analysis layer out of `snapshot.json`. `facts.analysis` holds the shard file names in shard order. A shard covers 4 MiB of RAM offsets. A file name holds the shard index and the SHA-256 of the file. A reader checks the hash and reads each file with its own JSON limit.
+- A reader takes versions 1 and 2 with the layer in `facts.analysis`. From version 3, a why-record keeps no creation order. A reader ignores the `order` and `why_next` of versions 1 and 2.
 - Version 2 gives each import the EXTERNAL address `ext:` and 1 plus the rank of its import ID. Version 1 used the place of the import in the import list of the binary model, so the import order changed the state hash. An open of a version 1 project changes each old `ext:` address of the snapshot facts and the journal edits to its new address (`db::migrate`). Journal lines carry `"v":2`. A write open writes `project.json` at version 2 after the load.
 - `crash_id` is the first 16 hex digits of `sha256(tool, JCS(args), rev)`. Output paths are relative to the project directory.
 - Lock: a write open creates `project.lock` and never writes over the lock of a live process. Its temp file follows the temp-file rule above. A lock whose process is alive (same `boot_id`, same start time in `/proc/<pid>/stat`) gives `PROJECT_LOCKED` with a read-only hint. The error names the owner of a stale lock. Only `--break-lock` replaces a stale lock.
@@ -3291,7 +3295,7 @@ All decompiler ACs (AC-073, AC-075b, AC-075c, AC-086b, AC-098 to AC-106, AC-108,
 | AC-118 | After SIGKILL of `ghidorah mcp` and a restart, renames, notes and `rev` survive. This test checks replay, not sync. | `test:cli::ac_118_restart_persistence@T1` | 20 | - |
 | AC-119a | A journal cut at every byte of its last line opens with `W_JOURNAL_TAIL_DISCARDED`. | `test:db::ac_119a_journal_tail@T1` | 20 | - |
 | AC-119b | A corrupt middle line gives `JOURNAL_CORRUPT` with its line number. | `test:db::ac_119b_journal_corrupt@T1` | 20 | - |
-| AC-120a | The `RecordingFs` log of a snapshot is exactly: create tmp, write, sync tmp, rename, sync dir. | `test:db::ac_120a_snapshot_op_log@T1` | 20 | - |
+| AC-120a | The `RecordingFs` log of a snapshot is exactly: create tmp, write, sync tmp, rename, sync dir. Each new shard file comes first with the same steps and one sync of the shard directory. | `test:db::ac_120a_snapshot_op_log@T1` | 20 | - |
 | AC-120b | With `CrashFs` stopped at each operation of a commit and of a snapshot, reopen gives the before or the after `state_hash`. | `test:db::ac_120b_crash_consistency@T1` | 20 | - |
 | AC-120c | The golden v1 project loads. | `test:db::ac_120c_golden_v1@T1` | 20 | - |
 | AC-121 | The provenance rule matches the table of Section 3.6 for all 5 x 5 x 2 inputs, and rank numbers equal their golden constants. | `test:db::ac_121_provenance_lattice@T1` | 11a | - |
