@@ -347,8 +347,10 @@ pub(super) fn not_found<'a>(
 /// Gives the names that a name input can match: symbol names of both layers and section
 /// names, in name order.
 pub(super) fn names(program: &Program) -> Names<'_> {
-    let mut set: BTreeSet<&str> = program.base().symbols().names().map(|(n, _)| n).collect();
-    set.extend(program.analysis().symbols().names().map(|(n, _)| n));
+    let mut set: BTreeSet<&str> = program
+        .layers()
+        .flat_map(|t| t.symbols().names().map(|(n, _)| n))
+        .collect();
     set.extend(
         program
             .binary()

@@ -104,7 +104,6 @@ fn referenced_flags_and_rules() {
         let unused = p
             .analysis()
             .strings()
-            .iter()
             .find(|(at, info)| {
                 strings::bytes(p, *at, info).as_deref() == Some(b"unused configuration banner")
             })
@@ -123,7 +122,6 @@ fn referenced_flags_and_rules() {
             let (at, info) = p
                 .analysis()
                 .strings()
-                .iter()
                 .find(|(at, info)| strings::bytes(p, *at, info).as_deref() == Some(text))
                 .unwrap_or_else(|| panic!("{name}: {text:?}"));
             assert!(info.referenced, "{name}: {text:?} is referenced");
@@ -153,12 +151,7 @@ fn hostile_strings_have_no_fragments() {
         "hostile_strings.clang-O2",
     ] {
         let p = t1(name);
-        let all: Vec<(u64, StrInfo)> = p
-            .analysis()
-            .strings()
-            .iter()
-            .map(|(a, i)| (a, *i))
-            .collect();
+        let all: Vec<(u64, StrInfo)> = p.analysis().strings().map(|(a, i)| (a, *i)).collect();
         let referenced = all.iter().filter(|(_, i)| i.referenced).count();
         // GCC reads the messages through relocated pointers. Clang reads them through a table
         // of relative offsets. Each entry of that table refers to its message.
@@ -205,7 +198,6 @@ fn data_file(ro: &[u8], refs: &[u64]) -> (Program, Layout) {
 fn found(p: &Program, base: u64) -> Vec<(u64, StrInfo)> {
     p.analysis()
         .strings()
-        .iter()
         .map(|(at, info)| (at - base, *info))
         .collect()
 }
@@ -301,11 +293,7 @@ fn text_test_of_referenced_strings() {
     let r = strings::render(
         &p,
         base + 7,
-        &p.analysis()
-            .strings()
-            .get(base + 7)
-            .copied()
-            .expect("a string"),
+        &p.analysis().string(base + 7).copied().expect("a string"),
         Caps::DEFAULT,
     )
     .expect("a render");
@@ -354,7 +342,10 @@ fn strings_slicing_and_idempotence() {
     ] {
         let mut whole = program(path);
         let (mut sched, _) = analyze(&mut whole);
-        assert!(!whole.analysis().strings().is_empty(), "{path}: strings");
+        assert!(
+            whole.analysis().strings().next().is_some(),
+            "{path}: strings"
+        );
         let expect = hash(&whole);
         let again = sched
             .run(&mut whole, Until::Full, &mut Fuel::unlimited())

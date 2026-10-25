@@ -296,7 +296,7 @@ fn strings(c: &Ctx<'_>) -> Part {
     let p = c.program;
     let mut found: Vec<(usize, u64, BTreeSet<FuncId>)> = Vec::new();
     let mut addrs = BTreeSet::new();
-    for layer in [p.base(), p.analysis()] {
+    for layer in p.layers() {
         addrs.extend(layer.strings().iter().map(|(at, _)| at));
     }
     let mut unreferenced = 0usize;

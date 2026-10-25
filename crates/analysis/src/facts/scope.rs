@@ -134,7 +134,7 @@ fn is_syscall(program: &Program, at: u64, len: u8) -> bool {
 
 /// Gives the syscall number of the analysis note at `site`: `sys:<name>` or `sys:<number>`.
 fn syscall_number(program: &Program, site: Address) -> Option<u16> {
-    let note = program.analysis().comments().get(site, CommentKind::Eol)?;
+    let note = program.analysis().comment(site, CommentKind::Eol)?;
     let Ok(Id::Syscall(id)) = Id::parse(&note.value) else {
         return None;
     };

@@ -3,7 +3,7 @@ use ghidorah_db::{FactKey, Program};
 use ghidorah_loader::{LoadOpts, load};
 use ghidorah_testkit::elf::{ElfBuilder, Loc, Section};
 
-use super::order;
+use super::kept;
 use super::whys::Whys;
 use crate::why::{Rule, Why};
 
@@ -23,7 +23,7 @@ fn unit(at: u64) -> FactKey {
 /// The walk visits the premises of a fact first. It cuts the premise that closes a cycle,
 /// a premise of a fact on itself and a premise outside the set and the inputs.
 #[test]
-fn order_cuts_cycles_and_unknown_premises() {
+fn the_walk_cuts_cycles_and_unknown_premises() {
     let rule = Rule::DisasmFlow;
     let mut whys = Whys::default();
     for (key, why) in [
@@ -34,18 +34,15 @@ fn order_cuts_cycles_and_unknown_premises() {
     ] {
         whys.insert(key, why);
     }
-    // Unit 3 has no premise left and comes first. Unit 2 loses unit 1, which closes the
-    // cycle. Unit 1 keeps unit 2. Unit 4 loses itself.
-    assert_eq!(
-        order(&program(), &whys.records()),
-        vec![(2, 0b1), (1, 0b10), (0, 0), (3, 0)]
-    );
+    // Unit 3 has no premise left. Unit 2 loses unit 1, which closes the cycle. Unit 1 keeps
+    // unit 2. Unit 4 loses itself.
+    assert_eq!(kept(&program(), &whys.records()), vec![0b1, 0b10, 0, 0]);
 }
 
 /// Compact records take part in the walk as general records do. A code unit names its owner
 /// function, and a reference names the code unit of its source.
 #[test]
-fn order_walks_compact_records() {
+fn the_walk_takes_compact_records() {
     use ghidorah_base::{Address, FuncId};
     use ghidorah_db::{RefKey, RefType};
 
@@ -83,8 +80,5 @@ fn order_walks_compact_records() {
     );
     // The reference from 0x10 closes the cycle unit, function, reference. The reference from
     // 0x99 names a unit outside the set.
-    assert_eq!(
-        order(&program(), &records),
-        vec![(2, 0b1), (1, 0b1), (0, 0), (3, 0)]
-    );
+    assert_eq!(kept(&program(), &records), vec![0b1, 0b1, 0, 0]);
 }

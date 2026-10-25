@@ -131,7 +131,7 @@ pub(super) fn create(
 ) -> Result<Option<Edit>, EditError> {
     own_record(ctx, p, r)?;
     let id = r.func.id();
-    let t = tables(p, ctx.layer())?;
+    let t = tables(p, ctx.layer(), r.func.entry)?;
     if let Some(existing) = t.funcs.get(id) {
         let vars_same = r.vars.iter().all(|(var, f)| {
             let cur = t.vars.get(var).cloned().unwrap_or_default();
@@ -175,7 +175,7 @@ pub(super) fn delete(
     id: FuncId,
     cascade: bool,
 ) -> Result<Option<Edit>, EditError> {
-    let t = tables(p, ctx.layer())?;
+    let t = tables(p, ctx.layer(), id.0)?;
     let Some(func) = t.funcs.get(id) else {
         return Ok(None);
     };
@@ -224,7 +224,7 @@ fn holder(
     };
     let mut f = Function::new(id.0, reason, confidence, ctx.origin.source);
     set(&mut f);
-    tables(p, Layer::Base)?.funcs.insert(f)?;
+    tables(p, Layer::Base, id.0)?.funcs.insert(f)?;
     Ok(Some(Edit::DeleteFunction { id, cascade: false }))
 }
 
@@ -242,7 +242,7 @@ pub(super) fn signature(
             check_sig(p, s.value)?;
         }
     }
-    let t = tables(p, ctx.layer())?;
+    let t = tables(p, ctx.layer(), id.0)?;
     let Some(func) = t.funcs.get(id) else {
         return match sig {
             None => Ok(None),
@@ -270,7 +270,7 @@ pub(super) fn noreturn(
     if let Some(n) = flag {
         own(ctx, &key, n)?;
     }
-    let t = tables(p, ctx.layer())?;
+    let t = tables(p, ctx.layer(), id.0)?;
     let Some(func) = t.funcs.get(id) else {
         return match flag {
             None => Ok(None),

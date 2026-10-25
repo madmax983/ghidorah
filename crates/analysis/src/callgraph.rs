@@ -74,7 +74,7 @@ impl CallGraph {
                 out.entries.entry(func).or_default().insert(row.id.clone());
             }
         }
-        for layer in [program.base(), program.analysis()] {
+        for layer in program.layers() {
             for r in layer.refs().iter() {
                 let key = r.value.key;
                 if !key.kind.is_call() {

@@ -316,7 +316,7 @@ fn ac_126_orphaned_facts() {
     data(&call(&mut s, "func_edit", seed));
     let id = FuncId(Address::ram(0x11d0));
     assert!(
-        program(&s).analysis().funcs().get(id).is_some(),
+        program(&s).analysis().func(id).is_some(),
         "the reference seeds a function"
     );
     let var = r#"{"target":"var:0x11d0/param:0","type":"int"}"#;
@@ -325,7 +325,7 @@ fn ac_126_orphaned_facts() {
     let envelope = call(&mut s, "func_edit", &unseed);
     data(&envelope);
     assert!(
-        program(&s).analysis().funcs().get(id).is_none(),
+        program(&s).analysis().func(id).is_none(),
         "the function is gone"
     );
     let orphaned = warnings(&envelope, "W_FACT_ORPHANED");

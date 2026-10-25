@@ -138,7 +138,7 @@ fn ac_081_jumptable_truth() {
                 .map(|v| Address::ram(hex(v)))
                 .collect();
             let owner = fid(funcs[name]);
-            let found = p.analysis().jumptables().iter().find(|(id, j)| {
+            let found = p.analysis().jumptables().find(|(id, j)| {
                 j.value.base == Some(Address::ram(base)) && p.owner_of(id.0) == Some(owner)
             });
             match found {

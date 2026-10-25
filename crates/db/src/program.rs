@@ -4,8 +4,9 @@
 //! The facts live in two [`Tables`] layers:
 //!
 //! - The base layer holds `Imported`, `Agent` and `User` facts.
-//! - The analysis layer ([`AnalysisSet`]) holds `Analysis` facts. `ReplaceAnalysis` swaps the
-//!   whole layer in O(1) and keeps the old layer for a rollback.
+//! - The analysis layer ([`AnalysisSet`]) holds `Analysis` facts in shards of 4 MiB of RAM
+//!   offsets, each one a [`Tables`]. `ReplaceAnalysis` swaps the whole layer in O(1) and keeps
+//!   the old layer for a rollback. A new layer shares each shard that does not change.
 //!
 //! A read merges the layers by these rules:
 //!
@@ -20,6 +21,7 @@
 //! or `User` fact (ADR-0013). A read shows the higher fact instead.
 
 mod load;
+mod shards;
 mod view;
 
 #[cfg(test)]
@@ -33,6 +35,7 @@ use ghidorah_base::{Address, BinaryId, ExportId, ImportId, Limits, Rev};
 use ghidorah_loader::{Arch, Binary, Format, Kind, MemoryMap};
 use ghidorah_types::PreludeError;
 
+pub use shards::{AnalysisSet, SHARD_BITS, ShardId};
 pub use view::{FuncView, Name, VarView};
 
 use crate::comments::Comments;
@@ -66,9 +69,6 @@ pub struct Tables {
     pub(crate) why: WhyStore,
     pub(crate) overrides: FlowOverrides,
 }
-
-/// The analysis layer: every `Analysis` fact of a program.
-pub type AnalysisSet = Tables;
 
 impl Tables {
     /// Gives the code units and data definitions.
@@ -293,6 +293,12 @@ impl Program {
         self.analysis.as_ref()
     }
 
+    /// Gives the tables of both layers: the base layer, then each analysis shard in address
+    /// order.
+    pub fn layers(&self) -> impl Iterator<Item = &Tables> {
+        std::iter::once(&self.base).chain(self.analysis.shards().map(|(_, t)| t))
+    }
+
     /// Gives the notes and the named sets.
     #[must_use]
     pub const fn notes(&self) -> &Notes {
@@ -311,17 +317,29 @@ impl Program {
         self.rev
     }
 
-    /// Gives the layer that a write of `source` changes.
+    /// Gives the base layer for a write of `source`.
     ///
     /// # Errors
     ///
-    /// Returns [`Invalid::DefaultSource`] for `Default`. The DB never stores a default.
+    /// Returns [`Invalid::DefaultSource`] for `Default`. The DB never stores a default. Returns
+    /// [`Invalid::BadSource`] for `Analysis`: [`Self::analysis_at_mut`] gives its shards.
     pub(crate) fn layer_mut(&mut self, source: Source) -> Result<&mut Tables, Invalid> {
         match source {
             Source::Default => Err(Invalid::DefaultSource),
-            Source::Analysis => Ok(Arc::make_mut(&mut self.analysis)),
+            Source::Analysis => Err(Invalid::BadSource(source)),
             Source::Agent | Source::Imported | Source::User => Ok(&mut self.base),
         }
+    }
+
+    /// Gives the analysis shard of `at` for a change. Call [`Self::tidy_analysis`] after the
+    /// change.
+    pub(crate) fn analysis_at_mut(&mut self, at: Address) -> &mut Tables {
+        Arc::make_mut(&mut self.analysis).tables_mut(ShardId::of(at))
+    }
+
+    /// Removes the empty analysis shards after [`Self::analysis_at_mut`].
+    pub(crate) fn tidy_analysis(&mut self) {
+        Arc::make_mut(&mut self.analysis).tidy();
     }
 
     /// Puts `set` in place of the analysis layer and gives the old layer.

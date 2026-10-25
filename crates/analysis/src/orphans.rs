@@ -98,8 +98,8 @@ const fn counts(source: Source) -> bool {
 #[must_use]
 pub fn find(program: &Program) -> Vec<Orphan> {
     let base = program.base();
-    let analysis = program.analysis().funcs();
-    let lost = |entry: Address| analysis.get(FuncId(entry)).is_none();
+    let analysis = program.analysis();
+    let lost = |entry: Address| analysis.func(FuncId(entry)).is_none();
     let mut out = Vec::new();
     for f in base.funcs().iter() {
         if counts(f.source) && lost(f.entry) {

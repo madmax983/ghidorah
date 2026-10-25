@@ -4,7 +4,7 @@
 use std::sync::{Arc, Mutex};
 
 use ghidorah_base::Fuel;
-use ghidorah_db::codec::tables_from_json;
+use ghidorah_db::codec::set_from_json;
 use ghidorah_db::{Edit, SessionLabel, Source};
 use ghidorah_json::Value;
 use ghidorah_tools::session::{AnalysisEngine, OpenBinary, RunReport, Until};
@@ -26,7 +26,7 @@ struct TestEngine {
 
 impl TestEngine {
     fn publish(binary: &mut OpenBinary) -> Result<(), ToolError> {
-        let set = tables_from_json(&json(SET)).expect("the test set decodes");
+        let set = set_from_json(&json(SET)).expect("the test set decodes");
         let label = SessionLabel::new(SessionLabel::ANALYSIS).expect("a label");
         let mut tx = binary
             .program
