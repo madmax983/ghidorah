@@ -99,12 +99,27 @@ impl Number {
         self.0.parse::<f64>().ok().filter(|x| x.is_finite())
     }
 
+    /// Gives the lexeme when it is already the JCS text: a short integer, which is exact as `f64`.
+    ///
+    /// The lexeme has at most 15 digits, so it is below 2^53. Its grammar allows no leading zero.
+    /// The text `-0` is not plain, because JCS writes it as `0`.
+    #[must_use]
+    pub fn jcs_plain(&self) -> Option<&str> {
+        let digits = self.0.strip_prefix('-').unwrap_or(&self.0);
+        let plain =
+            digits.len() <= 15 && digits.bytes().all(|b| b.is_ascii_digit()) && self.0 != "-0";
+        plain.then_some(self.0.as_str())
+    }
+
     /// Gives the RFC 8785 (JCS) text of the number, or `None` when it is outside the `f64` range.
     ///
     /// JCS writes the nearest `f64` in the ECMAScript form, for example `1e+21` and `0.000001`.
     /// So an integer above 2^53 can lose its low digits in this form.
     #[must_use]
     pub fn to_jcs(&self) -> Option<String> {
+        if let Some(plain) = self.jcs_plain() {
+            return Some(plain.to_owned());
+        }
         let x = self.as_f64()?;
         if x.abs().to_bits() == 0 {
             return Some("0".to_owned());

@@ -70,6 +70,10 @@ impl Form for Jcs {
     const INDENT: Option<&'static str> = None;
 
     fn number(number: &Number, out: &mut String) -> Result<(), JcsErrorKind> {
+        if let Some(plain) = number.jcs_plain() {
+            out.push_str(plain);
+            return Ok(());
+        }
         let text = number.to_jcs().ok_or(JcsErrorKind::NumberRange)?;
         out.push_str(&text);
         Ok(())
