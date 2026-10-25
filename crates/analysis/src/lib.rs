@@ -46,6 +46,7 @@ pub mod jumptable;
 pub mod main_discovery;
 pub mod orphans;
 pub mod overrides;
+pub mod pages;
 pub mod publish;
 pub mod registry;
 pub mod sched;
@@ -85,6 +86,9 @@ pub enum AnalysisError {
     Edit(EditError),
     /// A rule code or a session label breaks its grammar.
     Invalid(Invalid),
+    /// The page store of the work state fails. The work state is not complete, so the
+    /// scheduler stops.
+    Pages(pages::PageError),
 }
 
 impl fmt::Display for AnalysisError {
@@ -94,11 +98,18 @@ impl fmt::Display for AnalysisError {
             Self::Tx(e) => write!(f, "The publish transaction fails: {e}"),
             Self::Edit(e) => write!(f, "The analysis edit fails: {e}"),
             Self::Invalid(e) => write!(f, "A value of the analysis set is not valid: {e}"),
+            Self::Pages(e) => write!(f, "The work state is not complete: {e}"),
         }
     }
 }
 
 impl std::error::Error for AnalysisError {}
+
+impl From<pages::PageError> for AnalysisError {
+    fn from(e: pages::PageError) -> Self {
+        Self::Pages(e)
+    }
+}
 
 impl From<CodecError> for AnalysisError {
     fn from(e: CodecError) -> Self {

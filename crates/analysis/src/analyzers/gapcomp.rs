@@ -172,10 +172,10 @@ fn free(ctx: &AnalysisCtx<'_>, solid: &BTreeSet<u64>) -> RangeSet {
     let mut run: Option<Range> = None;
     let units = ctx
         .work
-        .units
+        .code
         .iter()
         .filter(|(_, u)| solid.contains(&u.owner));
-    for r in units.filter_map(|(at, u)| u.range(*at)) {
+    for r in units.filter_map(|(at, u)| u.range(at)) {
         run = match run {
             Some(cur) if cur.last.checked_add(1) == Some(r.first) => Some(Range {
                 first: cur.first,

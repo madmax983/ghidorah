@@ -65,6 +65,10 @@ pub const BIN_DIR: &str = "bin";
 /// The directory of the crash records.
 pub const CRASH_DIR: &str = "crash";
 
+/// The directory of the pages of the analysis work state (ADR-0031 stage 3). The pages are a
+/// cache of one process. A snapshot does not name them, and a new process removes them.
+pub const WORK_DIR: &str = "work";
+
 /// The number of journal lines between two snapshots.
 pub const SNAPSHOT_EVERY: u64 = 256;
 

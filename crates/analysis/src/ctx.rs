@@ -306,7 +306,7 @@ impl<'a> AnalysisCtx<'a> {
         let mut out = BTreeSet::new();
         for r in ranges.ranges() {
             out.extend(self.work.funcs.range(r.first..=r.last).map(|(e, _)| *e));
-            out.extend(self.work.overlapping(*r).into_iter().map(|(_, o)| o));
+            out.extend(self.work.owners_in(*r));
             for funcs in self.work.exits.range(r.first..=r.last).map(|(_, f)| f) {
                 out.extend(funcs.iter().copied());
             }
@@ -449,7 +449,28 @@ impl<'a> AnalysisCtx<'a> {
         self.work
             .callers
             .get(&target)
-            .map(|s| s.iter().copied().collect())
+            .map(|s| s.keys().copied().collect())
+            .unwrap_or_default()
+    }
+
+    /// Tells if `site` is a direct call site of `target` in a body. Such a site has a code unit
+    /// and the call reference, so the read loads no page.
+    #[must_use]
+    pub fn is_call_site(&self, site: u64, target: u64) -> bool {
+        self.work
+            .callers
+            .get(&target)
+            .is_some_and(|s| s.contains_key(&site))
+    }
+
+    /// Gives the direct call sites of `target` in address order, each with the length of its
+    /// code unit.
+    #[must_use]
+    pub fn call_site_lens(&self, target: u64) -> Vec<(u64, u8)> {
+        self.work
+            .callers
+            .get(&target)
+            .map(|s| s.iter().map(|(at, len)| (*at, *len)).collect())
             .unwrap_or_default()
     }
 

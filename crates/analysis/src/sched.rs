@@ -23,6 +23,7 @@ use ghidorah_kernel::RangeSet;
 
 use crate::AnalysisError;
 use crate::ctx::AnalysisCtx;
+use crate::pages::{PageLimits, PageStore};
 use crate::registry::{self, ANALYZERS, AnalyzerId};
 use crate::spec::{AnalyzerSpec, BAND_TRIAGE, Grain, Trigger};
 use crate::work::Work;
@@ -123,7 +124,7 @@ pub struct Ran {
 }
 
 /// The analysis scheduler of one program.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug)]
 pub struct Scheduler {
     specs: Vec<&'static AnalyzerSpec>,
     work: Work,
@@ -329,7 +330,7 @@ impl Scheduler {
         let first = self.specs.iter().map(|s| s.priority).min().unwrap_or(0);
         self.drain_all();
         if band <= first {
-            self.work = Work::default();
+            self.work.reset();
             self.pending = Self::fresh(&self.specs);
         } else {
             for (spec, set) in self.specs.iter().zip(self.pending.iter_mut()) {
@@ -507,6 +508,9 @@ impl Scheduler {
                 break;
             };
             let _ = fuel.take(ran.work.min(fuel.remaining()));
+            if let Some(e) = self.work.code.error() {
+                return Err(e.into());
+            }
         }
         self.drain_all();
         let done = self.is_done(Until::Full);
@@ -551,6 +555,13 @@ impl Scheduler {
         let commit = crate::publish::publish(program, &self.work)?;
         self.dirty = false;
         Ok(Some(commit))
+    }
+
+    /// Puts the pages of the work state that are not in use in `store` (ADR-0031 stage 3).
+    /// At most `limits.loaded` pages stay in memory. A new page size applies only to an empty
+    /// work state. The pages are a cache, so the facts do not change.
+    pub fn set_pages(&mut self, store: Box<dyn PageStore>, limits: PageLimits) {
+        self.work.code.set_store(store, limits);
     }
 
     /// Gives the analysis set of the work state without a commit.

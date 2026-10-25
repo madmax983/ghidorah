@@ -54,15 +54,17 @@ pub fn run(ctx: &mut AnalysisCtx<'_>, ranges: &RangeSet) -> Step {
             if ctx.owner(*site) != Some(f) || !is_exec(program, *target) {
                 continue;
             }
+            // A body adds the call reference of each kept site with a mapped target. So the
+            // index of the call sites tells if the reference exists.
+            if !ctx.is_call_site(*site, *target) {
+                continue;
+            }
             let key = RefKey {
                 from: Address::ram(*site),
                 op_index: 0,
                 to: Address::ram(*target),
                 kind: RefType::UnconditionalCall,
             };
-            if !ctx.work.refs.contains(&key) {
-                continue;
-            }
             reached.entry(*target).or_insert(key);
             if walked.insert(*target) {
                 queue.push_back(*target);

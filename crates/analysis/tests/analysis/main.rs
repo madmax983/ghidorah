@@ -17,6 +17,7 @@ mod gaps;
 mod lang;
 mod metrics;
 mod noreturn;
+mod pages;
 mod publish;
 mod raw;
 mod refs;

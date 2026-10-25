@@ -168,8 +168,8 @@ impl Fix<'_, '_> {
             let cut = self
                 .ctx
                 .work
-                .units
-                .get(site)
+                .code
+                .get(*site)
                 .is_some_and(|u| u.flags & UNIT_NORETURN_CALL != 0);
             if cut {
                 if !self.noreturn(*target) {
@@ -185,11 +185,8 @@ impl Fix<'_, '_> {
     fn fallthrough_rule(&self, entry: u64) -> Option<Why> {
         let program = self.ctx.program();
         let mut unsafe_sites = Vec::new();
-        for site in self.ctx.call_sites(entry) {
-            let Some(unit) = self.ctx.work.units.get(&site) else {
-                continue;
-            };
-            let Some(next) = site.checked_add(u64::from(unit.len)) else {
+        for (site, len) in self.ctx.call_site_lens(entry) {
+            let Some(next) = site.checked_add(u64::from(len)) else {
                 continue;
             };
             let bad = self.ctx.is_entry(next)
@@ -321,7 +318,7 @@ pub(crate) fn suspects(program: &Program, work: &Work, entry: u64) -> Vec<Caveat
     };
     let mut out = Vec::new();
     for (site, target) in &summary.calls {
-        let Some(unit) = work.units.get(site) else {
+        let Some(unit) = work.code.get(*site) else {
             continue;
         };
         let cut = unit.flags & UNIT_NORETURN_CALL != 0;

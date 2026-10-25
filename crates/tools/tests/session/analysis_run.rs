@@ -4,7 +4,9 @@
 
 use std::path::{Path, PathBuf};
 
+use ghidorah_analysis::pages::PageLimits;
 use ghidorah_base::{Address, BinaryId, Fuel, Range};
+use ghidorah_db::project::WORK_DIR;
 use ghidorah_db::{Edit, FuncRecord, Function, Source, StartReason};
 use ghidorah_json::Value;
 use ghidorah_tools::handlers::analysis_run::{self, Engine, SLICE_STEPS};
@@ -423,4 +425,46 @@ fn regress_reopen_keeps_the_committed_analysis() {
     assert_eq!(s.binary(id).expect("open").program.analysis(), &funcs);
     let rest = call(&mut s, "analysis_run", "{}");
     assert_eq!(text_at(data(&rest), "/state"), "complete", "{rest}");
+}
+
+/// Loads `fixtures/bin/hello.gcc-O2` in `s` with a full analysis. Gives the binary ID.
+fn hello(s: &mut Session) -> BinaryId {
+    let load = call(s, "binary_load", r#"{"path":"fixtures/bin/hello.gcc-O2"}"#);
+    assert_eq!(
+        text_at(data(&load), "/analysis/state"),
+        "complete",
+        "{load}"
+    );
+    BinaryId::parse(&text_at(data(&load), "/binary_id")).expect("the ID parses")
+}
+
+#[test]
+fn a_project_keeps_the_work_pages_in_its_directory() {
+    let dir = projects("work_pages");
+    let mut cfg = config();
+    cfg.projects = Some(ProjectsConfig {
+        root: dir.clone(),
+        named: true,
+        break_lock: false,
+    });
+    let mut paged = session_with(cfg);
+    let tiny = PageLimits {
+        loaded: 1,
+        bits: PageLimits::MIN_BITS,
+    };
+    paged.set_engine(Box::new(Engine::with_page_limits(tiny)));
+    let id = hello(&mut paged);
+    let work = dir.join(id.to_string()).join(WORK_DIR);
+    let files = std::fs::read_dir(&work).map_or(0, Iterator::count);
+    assert!(files > 1, "{files} page files in {}", work.display());
+
+    let mut plain = session();
+    analysis_run::install(&mut plain);
+    let same = hello(&mut plain);
+    assert_eq!(same, id);
+    assert_eq!(
+        paged.binary(id).expect("open").program.analysis(),
+        plain.binary(id).expect("open").program.analysis(),
+        "the pages do not change the facts"
+    );
 }

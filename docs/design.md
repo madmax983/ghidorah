@@ -629,6 +629,7 @@ Default projects root: `$XDG_DATA_HOME/ghidorah/projects` (fallback `$HOME/.loca
   journal.jsonl      append-only, one sync per commit, meta lines without a rev change
   snapshot.json      canonical JCS: {format_version, rev, journal_lines, analysis_inputs_hash, facts, progress, marks}
   shards/<index>-<sha256>.json   JCS text of one analysis shard (version 3)
+  work/<index>.page  one page of the analysis work state of this process (ADR-0031)
   project.lock       {pid, start_time, boot_id}
   crash/<id>.json    crash repro: tool, args, rev, panic text
 ```
@@ -637,6 +638,7 @@ Default projects root: `$XDG_DATA_HOME/ghidorah/projects` (fallback `$HOME/.loca
 - A commit is `append` of one journal line, then `sync_file`.
 - A snapshot is `create_new` of its temp file in the same directory, `write_all`, `sync_file`, `rename` and `sync_dir` (AC-120a). The session writes a snapshot after each completed analysis run, every 256 journal lines and at clean shutdown.
 - Before `snapshot.json`, a snapshot writes each new shard file with the same steps in `shards/`, then `sync_dir` of `shards/` (ADR-0031). A shard with no change keeps its file. After `snapshot.json`, the write removes the shard files and the shard temp files that the snapshot does not name.
+- The engine of a process that writes the project keeps the work state pages that are not in use in `work/`. A page is a cache: a write has no sync, and the engine reads only the pages that it wrote. The first run of a process removes the pages of an earlier process. A snapshot does not name them.
 - Temp files: the snapshot, the input copy, `project.json`, the journal, the lock and each crash record write their temp files with the per-process name `<base>.<pid>.<n>`.
 - `<base>` is the name of the target file, and `<n>` counts the temp files of the process. A crash record `crash/<id>.json` uses the base `<id>.tmp`.
 - So two processes never write to the same temp file. A write open removes the temp files of dead processes from the project directory, `bin/` and `crash/`.
