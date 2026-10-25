@@ -27,6 +27,7 @@
 use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, BTreeSet};
 
+use ghidorah_analysis::pages::{PageLimits, PageStore};
 use ghidorah_analysis::{ANALYZERS, AnalyzerRow, Changed, RunState, Scheduler, Until as Band};
 use ghidorah_base::{BinaryId, ErrorCode, Fuel, Limits};
 use ghidorah_db::Program;
@@ -110,7 +111,18 @@ pub struct Engine {
     unit_cap: Option<u64>,
     /// The binaries whose first analysis holds its publish until a flush.
     held: BTreeSet<BinaryId>,
+    /// The page stores that wait for the scheduler of their binary.
+    pages: BTreeMap<BinaryId, Box<dyn PageStore>>,
+    /// The page limits, or `None` for [`PAGES`].
+    page_limits: Option<PageLimits>,
 }
+
+/// The page limits of the shipped engine: pages of 64 KiB, 256 of them in memory. So the
+/// loaded pages hold the code units of at most 16 MiB of code.
+pub const PAGES: PageLimits = PageLimits {
+    loaded: 256,
+    bits: 16,
+};
 
 impl Engine {
     /// Makes an engine for the seed-order relation of design Section 13.4 (AC-189a). It
@@ -138,6 +150,27 @@ impl Engine {
         Self {
             edit: Some(edit),
             ..Self::default()
+        }
+    }
+
+    /// Makes an engine with the page limits `limits` in place of [`PAGES`]. A test uses small
+    /// pages to make the scheduler store pages.
+    #[must_use]
+    pub fn with_page_limits(limits: PageLimits) -> Self {
+        Self {
+            page_limits: Some(limits),
+            ..Self::default()
+        }
+    }
+
+    /// Gives the store of the binary `id` to `scheduler` when the store waits for it.
+    fn give_pages(&mut self, id: BinaryId) {
+        let limits = self.page_limits.unwrap_or(PAGES);
+        let Some(scheduler) = self.schedulers.get_mut(&id) else {
+            return;
+        };
+        if let Some(store) = self.pages.remove(&id) {
+            scheduler.set_pages(store, limits);
         }
     }
 
@@ -309,7 +342,19 @@ impl AnalysisEngine for Engine {
             scheduler.set_unit_cap(cap);
         }
         scheduler.set_hold(held);
+        self.give_pages(binary.id);
+        let Some(scheduler) = self.schedulers.get_mut(&binary.id) else {
+            return Err(ToolError::new(ErrorCode::InternalError));
+        };
         drive(scheduler, binary, band, fuel)
+    }
+
+    fn set_pages(&mut self, id: BinaryId, mut store: Box<dyn PageStore>) {
+        // The pages of an earlier process have no use. A failed remove leaves files that no
+        // read reaches, because the scheduler reads only the pages that it wrote.
+        let _ = store.clear();
+        self.pages.insert(id, store);
+        self.give_pages(id);
     }
 
     fn hold(&mut self, id: BinaryId, on: bool) {
@@ -356,6 +401,10 @@ impl AnalysisEngine for Engine {
             scheduler.set_unit_cap(cap);
         }
         scheduler.set_hold(held);
+        self.give_pages(binary.id);
+        let Some(scheduler) = self.schedulers.get_mut(&binary.id) else {
+            return Err(ToolError::new(ErrorCode::InternalError));
+        };
         drive(scheduler, binary, Band::Full, fuel)
     }
 

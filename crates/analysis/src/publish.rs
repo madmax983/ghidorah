@@ -178,28 +178,25 @@ fn collect(program: &Program, work: &Work) -> Facts {
         out.funcs.push(func);
         kept.insert(*entry);
     }
-    for (at, u) in &work.units {
+    for (at, u) in work.code.iter() {
         if !kept.contains(&u.owner) {
             continue;
         }
         out.units.push((
-            *at,
+            at,
             CodeUnit::Insn {
                 len: u.len,
                 flow: u.flow,
                 flags: u.flags,
             },
         ));
-        out.whys.insert_unit(*at, u.owner);
+        out.whys.insert_unit(at, u.owner);
     }
-    for key in &work.refs {
-        let owner = work.units.get(&key.from.off).map(|u| u.owner);
+    for key in work.code.refs() {
+        let owner = work.code.get(key.from.off).map(|u| u.owner);
         if owner.is_some_and(|o| kept.contains(&o)) {
-            out.refs.push(Ref {
-                key: *key,
-                primary: true,
-            });
-            out.whys.insert_ref(*key, Rule::FlowRef);
+            out.refs.push(Ref { key, primary: true });
+            out.whys.insert_ref(key, Rule::FlowRef);
         }
     }
     out.kept = kept;
@@ -286,7 +283,8 @@ fn kept(p: &Program, records: &[Rec<'_>]) -> Vec<u64> {
 ///
 /// # Errors
 ///
-/// Returns [`AnalysisError::Codec`] when a row breaks a table rule.
+/// Returns [`AnalysisError::Codec`] when a row breaks a table rule. Returns
+/// [`AnalysisError::Pages`] when a page of the work state does not load.
 pub(crate) fn analysis_set(program: &Program, work: &Work) -> Result<AnalysisSet, AnalysisError> {
     let mut facts = collect(program, work);
     let data = crate::analyzers::refs::collect(
@@ -334,6 +332,10 @@ pub(crate) fn analysis_set(program: &Program, work: &Work) -> Result<AnalysisSet
         ..SetRows::default()
     };
     extra.add_to(&mut rows);
+    // A page that did not load gives a set with facts missing.
+    if let Some(e) = work.code.error() {
+        return Err(e.into());
+    }
     // A shard with no change keeps the old allocation, so the new set shares it.
     Ok(set_from_rows(rows, program.analysis())?)
 }

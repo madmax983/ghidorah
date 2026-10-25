@@ -27,6 +27,7 @@ pub mod batch;
 mod cache;
 mod engine;
 mod open;
+mod pages;
 mod slices;
 mod store;
 
@@ -165,6 +166,8 @@ pub struct Session {
     fs: Box<dyn Fs>,
     me: LockInfo,
     current: Option<BinaryId>,
+    /// The binaries whose engine has a page store.
+    paged: std::collections::BTreeSet<BinaryId>,
 }
 
 impl fmt::Debug for Session {
@@ -217,6 +220,7 @@ impl Session {
             fs,
             me,
             current: None,
+            paged: std::collections::BTreeSet::new(),
         }
     }
 
@@ -267,6 +271,7 @@ impl Session {
         until: Until,
         fuel: &mut Fuel,
     ) -> Result<Option<RunReport>, ToolError> {
+        self.give_pages(id);
         let (Some(engine), Some(binary)) = (self.engine.as_mut(), self.binaries.get_mut(&id))
         else {
             return Ok(None);

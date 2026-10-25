@@ -37,9 +37,23 @@ The work goes in four stages. Each stage is one pull request with its own measur
 
 ### Stage 3: the work state outside memory
 
-- The engine keeps a summary of each function in memory: the entry, the extents, the callees, the noreturn flag and the exits. A summary takes about 100 bytes.
-- The work state of a cold shard goes to the project directory through the `Fs` seam. A cache of loaded shards with a fixed size bounds the memory.
-- `ghidorah-analysis` stays a pure core crate. It reads and writes shard state through a trait. `ghidorah-tools` gives the implementation.
+- The engine keeps a summary of each function in memory: the entry, the extents, the callees, the noreturn flag, the exits and the body ranges.
+- The code units and the flow references of the work state go in pages of 64 KiB of RAM offsets. At most 256 pages stay in memory. The other pages go to `work/` in the project directory through the `Fs` seam.
+- `ghidorah-analysis` stays a pure core crate. It reads and writes pages through the trait `PageStore`. `ghidorah-tools` gives the implementation. A binary with no project keeps all pages in memory.
+- The pages are a cache. A test runs the analysis with pages of 256 offsets and one page in memory, and the facts do not change.
+- A read of the owner of an address uses the body ranges. A rule over the call sites uses the index of the call sites with the length of each unit. So these reads load no page.
+- A load above the limit stores a random page. Each analyzer reads the pages in address order. A store of the page of the oldest use then stores each page before its next read.
+
+Measurements of stage 3 in Docker with a 16 GB limit:
+
+| Run | Work state | Peak | Time |
+|---|---|---|---|
+| libsystemd.so.0, full analysis | 22.8 MB to 16.7 MB (no copies of the unit and reference sets in each function) | 64.8 MB to 58.6 MB | the same |
+| Godot 4.7.2, default load, pages | 1,264 pages, 402 MB in `work/` | 5.30 GB to 3.57 GB | the same, within the noise of the host |
+| Godot 4.7.2, full analysis, pages | 1,264 pages, 402 MB in `work/` | 5.91 GB to 4.19 GB | 615 s to 429 s |
+
+The replies of each Godot run are the same with and without pages. The time of the host changes by up to 30% between two runs.
+The published set and the publish step still grow with the binary. Stage 3 does not page them. The shard files of stage 2 are on disk, so a cache of set shards can use them. That change needs an amendment of this ADR.
 
 ### Stage 4: analysis in the order of the queries
 

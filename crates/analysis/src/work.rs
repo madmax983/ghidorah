@@ -2,13 +2,17 @@
 //!
 //! The work state keeps one record for each function, code unit, flow reference and noreturn
 //! flag, each with its [`Why`]. The keys are RAM offsets. Indexes give the owner of each code
-//! unit, the call sites of each target and the functions that stop at an address.
+//! unit, the call sites of each target and the functions that stop at an address. A function
+//! keeps the ranges of its code units, not a list of them. The code units and the flow
+//! references sit in pages ([`code`]). A page store can hold the pages that are not in use.
 //!
 //! Rules:
 //!
 //! - Two code units never overlap. Each unit has one owner function.
 //! - A flow reference starts at a code unit of the same owner.
 //! - A function without a start reason does not exist.
+
+pub(crate) mod code;
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -32,10 +36,11 @@ pub(crate) struct WFunc {
     pub extents: Vec<Range>,
     /// The flow summary of the last disassembly, or `None` before it.
     pub summary: Option<Summary>,
-    /// The starts of the code units of the function.
-    pub units: BTreeSet<u64>,
-    /// The flow references from the code units of the function.
-    pub refs: BTreeSet<RefKey>,
+    /// The ranges of the code units of the function. Each code unit in these ranges belongs
+    /// to the function, because two code units never overlap.
+    pub body: RangeSet,
+    /// The number of code units of the function.
+    pub unit_count: usize,
 }
 
 impl WFunc {
@@ -58,7 +63,7 @@ impl WFunc {
 }
 
 /// One code unit of the work state.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct WUnit {
     /// The length in bytes.
     pub len: u8,
@@ -91,15 +96,13 @@ pub(crate) struct Extent {
 pub(crate) type SlotImport = (ImportId, Address);
 
 /// The work state.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Default)]
 pub(crate) struct Work {
     /// The functions by entry.
     pub funcs: BTreeMap<u64, WFunc>,
-    /// The code units by start.
-    pub units: BTreeMap<u64, WUnit>,
-    /// The flow references. The why-record of each is `R_FLOW_REF` with the code unit at its
-    /// source.
-    pub refs: BTreeSet<RefKey>,
+    /// The code units by start and the flow references. The why-record of each reference is
+    /// `R_FLOW_REF` with the code unit at its source.
+    pub code: code::Code,
     /// The noreturn flags from the known list, by function entry.
     pub known: BTreeMap<u64, Why>,
     /// The noreturn flags from the flow, by function entry.
@@ -108,10 +111,15 @@ pub(crate) struct Work {
     pub slots: BTreeMap<u64, ImportId>,
     /// The declared extents by start. Two extents at one start keep the longer one.
     pub extents: BTreeMap<u64, Extent>,
+    /// The body ranges of all functions by start: the last address and the owner entry. Two
+    /// code units never overlap, so the ranges do not overlap. An address in a range is in a
+    /// code unit of its owner, so an owner read loads no page.
+    pub spans: BTreeMap<u64, (u64, u64)>,
     /// The functions whose flow stops at an address outside their body.
     pub exits: BTreeMap<u64, BTreeSet<u64>>,
-    /// The call sites of each direct call target.
-    pub callers: BTreeMap<u64, BTreeSet<u64>>,
+    /// The call sites of each direct call target, each with the length of its code unit. So a
+    /// rule over the call sites reads no page of the code units.
+    pub callers: BTreeMap<u64, BTreeMap<u64, u8>>,
     /// The indirect call sites of each import slot.
     pub slot_callers: BTreeMap<u64, BTreeSet<u64>>,
     /// The number of body changes of each function entry.
@@ -172,15 +180,51 @@ pub(crate) fn import_slots(program: &Program) -> BTreeMap<u64, SlotImport> {
 }
 
 impl Work {
+    /// Empties the work state. The page store and its limits stay.
+    pub fn reset(&mut self) {
+        let mut code = std::mem::take(&mut self.code);
+        code.reset();
+        *self = Self {
+            code,
+            ..Self::default()
+        };
+    }
+
     /// Gives the start and the record of the code unit that holds `at`.
-    pub fn unit_at(&self, at: u64) -> Option<(u64, &WUnit)> {
-        let (start, unit) = self.units.range(..=at).next_back()?;
-        unit.range(*start)?.contains(at).then_some((*start, unit))
+    pub fn unit_at(&self, at: u64) -> Option<(u64, WUnit)> {
+        self.code.unit_at(at)
     }
 
     /// Gives the owner of the code unit that holds `at`.
     pub fn owner(&self, at: u64) -> Option<u64> {
-        self.unit_at(at).map(|(_, u)| u.owner)
+        let (_, (last, owner)) = self.spans.range(..=at).next_back()?;
+        (at <= *last).then_some(*owner)
+    }
+
+    /// Gives the owners of the code units that overlap `range`, in address order. Two code
+    /// units of one owner can give the owner twice.
+    pub fn owners_in(&self, range: Range) -> Vec<u64> {
+        let mut out: Vec<u64> = self.owner(range.first).into_iter().collect();
+        if let Some(next) = range.first.checked_add(1)
+            && next <= range.last
+        {
+            out.extend(self.spans.range(next..=range.last).map(|(_, (_, o))| *o));
+        }
+        out
+    }
+
+    /// Puts `body` in place of the body ranges of the function `entry`.
+    fn set_ranges(&mut self, entry: u64, body: RangeSet) {
+        let Some(f) = self.funcs.get_mut(&entry) else {
+            return;
+        };
+        for r in f.body.ranges() {
+            self.spans.remove(&r.first);
+        }
+        for r in body.ranges() {
+            self.spans.insert(r.first, (r.last, entry));
+        }
+        f.body = body;
     }
 
     /// Gives the starts and the owners of the code units that overlap `range`.
@@ -192,25 +236,29 @@ impl Work {
         if let Some(next) = range.first.checked_add(1)
             && next <= range.last
         {
-            out.extend(
-                self.units
-                    .range(next..=range.last)
-                    .map(|(a, u)| (*a, u.owner)),
-            );
+            out.extend(self.code.range(next, range.last).map(|(a, u)| (a, u.owner)));
         }
         out
     }
 
+    /// Gives the code units of the function `entry` in address order.
+    pub fn units_of(&self, entry: u64) -> impl Iterator<Item = (u64, WUnit)> {
+        let ranges = self.funcs.get(&entry).map_or(&[][..], |f| f.body.ranges());
+        ranges.iter().flat_map(|r| self.code.range(r.first, r.last))
+    }
+
+    /// Gives the flow references from the code unit at `at` in key order.
+    pub fn refs_from(&self, at: u64) -> Vec<RefKey> {
+        self.code.refs_from(at)
+    }
+
     /// Gives the body of the function `entry`: its code units, or its entry byte alone.
     pub fn body(&self, entry: u64) -> RangeSet {
-        let mut body = RangeSet::new();
-        if let Some(f) = self.funcs.get(&entry) {
-            for at in &f.units {
-                if let Some(r) = self.units.get(at).and_then(|u| u.range(*at)) {
-                    body.insert(r);
-                }
-            }
-        }
+        let mut body = self
+            .funcs
+            .get(&entry)
+            .map(|f| f.body.clone())
+            .unwrap_or_default();
         if !body.contains(entry) {
             body.insert(Range::single(entry));
         }
@@ -232,25 +280,31 @@ impl Work {
     /// Removes the code unit at `at` with its references and its call-site indexes.
     /// Gives its range.
     pub fn drop_unit(&mut self, at: u64) -> Option<Range> {
-        let unit = self.units.remove(&at)?;
+        let unit = self.code.remove(at)?;
         let range = unit.range(at);
+        for key in self.refs_from(at) {
+            self.code.remove_ref(&key);
+        }
         let Some(f) = self.funcs.get_mut(&unit.owner) else {
             return range;
         };
-        f.units.remove(&at);
-        let gone: Vec<RefKey> = f
-            .refs
-            .iter()
-            .filter(|k| k.from == Address::ram(at))
-            .copied()
-            .collect();
-        for key in gone {
-            f.refs.remove(&key);
-            self.refs.remove(&key);
+        f.unit_count = f.unit_count.saturating_sub(1);
+        if let Some(r) = range {
+            let mut body = f.body.clone();
+            body.remove(r);
+            self.set_ranges(unit.owner, body);
         }
+        let Some(f) = self.funcs.get(&unit.owner) else {
+            return range;
+        };
         if let Some(s) = &f.summary {
-            if let Some(t) = s.calls.get(&at) {
-                remove_from(&mut self.callers, *t, at);
+            if let Some(t) = s.calls.get(&at)
+                && let Some(sites) = self.callers.get_mut(t)
+            {
+                sites.remove(&at);
+                if sites.is_empty() {
+                    self.callers.remove(t);
+                }
             }
             if let Some(slot) = s.slot_calls.get(&at) {
                 remove_from(&mut self.slot_callers, *slot, at);
@@ -261,11 +315,7 @@ impl Work {
 
     /// Removes the body of the function `entry`: its units, references and indexes.
     pub fn clear_body(&mut self, entry: u64) {
-        let units: Vec<u64> = self
-            .funcs
-            .get(&entry)
-            .map(|f| f.units.iter().copied().collect())
-            .unwrap_or_default();
+        let units: Vec<u64> = self.units_of(entry).map(|(at, _)| at).collect();
         for at in units {
             let _ = self.drop_unit(at);
         }
@@ -284,7 +334,8 @@ impl Work {
     /// new unit goes. Gives the owners of the units that go, with their ranges.
     pub fn put_body(&mut self, entry: u64, body: Body) -> Vec<(u64, Range)> {
         let mut evicted = Vec::new();
-        let mut kept = BTreeSet::new();
+        let mut kept = BTreeMap::new();
+        let mut ranges = RangeSet::new();
         for (at, rec) in body.units {
             let Some(range) = Range::with_len(at, u64::from(rec.len)) else {
                 continue;
@@ -299,7 +350,7 @@ impl Work {
                 }
             }
             let UnitRec { len, flow, flags } = rec;
-            self.units.insert(
+            self.code.insert(
                 at,
                 WUnit {
                     len,
@@ -308,31 +359,35 @@ impl Work {
                     owner: entry,
                 },
             );
-            kept.insert(at);
+            kept.insert(at, len);
+            ranges.insert(range);
         }
-        let Some(f) = self.funcs.get_mut(&entry) else {
+        if !self.funcs.contains_key(&entry) {
             return evicted;
-        };
+        }
         for key in body.refs {
-            if kept.contains(&key.from.off) {
-                f.refs.insert(key);
-                self.refs.insert(key);
+            if kept.contains_key(&key.from.off) {
+                self.code.insert_ref(key);
             }
         }
         for x in &body.summary.exits {
             self.exits.entry(*x).or_default().insert(entry);
         }
         for (site, target) in &body.summary.calls {
-            if kept.contains(site) {
-                self.callers.entry(*target).or_default().insert(*site);
+            if let Some(len) = kept.get(site) {
+                self.callers.entry(*target).or_default().insert(*site, *len);
             }
         }
         for (site, slot) in &body.summary.slot_calls {
-            if kept.contains(site) {
+            if kept.contains_key(site) {
                 self.slot_callers.entry(*slot).or_default().insert(*site);
             }
         }
-        f.units = kept;
+        self.set_ranges(entry, ranges);
+        let Some(f) = self.funcs.get_mut(&entry) else {
+            return evicted;
+        };
+        f.unit_count = kept.len();
         f.summary = Some(body.summary);
         evicted
     }
@@ -342,22 +397,20 @@ impl Work {
         let Some(f) = self.funcs.get(&entry) else {
             return false;
         };
-        if f.summary.as_ref() != Some(&body.summary)
-            || f.units.len() != body.units.len()
-            || f.refs.len() != body.refs.len()
-        {
+        if f.summary.as_ref() != Some(&body.summary) || f.unit_count != body.units.len() {
             return false;
         }
         let units = body.units.iter().all(|(at, rec)| {
-            self.units.get(at).is_some_and(|u| {
+            self.code.get(*at).is_some_and(|u| {
                 u.owner == entry && u.len == rec.len && u.flow == rec.flow && u.flags == rec.flags
             })
         });
-        units
-            && body
-                .refs
-                .iter()
-                .all(|k| f.refs.contains(k) && self.refs.contains(k))
+        // With the same units, each reference of the body is from a unit of the function.
+        let refs: usize = self
+            .units_of(entry)
+            .map(|(at, _)| self.refs_from(at).len())
+            .sum();
+        units && refs == body.refs.len() && body.refs.iter().all(|k| self.code.has_ref(k))
     }
 }
 

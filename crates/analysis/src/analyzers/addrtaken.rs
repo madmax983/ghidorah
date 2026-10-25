@@ -84,7 +84,7 @@ pub fn run(ctx: &mut AnalysisCtx<'_>, ranges: &RangeSet) -> Step {
         for at in stale {
             sites.remove(&at);
         }
-        for at in ctx.work.units.range(r.first..=r.last).map(|(at, _)| *at) {
+        for at in ctx.work.code.range(r.first, r.last).map(|(at, _)| at) {
             work = work.saturating_add(1);
             if let Some(target) = decode_at(program, at).and_then(|i| taken(program, &i)) {
                 sites.insert(at, target);

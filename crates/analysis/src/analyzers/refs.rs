@@ -419,7 +419,7 @@ pub fn run(ctx: &mut AnalysisCtx<'_>, ranges: &RangeSet) -> Step {
     let mut fresh = BTreeSet::new();
     let mut fresh_sites = BTreeMap::new();
     for r in ranges.ranges() {
-        for at in ctx.work.units.range(r.first..=r.last).map(|(at, _)| *at) {
+        for at in ctx.work.code.range(r.first, r.last).map(|(at, _)| at) {
             work = work.saturating_add(1);
             let Some(insn) = decode_at(program, at) else {
                 continue;
@@ -513,7 +513,7 @@ pub(crate) fn collect(
     refs: &mut Vec<Ref>,
     whys: &mut crate::publish::whys::Whys,
 ) -> Vec<(u64, Fact<DataDef>)> {
-    let is_kept = |at: u64| work.units.get(&at).is_some_and(|u| kept.contains(&u.owner));
+    let is_kept = |at: u64| work.code.get(at).is_some_and(|u| kept.contains(&u.owner));
     for key in &work.data.operands {
         if is_kept(key.from.off) {
             refs.push(Ref {

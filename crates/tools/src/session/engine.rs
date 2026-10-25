@@ -77,6 +77,13 @@ pub trait AnalysisEngine: Send {
         let _ = (id, on);
     }
 
+    /// Gives the engine a store for the pages of the work state of the binary `id`
+    /// (ADR-0031 stage 3). The session calls it once for each binary with a project that
+    /// takes writes. The default drops the store.
+    fn set_pages(&mut self, id: BinaryId, store: Box<dyn ghidorah_analysis::pages::PageStore>) {
+        let _ = (id, store);
+    }
+
     /// Publishes the analysis work of `binary` that a hold kept back. The default does
     /// nothing.
     ///

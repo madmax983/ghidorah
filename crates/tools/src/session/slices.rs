@@ -145,6 +145,7 @@ impl Session {
         until: Until,
         fuel: &mut Fuel,
     ) -> Result<Option<RunReport>, ToolError> {
+        self.give_pages(id);
         let (Some(engine), Some(binary)) = (self.engine.as_mut(), self.binaries.get_mut(&id))
         else {
             if let (Some(_), Some(binary)) = (band, self.binaries.get_mut(&id)) {
