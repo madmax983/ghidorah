@@ -156,7 +156,7 @@ pub fn open_sites(p: &Program) -> Vec<(String, Vec<String>)> {
     let mut out = Vec::new();
     for view in p.funcs() {
         let mut sites = Vec::new();
-        for layer in [p.base(), p.analysis()] {
+        for layer in p.layers() {
             for r in view.func.body.ranges() {
                 for (at, _) in layer.listing().units_in(*r) {
                     if is_open_site(p, at) {

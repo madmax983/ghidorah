@@ -90,7 +90,7 @@ impl Program {
     /// Gives a function.
     #[must_use]
     pub fn func(&self, id: FuncId) -> Option<FuncView<'_>> {
-        Self::view(self.base.funcs.get(id), self.analysis.funcs.get(id))
+        Self::view(self.base.funcs.get(id), self.analysis.func(id))
     }
 
     /// Gives all functions in entry order.
@@ -100,7 +100,7 @@ impl Program {
             .base
             .funcs
             .iter()
-            .chain(self.analysis.funcs.iter())
+            .chain(self.analysis.funcs())
             .map(Function::id)
             .collect();
         ids.into_iter().filter_map(|id| self.func(id)).collect()
@@ -113,7 +113,6 @@ impl Program {
             return None;
         }
         self.analysis
-            .funcs
             .owner_of(addr.off)
             .or_else(|| self.base.funcs.owner_of(addr.off))
     }
@@ -124,7 +123,12 @@ impl Program {
         self.base
             .symbols
             .at(addr)
-            .chain(self.analysis.symbols.at(addr))
+            .chain(
+                self.analysis
+                    .at(addr)
+                    .into_iter()
+                    .flat_map(|t| t.symbols.at(addr)),
+            )
             .collect()
     }
 
@@ -134,7 +138,7 @@ impl Program {
         self.base
             .symbols
             .primary(addr)
-            .or_else(|| self.analysis.symbols.primary(addr))
+            .or_else(|| self.analysis.at(addr)?.symbols.primary(addr))
     }
 
     /// Gives the addresses with a symbol of this name in address order. A default name has
@@ -146,7 +150,11 @@ impl Program {
             .symbols
             .by_name(name)
             .iter()
-            .chain(self.analysis.symbols.by_name(name))
+            .chain(
+                self.analysis
+                    .shards()
+                    .flat_map(|(_, t)| t.symbols.by_name(name)),
+            )
             .copied()
             .collect();
         all.into_iter().collect()
@@ -215,7 +223,10 @@ impl Program {
     pub fn refs_from(&self, from: Address) -> Vec<&Fact<Ref>> {
         Self::merge_refs(
             self.base.refs.from(from),
-            self.analysis.refs.from(from),
+            self.analysis
+                .at(from)
+                .into_iter()
+                .flat_map(|t| t.refs.from(from)),
             |k| *k,
         )
     }
@@ -224,7 +235,8 @@ impl Program {
     /// the same key.
     #[must_use]
     pub fn refs_to(&self, to: Address) -> Vec<&Fact<Ref>> {
-        Self::merge_refs(self.base.refs.to(to), self.analysis.refs.to(to), |k| {
+        let analysis = self.analysis.shards().flat_map(|(_, t)| t.refs.to(to));
+        Self::merge_refs(self.base.refs.to(to), analysis, |k| {
             (k.to, k.from, k.op_index, k.kind)
         })
     }
@@ -234,7 +246,9 @@ impl Program {
     pub fn comment(&self, addr: Address, kind: CommentKind) -> Option<&Fact<String>> {
         higher(
             self.base.comments.get(addr, kind),
-            self.analysis.comments.get(addr, kind),
+            self.analysis
+                .at(addr)
+                .and_then(|t| t.comments.get(addr, kind)),
         )
     }
 
@@ -243,27 +257,29 @@ impl Program {
     pub fn jump_table(&self, id: JumpTableId) -> Option<&Fact<JumpTable>> {
         higher(
             self.base.jumptables.get(id),
-            self.analysis.jumptables.get(id),
+            self.analysis.at(id.0).and_then(|t| t.jumptables.get(id)),
         )
     }
 
     /// Gives the flow override at `at` with the higher rank.
     #[must_use]
     pub fn flow_override(&self, at: Address) -> Option<&Fact<FlowOverride>> {
-        higher(self.base.overrides.get(at), self.analysis.overrides.get(at))
+        higher(
+            self.base.overrides.get(at),
+            self.analysis.at(at).and_then(|t| t.overrides.get(at)),
+        )
     }
 
     /// Gives the data definition at the RAM offset `off` with the higher rank.
     #[must_use]
     pub fn data_def(&self, off: u64) -> Option<&Fact<DataDef>> {
-        higher(self.base.listing.data(off), self.analysis.listing.data(off))
+        higher(self.base.listing.data(off), self.analysis.data(off))
     }
 
     /// Gives the code unit at the RAM offset `off`. The analysis layer comes first.
     #[must_use]
     pub fn code_unit(&self, off: u64) -> Option<&CodeUnit> {
         self.analysis
-            .listing
             .unit(off)
             .or_else(|| self.base.listing.unit(off))
     }
@@ -272,7 +288,7 @@ impl Program {
     #[must_use]
     pub fn var(&self, id: &VarId) -> VarView<'_> {
         let b = self.base.vars.get(id);
-        let a = self.analysis.vars.get(id);
+        let a = self.analysis.at(id.func.0).and_then(|t| t.vars.get(id));
         VarView {
             name: higher(
                 b.and_then(|v| v.name.as_ref()),
@@ -286,17 +302,14 @@ impl Program {
     #[must_use]
     pub fn string(&self, off: u64) -> Option<&StrInfo> {
         self.analysis
-            .strings
-            .get(off)
+            .at_off(off)
+            .and_then(|t| t.strings.get(off))
             .or_else(|| self.base.strings.get(off))
     }
 
     /// Gives the why-record of a fact. The analysis layer comes first.
     #[must_use]
     pub fn why(&self, key: &FactKey) -> Option<Why> {
-        self.analysis
-            .why
-            .get(key)
-            .or_else(|| self.base.why.get(key))
+        self.analysis.why(key).or_else(|| self.base.why.get(key))
     }
 }

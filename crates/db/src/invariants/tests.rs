@@ -190,14 +190,14 @@ fn broken() -> crate::Program {
         .refs
         .add(bad, &agent)
         .unwrap();
-    let layer = p.layer_mut(Source::Analysis).unwrap();
+    let layer = p.analysis_at_mut(ghidorah_base::Address::ram(0x1000));
     layer.refs.add(bad, &a).unwrap();
     layer
         .why
         .insert(FactKey::Ref(bad_ref), why("R_TEST_REF", Vec::new()))
         .unwrap();
     // Rule 6: an analysis code unit without a why-record, and a premise that does not exist.
-    let layer = p.layer_mut(Source::Analysis).unwrap();
+    let layer = p.analysis_at_mut(ghidorah_base::Address::ram(0x1000));
     layer
         .listing
         .insert_unit(
@@ -223,10 +223,13 @@ fn broken() -> crate::Program {
             ),
         )
         .unwrap();
-    // A new record for 0x1090 gives it a higher order than its user at 0x1084.
+    // The record of 0x1090 names 0x1084, and 0x1084 names 0x1090: a cycle.
     layer
         .why
-        .insert(FactKey::CodeUnit(0x1090), why("R_TEST_AGAIN", Vec::new()))
+        .insert(
+            FactKey::CodeUnit(0x1090),
+            why("R_TEST_AGAIN", vec![FactKey::CodeUnit(0x1084)]),
+        )
         .unwrap();
     // Rule 8: a jump target inside an instruction and an indirect target in data.
     layer
@@ -289,9 +292,9 @@ fn each_rule_finds_its_violation() {
             key: FactKey::CodeUnit(0x1084),
             premise: FactKey::Fde(0x77),
         },
-        Violation::PremiseOrder {
-            key: FactKey::CodeUnit(0x1084),
-            premise: FactKey::CodeUnit(0x1090),
+        Violation::PremiseCycle {
+            key: FactKey::CodeUnit(0x1090),
+            premise: FactKey::CodeUnit(0x1084),
         },
         Violation::EventRev { rev: Rev(5) },
         Violation::JumpTarget {

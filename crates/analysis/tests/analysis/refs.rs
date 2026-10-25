@@ -23,7 +23,6 @@ const ABS64: u32 = 1;
 fn data_refs(p: &Program) -> Vec<RefKey> {
     p.analysis()
         .refs()
-        .iter()
         .map(|r| r.value.key)
         .filter(|k| !k.kind.is_flow())
         .collect()
@@ -114,7 +113,7 @@ fn specs_and_rows() {
         )
         .expect("a triage run");
     assert!(
-        !triage.analysis().strings().is_empty(),
+        triage.analysis().strings().next().is_some(),
         "bands 600 and 650 are triage bands"
     );
 }
@@ -125,7 +124,7 @@ fn ac_085a_xref_shape() {
     for (path, p) in all_t1() {
         let found = p.check_invariants();
         assert!(found.is_empty(), "{path}: {found:?}");
-        for layer in [p.base(), p.analysis()] {
+        for layer in p.layers() {
             for r in layer.refs().iter() {
                 let k = r.value.key;
                 assert!(
@@ -211,7 +210,7 @@ fn reloc_slots_of_a_pie() {
             to: *to,
             kind: RefType::Data,
         };
-        assert!(p.analysis().refs().get(&key).is_some(), "{key:?}");
+        assert!(p.analysis().ref_get(&key).is_some(), "{key:?}");
         let why = p
             .why(&ghidorah_db::FactKey::Data(*at))
             .expect("a why-record");
@@ -479,7 +478,7 @@ fn regress_clang_reltable_strings_referenced() {
             kind: RefType::Data,
         };
         assert!(
-            p.analysis().refs().get(&key).is_some(),
+            p.analysis().ref_get(&key).is_some(),
             "entry {i} at {at:#x} refers to {target:#x}"
         );
         let def = p.data_def(at).expect("a data definition at the entry");

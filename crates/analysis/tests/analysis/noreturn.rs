@@ -241,7 +241,7 @@ fn known_list_flags_stubs_and_slots() {
     let mut flagged = 0;
     for view in q.funcs() {
         for r in view.func.body.ranges() {
-            for (at, unit) in q.analysis().listing().units_in(*r) {
+            for (at, unit) in q.analysis().units_in(*r) {
                 let CodeUnit::Insn { flow, flags, .. } = unit;
                 if *flow == FlowKind::ICall && flags & UNIT_NORETURN_CALL != 0 {
                     flagged += 1;

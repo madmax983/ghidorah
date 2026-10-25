@@ -160,7 +160,7 @@ type Unit = (u8, FlowKind, u8);
 fn units(program: &Program, body: &RangeSet) -> BTreeMap<u64, Unit> {
     let mut out = BTreeMap::new();
     for r in body.ranges() {
-        for t in [program.base(), program.analysis()] {
+        for t in program.layers() {
             for (at, unit) in t.listing().units_in(*r) {
                 let CodeUnit::Insn { len, flow, flags } = unit;
                 out.insert(at, (*len, *flow, *flags));

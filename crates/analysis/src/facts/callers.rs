@@ -58,7 +58,7 @@ fn judge(
 /// Gives the sites of the `IndirectTargets` overrides that list one of `targets`.
 fn override_sites(p: &Program, targets: &[Address]) -> BTreeSet<Address> {
     let mut out = BTreeSet::new();
-    for layer in [p.base(), p.analysis()] {
+    for layer in p.layers() {
         for (at, _) in layer.overrides().iter() {
             if override_targets(p, at).is_some_and(|t| t.iter().any(|a| targets.contains(a))) {
                 out.insert(at);

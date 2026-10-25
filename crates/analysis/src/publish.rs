@@ -2,7 +2,7 @@
 //! (design Section 3.9).
 //!
 //! The step makes the typed rows of the analysis layer and gives them to
-//! [`tables_from_rows`]. So each row goes through the write rules of its table, with no JSON
+//! [`set_from_rows`]. So each row goes through the write rules of its table, with no JSON
 //! form between. Rules of the step:
 //!
 //! - Each fact has the origin `Analysis`, transaction 0, session `analysis`. So the set does
@@ -22,11 +22,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use ghidorah_base::{Address, FuncId, JumpTableId};
-use ghidorah_db::codec::{SetRows, tables_from_rows};
+use ghidorah_db::codec::{SetRows, set_from_rows};
 use ghidorah_db::listing::CodeUnit;
 use ghidorah_db::{
     AnalysisSet, Commit, Edit, Fact, FactKey, Function, JumpTable, Origin, Part, PartKind, Program,
-    Ref, RefKey, RuleCode, SessionLabel, Source, StartReason, StrInfo, WhyRows,
+    Ref, RefKey, RuleCode, SessionLabel, Source, StartReason, StrInfo, Tables, WhyRows,
 };
 
 use crate::AnalysisError;
@@ -58,24 +58,33 @@ impl Changed {
     /// Counts the changes from `old` to `new`.
     #[must_use]
     pub fn between(old: &AnalysisSet, new: &AnalysisSet) -> Self {
-        fn funcs(t: &AnalysisSet) -> BTreeMap<Address, &Function> {
-            t.funcs().iter().map(|f| (f.entry, f)).collect()
+        fn funcs(t: Option<&Tables>) -> BTreeMap<Address, &Function> {
+            t.into_iter()
+                .flat_map(|t| t.funcs().iter().map(|f| (f.entry, f)))
+                .collect()
         }
-        fn refs(t: &AnalysisSet) -> BTreeMap<RefKey, &Fact<Ref>> {
-            t.refs().iter().map(|r| (r.value.key, r)).collect()
+        fn refs(t: Option<&Tables>) -> BTreeMap<RefKey, &Fact<Ref>> {
+            t.into_iter()
+                .flat_map(|t| t.refs().iter().map(|r| (r.value.key, r)))
+                .collect()
         }
-        fn strings(t: &AnalysisSet) -> BTreeMap<u64, &StrInfo> {
-            t.strings().iter().collect()
+        fn strings(t: Option<&Tables>) -> BTreeMap<u64, &StrInfo> {
+            t.into_iter().flat_map(|t| t.strings().iter()).collect()
         }
-        fn tables(t: &AnalysisSet) -> BTreeMap<JumpTableId, &Fact<JumpTable>> {
-            t.jumptables().iter().collect()
+        fn tables(t: Option<&Tables>) -> BTreeMap<JumpTableId, &Fact<JumpTable>> {
+            t.into_iter().flat_map(|t| t.jumptables().iter()).collect()
         }
-        Self {
-            functions: diff(&funcs(old), &funcs(new)),
-            refs: diff(&refs(old), &refs(new)),
-            strings: diff(&strings(old), &strings(new)),
-            jumptables: diff(&tables(old), &tables(new)),
+        // A shard that both sets share has no change, so only the other shards count.
+        let mut out = Self::default();
+        for id in old.changed_shards(new) {
+            let (a, b) = (old.shard(id), new.shard(id));
+            let add = |x: u64, y: u64| x.saturating_add(y);
+            out.functions = add(out.functions, diff(&funcs(a), &funcs(b)));
+            out.refs = add(out.refs, diff(&refs(a), &refs(b)));
+            out.strings = add(out.strings, diff(&strings(a), &strings(b)));
+            out.jumptables = add(out.jumptables, diff(&tables(a), &tables(b)));
         }
+        out
     }
 }
 
@@ -205,14 +214,15 @@ fn bit(j: usize) -> u64 {
         .unwrap_or(0)
 }
 
-/// Gives the creation order of each fact and a mask of its kept premises, by the position of
-/// the fact in key order. Bit `j` of the mask keeps premise `j`. A walk in key order visits
-/// the premises of each fact first. A premise outside the set and the inputs goes, and so
-/// does a premise that closes a cycle.
+/// Gives a mask of the kept premises of each fact, by the position of the fact in key order.
+/// Bit `j` of the mask keeps premise `j`. A walk in key order visits the premises of each
+/// fact first. A premise outside the set and the inputs goes, and so does a premise that
+/// closes a cycle. The walk is global, so the result does not depend on a shard edge
+/// (ADR-0031).
 ///
 /// The step works on positions, so it makes no copy of a key. A record has at most 64
 /// premises, so its mask fits in a `u64`.
-fn order(p: &Program, records: &[Rec<'_>]) -> Vec<(u64, u64)> {
+fn kept(p: &Program, records: &[Rec<'_>]) -> Vec<u64> {
     /// The walk state of a fact.
     #[derive(Clone, Copy, PartialEq, Eq)]
     enum Mark {
@@ -222,20 +232,18 @@ fn order(p: &Program, records: &[Rec<'_>]) -> Vec<(u64, u64)> {
     }
     let inputs = Inputs::of(p);
     let at = |q: &FactKey| records.binary_search_by(|r| r.cmp_key(q)).ok();
-    let mut out: Vec<(u64, u64)> = records
+    let mut out: Vec<u64> = records
         .iter()
         .map(|r| {
-            let mask = (0..r.premise_count()).fold(0u64, |m, j| {
+            (0..r.premise_count()).fold(0u64, |m, j| {
                 let kept = r
                     .premise(j)
                     .is_some_and(|q| at(&q).is_some() || inputs.holds(p, &q));
                 if kept { m | bit(j) } else { m }
-            });
-            (0, mask)
+            })
         })
         .collect();
     let mut marks = vec![Mark::New; records.len()];
-    let mut next = 0u64;
     for root in 0..records.len() {
         if marks.get(root) != Some(&Mark::New) {
             continue;
@@ -258,7 +266,7 @@ fn order(p: &Program, records: &[Rec<'_>]) -> Vec<(u64, u64)> {
                         stack.push((k, 0));
                     }
                     Some(Mark::Open) => {
-                        if let Some((_, mask)) = out.get_mut(i) {
+                        if let Some(mask) = out.get_mut(i) {
                             *mask &= !bit(j);
                         }
                     }
@@ -266,11 +274,9 @@ fn order(p: &Program, records: &[Rec<'_>]) -> Vec<(u64, u64)> {
                 }
                 continue;
             }
-            if let (Some((o, _)), Some(m)) = (out.get_mut(i), marks.get_mut(i)) {
-                *o = next;
+            if let Some(m) = marks.get_mut(i) {
                 *m = Mark::Done;
             }
-            next = next.saturating_add(1);
         }
     }
     out
@@ -294,11 +300,10 @@ pub(crate) fn analysis_set(program: &Program, work: &Work) -> Result<AnalysisSet
     let extra = crate::irfacts::rows(program, work, &facts.funcs, &mut facts.whys);
     let origin = Origin::analysis();
     let records = facts.whys.records();
-    let ordered = order(program, &records);
-    let why_next = u64::try_from(ordered.len()).unwrap_or(u64::MAX);
+    let masks = kept(program, &records);
     let mut why = WhyRows::new();
     let mut codes: BTreeMap<Rule, RuleCode> = BTreeMap::new();
-    for (rec, (n, mask)) in records.iter().zip(ordered) {
+    for (rec, mask) in records.iter().zip(masks) {
         let premises: Vec<FactKey> = (0..rec.premise_count())
             .filter(|j| mask & bit(*j) != 0)
             .filter_map(|j| rec.premise(j))
@@ -311,7 +316,7 @@ pub(crate) fn analysis_set(program: &Program, work: &Work) -> Result<AnalysisSet
             code
         };
         let record = ghidorah_db::why::Why { rule, premises };
-        why.push(rec.key(), n, record)?;
+        why.push(rec.key(), record)?;
     }
     drop(records);
     // The rows hold every record now, so the collection goes before the tables grow.
@@ -326,11 +331,11 @@ pub(crate) fn analysis_set(program: &Program, work: &Work) -> Result<AnalysisSet
         strings,
         units: facts.units,
         why,
-        why_next,
         ..SetRows::default()
     };
     extra.add_to(&mut rows);
-    Ok(tables_from_rows(rows)?)
+    // A shard with no change keeps the old allocation, so the new set shares it.
+    Ok(set_from_rows(rows, program.analysis())?)
 }
 
 /// Commits the analysis set of `work` with one `ReplaceAnalysis` edit.

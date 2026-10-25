@@ -99,7 +99,6 @@ fn random_pick(p: &Program, rng: &mut SplitMix64) -> Option<Pick> {
     let funcs: Vec<FuncId> = p.funcs().iter().map(FuncView::id).collect();
     let units: Vec<(u64, FlowKind)> = p
         .analysis()
-        .listing()
         .units_in(ghidorah_base::Range {
             first: 0,
             last: u64::MAX,

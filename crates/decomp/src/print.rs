@@ -497,7 +497,7 @@ pub fn body_units(program: &Program, func: FuncId) -> Vec<(u64, u8)> {
     let Some(view) = program.func(func) else {
         return Vec::new();
     };
-    for layer in [program.base(), program.analysis()] {
+    for layer in program.layers() {
         for r in view.func.body.ranges() {
             for (at, unit) in layer.listing().units_in(*r) {
                 let CodeUnit::Insn { len, .. } = unit;

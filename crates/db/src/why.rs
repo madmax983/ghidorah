@@ -1,8 +1,8 @@
 //! Why-records (design Section 3.4, ADR-0023).
 //!
-//! Every ANALYSIS fact has a [`Why`]: a rule code and the keys of its premises. The store
-//! gives each record a creation order. A premise must have a lower order than its fact, so
-//! the premise graph has no cycle (Section 3.11, invariant 6).
+//! Every ANALYSIS fact has a [`Why`]: a rule code and the keys of its premises. The premise
+//! graph has no cycle (Section 3.11, invariant 6). The store keeps no creation order, so a
+//! change of one record changes no other record (ADR-0031).
 //!
 //! The analysis crate owns the closed rule catalog and its doc lines. This module keeps the
 //! code text: `R_` and upper case letters, digits and `_`, for example `R_FDE_START`.

@@ -10,7 +10,7 @@
 //! | 3 | Each body holds its entry. Bodies of one layer are disjoint. The ownership map equals the union of the bodies. | `FuncEntry`, `FuncOverlap`, `Ownership` |
 //! | 4 | Each address with symbols has one primary symbol. The name index equals the symbols. | `Primary`, `NameIndex` |
 //! | 5 | Code units of one layer do not overlap. Data definitions of one layer do not overlap. | `UnitOverlap`, `DataOverlap` |
-//! | 6 | Each analysis fact has a why-record. Each premise exists and has a lower creation order. | `NoWhy`, `WhyOrphan`, `Premise`, `PremiseOrder` |
+//! | 6 | Each analysis fact has a why-record. Each premise exists. The premises make no cycle. | `NoWhy`, `WhyOrphan`, `Premise`, `PremiseCycle` |
 //! | 7 | The events have one revision step at a time and end at `rev`. No epoch is above `rev`. | `EventRev`, `EpochAhead` |
 //! | 8 | Each jump-table target and indirect target is an instruction start in code or an import. | `JumpTarget`, `CallTarget` |
 //! | 9 | Each evidence entry and each ID member of a note parses as an ID. | `Evidence` |
@@ -38,7 +38,7 @@ use crate::epochs::Table;
 use crate::funcs::Function;
 use crate::notes::{Note, NoteSet, SetMembers};
 use crate::overrides::FlowOverride;
-use crate::program::Program;
+use crate::program::{Program, Tables};
 use crate::refs::RefKey;
 use crate::symbols::Symbol;
 use crate::why::FactKey;
@@ -125,8 +125,8 @@ pub enum Violation {
         /// The premise.
         premise: FactKey,
     },
-    /// Rule 6: a premise does not have a lower creation order than its fact.
-    PremiseOrder {
+    /// Rule 6: a premise closes a cycle of premises.
+    PremiseCycle {
         /// The fact.
         key: FactKey,
         /// The premise.
@@ -183,7 +183,7 @@ impl Violation {
             Self::NoWhy { .. }
             | Self::WhyOrphan { .. }
             | Self::Premise { .. }
-            | Self::PremiseOrder { .. } => 6,
+            | Self::PremiseCycle { .. } => 6,
             Self::EventRev { .. } | Self::EpochAhead { .. } => 7,
             Self::JumpTarget { .. } | Self::CallTarget { .. } => 8,
             Self::Evidence { .. } => 9,
@@ -326,49 +326,64 @@ impl Program {
     #[must_use]
     pub fn check_invariants(&self) -> Vec<Violation> {
         let mut out = Vec::new();
-        let layers = [
-            (Layer::Base, self.base()),
-            (Layer::Analysis, self.analysis()),
-        ];
-        for (layer, t) in layers {
-            let from = t.refs().iter().map(|f| f.value.key).collect();
-            ref_index(layer, from, t.refs().to_index().collect(), &mut out);
+        let shards: Vec<&Tables> = self.analysis().shards().map(|(_, t)| t).collect();
+        let layers: [(Layer, Vec<&Tables>); 2] =
+            [(Layer::Base, vec![self.base()]), (Layer::Analysis, shards)];
+        for (layer, ts) in &layers {
+            let from = ts
+                .iter()
+                .flat_map(|t| t.refs().iter().map(|f| f.value.key))
+                .collect();
+            let to = ts.iter().flat_map(|t| t.refs().to_index()).collect();
+            ref_index(*layer, from, to, &mut out);
         }
-        for r in self.analysis().refs().iter() {
-            let from = r.value.key.from;
-            if !starts_unit(self, from) {
-                out.push(Violation::RefFrom {
-                    layer: Layer::Analysis,
-                    from,
-                });
+        for (_, t) in self.analysis().shards() {
+            for r in t.refs().iter() {
+                let from = r.value.key.from;
+                if !starts_unit(self, from) {
+                    out.push(Violation::RefFrom {
+                        layer: Layer::Analysis,
+                        from,
+                    });
+                }
             }
         }
-        for (layer, t) in layers {
-            let funcs: Vec<&Function> = t.funcs().iter().collect();
-            bodies(layer, &funcs, t.funcs().ownership(), &mut out);
+        for (layer, ts) in &layers {
+            let funcs: Vec<&Function> = ts.iter().flat_map(|t| t.funcs().iter()).collect();
+            let mut owned: Vec<(Range, FuncId)> = ts
+                .iter()
+                .flat_map(|t| t.funcs().ownership().iter().copied())
+                .collect();
+            owned.sort_unstable();
+            bodies(*layer, &funcs, &owned, &mut out);
         }
-        for (layer, t) in layers {
-            let syms: Vec<&Symbol> = t.symbols().iter().collect();
-            let names: Vec<(&str, &[Address])> = t.symbols().names().collect();
-            symbols(layer, &syms, &names, &mut out);
+        for (layer, ts) in &layers {
+            for t in ts {
+                let syms: Vec<&Symbol> = t.symbols().iter().collect();
+                let names: Vec<(&str, &[Address])> = t.symbols().names().collect();
+                symbols(*layer, &syms, &names, &mut out);
+            }
         }
-        for (layer, t) in layers {
-            let units: Vec<(u64, u64)> = t
-                .listing()
-                .units_in(ALL)
+        for (layer, ts) in &layers {
+            let units: Vec<(u64, u64)> = ts
+                .iter()
+                .flat_map(|t| t.listing().units_in(ALL))
                 .map(|(at, u)| (at, u64::from(u.len())))
                 .collect();
-            overlaps(layer, &units, false, &mut out);
-            let data: Vec<(u64, u64)> = t
-                .listing()
-                .data_defs()
+            overlaps(*layer, &units, false, &mut out);
+            let data: Vec<(u64, u64)> = ts
+                .iter()
+                .flat_map(|t| t.listing().data_defs())
                 .map(|(at, d)| (at, u64::from(d.value.len)))
                 .collect();
-            overlaps(layer, &data, true, &mut out);
+            overlaps(*layer, &data, true, &mut out);
         }
         whys::check(self, &mut out);
         self.check_events(&mut out);
-        for (layer, t) in layers {
+        for (layer, t) in layers
+            .iter()
+            .flat_map(|(l, ts)| ts.iter().map(move |t| (*l, *t)))
+        {
             for (table, jt) in t.jumptables().iter() {
                 for target in jt
                     .value
@@ -440,11 +455,9 @@ impl Program {
             .mem()
             .region_at(target.off)
             .is_some_and(|r| r.perms.contains(Perms::EXECUTE));
-        let inside = [self.base(), self.analysis()].iter().any(|t| {
-            t.listing()
-                .unit_containing(target.off)
-                .is_some_and(|(start, _)| start != target.off)
-        });
+        let after_start = |u: Option<(u64, _)>| u.is_some_and(|(start, _)| start != target.off);
+        let inside = after_start(self.base().listing().unit_containing(target.off))
+            || after_start(self.analysis().unit_containing(target.off));
         exec && !inside
     }
 }

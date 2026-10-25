@@ -28,7 +28,7 @@ fn check_cfgs(path: &str, p: &Program) -> usize {
             .body
             .ranges()
             .iter()
-            .map(|r| p.analysis().listing().units_in(*r).count())
+            .map(|r| p.analysis().units_in(*r).count())
             .sum();
         assert_eq!(
             units,

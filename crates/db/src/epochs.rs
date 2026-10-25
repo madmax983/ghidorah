@@ -313,7 +313,7 @@ impl Program {
         };
         best = best.max(e.in_ranges(&view.func.body));
         for range in view.func.body.ranges() {
-            let units = self.analysis().listing().units_in(*range);
+            let units = self.analysis().units_in(*range);
             for (off, _) in units.chain(self.base().listing().units_in(*range)) {
                 for r in self.refs_from(Address::ram(off)) {
                     let kind = r.value.key.kind;

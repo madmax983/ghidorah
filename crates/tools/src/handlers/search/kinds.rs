@@ -75,26 +75,25 @@ pub fn names(items: &mut Items<'_>, m: &Matcher, namer: &Namer, fuel: &mut Fuel)
         }
     }
     let mut seen: BTreeSet<(Address, String)> = BTreeSet::new();
-    for layer in [p.base(), p.analysis()] {
-        for (name, addrs) in layer.symbols().names() {
-            for a in addrs {
-                if fuel.tick().is_err() {
-                    items.cut = true;
-                    return;
-                }
-                let pair = (*a, name.to_owned());
-                if !m.matches(name) || taken.contains(&pair) || !seen.insert(pair) {
-                    continue;
-                }
-                let Some(id) = addr_info::symbol_id(p, name, *a) else {
-                    continue;
-                };
-                let mut new = New::item("symbol", id);
-                new.addr = Some(*a);
-                new.text = Some(Value::from(namer.at(p, *a, name)));
-                new.func = p.owner_of(*a);
-                items.push(new, None);
+    let base = p.base().symbols().names().map(|(n, a)| (n, a.to_vec()));
+    for (name, addrs) in base.chain(p.analysis().names()) {
+        for a in &addrs {
+            if fuel.tick().is_err() {
+                items.cut = true;
+                return;
             }
+            let pair = (*a, name.to_owned());
+            if !m.matches(name) || taken.contains(&pair) || !seen.insert(pair) {
+                continue;
+            }
+            let Some(id) = addr_info::symbol_id(p, name, *a) else {
+                continue;
+            };
+            let mut new = New::item("symbol", id);
+            new.addr = Some(*a);
+            new.text = Some(Value::from(namer.at(p, *a, name)));
+            new.func = p.owner_of(*a);
+            items.push(new, None);
         }
     }
 }
@@ -102,7 +101,7 @@ pub fn names(items: &mut Items<'_>, m: &Matcher, namer: &Namer, fuel: &mut Fuel)
 /// Gives the addresses of every string of both layers.
 fn string_addrs(p: &Program) -> BTreeSet<u64> {
     let mut out = BTreeSet::new();
-    for layer in [p.base(), p.analysis()] {
+    for layer in p.layers() {
         out.extend(layer.strings().iter().map(|(at, _)| at));
     }
     out
@@ -245,7 +244,7 @@ pub fn bytes(items: &mut Items<'_>, pat: &[(u8, u8)], fuel: &mut Fuel) {
 pub fn comments(items: &mut Items<'_>, m: &Matcher) {
     let p = items.program;
     let mut keys: BTreeSet<(Address, CommentKind)> = BTreeSet::new();
-    for layer in [p.base(), p.analysis()] {
+    for layer in p.layers() {
         keys.extend(layer.comments().iter().map(|(a, k, _)| (a, k)));
     }
     for (addr, kind) in keys {

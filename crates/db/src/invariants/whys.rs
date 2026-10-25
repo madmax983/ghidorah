@@ -1,8 +1,9 @@
-//! Rule 6: each analysis fact has a why-record, and each premise exists and is older.
+//! Rule 6: each analysis fact has a why-record, each premise exists and the premises make no
+//! cycle.
 //!
 //! A premise is a fact of either layer or an input of the binary. The inputs are imports,
-//! exports, entry points, relocations and FDEs. A premise with its own analysis why-record needs a
-//! lower creation order. Other premises are inputs, so they are always older.
+//! exports, entry points, relocations and FDEs. Only a premise with its own analysis
+//! why-record can be on a cycle.
 
 use std::collections::BTreeSet;
 
@@ -11,6 +12,7 @@ use ghidorah_base::{Address, StringId};
 use super::{ALL, Violation};
 use crate::program::{Program, Tables};
 use crate::why::FactKey;
+use crate::why::Why;
 
 /// Gives the keys of the facts of a layer, in table order.
 fn fact_keys(t: &Tables) -> Vec<FactKey> {
@@ -63,15 +65,22 @@ impl Inputs {
 
 /// Tells if the fact or the input of `key` exists.
 fn exists(p: &Program, inputs: &Inputs, key: &FactKey) -> bool {
-    let layers = [p.base(), p.analysis()];
+    let a = p.analysis();
     match key {
         FactKey::CodeUnit(at) => p.code_unit(*at).is_some(),
         FactKey::Data(at) => p.data_def(*at).is_some(),
-        FactKey::Symbol(a, k) => layers.iter().any(|t| t.symbols().get(*a, *k).is_some()),
+        FactKey::Symbol(at, k) => {
+            p.base().symbols().get(*at, *k).is_some()
+                || a.at(*at)
+                    .is_some_and(|t| t.symbols().get(*at, *k).is_some())
+        }
         FactKey::Func(f) => p.func(*f).is_some(),
         FactKey::Signature(f) => p.func(*f).is_some_and(|v| v.sig.is_some()),
         FactKey::Noreturn(f) => p.func(*f).is_some_and(|v| v.noreturn.is_some()),
-        FactKey::Ref(r) => layers.iter().any(|t| t.refs().get(r).is_some()),
+        FactKey::Ref(r) => {
+            p.base().refs().get(r).is_some()
+                || a.at(r.from).is_some_and(|t| t.refs().get(r).is_some())
+        }
         FactKey::Comment(a, k) => p.comment(*a, *k).is_some(),
         FactKey::JumpTable(j) => p.jump_table(*j).is_some(),
         FactKey::FlowOverride(a) => p.flow_override(*a).is_some(),
@@ -92,26 +101,84 @@ fn exists(p: &Program, inputs: &Inputs, key: &FactKey) -> bool {
 /// Checks rule 6 over the analysis layer.
 pub(super) fn check(p: &Program, out: &mut Vec<Violation>) {
     let a = p.analysis();
-    let facts = fact_keys(a);
+    let mut facts: Vec<FactKey> = a.shards().flat_map(|(_, t)| fact_keys(t)).collect();
     for key in &facts {
-        if a.why().get(key).is_none() {
+        if a.why(key).is_none() {
             out.push(Violation::NoWhy { key: key.clone() });
         }
     }
-    let held: BTreeSet<&FactKey> = facts.iter().collect();
+    facts.sort_unstable();
     let inputs = Inputs::of(p);
-    for (key, order, why) in a.why().iter() {
-        if !held.contains(&key) {
+    for (key, why) in a.whys() {
+        if facts.binary_search(&key).is_err() {
             out.push(Violation::WhyOrphan { key: key.clone() });
         }
         for premise in &why.premises {
-            let pair = || (key.clone(), premise.clone());
             if !exists(p, &inputs, premise) {
-                let (key, premise) = pair();
-                out.push(Violation::Premise { key, premise });
-            } else if a.why().order(premise).is_some_and(|o| o >= order) {
-                let (key, premise) = pair();
-                out.push(Violation::PremiseOrder { key, premise });
+                out.push(Violation::Premise {
+                    key: key.clone(),
+                    premise: premise.clone(),
+                });
+            }
+        }
+    }
+    cycles(&|k| a.why(k), &facts, out);
+}
+
+/// Finds the premises that close a cycle among the facts `facts` in key order. A walk in key
+/// order visits the premises of each fact first. Each premise that points back to an open
+/// fact closes a cycle. The walk reads the premises of a fact when it opens the fact.
+fn cycles(why: &dyn Fn(&FactKey) -> Option<Why>, facts: &[FactKey], out: &mut Vec<Violation>) {
+    /// The walk state of a fact.
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum Mark {
+        New,
+        Open,
+        Done,
+    }
+    let premises = |i: usize| -> Vec<FactKey> {
+        facts
+            .get(i)
+            .and_then(why)
+            .map(|w| w.premises)
+            .unwrap_or_default()
+    };
+    let mut marks = vec![Mark::New; facts.len()];
+    for root in 0..facts.len() {
+        if marks.get(root) != Some(&Mark::New) {
+            continue;
+        }
+        if let Some(m) = marks.get_mut(root) {
+            *m = Mark::Open;
+        }
+        let mut stack: Vec<(usize, Vec<FactKey>, usize)> = vec![(root, premises(root), 0)];
+        while let Some((i, list, j)) = stack.pop() {
+            let Some(q) = list.get(j).cloned() else {
+                if let Some(m) = marks.get_mut(i) {
+                    *m = Mark::Done;
+                }
+                continue;
+            };
+            stack.push((i, list, j.saturating_add(1)));
+            let Ok(k) = facts.binary_search(&q) else {
+                continue;
+            };
+            match marks.get(k) {
+                Some(Mark::New) => {
+                    if let Some(m) = marks.get_mut(k) {
+                        *m = Mark::Open;
+                    }
+                    stack.push((k, premises(k), 0));
+                }
+                Some(Mark::Open) => {
+                    if let Some(key) = facts.get(i) {
+                        out.push(Violation::PremiseCycle {
+                            key: key.clone(),
+                            premise: q,
+                        });
+                    }
+                }
+                Some(Mark::Done) | None => {}
             }
         }
     }
