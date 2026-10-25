@@ -140,13 +140,14 @@ fn kept_bytes(n: u64) -> (Program, usize, usize) {
 
 /// The work state keeps the owner of each code unit, not its why-record. The record of a
 /// unit is always `R_DISASM_FLOW` with the owner function, so the publish step makes it.
-/// A copy in each unit kept 459 bytes of work state for each unit; now 344.
+/// A copy in each unit kept 459 bytes of work state for each unit. Then 344, and now 324: a
+/// function keeps the ranges of its units, not a set of their starts.
 #[test]
 fn regress_work_state_keeps_no_unit_why() {
     let (program, _, work) = kept_bytes(5_000);
     let units = program.analysis().unit_count();
     assert!(
-        work <= units * 400,
+        work <= units * 340,
         "the work state keeps {work} bytes for {units} code units"
     );
 }
@@ -313,7 +314,8 @@ fn kept_after_run(mut program: Program) -> (Program, usize) {
 /// The work state keeps each flow and operand reference as a key. The why-record of such a
 /// reference is its rule with the code unit at its source, so the publish step makes it.
 /// The bytes of one call are the bytes of `n` functions with a call each, less the bytes of
-/// `n` functions with no call. A call kept 1,542 bytes with a full record; now 1,428.
+/// `n` functions with no call. A call kept 1,542 bytes with a full record. Then 1,428, and
+/// now 805: a function keeps no copy of the references of its units.
 #[test]
 fn regress_work_state_keeps_reference_keys_only() {
     let n = 5_000u64;
@@ -334,7 +336,7 @@ fn regress_work_state_keeps_reference_keys_only() {
         "each call but the last has a reference: {refs}"
     );
     let per_call = with_calls.saturating_sub(plain) / refs;
-    assert!(per_call <= 1_480, "a call keeps {per_call} bytes");
+    assert!(per_call <= 840, "a call keeps {per_call} bytes");
 }
 
 /// The reference table and the listing of a new set take their rows in one bulk build each.

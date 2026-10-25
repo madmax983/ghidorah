@@ -111,7 +111,7 @@ struct Walk<'c, 'a> {
 impl<'c, 'a> Walk<'c, 'a> {
     fn new(ctx: &'c AnalysisCtx<'a>, entry: u64) -> Self {
         let work = &ctx.work;
-        let own = work.funcs.get(&entry).map_or(0, |f| f.units.len());
+        let own = work.units_of(entry).count();
         let others = work.units.len().saturating_sub(own);
         let cap = work.unit_cap.unwrap_or(MAX_UNITS);
         Self {

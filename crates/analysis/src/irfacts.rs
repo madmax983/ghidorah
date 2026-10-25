@@ -117,21 +117,17 @@ impl AnalysisCtx<'_> {
 
     /// Gives the code units of the function `entry` in the work state.
     pub(crate) fn units_of(&self, entry: u64) -> BTreeMap<u64, Unit> {
-        let Some(f) = self.work.funcs.get(&entry) else {
-            return BTreeMap::new();
-        };
-        f.units
-            .iter()
-            .filter_map(|at| {
-                let u = self.work.units.get(at)?;
-                Some((
-                    *at,
+        self.work
+            .units_of(entry)
+            .map(|(at, u)| {
+                (
+                    at,
                     Unit {
                         len: u.len,
                         flow: u.flow,
                         flags: u.flags,
                     },
-                ))
+                )
             })
             .collect()
     }

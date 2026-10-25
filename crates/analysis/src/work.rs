@@ -2,7 +2,9 @@
 //!
 //! The work state keeps one record for each function, code unit, flow reference and noreturn
 //! flag, each with its [`Why`]. The keys are RAM offsets. Indexes give the owner of each code
-//! unit, the call sites of each target and the functions that stop at an address.
+//! unit, the call sites of each target and the functions that stop at an address. A function
+//! keeps the ranges of its code units, not a list of them. The references of a code unit come
+//! from a range of the reference set.
 //!
 //! Rules:
 //!
@@ -13,7 +15,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use ghidorah_base::{Address, BinText, ImportId, Range};
-use ghidorah_db::{FlowKind, Program, RefKey, StartReason, StrInfo};
+use ghidorah_db::{FlowKind, Program, RefKey, RefType, StartReason, StrInfo};
 use ghidorah_kernel::RangeSet;
 
 use crate::analyzers::dataptr::CodePtrs;
@@ -32,10 +34,9 @@ pub(crate) struct WFunc {
     pub extents: Vec<Range>,
     /// The flow summary of the last disassembly, or `None` before it.
     pub summary: Option<Summary>,
-    /// The starts of the code units of the function.
-    pub units: BTreeSet<u64>,
-    /// The flow references from the code units of the function.
-    pub refs: BTreeSet<RefKey>,
+    /// The ranges of the code units of the function. Each code unit in these ranges belongs
+    /// to the function, because two code units never overlap.
+    pub body: RangeSet,
 }
 
 impl WFunc {
@@ -201,16 +202,35 @@ impl Work {
         out
     }
 
+    /// Gives the code units of the function `entry` in address order.
+    pub fn units_of(&self, entry: u64) -> impl Iterator<Item = (u64, &WUnit)> {
+        let ranges = self.funcs.get(&entry).map_or(&[][..], |f| f.body.ranges());
+        ranges
+            .iter()
+            .flat_map(|r| self.units.range(r.first..=r.last))
+            .map(|(at, u)| (*at, u))
+    }
+
+    /// Gives the flow references from the code unit at `at` in key order.
+    pub fn refs_from(&self, at: u64) -> impl Iterator<Item = &RefKey> {
+        let from = Address::ram(at);
+        // RAM is the space of the lowest code, so this key is the first key from `at`.
+        let first = RefKey {
+            from,
+            op_index: i8::MIN,
+            to: Address::ram(0),
+            kind: RefType::FallThrough,
+        };
+        self.refs.range(first..).take_while(move |k| k.from == from)
+    }
+
     /// Gives the body of the function `entry`: its code units, or its entry byte alone.
     pub fn body(&self, entry: u64) -> RangeSet {
-        let mut body = RangeSet::new();
-        if let Some(f) = self.funcs.get(&entry) {
-            for at in &f.units {
-                if let Some(r) = self.units.get(at).and_then(|u| u.range(*at)) {
-                    body.insert(r);
-                }
-            }
-        }
+        let mut body = self
+            .funcs
+            .get(&entry)
+            .map(|f| f.body.clone())
+            .unwrap_or_default();
         if !body.contains(entry) {
             body.insert(Range::single(entry));
         }
@@ -234,19 +254,15 @@ impl Work {
     pub fn drop_unit(&mut self, at: u64) -> Option<Range> {
         let unit = self.units.remove(&at)?;
         let range = unit.range(at);
+        let gone: Vec<RefKey> = self.refs_from(at).copied().collect();
+        for key in gone {
+            self.refs.remove(&key);
+        }
         let Some(f) = self.funcs.get_mut(&unit.owner) else {
             return range;
         };
-        f.units.remove(&at);
-        let gone: Vec<RefKey> = f
-            .refs
-            .iter()
-            .filter(|k| k.from == Address::ram(at))
-            .copied()
-            .collect();
-        for key in gone {
-            f.refs.remove(&key);
-            self.refs.remove(&key);
+        if let Some(r) = range {
+            f.body.remove(r);
         }
         if let Some(s) = &f.summary {
             if let Some(t) = s.calls.get(&at) {
@@ -261,11 +277,7 @@ impl Work {
 
     /// Removes the body of the function `entry`: its units, references and indexes.
     pub fn clear_body(&mut self, entry: u64) {
-        let units: Vec<u64> = self
-            .funcs
-            .get(&entry)
-            .map(|f| f.units.iter().copied().collect())
-            .unwrap_or_default();
+        let units: Vec<u64> = self.units_of(entry).map(|(at, _)| at).collect();
         for at in units {
             let _ = self.drop_unit(at);
         }
@@ -285,6 +297,7 @@ impl Work {
     pub fn put_body(&mut self, entry: u64, body: Body) -> Vec<(u64, Range)> {
         let mut evicted = Vec::new();
         let mut kept = BTreeSet::new();
+        let mut ranges = RangeSet::new();
         for (at, rec) in body.units {
             let Some(range) = Range::with_len(at, u64::from(rec.len)) else {
                 continue;
@@ -309,13 +322,13 @@ impl Work {
                 },
             );
             kept.insert(at);
+            ranges.insert(range);
         }
         let Some(f) = self.funcs.get_mut(&entry) else {
             return evicted;
         };
         for key in body.refs {
             if kept.contains(&key.from.off) {
-                f.refs.insert(key);
                 self.refs.insert(key);
             }
         }
@@ -332,7 +345,7 @@ impl Work {
                 self.slot_callers.entry(*slot).or_default().insert(*site);
             }
         }
-        f.units = kept;
+        f.body = ranges;
         f.summary = Some(body.summary);
         evicted
     }
@@ -343,8 +356,7 @@ impl Work {
             return false;
         };
         if f.summary.as_ref() != Some(&body.summary)
-            || f.units.len() != body.units.len()
-            || f.refs.len() != body.refs.len()
+            || self.units_of(entry).count() != body.units.len()
         {
             return false;
         }
@@ -353,11 +365,12 @@ impl Work {
                 u.owner == entry && u.len == rec.len && u.flow == rec.flow && u.flags == rec.flags
             })
         });
-        units
-            && body
-                .refs
-                .iter()
-                .all(|k| f.refs.contains(k) && self.refs.contains(k))
+        // With the same units, each reference of the body is from a unit of the function.
+        let refs: usize = self
+            .units_of(entry)
+            .map(|(at, _)| self.refs_from(at).count())
+            .sum();
+        units && refs == body.refs.len() && body.refs.iter().all(|k| self.refs.contains(k))
     }
 }
 
