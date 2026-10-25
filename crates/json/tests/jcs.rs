@@ -234,3 +234,17 @@ fn jcs_errors_name_the_path() {
     );
     assert_eq!(write_jcs(&Value::Null).as_deref(), Ok("null"));
 }
+
+#[test]
+fn jcs_plain_matches_the_f64_form_of_short_integers() {
+    for lexeme in ["0", "7", "-7", "10", "123456789012345", "-999999999999999"] {
+        let number = Number::parse(lexeme).expect("lexeme");
+        let value = number.as_f64().expect("finite");
+        assert_eq!(number.jcs_plain(), Some(lexeme));
+        assert_eq!(format!("{value}"), lexeme);
+    }
+    for lexeme in ["-0", "1.0", "1e3", "1234567890123456", "-1234567890123456"] {
+        let number = Number::parse(lexeme).expect("lexeme");
+        assert_eq!(number.jcs_plain(), None, "{lexeme}");
+    }
+}
