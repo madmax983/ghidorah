@@ -440,7 +440,7 @@ impl Session {
         };
         if let Some(project) = store.project.as_mut() {
             if !project.is_read_only() {
-                let _ = project.snapshot(&binary.program);
+                let _ = project.snapshot_if_stale(&binary.program);
             }
             project.release();
         }

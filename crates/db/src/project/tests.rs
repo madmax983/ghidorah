@@ -1056,3 +1056,46 @@ fn regress_sweep_removes_dead_crash_temps() {
     assert!(fs.get(&link).is_some(), "a symbolic link stays");
     drop(opened);
 }
+
+/// Tells if the log of `fs` holds a write to the snapshot.
+fn wrote_snapshot(fs: &SimFs) -> bool {
+    fs.take_log().iter().any(|op| op.contains("snapshot.json"))
+}
+
+#[test]
+fn regress_close_skips_a_current_snapshot() {
+    let fs = sim(&[100]);
+    let (mut project, mut p, dir) = create(&fs, 100);
+    let mut h = History::new();
+    rename(&mut p, &mut project, &mut h, 0x1084, "alpha");
+    project.snapshot(&p).unwrap();
+    drop(project);
+    let mut opened = reopen(&fs, &dir, &write(100)).unwrap();
+    let _ = fs.take_log();
+    opened.project.snapshot_if_stale(&opened.program).unwrap();
+    assert!(!wrote_snapshot(&fs), "a current snapshot stays as it is");
+    let hash_before = hash(&opened.program);
+    let mut h = opened.history;
+    let mut program = opened.program;
+    rename(&mut program, &mut opened.project, &mut h, 0x1088, "beta");
+    let _ = fs.take_log();
+    opened.project.snapshot_if_stale(&program).unwrap();
+    assert!(wrote_snapshot(&fs), "an append makes the snapshot stale");
+    assert_ne!(hash(&program), hash_before);
+}
+
+#[test]
+fn regress_close_writes_a_snapshot_that_is_behind_the_journal() {
+    let fs = sim(&[100]);
+    let (mut project, mut p, dir) = create(&fs, 100);
+    let mut h = History::new();
+    rename(&mut p, &mut project, &mut h, 0x1084, "alpha");
+    drop(project);
+    let mut opened = reopen(&fs, &dir, &write(100)).unwrap();
+    let _ = fs.take_log();
+    opened.project.snapshot_if_stale(&opened.program).unwrap();
+    assert!(wrote_snapshot(&fs), "the journal is ahead of the snapshot");
+    let _ = fs.take_log();
+    opened.project.snapshot_if_stale(&opened.program).unwrap();
+    assert!(!wrote_snapshot(&fs), "a second call has nothing to write");
+}

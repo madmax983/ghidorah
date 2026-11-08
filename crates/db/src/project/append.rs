@@ -43,6 +43,7 @@ impl Project {
         self.journal_len = self.journal_len.saturating_add(added);
         self.lines = self.lines.saturating_add(1);
         self.since_snapshot = self.since_snapshot.saturating_add(1);
+        self.snapshot_current = false;
         if let Line::Run(run) = line {
             self.last_run = Some(*run);
         }
@@ -83,7 +84,24 @@ impl Project {
         let inputs = self.last_run.map(|run| run.inputs_hash);
         snapshot::write_program(self.fs.as_mut(), &self.dir, program, self.lines, inputs)?;
         self.since_snapshot = 0;
+        self.snapshot_current = true;
         Ok(())
+    }
+
+    /// Writes a snapshot of `program` like [`Project::snapshot`], but only when the snapshot on
+    /// disk is not current. A project that opened from a snapshot with all journal lines, and
+    /// that has had no append since, writes nothing.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProjectError::ReadOnly`] for a read-only project and [`ProjectError::Fs`]
+    /// for a failed operation. After a failed cut of the journal, it gives that first error.
+    pub fn snapshot_if_stale(&mut self, program: &Program) -> Result<(), ProjectError> {
+        self.writable()?;
+        if self.snapshot_current {
+            return Ok(());
+        }
+        self.snapshot(program)
     }
 
     /// Writes the crash record `crash/<id>.json`. Gives its path relative to the project.
