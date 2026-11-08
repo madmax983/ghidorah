@@ -320,6 +320,8 @@ pub(super) fn load(project: &mut Project, limits: &Limits) -> Result<Loaded, Pro
     project.failed = None;
     project.lines = lines;
     project.since_snapshot = lines.saturating_sub(covered);
+    // A project with no journal line writes a snapshot at close.
+    project.snapshot_current = covered > 0 && covered == lines;
     project.last_run = replayed.last_run;
     let current = replayed.last_run.is_some_and(|run| {
         !replayed.behind

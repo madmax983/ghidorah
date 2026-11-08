@@ -376,6 +376,8 @@ pub struct Project {
     owner: Option<LockInfo>,
     lines: u64,
     since_snapshot: u64,
+    /// The snapshot on disk covers every journal line and holds the program as it is.
+    snapshot_current: bool,
     last_run: Option<RunLine>,
     engine: Value,
     /// The length of the journal in bytes after the last good line.
@@ -455,6 +457,7 @@ impl Project {
             owner: Some(opts.me.clone()),
             lines: 0,
             since_snapshot: 0,
+            snapshot_current: false,
             last_run: None,
             engine: opts.engine.clone(),
             journal_len: 0,
@@ -499,6 +502,7 @@ impl Project {
             owner,
             lines: 0,
             since_snapshot: 0,
+            snapshot_current: false,
             last_run: None,
             engine: opts.engine.clone(),
             journal_len: 0,
