@@ -11,6 +11,10 @@ const ES_MAX_PLAIN: i32 = 21;
 /// The smallest decimal exponent `n` that the ECMAScript form writes as `0.000ddd`.
 const ES_MIN_PLAIN: i32 = -5;
 
+/// The most digits of an integer lexeme that the JCS writer copies with no `f64` step.
+/// Each integer below 10^15 is exact in an `f64`, because 10^15 is below 2^53.
+const MAX_EXACT_DIGITS: usize = 15;
+
 /// A JSON number that keeps its raw lexeme.
 ///
 /// The lexeme always matches the RFC 8259 grammar
@@ -105,6 +109,37 @@ impl Number {
     /// So an integer above 2^53 can lose its low digits in this form.
     #[must_use]
     pub fn to_jcs(&self) -> Option<String> {
+        let mut out = String::new();
+        self.push_jcs(&mut out)?;
+        Some(out)
+    }
+
+    /// Adds the JCS text of the number to `out`, or gives `None` when it is outside the `f64` range.
+    pub(crate) fn push_jcs(&self, out: &mut String) -> Option<()> {
+        if let Some(text) = self.plain_integer() {
+            out.push_str(text);
+            return Some(());
+        }
+        out.push_str(&self.float_jcs()?);
+        Some(())
+    }
+
+    /// Gives the lexeme of an integer with at most 15 digits, with `0` for `-0`.
+    ///
+    /// Each such integer is an exact `f64` below 10^21, so its JCS text is its own lexeme.
+    fn plain_integer(&self) -> Option<&str> {
+        let digits = self.0.strip_prefix('-').unwrap_or(&self.0);
+        if digits.len() > MAX_EXACT_DIGITS || !digits.bytes().all(|b| b.is_ascii_digit()) {
+            None
+        } else if digits == "0" {
+            Some(digits)
+        } else {
+            Some(&self.0)
+        }
+    }
+
+    /// Gives the JCS text of the nearest `f64` of the number.
+    fn float_jcs(&self) -> Option<String> {
         let x = self.as_f64()?;
         if x.abs().to_bits() == 0 {
             return Some("0".to_owned());

@@ -64,6 +64,56 @@ fn jcs_number_vectors() {
     assert_eq!(Number::parse("1e400").ok().and_then(|n| n.to_jcs()), None);
 }
 
+/// An integer lexeme gives the same JCS text as the `f64` lexeme of its value.
+/// The rows cover each digit count at the 15-digit and 2^53 limits.
+#[test]
+fn jcs_integer_lexemes_match_the_f64_form() {
+    for (lexeme, expected) in [
+        ("0", "0"),
+        ("-0", "0"),
+        ("7", "7"),
+        ("-42", "-42"),
+        ("4198400", "4198400"),
+        ("999999999999999", "999999999999999"),
+        ("-999999999999999", "-999999999999999"),
+        ("1000000000000000", "1000000000000000"),
+        ("9007199254740993", "9007199254740992"),
+        ("-9007199254740993", "-9007199254740992"),
+        ("18446744073709551615", "18446744073709552000"),
+        ("100000000000000000000", "100000000000000000000"),
+        ("1000000000000000000000", "1e+21"),
+    ] {
+        let number = Number::parse(lexeme).unwrap_or_else(|e| panic!("{lexeme}: {e}"));
+        assert_eq!(number.to_jcs().as_deref(), Some(expected), "{lexeme}");
+    }
+    pbt::check("jcs_integer_lexeme", 2000, |g| {
+        let digits = g.range(1, 20);
+        let n = g.u64() % 10u64.saturating_pow(u32::try_from(digits).unwrap_or(19));
+        let lexeme = if g.bool() && n != 0 {
+            format!("-{n}")
+        } else {
+            n.to_string()
+        };
+        let integer = Number::parse(&lexeme).map_err(|e| e.to_string())?;
+        #[expect(clippy::cast_precision_loss, reason = "the oracle is the nearest f64")]
+        let x = if lexeme.starts_with('-') {
+            -(n as f64)
+        } else {
+            n as f64
+        };
+        let float = Number::from_f64(x).ok_or("finite")?;
+        if integer.to_jcs() == float.to_jcs() {
+            Ok(())
+        } else {
+            Err(format!(
+                "{lexeme}: {:?} differs from {:?}",
+                integer.to_jcs(),
+                float.to_jcs()
+            ))
+        }
+    });
+}
+
 #[test]
 fn jcs_number_table_matches_ecmascript() {
     let table = include_str!("data/jcs_numbers.txt");
