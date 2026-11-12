@@ -28,7 +28,7 @@ mod value;
 mod write;
 
 pub use error::{Code, JsonError};
-pub use jcs::{JcsError, JcsErrorKind, write_jcs};
+pub use jcs::{JcsError, JcsErrorKind, write_jcs, write_jcs_into};
 pub use number::Number;
 pub use parse::{DEFAULT_MAX_BYTES, DEFAULT_MAX_DEPTH, DEPTH_CEILING, Limits, parse, parse_bytes};
 pub use record::{DecodeError, DecodeKind, Fields, FromJson, ToJson, field_key};

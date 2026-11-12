@@ -18,7 +18,7 @@
 use std::collections::BTreeSet;
 
 use ghidorah_base::{Address, JumpTableId, Range, Rev};
-use ghidorah_json::{JcsError, Value, write_jcs};
+use ghidorah_json::{JcsError, Value, write_jcs, write_jcs_into};
 
 use super::edit::{var_from_row, var_row};
 use super::values::{Json, Off, obj};
@@ -156,6 +156,8 @@ pub(super) fn write_jcs_to(
     counters: bool,
     sink: &mut dyn FnMut(&str),
 ) -> Result<(), JcsError> {
+    // One buffer holds the text of each row in turn.
+    let mut text = String::new();
     sink("{");
     for (i, (name, rows)) in member_rows(t).into_iter().enumerate() {
         if i > 0 {
@@ -166,7 +168,9 @@ pub(super) fn write_jcs_to(
             if j > 0 {
                 sink(",");
             }
-            sink(&write_jcs(&row)?);
+            text.clear();
+            write_jcs_into(&row, &mut text)?;
+            sink(&text);
         }
         sink("]");
     }
