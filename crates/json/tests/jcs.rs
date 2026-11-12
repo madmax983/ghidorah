@@ -4,7 +4,9 @@
 
 mod common;
 
-use ghidorah_json::{JcsError, JcsErrorKind, Number, Object, Value, parse, write_jcs};
+use ghidorah_json::{
+    JcsError, JcsErrorKind, Number, Object, Value, parse, write_jcs, write_jcs_into,
+};
 use ghidorah_testkit::pbt::{self, Gen};
 
 /// RFC 8785 Appendix B: f64 bit patterns and their JCS text.
@@ -283,4 +285,29 @@ fn jcs_errors_name_the_path() {
         Err("/k".to_owned())
     );
     assert_eq!(write_jcs(&Value::Null).as_deref(), Ok("null"));
+}
+
+#[test]
+fn write_jcs_into_appends_the_jcs_text() {
+    let limits = common::limits();
+    let values = [
+        r#"{"b":[1,{"z":null,"a":"x\ny"}],"a":true}"#,
+        "[]",
+        "-0.5",
+        r#""\u0001""#,
+    ];
+    let mut out = String::from("head,");
+    let mut want = out.clone();
+    for text in values {
+        let value = parse(text, &limits).unwrap_or_default();
+        let jcs = write_jcs(&value).unwrap_or_default();
+        assert_eq!(write_jcs_into(&value, &mut out), Ok(()));
+        want.push_str(&jcs);
+        assert_eq!(out, want);
+    }
+    let dup = parse(r#"{"a":[{"b":1,"b":2}]}"#, &limits).unwrap_or_default();
+    assert_eq!(
+        write_jcs_into(&dup, &mut out).map_err(|e| e.path),
+        Err("/a/0/b".to_owned())
+    );
 }
