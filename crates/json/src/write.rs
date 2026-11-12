@@ -173,6 +173,19 @@ fn newline<F: Form>(out: &mut String, depth: usize) {
 /// Returns the error of the form and the pointer of the bad part.
 pub(crate) fn render<F: Form>(root: &Value) -> Result<String, (F::Error, String)> {
     let mut out = String::new();
+    render_into::<F>(root, &mut out)?;
+    Ok(out)
+}
+
+/// Adds the text of `root` in the form `F` to the end of `out`.
+///
+/// # Errors
+///
+/// Returns the error of the form and the pointer of the bad part. Then `out` can hold a part.
+pub(crate) fn render_into<F: Form>(
+    root: &Value,
+    out: &mut String,
+) -> Result<(), (F::Error, String)> {
     let mut stack: Vec<Level<'_>> = Vec::new();
     let mut next = Some(root);
     loop {
@@ -182,9 +195,9 @@ pub(crate) fn render<F: Form>(root: &Value) -> Result<String, (F::Error, String)
                 Value::Bool(true) => out.push_str("true"),
                 Value::Bool(false) => out.push_str("false"),
                 Value::Number(n) => {
-                    F::number(n, &mut out).map_err(|e| (e, path_of(&stack, None)))?;
+                    F::number(n, out).map_err(|e| (e, path_of(&stack, None)))?;
                 }
-                Value::String(s) => write_string(&mut out, s),
+                Value::String(s) => write_string(out, s),
                 Value::Array(items) if items.is_empty() => out.push_str("[]"),
                 Value::Object(object) if object.is_empty() => out.push_str("{}"),
                 Value::Array(items) => {
@@ -207,15 +220,15 @@ pub(crate) fn render<F: Form>(root: &Value) -> Result<String, (F::Error, String)
         }
         let depth = stack.len();
         let Some(level) = stack.last_mut() else {
-            return Ok(out);
+            return Ok(());
         };
         if let Some((key, value)) = level.take() {
             if level.next > 1 {
                 out.push(',');
             }
-            newline::<F>(&mut out, depth);
+            newline::<F>(out, depth);
             if let Some(key) = key {
-                write_string(&mut out, key);
+                write_string(out, key);
                 out.push(':');
                 if F::INDENT.is_some() {
                     out.push(' ');
@@ -225,7 +238,7 @@ pub(crate) fn render<F: Form>(root: &Value) -> Result<String, (F::Error, String)
         } else {
             let close = level.close();
             stack.pop();
-            newline::<F>(&mut out, stack.len());
+            newline::<F>(out, stack.len());
             out.push(close);
         }
     }

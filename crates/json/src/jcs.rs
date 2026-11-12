@@ -5,7 +5,7 @@ use std::fmt;
 
 use crate::number::Number;
 use crate::value::{Object, Value};
-use crate::write::{Form, Members, render};
+use crate::write::{Form, Members, render, render_into};
 
 /// The reason that a value has no JCS form.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -60,6 +60,17 @@ impl std::error::Error for JcsError {}
 /// Returns [`JcsErrorKind::NumberRange`] for a number outside the `f64` range.
 pub fn write_jcs(value: &Value) -> Result<String, JcsError> {
     render::<Jcs>(value).map_err(|(kind, path)| JcsError { kind, path })
+}
+
+/// Adds the canonical RFC 8785 (JCS) text of `value` to the end of `out`.
+///
+/// The text is the text of [`write_jcs`]. A caller can use one buffer for many values.
+///
+/// # Errors
+///
+/// Returns the errors of [`write_jcs`]. Then `out` can hold a part of the text.
+pub fn write_jcs_into(value: &Value, out: &mut String) -> Result<(), JcsError> {
+    render_into::<Jcs>(value, out).map_err(|(kind, path)| JcsError { kind, path })
 }
 
 /// The RFC 8785 form of the writer engine.
