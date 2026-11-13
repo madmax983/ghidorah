@@ -161,6 +161,23 @@ impl Sha256 {
     }
 }
 
+/// Runs one round of FIPS 180-4, Section 6.2.2, step 3.
+///
+/// The caller turns the names of the eight working variables by one place for each round.
+/// Then no round moves the six variables that it does not change.
+/// The forms of Ch and Maj give the same values as the forms of FIPS 180-4, Section 4.1.2.
+macro_rules! round {
+    ($a:ident, $b:ident, $c:ident, $d:ident, $e:ident, $f:ident, $g:ident, $h:ident, $kw:expr) => {
+        let s1 = $e.rotate_right(6) ^ $e.rotate_right(11) ^ $e.rotate_right(25);
+        let ch = $g ^ ($e & ($f ^ $g));
+        let t1 = $h.wrapping_add(s1).wrapping_add(ch).wrapping_add($kw);
+        let s0 = $a.rotate_right(2) ^ $a.rotate_right(13) ^ $a.rotate_right(22);
+        let maj = ($a & $b) | ($c & ($a | $b));
+        $d = $d.wrapping_add(t1);
+        $h = t1.wrapping_add(s0.wrapping_add(maj));
+    };
+}
+
 /// Runs the compression function of FIPS 180-4, Section 6.2.2, on one block.
 #[expect(
     clippy::many_single_char_names,
@@ -181,26 +198,21 @@ fn compress(state: &mut [u32; 8], block: &[u8; BLOCK_LEN]) {
             .wrapping_add(w[t - 7])
             .wrapping_add(s1);
     }
+    let mut kw = [0u32; 64];
+    for ((dst, k), wt) in kw.iter_mut().zip(K).zip(w) {
+        *dst = k.wrapping_add(wt);
+    }
     let [mut a, mut b, mut c, mut d, mut e, mut f, mut g, mut h] = *state;
-    for (k, wt) in K.iter().zip(w) {
-        let s1 = e.rotate_right(6) ^ e.rotate_right(11) ^ e.rotate_right(25);
-        let ch = (e & f) ^ (!e & g);
-        let t1 = h
-            .wrapping_add(s1)
-            .wrapping_add(ch)
-            .wrapping_add(*k)
-            .wrapping_add(wt);
-        let s0 = a.rotate_right(2) ^ a.rotate_right(13) ^ a.rotate_right(22);
-        let maj = (a & b) ^ (a & c) ^ (b & c);
-        let t2 = s0.wrapping_add(maj);
-        h = g;
-        g = f;
-        f = e;
-        e = d.wrapping_add(t1);
-        d = c;
-        c = b;
-        b = a;
-        a = t1.wrapping_add(t2);
+    let (chunks, _) = kw.as_chunks::<8>();
+    for &[k0, k1, k2, k3, k4, k5, k6, k7] in chunks {
+        round!(a, b, c, d, e, f, g, h, k0);
+        round!(h, a, b, c, d, e, f, g, k1);
+        round!(g, h, a, b, c, d, e, f, k2);
+        round!(f, g, h, a, b, c, d, e, k3);
+        round!(e, f, g, h, a, b, c, d, k4);
+        round!(d, e, f, g, h, a, b, c, k5);
+        round!(c, d, e, f, g, h, a, b, k6);
+        round!(b, c, d, e, f, g, h, a, k7);
     }
     for (s, v) in state.iter_mut().zip([a, b, c, d, e, f, g, h]) {
         *s = s.wrapping_add(v);
