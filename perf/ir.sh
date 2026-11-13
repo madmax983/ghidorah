@@ -4,7 +4,8 @@
 # Each run uses a private XDG_DATA_HOME, so the result does not depend on earlier runs.
 #   cold: the project does not exist (load, analysis, project write).
 #   warm: the project exists (snapshot read, snapshot write at close).
-# Usage: cargo build --release -p ghidorah && perf/ir.sh
+# Set IR_FOCUS to a grep pattern to also print the self Ir of the functions that match it.
+# Usage: cargo build --release -p ghidorah && [IR_FOCUS=Sha256] perf/ir.sh
 set -eu
 root=$(cd "$(dirname "$0")/.." && pwd)
 bin="$root/target/release/ghidorah"
@@ -22,6 +23,10 @@ count() { # label, state (cold|warm), then the command
     if [ "$tool" = callgrind ]; then
       valgrind --tool=callgrind --callgrind-out-file="$work/cg.out" "$@" 2>&1 >/dev/null \
         | grep 'Collected' | sed 's/^==[0-9]*== *//' | sed "s/^/$label callgrind /"
+      if [ -n "${IR_FOCUS:-}" ]; then
+        callgrind_annotate "$work/cg.out" 2>/dev/null | grep -E "^ *[0-9,]+ .*($IR_FOCUS)" \
+          | sed 's/ \[.*//' | sed "s/^ */$label self /" || true
+      fi
     else
       valgrind --tool=memcheck "$@" 2>&1 >/dev/null \
         | grep 'total heap usage' | sed 's/^==[0-9]*== *//' | sed "s/^/$label /"
