@@ -249,6 +249,17 @@ pub(crate) fn render_into<F: Form>(
 /// The escapes are `\"`, `\\`, `\b`, `\f`, `\n`, `\r`, `\t` and `\u00xx` (lowercase hex)
 /// for the other control characters. This is also the string form of RFC 8785.
 pub(crate) fn write_string(out: &mut String, text: &str) {
+    // Most strings need no escape. The scan has no early exit, so the compiler can vectorize it.
+    let escape = text
+        .bytes()
+        .fold(false, |hit, b| hit || b < 0x20 || b == b'"' || b == b'\\');
+    if !escape {
+        out.reserve(text.len().saturating_add(2));
+        out.push('"');
+        out.push_str(text);
+        out.push('"');
+        return;
+    }
     out.push('"');
     let mut start = 0;
     for (i, b) in text.bytes().enumerate() {
