@@ -6,6 +6,7 @@ mod common;
 
 use ghidorah_json::{JcsErrorKind, Number, Value, parse, write, write_jcs, write_pretty};
 use ghidorah_testkit::pbt;
+use std::fmt::Write as _;
 
 /// Spec table: string value and its written text.
 const ESCAPES: &[(&str, &str)] = &[
@@ -153,4 +154,48 @@ fn ac_041b_no_nan_inf() {
         write_jcs(&huge).map_err(|e| (e.kind, e.path)),
         Err((JcsErrorKind::NumberRange, "/0".to_owned()))
     );
+}
+
+/// Gives the written text of `text` by the escape rules, one character at a time.
+fn reference_string(text: &str) -> String {
+    let mut out = String::from("\"");
+    for c in text.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\u{8}' => out.push_str("\\b"),
+            '\u{c}' => out.push_str("\\f"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            '\u{0}'..='\u{1f}' => write!(out, "\\u{:04x}", u32::from(c)).unwrap_or(()),
+            _ => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
+/// A byte that needs an escape gets it at each position of strings of 0 to 70 bytes.
+/// The lengths cross the 8-byte and 32-byte steps of a scan.
+#[test]
+fn write_escape_at_each_position() {
+    let specials = [
+        '"', '\\', '\u{0}', '\u{8}', '\n', '\u{1f}', ' ', '\u{7f}', '\u{e9}',
+    ];
+    for len in 0..=70 {
+        let plain = "a".repeat(len);
+        let value = Value::from(plain.as_str());
+        assert_eq!(write(&value), reference_string(&plain), "{len}");
+        for special in specials {
+            for at in 0..=len {
+                let mut text = plain.clone();
+                text.insert(at, special);
+                let value = Value::from(text.as_str());
+                let want = reference_string(&text);
+                assert_eq!(write(&value), want, "{text:?}");
+                assert_eq!(write_jcs(&value).as_deref(), Ok(want.as_str()), "{text:?}");
+            }
+        }
+    }
 }
