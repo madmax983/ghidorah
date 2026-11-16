@@ -240,3 +240,33 @@ fn tier0_errors() {
         assert!(e.to_string().contains("tier0.h"), "{e}");
     }
 }
+
+/// The Tier-0 store is the store of one `parse_sig` call per prototype, in file order.
+#[test]
+fn tier0_store_matches_sequential_parse_sig() {
+    let db = builtin().unwrap_or_else(|e| panic!("tier0.h: {e}"));
+    let mut s = store();
+    for proto in db.protos() {
+        let parsed = parse_sig(&mut s, &proto.text)
+            .unwrap_or_else(|e| panic!("`{}` does not parse: {e}", proto.text));
+        assert_eq!(parsed.name, proto.name);
+        assert_eq!(parsed.ty, proto.ty, "{}", proto.name);
+        assert_eq!(parsed.sig, proto.sig, "{}", proto.name);
+    }
+    assert_eq!(&s, db.store());
+}
+
+/// A bad line after a good line gives the error of `parse_sig` on the store of the good line.
+#[test]
+fn tier0_error_after_good_line() {
+    let good = "struct p { int x; } *mk(void);";
+    let bad = "struct q { int y; } *bad(const chr *s);";
+    let text = format!("{good} // io\n{bad} // io\n");
+    let mut s = store();
+    parse_sig(&mut s, good).expect("good");
+    let want = parse_sig(&mut s, bad).expect_err("bad");
+    match Tier0::parse(&text) {
+        Err(Tier0Error::Parse { line: 2, error }) => assert_eq!(error, want),
+        other => panic!("{other:?}"),
+    }
+}

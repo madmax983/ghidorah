@@ -179,6 +179,24 @@ pub fn parse_sig(store: &mut TypeStore, text: &str) -> Result<ParsedSig, CParseE
     finish(store, work, text, result)
 }
 
+/// Parses one function prototype in the `sig` mode, with no copy of the store.
+///
+/// The parse is the parse of [`parse_sig`]. On an error, the store can hold some types of the
+/// text. Use this function only when the caller discards the store on an error.
+///
+/// # Errors
+///
+/// Returns [`CParseError`] with the diagnostics of the text.
+pub(crate) fn parse_sig_in_place(
+    store: &mut TypeStore,
+    text: &str,
+) -> Result<ParsedSig, CParseError> {
+    let toks = lex::lex(text).map_err(|f| f.error(text))?;
+    Parser::new(text, toks, store)
+        .sig_mode()
+        .map_err(|f| f.error(text))
+}
+
 /// Parses one abstract type in the `type` mode.
 ///
 /// The text holds a specifier list, an abstract declarator without a name and an optional `;`.

@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::OnceLock;
 
-use crate::cparse::{CParseError, parse_sig};
+use crate::cparse::{CParseError, parse_sig_in_place};
 use crate::data::TIER0_H;
 use crate::store::TypeStore;
 use crate::ty::{Sig, TypeId};
@@ -245,8 +245,9 @@ impl Tier0 {
                 continue;
             }
             let (c, comment) = split_line(t, line)?;
-            let parsed =
-                parse_sig(&mut store, c).map_err(|error| Tier0Error::Parse { line, error })?;
+            // The store drops out on an error, so the parse needs no copy of the store.
+            let parsed = parse_sig_in_place(&mut store, c)
+                .map_err(|error| Tier0Error::Parse { line, error })?;
             let found = attrs::parse(comment, &parsed.sig, &store, line)?;
             let names = std::iter::once(&parsed.name).chain(&found.aliases);
             for name in names.clone() {
