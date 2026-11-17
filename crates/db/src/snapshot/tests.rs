@@ -197,3 +197,29 @@ fn a_streamed_snapshot_is_the_encoded_text() {
     let text = encode(&p, 12, inputs).unwrap();
     assert_eq!(fs.get(&dir.join("snapshot.json")), Some(text.into_bytes()));
 }
+
+#[test]
+fn result_hash_is_the_hash_of_the_snapshot_analysis_text() {
+    let mut p = seeded();
+    p.layer_mut(Source::Analysis)
+        .expect("the analysis layer")
+        .comments
+        .set(
+            Address::ram(0x1080),
+            crate::comments::CommentKind::Eol,
+            Some("sys:write".to_owned()),
+            &crate::fact::Origin::analysis(),
+        )
+        .expect("a comment");
+    let text = encode(&p, 4, Some([3; 32])).unwrap();
+    let value = ghidorah_json::parse(&text, &super::SNAPSHOT_LIMITS).unwrap();
+    let analysis = value
+        .get("facts")
+        .and_then(|f| f.get("analysis"))
+        .expect("facts.analysis");
+    let layer = ghidorah_json::write_jcs(analysis).unwrap();
+    assert_eq!(
+        result_hash(p.analysis()),
+        ghidorah_base::sha256(layer.as_bytes())
+    );
+}
