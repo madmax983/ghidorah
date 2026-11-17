@@ -80,9 +80,30 @@ impl Project {
     /// Returns [`ProjectError::ReadOnly`] for a read-only project and [`ProjectError::Fs`]
     /// for a failed operation. After a failed cut of the journal, it gives that first error.
     pub fn snapshot(&mut self, program: &Program) -> Result<(), ProjectError> {
+        self.snapshot_with(program, None)
+    }
+
+    /// Writes a snapshot of `program` like [`Project::snapshot`]. A `Some` analysis text must
+    /// be the [`snapshot::AnalysisText`] of `program.analysis()`. Then the write uses it.
+    ///
+    /// # Errors
+    ///
+    /// Returns the errors of [`Project::snapshot`].
+    pub fn snapshot_with(
+        &mut self,
+        program: &Program,
+        analysis: Option<&snapshot::AnalysisText>,
+    ) -> Result<(), ProjectError> {
         self.writable()?;
         let inputs = self.last_run.map(|run| run.inputs_hash);
-        snapshot::write_program(self.fs.as_mut(), &self.dir, program, self.lines, inputs)?;
+        snapshot::write_program_with(
+            self.fs.as_mut(),
+            &self.dir,
+            program,
+            self.lines,
+            inputs,
+            analysis,
+        )?;
         self.since_snapshot = 0;
         self.snapshot_current = true;
         Ok(())

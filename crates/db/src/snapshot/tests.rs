@@ -5,7 +5,10 @@ use std::path::Path;
 use ghidorah_base::{Address, FuncId, Rev};
 use ghidorah_json::Value;
 
-use super::{SnapshotError, decode, encode, inputs_hash, result_hash, write, write_program};
+use super::{
+    AnalysisText, SnapshotError, decode, encode, inputs_hash, result_hash, write, write_program,
+    write_program_with,
+};
 use crate::fs::Fs;
 use crate::meta::{MetaLine, apply};
 use crate::migrate::ExtMap;
@@ -222,4 +225,23 @@ fn result_hash_is_the_hash_of_the_snapshot_analysis_text() {
         result_hash(p.analysis()),
         ghidorah_base::sha256(layer.as_bytes())
     );
+}
+
+#[test]
+fn analysis_text_gives_the_result_hash_and_the_same_snapshot() {
+    let p = seeded();
+    let text = AnalysisText::new(p.analysis()).unwrap();
+    assert_eq!(text.hash(), result_hash(p.analysis()));
+    let fs = SimFs::new();
+    let dir = Path::new("/p/0011223344556677");
+    let mut handle = fs.boxed();
+    handle.create_dir_all(dir).unwrap();
+    let inputs = Some([9u8; 32]);
+    write_program(handle.as_mut(), dir, &p, 5, inputs).unwrap();
+    let plain = fs.get(&dir.join("snapshot.json"));
+    let _ = fs.take_log();
+    write_program_with(handle.as_mut(), dir, &p, 5, inputs, Some(&text)).unwrap();
+    assert_eq!(fs.take_log().len(), 5, "the AC-120a sequence");
+    assert_eq!(fs.get(&dir.join("snapshot.json")), plain);
+    assert_eq!(plain, Some(encode(&p, 5, inputs).unwrap().into_bytes()));
 }

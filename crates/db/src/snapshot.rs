@@ -222,6 +222,45 @@ pub fn encode_to(
     inputs: Option<[u8; 32]>,
     sink: &mut dyn FnMut(&str),
 ) -> Result<(), SnapshotError> {
+    encode_with(program, journal_lines, inputs, None, sink)
+}
+
+/// The JCS text of the analysis tables of one program: the `facts.analysis` member of a
+/// snapshot. [`result_hash`] gives the SHA-256 of the same text.
+///
+/// A caller that needs the result hash and the snapshot of one revision makes this text one
+/// time. Then [`AnalysisText::hash`] and [`write_program_with`] use it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AnalysisText(String);
+
+impl AnalysisText {
+    /// Makes the JCS text of the analysis tables `set`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SnapshotError::Jcs`] for a row that has no JCS form.
+    pub fn new(set: &AnalysisSet) -> Result<Self, SnapshotError> {
+        let mut text = String::new();
+        layer_jcs(&mut |piece| text.push_str(piece), set)?;
+        Ok(Self(text))
+    }
+
+    /// Gives the SHA-256 of the text. It is equal to [`result_hash`] of the same tables.
+    #[must_use]
+    pub fn hash(&self) -> [u8; 32] {
+        sha256(self.0.as_bytes())
+    }
+}
+
+/// Writes the text of [`encode_to`] to `sink`. A `Some` analysis text goes in place of the
+/// analysis tables of `program`. It must be the text of `program.analysis()`.
+fn encode_with(
+    program: &Program,
+    journal_lines: u64,
+    inputs: Option<[u8; 32]>,
+    analysis: Option<&AnalysisText>,
+    sink: &mut dyn FnMut(&str),
+) -> Result<(), SnapshotError> {
     let progress = progress_to_json(program.progress());
     let part = |name: &str| {
         progress
@@ -234,7 +273,10 @@ pub fn encode_to(
     sink("{\"analysis_inputs_hash\":");
     sink(&jcs(&hash_json(inputs.as_ref()))?);
     sink(",\"facts\":{\"analysis\":");
-    layer_jcs(sink, program.analysis())?;
+    match analysis {
+        Some(text) => sink(&text.0),
+        None => layer_jcs(sink, program.analysis())?,
+    }
     sink(",\"base\":");
     layer_jcs(sink, program.base())?;
     sink(",\"binary\":");
@@ -347,9 +389,26 @@ pub fn write_program(
     journal_lines: u64,
     inputs: Option<[u8; 32]>,
 ) -> Result<(), FsError> {
+    write_program_with(fs, dir, program, journal_lines, inputs, None)
+}
+
+/// Writes the snapshot of `program` as [`write_program`] does. A `Some` analysis text must be
+/// the [`AnalysisText`] of `program.analysis()`. Then the write does not make that text again.
+///
+/// # Errors
+///
+/// Returns the [`FsError`] of a failed operation, as [`write_program`] does.
+pub fn write_program_with(
+    fs: &mut dyn Fs,
+    dir: &Path,
+    program: &Program,
+    journal_lines: u64,
+    inputs: Option<[u8; 32]>,
+    analysis: Option<&AnalysisText>,
+) -> Result<(), FsError> {
     let tmp = dir.join(SNAPSHOT_TMP);
     let mut fill = |put: &mut dyn FnMut(&[u8])| {
-        encode_to(program, journal_lines, inputs, &mut |piece| {
+        encode_with(program, journal_lines, inputs, analysis, &mut |piece| {
             put(piece.as_bytes());
         })
         .map_err(|e| e.to_string())
