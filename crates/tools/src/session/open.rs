@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 
 use ghidorah_base::{BinaryId, ErrorCode, Fuel, Rev, TxId, WarningCode};
 use ghidorah_db::project::{Access, LoadSpec, OpenOptions, PROJECT_FILE, ProjectMeta, check_root};
-use ghidorah_db::snapshot::{inputs_hash, result_hash};
+use ghidorah_db::snapshot::{AnalysisText, inputs_hash, result_hash};
 use ghidorah_db::{Line, Project, ProjectError, ProjectSummary, RunLine, RunState};
 use ghidorah_json::{Limits as JsonLimits, Object, Value};
 
@@ -385,6 +385,11 @@ impl Session {
         };
         let last_tx = program.last_tx().0;
         // The hashes cost a walk of the analysis set, so a run with no new revision skips them.
+        // A complete run that writes a snapshot makes the analysis text one time for both.
+        let writes = store.project.as_ref().is_some_and(|p| !p.is_read_only());
+        let text = (after > before && state == RunState::Complete && writes)
+            .then(|| AnalysisText::new(program.analysis()).ok())
+            .flatten();
         let (inputs, result) = if after > before {
             let config = store.project.as_ref().map_or_else(
                 || Value::Object(Object::new()),
@@ -392,7 +397,8 @@ impl Session {
             );
             (
                 inputs_hash(program, &tag, &config),
-                result_hash(program.analysis()),
+                text.as_ref()
+                    .map_or_else(|| result_hash(program.analysis()), AnalysisText::hash),
             )
         } else {
             ([0; 32], [0; 32])
@@ -421,7 +427,7 @@ impl Session {
                 (state, store.project.as_mut().filter(|p| !p.is_read_only()))
             {
                 project
-                    .snapshot(program)
+                    .snapshot_with(program, text.as_ref())
                     .map_err(|e| project_error(&e, Some(project.dir())))?;
             }
             store.checkpoint(program);
