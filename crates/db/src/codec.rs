@@ -22,6 +22,7 @@
 
 mod edit;
 mod records;
+mod rowjcs;
 mod tables;
 mod values;
 

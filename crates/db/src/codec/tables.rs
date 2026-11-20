@@ -21,6 +21,7 @@ use ghidorah_base::{Address, JumpTableId, Range, Rev};
 use ghidorah_json::{JcsError, Value, write_jcs, write_jcs_into};
 
 use super::edit::{var_from_row, var_row};
+use super::rowjcs;
 use super::values::{Json, Off, obj};
 use super::{CodecError, Obj};
 use crate::comments::CommentKind;
@@ -34,7 +35,7 @@ use crate::progress::{FuncProgress, Mark, Progress};
 use crate::refs::Ref;
 use crate::strings::StrInfo;
 use crate::symbols::Symbol;
-use crate::why::{RuleCode, Why, WhyRows};
+use crate::why::{FactKey, RuleCode, Why, WhyRows};
 
 /// The member names of the tables of a layer.
 const NAMES: [&str; 12] = [
@@ -79,23 +80,14 @@ fn member_rows(t: &Tables) -> [(&'static str, Rows<'_>); 11] {
             ("text", text.enc()),
         ])
     });
-    let units = t.listing.units_in(ALL).map(|(at, unit)| {
-        let CodeUnit::Insn { len, flow, flags } = unit;
-        obj([
-            ("at", Off(at).enc()),
-            ("len", len.enc()),
-            ("flow", flow.enc()),
-            ("flags", flags.enc()),
-        ])
-    });
-    let why = t.why.iter().map(|(key, order, why)| {
-        obj([
-            ("key", key.enc()),
-            ("order", order.enc()),
-            ("rule", why.rule.enc()),
-            ("premises", why.premises.enc()),
-        ])
-    });
+    let units = t
+        .listing
+        .units_in(ALL)
+        .map(|(at, unit)| unit_row(at, *unit));
+    let why = t
+        .why
+        .iter()
+        .map(|(key, order, why)| why_row(&key, order, &why));
     let pair = |[a, b]: [&'static str; 2]| move |(x, y): (Value, Value)| obj([(a, x), (b, y)]);
     let data = t
         .listing
@@ -164,13 +156,33 @@ pub(super) fn write_jcs_to(
             sink(",");
         }
         sink(&format!("\"{name}\":["));
-        for (j, row) in rows.enumerate() {
-            if j > 0 {
-                sink(",");
+        // The why and unit rows go to the text with no JSON value step.
+        let mut row_text =
+            |j: usize, write: &mut dyn FnMut(&mut String) -> Result<(), JcsError>| {
+                if j > 0 {
+                    sink(",");
+                }
+                text.clear();
+                write(&mut text)?;
+                sink(&text);
+                Ok::<(), JcsError>(())
+            };
+        match name {
+            "why" => {
+                for (j, (key, order, why)) in t.why.iter().enumerate() {
+                    row_text(j, &mut |out| rowjcs::push_why(out, &key, order, &why))?;
+                }
             }
-            text.clear();
-            write_jcs_into(&row, &mut text)?;
-            sink(&text);
+            "units" => {
+                for (j, (at, unit)) in t.listing.units_in(ALL).enumerate() {
+                    row_text(j, &mut |out| rowjcs::push_unit(out, at, *unit))?;
+                }
+            }
+            _ => {
+                for (j, row) in rows.enumerate() {
+                    row_text(j, &mut |out| write_jcs_into(&row, out))?;
+                }
+            }
         }
         sink("]");
     }
@@ -180,6 +192,27 @@ pub(super) fn write_jcs_to(
     }
     sink("}");
     Ok(())
+}
+
+/// Gives the JSON form of the unit row at the RAM offset `at`.
+pub(super) fn unit_row(at: u64, unit: CodeUnit) -> Value {
+    let CodeUnit::Insn { len, flow, flags } = unit;
+    obj([
+        ("at", Off(at).enc()),
+        ("len", len.enc()),
+        ("flow", flow.enc()),
+        ("flags", flags.enc()),
+    ])
+}
+
+/// Gives the JSON form of the why row of `key`.
+pub(super) fn why_row(key: &FactKey, order: u64, why: &Why) -> Value {
+    obj([
+        ("key", key.enc()),
+        ("order", order.enc()),
+        ("rule", why.rule.enc()),
+        ("premises", why.premises.enc()),
+    ])
 }
 
 fn symbol_row(s: &Symbol) -> Value {
