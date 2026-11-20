@@ -289,9 +289,9 @@ fn note_lift_ver_round_trips() {
     assert!(plain.pointer("/note/lift_ver").is_none(), "{plain}");
 }
 
-#[test]
-fn key_codec_roundtrip_every_variant() {
-    let keys = [
+/// Gives one fact key of each variant.
+fn every_key() -> Vec<FactKey> {
+    vec![
         FactKey::CodeUnit(0x10),
         FactKey::Data(0x11),
         FactKey::Symbol(ram(0x12), SymKey(2)),
@@ -315,7 +315,12 @@ fn key_codec_roundtrip_every_variant() {
         FactKey::Reloc(0x1d),
         FactKey::Fde(0x1e),
         FactKey::Note(NoteId(4)),
-    ];
+    ]
+}
+
+#[test]
+fn key_codec_roundtrip_every_variant() {
+    let keys = every_key();
     for key in &keys {
         let v = key_to_json(key);
         assert_eq!(&key_from_json(&reparse(&v)).unwrap(), key, "{v}");
@@ -626,5 +631,73 @@ fn layer_jcs_streams_the_same_bytes() {
             let want = write_jcs(&super::tables::encode(tables, counters)).unwrap();
             assert_eq!(text, want);
         }
+    }
+}
+
+/// The `why` and `units` rows keep the bytes of the JCS text of their JSON form. The rows
+/// hold each fact key variant, external addresses, each flow kind and integers of 16 digits
+/// or more.
+#[test]
+fn layer_jcs_keeps_the_bytes_of_why_and_unit_rows() {
+    let keys = every_key();
+    let rule = |code: &str| RuleCode::new(code).unwrap();
+    let mut rows = Vec::new();
+    for (i, key) in keys.iter().enumerate() {
+        let premises = keys.iter().skip(i).take(3).cloned().collect();
+        let order = [0, 7, 999_999_999_999_999, 1_000_000_000_000_000, u64::MAX][i % 5];
+        let why = Why {
+            rule: rule(["R_ENTRY", "R_DISASM_FLOW"][i % 2]),
+            premises,
+        };
+        rows.push((key.clone(), order, why));
+    }
+    let ext = Why {
+        rule: rule("R_ENTRY"),
+        premises: vec![
+            FactKey::FlowOverride(Address::external(3)),
+            FactKey::Func(FuncId(Address::external(4))),
+        ],
+    };
+    rows.push((
+        FactKey::JumpTable(JumpTableId(Address::external(5))),
+        3,
+        ext,
+    ));
+    rows.sort_by(|a, b| a.0.cmp(&b.0));
+    let mut set = SetRows {
+        why: WhyRows::from_rows(rows).unwrap(),
+        why_next: u64::MAX,
+        ..SetRows::default()
+    };
+    let flows = [
+        FlowKind::Seq,
+        FlowKind::Jmp,
+        FlowKind::Jcc,
+        FlowKind::Call,
+        FlowKind::ICall,
+        FlowKind::IJmp,
+        FlowKind::Ret,
+        FlowKind::Trap,
+    ];
+    for (i, flow) in (0u64..).zip(flows) {
+        let flags = [0, 1, 255][usize::try_from(i % 3).unwrap()];
+        let at = [0x1000 + 16 * i, u64::MAX - 16 * (8 - i)][usize::try_from(i % 2).unwrap()];
+        set.units.push((
+            at,
+            CodeUnit::Insn {
+                len: 15,
+                flow,
+                flags,
+            },
+        ));
+    }
+    set.units.sort_by_key(|u| u.0);
+    let typed = tables_from_rows(set).unwrap();
+    assert!(typed.why.iter().count() > keys.len());
+    for counters in [true, false] {
+        let mut text = String::new();
+        tables_jcs_to(&typed, counters, &mut |piece| text.push_str(piece)).unwrap();
+        let want = write_jcs(&super::tables::encode(&typed, counters)).unwrap();
+        assert_eq!(text, want);
     }
 }
