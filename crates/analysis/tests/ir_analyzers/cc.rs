@@ -10,7 +10,7 @@ use ghidorah_ir::{Loc, Opc, Switches};
 use ghidorah_json::Value;
 use ghidorah_loader::LoadOpts;
 use ghidorah_testkit::elf::{ElfBuilder, Section};
-use ghidorah_types::cc::SYSV_X86_64;
+use ghidorah_types::cc::{MS_X64, SYSV_X86_64};
 
 use crate::support::{
     analyze, cached, fid, fir_of, fixtures, list, named, program_of, truth, truth_funcs,
@@ -82,6 +82,31 @@ fn varargs_prologues() {
             }
         }
     }
+}
+
+/// `cc::varargs` gives the varargs flag of `cc::recover` for each function of each fixture,
+/// with each convention. `cc::run` reads only that flag.
+#[test]
+fn varargs_matches_recover() {
+    let mut paths: Vec<String> = fixtures().into_iter().map(|f| f.path).collect();
+    paths.push("fixtures/bin/pe/pe_main.exe".to_owned());
+    let (mut total, mut flagged) = (0usize, 0usize);
+    for path in &paths {
+        let p = cached(path);
+        for view in p.funcs() {
+            let Ok(ir) = fir::build(p, view.id(), &Opts::DEFAULT, &mut Fuel::new(1_000_000)) else {
+                continue;
+            };
+            for conv in [&SYSV_X86_64, &MS_X64] {
+                let want = cc::recover(&ir, conv).varargs;
+                assert_eq!(cc::varargs(&ir, conv), want, "{path} {:?}", view.id());
+                total += 1;
+                flagged += usize::from(want);
+            }
+        }
+    }
+    assert!(total >= 1_000, "{total} checks");
+    assert!(flagged >= 6, "{flagged} varargs functions");
 }
 
 #[test]

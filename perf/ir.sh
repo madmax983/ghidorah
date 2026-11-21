@@ -5,7 +5,8 @@
 #   cold: the project does not exist (load, analysis, project write).
 #   warm: the project exists (snapshot read, snapshot write at close).
 # Set IR_FOCUS to a grep pattern to also print the self Ir of the functions that match it.
-# Usage: cargo build --release -p ghidorah && [IR_FOCUS=Sha256] perf/ir.sh
+# Set IR_INCL to a grep pattern to also print the inclusive Ir of the functions that match it.
+# Usage: cargo build --release -p ghidorah && [IR_FOCUS=Sha256] [IR_INCL='cc::run$'] perf/ir.sh
 set -eu
 root=$(cd "$(dirname "$0")/.." && pwd)
 bin="$root/target/release/ghidorah"
@@ -26,6 +27,10 @@ count() { # label, state (cold|warm), then the command
       if [ -n "${IR_FOCUS:-}" ]; then
         callgrind_annotate "$work/cg.out" 2>/dev/null | grep -E "^ *[0-9,]+ .*($IR_FOCUS)" \
           | sed 's/ \[.*//' | sed "s/^ */$label self /" || true
+      fi
+      if [ -n "${IR_INCL:-}" ]; then
+        callgrind_annotate --inclusive=yes "$work/cg.out" 2>/dev/null | sed 's/ \[.*//' \
+          | grep -E "^ *[0-9,]+ .*($IR_INCL)" | sed "s/^ */$label incl /" || true
       fi
     else
       valgrind --tool=memcheck "$@" 2>&1 >/dev/null \
