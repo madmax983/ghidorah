@@ -457,6 +457,14 @@ pub fn recover(fir: &FuncIr, conv: &CallConv) -> Params {
     )
 }
 
+/// Tells if `fir` is a varargs function: the flag of [`recover`] with no liveness pass. A
+/// positional convention has no varargs flag. Else the entry block fills a save area or tests
+/// `al`.
+#[must_use]
+pub fn varargs(fir: &FuncIr, conv: &CallConv) -> bool {
+    !conv.positional && (save_area(fir, conv).is_some() || tests_al(fir))
+}
+
 /// Gives the parameters of `fir` with the live-in registers `live`.
 pub(crate) fn from_live(fir: &FuncIr, conv: &CallConv, live: &BTreeSet<Loc>) -> Params {
     let first = i64::from(conv.stack_arg_offset);
@@ -554,7 +562,7 @@ pub fn run(ctx: &mut AnalysisCtx<'_>, ranges: &RangeSet) -> Step {
             None => match work_ir(ctx, entry, &mut Fuel::new(IR_FUEL)) {
                 Ok(ir) => {
                     work = work.saturating_add(u64::try_from(ir.units.len()).unwrap_or(0));
-                    recover(&ir, conv).varargs
+                    varargs(&ir, conv)
                 }
                 Err(_) => false,
             },
