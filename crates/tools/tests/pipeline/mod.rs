@@ -195,9 +195,17 @@ pub fn check(tool: &str, envelope: &Value) -> Result<(), String> {
     }
 }
 
-fn load_args(load: Load) -> Value {
+/// Gives the case file of the current thread in `dir`. The fuzz harness runs cases on more
+/// than one thread in one work directory, so each thread writes its own file.
+pub fn case_file(dir: &Path) -> PathBuf {
+    let id = format!("{:?}", std::thread::current().id());
+    let n: String = id.chars().filter(char::is_ascii_digit).collect();
+    dir.join(format!("case-{n}.bin"))
+}
+
+fn load_args(load: Load, name: &str) -> Value {
     let mut members = vec![
-        ("path", Value::from("case.bin")),
+        ("path", Value::from(name)),
         ("analysis", Value::from("none")),
     ];
     if let Load::Raw { base, entry } = load {
@@ -214,10 +222,14 @@ fn load_args(load: Load) -> Value {
 ///
 /// Returns the violation message of the first bad result.
 pub fn run(dir: &Path, bytes: &[u8], load: Load) -> Result<Summary, String> {
-    let file = dir.join("case.bin");
+    let file = case_file(dir);
     std::fs::write(&file, bytes).map_err(|e| format!("{}: {e}", file.display()))?;
+    let name = file
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| format!("{}: no file name", file.display()))?;
     let mut session = session(dir);
-    let loaded = call(&mut session, "binary_load", load_args(load));
+    let loaded = call(&mut session, "binary_load", load_args(load, name));
     check("binary_load", &loaded)?;
     let mut summary = Summary::default();
     let Some(id) = loaded.pointer("/data/binary_id").and_then(Value::as_str) else {
