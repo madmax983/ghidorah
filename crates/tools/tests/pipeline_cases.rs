@@ -15,7 +15,8 @@ use std::collections::BTreeSet;
 use ghidorah_testkit::elf::{Class, Endian, header_only, malformed_variants};
 
 use crate::pipeline::{
-    ELF_STAGES, Load, RAW_BASE, elf_seeds, elf_stage, fixture, raw_entry, raw_seeds, run, work_dir,
+    ELF_STAGES, Load, RAW_BASE, case_file, elf_seeds, elf_stage, fixture, raw_entry, raw_seeds,
+    run, work_dir,
 };
 
 /// Gives fixed hostile raw blobs: empty, one byte, zeros, ones, traps and loops.
@@ -83,4 +84,22 @@ fn ac_190d_stage_reach() {
     for stage in [0, 1, ELF_STAGES.len() - 1] {
         assert!(seen.contains(&stage), "stage {stage} of {seen:?}");
     }
+}
+
+/// The fuzz targets run their cases on 4 threads in one work directory. All cases wrote one
+/// `case.bin`, so a case loaded the bytes of a case of another thread.
+#[test]
+fn regress_pipeline_case_file_per_thread() {
+    let dir = work_dir("case_file");
+    let here = case_file(&dir);
+    let there = {
+        let dir = dir.clone();
+        std::thread::spawn(move || case_file(&dir))
+            .join()
+            .expect("the thread runs")
+    };
+    assert_ne!(here, there);
+    assert_eq!(here.parent(), Some(dir.as_path()));
+    assert_eq!(there.parent(), Some(dir.as_path()));
+    assert_eq!(here, case_file(&dir), "one thread keeps one file");
 }
