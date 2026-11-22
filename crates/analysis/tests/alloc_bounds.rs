@@ -10,6 +10,8 @@
 
 #![allow(clippy::expect_used, reason = "test helpers fail through expect")]
 
+use std::path::PathBuf;
+
 use ghidorah_analysis::analyzers::gaps;
 use ghidorah_analysis::{RunState, Scheduler, Until};
 use ghidorah_base::{Fuel, Limits};
@@ -374,5 +376,46 @@ fn regress_set_tables_build_full_nodes() {
         stats.retained_bytes <= 20_000 * 250,
         "the tables keep {} bytes for 20,000 units and references",
         stats.retained_bytes
+    );
+}
+
+/// The stack tracking runs each block on each pass of its dataflow. Each run of a block
+/// made a set of the callee-saved registers and a map of the op values. The frame keeps
+/// the only per-block records. The fixture allocated 35,064 times for 2,550 blocks; now 9,921.
+#[test]
+fn regress_stack_track_allocates_per_frame() {
+    use ghidorah_analysis::fir::{self, Opts};
+    use ghidorah_analysis::stack;
+
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/bin/large.gcc-O2");
+    let bytes = std::fs::read(path).expect("the fixture");
+    let (binary, mem) = load(&bytes, &LoadOpts::AUTO, &Limits::DEFAULT).expect("a load");
+    let mut program = Program::from_binary(binary, mem, &Limits::DEFAULT).expect("a program");
+    Scheduler::new()
+        .run(&mut program, Until::Full, &mut Fuel::unlimited())
+        .expect("a run");
+    let opts = Opts {
+        fuse: true,
+        stack: false,
+    };
+    let (mut blocks, mut passes, mut copy) = (0, 0, 0);
+    for view in program.funcs() {
+        let Ok(ir) = fir::build(&program, view.id(), &opts, &mut Fuel::new(1_000_000)) else {
+            continue;
+        };
+        let (frame, stats) =
+            ALLOC.measure(|| stack::track(&ir.arena, &ir.body, &mut Fuel::new(1_000_000)));
+        let Ok(frame) = frame else {
+            continue;
+        };
+        let ((), kept) = ALLOC.measure(|| drop(frame.clone()));
+        blocks += ir.body.blocks.len() as u64;
+        passes += stats.allocations;
+        copy += kept.allocations;
+    }
+    assert!(blocks > 2_000, "the fixture has {blocks} blocks");
+    assert!(
+        passes <= copy + 3 * blocks,
+        "stack::track allocates {passes} times for {blocks} blocks; a frame copy is {copy}"
     );
 }
