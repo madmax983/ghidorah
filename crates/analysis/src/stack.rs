@@ -26,9 +26,12 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use ghidorah_base::{Fuel, OutOfFuel};
 use ghidorah_ir::ssa::Body;
-use ghidorah_ir::{Arena, Arg, Loc, MemEffect, Node, Op, Opc, Val, rpo};
+use ghidorah_ir::{Arena, Arg, Loc, MemEffect, Node, Op, Opc, rpo};
 
 mod cfa;
+mod vals;
+
+use self::vals::Vals;
 
 pub use self::cfa::{CfaReport, Mismatch, Untracked, cfa_check, cfa_rule, run, spec};
 
@@ -186,15 +189,26 @@ fn reg(loc: Loc) -> Option<usize> {
     }
 }
 
+/// The bit set of [`SAVED`].
+const SAVED_BITS: u16 = {
+    let mut bits = 0;
+    let mut i = 0;
+    while i < SAVED.len() {
+        bits |= 1 << SAVED[i];
+        i += 1;
+    }
+    bits
+};
+
 /// The transfer of one block, with the records of the final pass.
 struct Transfer<'a> {
     arena: &'a Arena,
     regs: Regs,
-    vals: BTreeMap<Val, Sp>,
+    vals: &'a mut Vals,
     /// `Some` in the final pass: the frame that gets the records.
     frame: Option<&'a mut Frame>,
-    /// The callee-saved registers that the entry block did not write yet.
-    fresh: BTreeSet<usize>,
+    /// The bit set of the callee-saved registers that the entry block did not write yet.
+    fresh: u16,
     entry: bool,
 }
 
@@ -202,7 +216,7 @@ impl Transfer<'_> {
     /// Gives the value of an argument.
     fn val(&self, a: Arg) -> Sp {
         match a {
-            Arg::V(v) => self.vals.get(&v).copied().unwrap_or(Sp::Other),
+            Arg::V(v) => self.vals.get(v).unwrap_or(Sp::Other),
             Arg::K(_) | Arg::Nil | Arg::L(_) => Sp::Other,
         }
     }
@@ -281,7 +295,7 @@ impl Transfer<'_> {
                 let v = self.val(op.a[1]);
                 if let Some(r) = op.a[0].as_loc().and_then(reg) {
                     self.regs[r] = v;
-                    self.fresh.remove(&r);
+                    self.take_fresh(r);
                 }
                 return;
             }
@@ -318,7 +332,7 @@ impl Transfer<'_> {
             _ => return,
         };
         if let Some(v) = op.out {
-            self.vals.insert(v, out);
+            self.vals.set(v, out);
         }
     }
 
@@ -342,11 +356,11 @@ impl Transfer<'_> {
         if let Some(size) = size
             && let Some(frame) = self.frame.as_deref_mut()
         {
-            match op.a[1].as_v().and_then(|v| self.vals.get(&v)) {
+            match op.a[1].as_v().and_then(|v| self.vals.get(v)) {
                 Some(Sp::At(k)) if size > 0 => {
-                    frame.escaped.push((*k, k.saturating_add(i64::from(size))));
+                    frame.escaped.push((k, k.saturating_add(i64::from(size))));
                 }
-                Some(Sp::At(k)) => frame.escaped.push((*k, i64::MAX)),
+                Some(Sp::At(k)) => frame.escaped.push((k, i64::MAX)),
                 Some(Sp::Top) => frame.all_escape = true,
                 _ => {}
             }
@@ -356,6 +370,16 @@ impl Transfer<'_> {
                 self.regs[r] = if r == RSP { Sp::Top } else { Sp::Other };
             }
         }
+    }
+
+    /// Removes the register `r` from the fresh set. Tells if the set held it.
+    fn take_fresh(&mut self, r: usize) -> bool {
+        let Some(bit) = u32::try_from(r).ok().and_then(|r| 1u16.checked_shl(r)) else {
+            return false;
+        };
+        let held = self.fresh & bit != 0;
+        self.fresh &= !bit;
+        held
     }
 
     /// Records a push of a callee-saved register in the entry block.
@@ -376,7 +400,7 @@ impl Transfer<'_> {
             return;
         };
         if SAVED.contains(&r)
-            && self.fresh.remove(&r)
+            && self.take_fresh(r)
             && let Some(frame) = self.frame.as_deref_mut()
         {
             let n = u16::try_from(r).unwrap_or(0);
@@ -391,16 +415,18 @@ fn run_block(
     body: &Body,
     node: Node,
     regs: Regs,
+    vals: &mut Vals,
     frame: Option<&mut Frame>,
     fuel: &mut Fuel,
 ) -> Result<Regs, OutOfFuel> {
     let entry = node == body.cfg.entry();
+    vals.start();
     let mut step = Transfer {
         arena,
         regs,
-        vals: BTreeMap::new(),
+        vals,
         frame,
-        fresh: SAVED.into_iter().collect(),
+        fresh: SAVED_BITS,
         entry,
     };
     let Some(block) = body.blocks.get(node.index()) else {
@@ -436,6 +462,7 @@ pub fn track(arena: &Arena, body: &Body, fuel: &mut Fuel) -> Result<Frame, OutOf
     let preds = body.cfg.preds();
     let entry = body.cfg.entry();
     let mut out: BTreeMap<Node, Regs> = BTreeMap::new();
+    let mut vals = Vals::new(arena);
     let in_of = |out: &BTreeMap<Node, Regs>, node: Node| -> Regs {
         let mut regs = if node == entry {
             entry_regs()
@@ -454,7 +481,7 @@ pub fn track(arena: &Arena, body: &Body, fuel: &mut Fuel) -> Result<Frame, OutOf
         let mut changed = false;
         for node in &order {
             let regs = in_of(&out, *node);
-            let end = run_block(arena, body, *node, regs, None, fuel)?;
+            let end = run_block(arena, body, *node, regs, &mut vals, None, fuel)?;
             if out.get(node) != Some(&end) {
                 out.insert(*node, end);
                 changed = true;
@@ -467,7 +494,7 @@ pub fn track(arena: &Arena, body: &Body, fuel: &mut Fuel) -> Result<Frame, OutOf
     let mut frame = Frame::default();
     for node in &order {
         let regs = in_of(&out, *node);
-        let _ = run_block(arena, body, *node, regs, Some(&mut frame), fuel)?;
+        let _ = run_block(arena, body, *node, regs, &mut vals, Some(&mut frame), fuel)?;
     }
     frame.escaped.sort_unstable();
     frame.escaped.dedup();
