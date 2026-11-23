@@ -1,5 +1,7 @@
 //! Stack tracking, frames, the CFA cross-check (AC-091) and the escape rule (AC-207).
 
+use std::fmt::Write as _;
+
 use ghidorah_analysis::FuncIr;
 use ghidorah_analysis::code::decode_at;
 use ghidorah_analysis::stack::{self, Sp};
@@ -1110,7 +1112,7 @@ const TRACK_PINS: &[(&str, usize, u64, &str)] = &[
 ];
 
 /// `stack::track` gives the pinned frames and fuel units for each function of each fixture. A
-/// tank with one unit less than the full run fails with `needed == 1` and an empty tank. So a
+/// tank with less fuel than the full run fails with `needed == 1` and an empty tank. So a
 /// change of the pass order cannot change the frames, the fuel or the fuel error.
 #[test]
 fn track_frames_and_fuel_are_pinned() {
@@ -1136,6 +1138,11 @@ fn track_frames_and_fuel_are_pinned() {
             let err = stack::track(&ir.arena, &ir.body, &mut short).expect_err("one unit short");
             assert_eq!(err.needed, 1, "{path} {:?}", view.id());
             assert!(short.is_empty(), "{path} {:?}", view.id());
+            for limit in [used / 4, used / 2, used * 3 / 4] {
+                let mut part = Fuel::new(limit);
+                let err = stack::track(&ir.arena, &ir.body, &mut part).expect_err("a part tank");
+                assert_eq!((err.needed, part.used()), (1, limit), "{path} {limit}");
+            }
             let mut exact = Fuel::new(used);
             assert_eq!(
                 stack::track(&ir.arena, &ir.body, &mut exact),
@@ -1143,7 +1150,7 @@ fn track_frames_and_fuel_are_pinned() {
             );
             funcs += 1;
             fuel += used;
-            text.push_str(&format!("{:?} {frame:?}\n", view.id()));
+            writeln!(text, "{:?} {frame:?}", view.id()).expect("a String write");
         }
         let digest = ghidorah_base::sha256::sha256_hex(text.as_bytes());
         got.push((path.clone(), funcs, fuel, digest));

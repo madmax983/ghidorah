@@ -426,6 +426,21 @@ fn run_block(
     Ok(step.regs)
 }
 
+/// Takes `units` from `fuel` with the result of `units` calls of [`Fuel::tick`].
+///
+/// # Errors
+///
+/// Returns [`OutOfFuel`] with `needed == 1` when fewer than `units` remain. The tank is then
+/// empty.
+fn spend(fuel: &mut Fuel, units: u64) -> Result<(), OutOfFuel> {
+    if units <= fuel.remaining() {
+        fuel.take(units)
+    } else {
+        fuel.take(fuel.remaining())?;
+        fuel.tick()
+    }
+}
+
 /// Tracks the stack of the L0 body. Each op takes one unit of `fuel` for each pass.
 ///
 /// # Errors
@@ -450,11 +465,24 @@ pub fn track(arena: &Arena, body: &Body, fuel: &mut Fuel) -> Result<Frame, OutOf
         regs
     };
     let rounds = order.len().saturating_mul(4).saturating_add(8);
+    // The last start state and fuel units of each block. The end of a block depends only on
+    // its start state. So a block with its last start state keeps its end, and only pays fuel.
+    let mut last: Vec<Option<(Regs, u64)>> = vec![None; body.cfg.len()];
     for _ in 0..rounds {
         let mut changed = false;
         for node in &order {
             let regs = in_of(&out, *node);
+            if let Some(Some((seen, units))) = last.get(node.index())
+                && *seen == regs
+            {
+                spend(fuel, *units)?;
+                continue;
+            }
+            let before = fuel.used();
             let end = run_block(arena, body, *node, regs, None, fuel)?;
+            if let Some(slot) = last.get_mut(node.index()) {
+                *slot = Some((regs, fuel.used().saturating_sub(before)));
+            }
             if out.get(node) != Some(&end) {
                 out.insert(*node, end);
                 changed = true;
