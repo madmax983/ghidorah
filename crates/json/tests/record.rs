@@ -288,3 +288,53 @@ fn std_codecs() {
         Err("E_TYPE at '': expected object, found number".to_owned())
     );
 }
+
+/// Gives the kind and the path of the error of `Fields::new` for `members` and `names`.
+fn fields_error(members: &[&str], names: &[&str]) -> Option<(DecodeKind, String)> {
+    let value = Value::object(members.iter().map(|k| (*k, Value::Null)));
+    Fields::new(&value, names)
+        .err()
+        .map(|e| (e.kind(), e.path()))
+}
+
+#[test]
+fn fields_new_reports_the_first_bad_member() {
+    assert_eq!(fields_error(&["a", "b"], &["a", "b", "c"]), None);
+    assert_eq!(fields_error(&[], &[]), None);
+    // The first bad member in object order gives the error.
+    assert_eq!(
+        fields_error(&["a", "a", "x"], &["a"]),
+        Some((DecodeKind::Duplicate, "/a".to_owned()))
+    );
+    assert_eq!(
+        fields_error(&["a", "x", "a"], &["a"]),
+        Some((DecodeKind::Unknown, "/x".to_owned()))
+    );
+    assert_eq!(
+        fields_error(&["b", "a", "b", "a"], &["a", "b"]),
+        Some((DecodeKind::Duplicate, "/b".to_owned()))
+    );
+    // A name that is two times in `names` is still one field.
+    assert_eq!(fields_error(&["a", "b"], &["a", "a", "b"]), None);
+    assert_eq!(
+        fields_error(&["a", "b", "a"], &["a", "a", "b"]),
+        Some((DecodeKind::Duplicate, "/a".to_owned()))
+    );
+    // A record with more than 128 names.
+    let many: Vec<String> = (0..200).map(|i| format!("n{i}")).collect();
+    let names: Vec<&str> = many.iter().map(String::as_str).collect();
+    assert_eq!(fields_error(&names, &names), None);
+    let mut members = names.clone();
+    members.push("n150");
+    members.push("n3");
+    assert_eq!(
+        fields_error(&members, &names),
+        Some((DecodeKind::Duplicate, "/n150".to_owned()))
+    );
+    members.truncate(names.len());
+    members.push("n3");
+    assert_eq!(
+        fields_error(&members, &names),
+        Some((DecodeKind::Duplicate, "/n3".to_owned()))
+    );
+}

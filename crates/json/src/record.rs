@@ -1,6 +1,6 @@
 //! Codecs for record structs: [`ToJson`], [`FromJson`] and the [`json_record!`] macro.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::fmt;
 
 use crate::value::{Object, Value};
@@ -188,12 +188,23 @@ impl<'a> Fields<'a> {
         let object = value
             .as_object()
             .ok_or_else(|| DecodeError::type_error("object", value))?;
-        let mut seen = BTreeSet::new();
-        for (key, _) in object.iter() {
-            if !names.contains(&key) {
+        // Bit `i` marks the first name of `names` at index `i`. A name at index 128 or above
+        // compares with the earlier members. Each earlier member is a different entry of
+        // `names`, so that scan stays below `names.len()` steps.
+        let mut seen: u128 = 0;
+        for (at, (key, _)) in object.iter().enumerate() {
+            let Some(slot) = names.iter().position(|name| *name == key) else {
                 return Err(DecodeError::new(DecodeKind::Unknown).at_key(key));
-            }
-            if !seen.insert(key) {
+            };
+            let repeated = match u32::try_from(slot).ok().and_then(|s| 1u128.checked_shl(s)) {
+                Some(bit) => {
+                    let repeated = seen & bit != 0;
+                    seen |= bit;
+                    repeated
+                }
+                None => object.iter().take(at).any(|(earlier, _)| earlier == key),
+            };
+            if repeated {
                 return Err(DecodeError::new(DecodeKind::Duplicate).at_key(key));
             }
         }
