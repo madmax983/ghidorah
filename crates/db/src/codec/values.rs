@@ -286,7 +286,7 @@ const ENCODINGS: [Encoding; 3] = [Encoding::Ascii, Encoding::Utf8, Encoding::Utf
 const PART_KINDS: [PartKind; 3] = [PartKind::Main, PartKind::Cold, PartKind::Thunk];
 
 /// Gives the output name of a part kind.
-const fn part_name(kind: PartKind) -> &'static str {
+pub(super) const fn part_name(kind: PartKind) -> &'static str {
     match kind {
         PartKind::Main => "main",
         PartKind::Cold => "cold",
