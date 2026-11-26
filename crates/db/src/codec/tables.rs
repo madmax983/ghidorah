@@ -156,7 +156,7 @@ pub(super) fn write_jcs_to(
             sink(",");
         }
         sink(&format!("\"{name}\":["));
-        // The why and unit rows go to the text with no JSON value step.
+        // The why, unit, func and ref rows go to the text with no JSON value step.
         let mut row_text =
             |j: usize, write: &mut dyn FnMut(&mut String) -> Result<(), JcsError>| {
                 if j > 0 {
@@ -176,6 +176,16 @@ pub(super) fn write_jcs_to(
             "units" => {
                 for (j, (at, unit)) in t.listing.units_in(ALL).enumerate() {
                     row_text(j, &mut |out| rowjcs::push_unit(out, at, *unit))?;
+                }
+            }
+            "funcs" => {
+                for (j, f) in t.funcs.iter().enumerate() {
+                    row_text(j, &mut |out| rowjcs::push_func(out, f))?;
+                }
+            }
+            "refs" => {
+                for (j, r) in t.refs.iter().enumerate() {
+                    row_text(j, &mut |out| rowjcs::push_ref(out, r))?;
                 }
             }
             _ => {
