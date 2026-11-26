@@ -701,3 +701,67 @@ fn layer_jcs_keeps_the_bytes_of_why_and_unit_rows() {
         assert_eq!(text, want);
     }
 }
+
+/// The `funcs` and `refs` rows keep the bytes of the JCS text of their JSON form. The rows
+/// hold each start reason, source and reference type, external targets, the optional parts
+/// and integers of 16 digits or more.
+#[test]
+fn layer_jcs_keeps_the_bytes_of_func_and_ref_rows() {
+    let big = [0, 7, 999_999_999_999_999, 1_000_000_000_000_000, u64::MAX];
+    // A layer row has no default source.
+    let srcs = &Source::ALL[1..];
+    let mut set = SetRows::default();
+    for (i, reason) in (0u64..).zip(StartReason::ALL) {
+        let at = 0x400 + 0x40 * i;
+        let src = srcs[usize::try_from(i).unwrap() % srcs.len()];
+        let o = origin(src, big[usize::try_from(i).unwrap() % 5], "mcp-1");
+        let mut func = Function::new(ram(at), reason, u8::try_from(i * 7).unwrap(), src);
+        func.body = RangeSet::from_ranges(&[Range::new(at, at + 0x1f).unwrap()]);
+        func.parts = vec![Part {
+            range: Range::new(at, at + 0x1f).unwrap(),
+            kind: [PartKind::Main, PartKind::Cold, PartKind::Thunk]
+                [usize::try_from(i % 3).unwrap()],
+        }];
+        func.flags.thunk = i % 2 == 0;
+        func.flags.varargs = i % 3 == 0;
+        match i % 4 {
+            1 => func.flags.noreturn = Some(o.fact(i % 8 == 1)),
+            2 => func.sig = Some(o.fact(TypeId::from_index(u32::try_from(i).unwrap()))),
+            3 => func.caveats = record().func.caveats,
+            _ => {}
+        }
+        set.funcs.push(func);
+    }
+    set.funcs.push(record().func);
+    for (i, kind) in (0u64..).zip(RefType::ALL) {
+        let o = origin(
+            srcs[usize::try_from(i % 4).unwrap()],
+            big[usize::try_from(i % 5).unwrap()],
+            "mcp-1",
+        );
+        let mut o = o;
+        o.force = i % 2 == 1;
+        let to = [ram(0x2000 + i), Address::external(i), ram(u64::MAX - i)]
+            [usize::try_from(i % 3).unwrap()];
+        let op_index = [-1, 0, 1, 127, -128][usize::try_from(i % 5).unwrap()];
+        let key = RefKey {
+            from: ram(0x1000 + 4 * i),
+            op_index,
+            to,
+            kind,
+        };
+        set.refs.push(o.fact(Ref {
+            key,
+            primary: i % 2 == 0,
+        }));
+    }
+    let typed = tables_from_rows(set).unwrap();
+    assert!(typed.funcs().iter().count() > StartReason::ALL.len());
+    assert_eq!(typed.refs().iter().count(), RefType::ALL.len());
+    for counters in [true, false] {
+        let mut text = String::new();
+        tables_jcs_to(&typed, counters, &mut |piece| text.push_str(piece)).unwrap();
+        let want = write_jcs(&super::tables::encode(&typed, counters)).unwrap();
+        assert_eq!(text, want);
+    }
+}
