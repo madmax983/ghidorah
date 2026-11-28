@@ -765,3 +765,68 @@ fn layer_jcs_keeps_the_bytes_of_func_and_ref_rows() {
         assert_eq!(text, want);
     }
 }
+
+/// The `why` and `units` rows keep the bytes of the JCS text of their JSON form at the edge
+/// addresses: 0, `u64::MAX` and external addresses. Reference keys hold each operand index
+/// edge, as row keys and as premises.
+#[test]
+fn layer_jcs_keeps_the_bytes_of_ref_keys_and_edge_addresses() {
+    let edges = [
+        ram(0),
+        ram(9),
+        ram(0xa),
+        ram(u64::MAX),
+        Address::external(0),
+        Address::external(u64::MAX),
+    ];
+    let mut keys = Vec::new();
+    for (i, from) in edges.iter().enumerate() {
+        for (j, to) in edges.iter().enumerate() {
+            keys.push(FactKey::Ref(RefKey {
+                from: *from,
+                op_index: [-128, -1, 0, 9, 10, 127][(i + j) % 6],
+                to: *to,
+                kind: RefType::ALL[(i * 6 + j) % RefType::ALL.len()],
+            }));
+        }
+        keys.push(FactKey::Func(FuncId(*from)));
+        keys.push(FactKey::FlowOverride(*from));
+    }
+    keys.extend([0, 9, 0xa, 0xf, 0x10, u64::MAX].map(FactKey::CodeUnit));
+    keys.sort();
+    keys.dedup();
+    let rule = RuleCode::new("R_DISASM_FLOW").unwrap();
+    let rows: Vec<_> = keys
+        .iter()
+        .enumerate()
+        .map(|(i, key)| {
+            let premises = keys.iter().skip(i + 1).take(2).cloned().collect();
+            let order = [0, 9, 10, 999_999_999_999_999][i % 4];
+            let why = Why {
+                rule: rule.clone(),
+                premises,
+            };
+            (key.clone(), order, why)
+        })
+        .collect();
+    let mut set = SetRows {
+        why: WhyRows::from_rows(rows).unwrap(),
+        why_next: 10,
+        ..SetRows::default()
+    };
+    for (at, len) in [(0, 1), (0x10, 9), (0xa0, 10), (u64::MAX - 1, 1)] {
+        let unit = CodeUnit::Insn {
+            len,
+            flow: FlowKind::Seq,
+            flags: len,
+        };
+        set.units.push((at, unit));
+    }
+    let typed = tables_from_rows(set).unwrap();
+    for counters in [true, false] {
+        let mut text = String::new();
+        tables_jcs_to(&typed, counters, &mut |piece| text.push_str(piece)).unwrap();
+        let want = write_jcs(&super::tables::encode(&typed, counters)).unwrap();
+        assert_eq!(text, want);
+    }
+}
