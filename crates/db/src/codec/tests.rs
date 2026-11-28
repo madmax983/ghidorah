@@ -765,3 +765,111 @@ fn layer_jcs_keeps_the_bytes_of_func_and_ref_rows() {
         assert_eq!(text, want);
     }
 }
+
+/// The `why` and `units` rows keep the bytes of the JCS text of their JSON form at the edge
+/// addresses: 0, `u64::MAX` and external addresses. Reference keys hold each operand index
+/// edge, as row keys and as premises.
+#[test]
+fn layer_jcs_keeps_the_bytes_of_ref_keys_and_edge_addresses() {
+    let edges = [
+        ram(0),
+        ram(9),
+        ram(0xa),
+        ram(u64::MAX),
+        Address::external(0),
+        Address::external(u64::MAX),
+    ];
+    let mut keys = Vec::new();
+    for (i, from) in edges.iter().enumerate() {
+        for (j, to) in edges.iter().enumerate() {
+            keys.push(FactKey::Ref(RefKey {
+                from: *from,
+                op_index: [-128, -1, 0, 9, 10, 127][(i + j) % 6],
+                to: *to,
+                kind: RefType::ALL[(i * 6 + j) % RefType::ALL.len()],
+            }));
+        }
+        keys.push(FactKey::Func(FuncId(*from)));
+        keys.push(FactKey::FlowOverride(*from));
+    }
+    keys.extend([0, 9, 0xa, 0xf, 0x10, u64::MAX].map(FactKey::CodeUnit));
+    keys.sort();
+    keys.dedup();
+    let rule = RuleCode::new("R_DISASM_FLOW").unwrap();
+    let rows: Vec<_> = keys
+        .iter()
+        .enumerate()
+        .map(|(i, key)| {
+            let premises = keys.iter().skip(i + 1).take(2).cloned().collect();
+            let order = [0, 9, 10, 999_999_999_999_999][i % 4];
+            let why = Why {
+                rule: rule.clone(),
+                premises,
+            };
+            (key.clone(), order, why)
+        })
+        .collect();
+    let mut set = SetRows {
+        why: WhyRows::from_rows(rows).unwrap(),
+        why_next: 10,
+        ..SetRows::default()
+    };
+    for (at, len) in [(0, 1), (0x10, 9), (0xa0, 10), (u64::MAX - 1, 1)] {
+        let unit = CodeUnit::Insn {
+            len,
+            flow: FlowKind::Seq,
+            flags: len,
+        };
+        set.units.push((at, unit));
+    }
+    let typed = tables_from_rows(set).unwrap();
+    for counters in [true, false] {
+        let mut text = String::new();
+        tables_jcs_to(&typed, counters, &mut |piece| text.push_str(piece)).unwrap();
+        let want = write_jcs(&super::tables::encode(&typed, counters)).unwrap();
+        assert_eq!(text, want);
+    }
+}
+
+/// The `symbols` rows keep the bytes of the JCS text of their JSON form. The rows hold each
+/// kind, names that need an escape, names with non-ASCII text and external addresses.
+#[test]
+fn layer_jcs_keeps_the_bytes_of_symbol_rows() {
+    let big = [0, 7, 999_999_999_999_999, 1_000_000_000_000_000, u64::MAX];
+    let names = [
+        "main",
+        "a\"b",
+        "c\\d",
+        "tab\tx",
+        "nl\n",
+        "\u{1}",
+        "x\u{7f}",
+        "pi_\u{3c0}",
+        "\u{2028}",
+        "_start",
+        "f@plt",
+        "g.cold",
+    ];
+    let srcs = &Source::ALL[1..];
+    let mut set = SetRows::default();
+    for (i, name) in names.iter().enumerate() {
+        let mut o = origin(srcs[i % srcs.len()], big[i % 5], "mcp-1");
+        o.force = i % 2 == 1;
+        let addr = [ram(0x1000 + 16 * i as u64), Address::external(i as u64)][i % 2];
+        set.symbols.push(Symbol {
+            addr,
+            key: SymKey(0),
+            name: o.fact((*name).to_string()),
+            kind: SymKind::ALL[i % SymKind::ALL.len()],
+            primary: i % 3 != 0,
+        });
+    }
+    let typed = tables_from_rows(set).unwrap();
+    assert_eq!(typed.symbols.iter().count(), names.len());
+    for counters in [true, false] {
+        let mut text = String::new();
+        tables_jcs_to(&typed, counters, &mut |piece| text.push_str(piece)).unwrap();
+        let want = write_jcs(&super::tables::encode(&typed, counters)).unwrap();
+        assert_eq!(text, want);
+    }
+}

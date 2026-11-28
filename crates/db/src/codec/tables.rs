@@ -156,7 +156,7 @@ pub(super) fn write_jcs_to(
             sink(",");
         }
         sink(&format!("\"{name}\":["));
-        // The why, unit, func and ref rows go to the text with no JSON value step.
+        // The why, unit, func, ref and symbol rows go to the text with no JSON value step.
         let mut row_text =
             |j: usize, write: &mut dyn FnMut(&mut String) -> Result<(), JcsError>| {
                 if j > 0 {
@@ -186,6 +186,11 @@ pub(super) fn write_jcs_to(
             "refs" => {
                 for (j, r) in t.refs.iter().enumerate() {
                     row_text(j, &mut |out| rowjcs::push_ref(out, r))?;
+                }
+            }
+            "symbols" => {
+                for (j, s) in t.symbols.iter().enumerate() {
+                    row_text(j, &mut |out| rowjcs::push_symbol(out, s))?;
                 }
             }
             _ => {
@@ -225,7 +230,8 @@ pub(super) fn why_row(key: &FactKey, order: u64, why: &Why) -> Value {
     ])
 }
 
-fn symbol_row(s: &Symbol) -> Value {
+/// Gives the JSON form of the symbol row `s`.
+pub(super) fn symbol_row(s: &Symbol) -> Value {
     obj([
         ("addr", s.addr.enc()),
         ("key", s.key.enc()),
