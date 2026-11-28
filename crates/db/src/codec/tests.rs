@@ -830,3 +830,46 @@ fn layer_jcs_keeps_the_bytes_of_ref_keys_and_edge_addresses() {
         assert_eq!(text, want);
     }
 }
+
+/// The `symbols` rows keep the bytes of the JCS text of their JSON form. The rows hold each
+/// kind, names that need an escape, names with non-ASCII text and external addresses.
+#[test]
+fn layer_jcs_keeps_the_bytes_of_symbol_rows() {
+    let big = [0, 7, 999_999_999_999_999, 1_000_000_000_000_000, u64::MAX];
+    let names = [
+        "main",
+        "a\"b",
+        "c\\d",
+        "tab\tx",
+        "nl\n",
+        "\u{1}",
+        "x\u{7f}",
+        "pi_\u{3c0}",
+        "\u{2028}",
+        "_start",
+        "f@plt",
+        "g.cold",
+    ];
+    let srcs = &Source::ALL[1..];
+    let mut set = SetRows::default();
+    for (i, name) in names.iter().enumerate() {
+        let mut o = origin(srcs[i % srcs.len()], big[i % 5], "mcp-1");
+        o.force = i % 2 == 1;
+        let addr = [ram(0x1000 + 16 * i as u64), Address::external(i as u64)][i % 2];
+        set.symbols.push(Symbol {
+            addr,
+            key: SymKey(0),
+            name: o.fact((*name).to_string()),
+            kind: SymKind::ALL[i % SymKind::ALL.len()],
+            primary: i % 3 != 0,
+        });
+    }
+    let typed = tables_from_rows(set).unwrap();
+    assert_eq!(typed.symbols.iter().count(), names.len());
+    for counters in [true, false] {
+        let mut text = String::new();
+        tables_jcs_to(&typed, counters, &mut |piece| text.push_str(piece)).unwrap();
+        let want = write_jcs(&super::tables::encode(&typed, counters)).unwrap();
+        assert_eq!(text, want);
+    }
+}

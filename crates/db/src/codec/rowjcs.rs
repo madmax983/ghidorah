@@ -1,21 +1,22 @@
-//! The JCS text of the `why`, `units`, `funcs` and `refs` rows with no JSON value step.
+//! The JCS text of the `why`, `units`, `funcs`, `refs` and `symbols` rows with no JSON value
+//! step.
 //!
-//! These four members hold most rows of an analysis layer. Each writer adds the bytes of
+//! These five members hold most rows of an analysis layer. Each writer adds the bytes of
 //! `write_jcs_into` on the JSON form of the row. A part with no plain form, for example an
 //! integer of 16 digits or more, goes through the JSON form of its row.
 //! The member names of each object go in JCS order.
 
-use std::fmt::Write as _;
-
-use ghidorah_base::{Address, Range};
+use ghidorah_base::address::EXTERNAL_PREFIX;
+use ghidorah_base::{Address, Range, SpaceId};
 use ghidorah_json::{JcsError, write_jcs_into};
 
-use super::tables::{unit_row, why_row};
+use super::tables::{symbol_row, unit_row, why_row};
 use super::values::{Json, part_name};
 use crate::fact::Fact;
 use crate::funcs::Function;
 use crate::listing::CodeUnit;
-use crate::refs::Ref;
+use crate::refs::{Ref, RefKey};
+use crate::symbols::Symbol;
 use crate::why::{FactKey, Why};
 
 /// The largest integer with at most 15 digits. JCS writes each such integer as its lexeme.
@@ -32,17 +33,68 @@ fn push_plain(out: &mut String, text: &str) -> Option<()> {
     Some(())
 }
 
+/// The digits of the hex and decimal writers.
+const DIGITS: &[u8; 16] = b"0123456789abcdef";
+
+/// Adds the digits of `n` in the base `radix` (10 or 16) with no leading zero.
+fn push_digits(out: &mut String, mut n: u64, radix: u64) {
+    let mut buf = [0u8; 20];
+    let mut at = buf.len();
+    for slot in buf.iter_mut().rev() {
+        let d = DIGITS.get(usize::try_from(n % radix).unwrap_or_default());
+        *slot = d.copied().unwrap_or(b'0');
+        at -= 1;
+        n /= radix;
+        if n == 0 {
+            break;
+        }
+    }
+    for b in buf.get(at..).unwrap_or_default() {
+        out.push(char::from(*b));
+    }
+}
+
 /// Adds `n` as a JCS number if it has at most 15 digits. Gives `None` if not.
 fn push_uint(out: &mut String, n: u64) -> Option<()> {
     if n > MAX_PLAIN {
         return None;
     }
-    write!(out, "{n}").ok()
+    push_digits(out, n, 10);
+    Some(())
 }
 
-/// Adds the text of `a` as a JSON string. The text is an optional prefix and hex digits.
-fn push_addr(out: &mut String, a: Address) -> Option<()> {
-    write!(out, "\"{a}\"").ok()
+/// Adds `n` as a JCS number.
+fn push_i8(out: &mut String, n: i8) {
+    if n < 0 {
+        out.push('-');
+    }
+    push_digits(out, u64::from(n.unsigned_abs()), 10);
+}
+
+/// Adds the text of `a` as a JSON string. The text is an optional prefix and hex digits,
+/// the same as the [`Address`] display form.
+fn push_addr(out: &mut String, a: Address) {
+    out.push('"');
+    if a.space == SpaceId::EXTERNAL {
+        out.push_str(EXTERNAL_PREFIX);
+    }
+    out.push_str("0x");
+    push_digits(out, a.off, 16);
+    out.push('"');
+}
+
+/// Adds the JCS text of the reference key `key`.
+fn push_ref_key(out: &mut String, key: &RefKey) -> Option<()> {
+    out.push_str("{\"from\":");
+    push_addr(out, key.from);
+    out.push_str(",\"kind\":");
+    push_plain(out, key.kind.name())?;
+    out.push_str(",\"op_index\":");
+    push_i8(out, key.op_index);
+    out.push_str(",\"to\":");
+    push_addr(out, key.to);
+    out.push('}');
+    Some(())
 }
 
 /// Adds the JCS text of the fact keys that name one address. Gives `None` for the others.
@@ -59,12 +111,18 @@ fn push_plain_key(out: &mut String, key: &FactKey) -> Option<()> {
         FactKey::Func(f) => ("func", "func", f.0),
         FactKey::Signature(f) => ("func", "signature", f.0),
         FactKey::Noreturn(f) => ("func", "noreturn", f.0),
+        FactKey::Ref(r) => {
+            out.push_str("{\"k\":\"ref\",\"ref\":");
+            push_ref_key(out, r)?;
+            out.push('}');
+            return Some(());
+        }
         _ => return None,
     };
     out.push_str("{\"");
     out.push_str(name);
     out.push_str("\":");
-    push_addr(out, at)?;
+    push_addr(out, at);
     out.push_str(",\"k\":\"");
     out.push_str(kind);
     out.push_str("\"}");
@@ -128,7 +186,7 @@ pub(super) fn push_unit(out: &mut String, at: u64, unit: CodeUnit) -> Result<(),
     let start = out.len();
     let mut plain = || {
         out.push_str("{\"at\":");
-        push_addr(out, Address::ram(at))?;
+        push_addr(out, Address::ram(at));
         out.push_str(",\"flags\":");
         push_uint(out, u64::from(flags))?;
         out.push_str(",\"flow\":");
@@ -151,13 +209,12 @@ fn push_bool(out: &mut String, b: bool) {
 }
 
 /// Adds the JCS text of a range of RAM offsets.
-fn push_range(out: &mut String, r: Range) -> Option<()> {
+fn push_range(out: &mut String, r: Range) {
     out.push_str("{\"first\":");
-    push_addr(out, Address::ram(r.first))?;
+    push_addr(out, Address::ram(r.first));
     out.push_str(",\"last\":");
-    push_addr(out, Address::ram(r.last))?;
+    push_addr(out, Address::ram(r.last));
     out.push('}');
-    Some(())
 }
 
 /// Adds the JCS text of `fact`. The `value` writer adds the text of the value.
@@ -188,13 +245,9 @@ fn push_fact<T>(
 pub(super) fn push_ref(out: &mut String, fact: &Fact<Ref>) -> Result<(), JcsError> {
     let start = out.len();
     let plain = push_fact(out, fact, |out, r| {
-        out.push_str("{\"key\":{\"from\":");
-        push_addr(out, r.key.from)?;
-        out.push_str(",\"kind\":");
-        push_plain(out, r.key.kind.name())?;
-        write!(out, ",\"op_index\":{},\"to\":", r.key.op_index).ok()?;
-        push_addr(out, r.key.to)?;
-        out.push_str("},\"primary\":");
+        out.push_str("{\"key\":");
+        push_ref_key(out, &r.key)?;
+        out.push_str(",\"primary\":");
         push_bool(out, r.primary);
         out.push('}');
         Some(())
@@ -216,12 +269,12 @@ fn push_plain_func(out: &mut String, f: &Function) -> Option<()> {
         if i > 0 {
             out.push(',');
         }
-        push_range(out, *r)?;
+        push_range(out, *r);
     }
     out.push_str("],\"caveats\":[],\"confidence\":");
     push_uint(out, u64::from(f.confidence))?;
     out.push_str(",\"entry\":");
-    push_addr(out, f.entry)?;
+    push_addr(out, f.entry);
     out.push_str(",\"noreturn\":");
     match &f.flags.noreturn {
         Some(fact) => push_fact(out, fact, |out, b| {
@@ -238,7 +291,7 @@ fn push_plain_func(out: &mut String, f: &Function) -> Option<()> {
         out.push_str("{\"kind\":");
         push_plain(out, part_name(part.kind))?;
         out.push_str(",\"range\":");
-        push_range(out, part.range)?;
+        push_range(out, part.range);
         out.push('}');
     }
     out.push_str("],\"sig\":");
@@ -270,4 +323,32 @@ pub(super) fn push_func(out: &mut String, f: &Function) -> Result<(), JcsError> 
     }
     out.truncate(start);
     write_jcs_into(&f.enc(), out)
+}
+
+/// Adds the JCS text of the symbol row `s` to `out`.
+///
+/// # Errors
+///
+/// Returns the [`JcsError`] of a part that has no JCS form.
+pub(super) fn push_symbol(out: &mut String, s: &Symbol) -> Result<(), JcsError> {
+    let start = out.len();
+    let mut plain = || {
+        out.push_str("{\"addr\":");
+        push_addr(out, s.addr);
+        out.push_str(",\"key\":");
+        push_uint(out, u64::from(s.key.0))?;
+        out.push_str(",\"kind\":");
+        push_plain(out, s.kind.name())?;
+        out.push_str(",\"name\":");
+        push_fact(out, &s.name, |out, name| push_plain(out, name))?;
+        out.push_str(",\"primary\":");
+        push_bool(out, s.primary);
+        out.push('}');
+        Some(())
+    };
+    if plain().is_some() {
+        return Ok(());
+    }
+    out.truncate(start);
+    write_jcs_into(&symbol_row(s), out)
 }
